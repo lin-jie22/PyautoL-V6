@@ -35,7 +35,7 @@ from aether.ledger import Ledger                                      # noqa: E4
 from aether.nongression import Baseline, FrozenTask, NonRegressionGate  # noqa: E402
 from aether.providers import TemplateProposer                         # noqa: E402
 
-from aether.cli import _default_runner                                # noqa: E402
+from aether.cli import _default_runner, TASK_CLASS                    # noqa: E402
 
 DEV_ENV = "textscore"
 HO_ENV = "eventflow"
@@ -48,12 +48,18 @@ def build(root: Path, tmp: Path, capsules: str, gate_on: bool):
     led = Ledger(tmp / "ledger.jsonl")
     runner = _default_runner(envs)
 
+    # ⛔ 基线必须用**种子 harness**（带工具）跑，不能用空 `Harness()`：
+    #    空 harness 连 read_file/python_exec 都没有 ⇒ 冻结基线全红 ⇒
+    #    非回归闸"没有原本通过的任务"⇒ 变成对谁都放行的空闸。
+    h_seed = Harness(tools=("read_file", "write_file", "python_exec"),
+                     memory_policy={"recall_topk": 5})
     frozen = [FrozenTask(task_id=f"frozen::{n}",
-                         spec={"env_id": n, "broken_source": e.source, "topic": n})
+                         spec={"env_id": n, "broken_source": e.source,
+                               "topic": n, "task_class": TASK_CLASS})
               for n, e in envs.items()]
     caliber = {"seed": 0, "timeout": 10.0, "split": "frozen"}
     baseline = Baseline(caliber=caliber,
-                        verdicts={t.task_id: runner(Harness(), t.spec)
+                        verdicts={t.task_id: runner(h_seed, t.spec)
                                   for t in frozen},
                         harness_id="seed")
     gate = NonRegressionGate(frozen, baseline)
@@ -61,7 +67,7 @@ def build(root: Path, tmp: Path, capsules: str, gate_on: bool):
     rep_dev = synthesize_tasks(envs[DEV_ENV], max_n=MAX_TASKS)
     dev = [FrozenTask(task_id=t.task_id,
                       spec={"env_id": DEV_ENV, "broken_source": t.broken_source,
-                            "topic": DEV_ENV})
+                            "topic": DEV_ENV, "task_class": TASK_CLASS})
            for t in rep_dev.tasks]
 
     rep_ho = synthesize_tasks(envs[HO_ENV], max_n=MAX_TASKS)
@@ -69,7 +75,7 @@ def build(root: Path, tmp: Path, capsules: str, gate_on: bool):
         make_heldout(HO_ENV, [
             FrozenTask(task_id=t.task_id,
                        spec={"env_id": HO_ENV, "broken_source": t.broken_source,
-                             "topic": HO_ENV})
+                             "topic": HO_ENV, "task_class": TASK_CLASS})
             for t in rep_ho.tasks]),
         dev_task_ids=[t.task_id for t in dev],
         base_at_ceiling=1.0) if gate_on else None
@@ -83,11 +89,13 @@ def build(root: Path, tmp: Path, capsules: str, gate_on: bool):
     elif capsules == "narrow":
         pool = {k: v for k, v in pool.items() if k.startswith("patch:")}
 
-    loop = EvolutionLoop(led, gate, dev, runner, TemplateProposer(skills=pool),
+    loop = EvolutionLoop(led, gate, dev, runner,
+                         TemplateProposer(skills=pool, route_key=TASK_CLASS),
                          caliber=caliber, heldout=heldout,
                          config=EvolutionConfig(group_size=3))
     h0 = Harness(meta_rules="V6 元规则：奖励只来自执行判据；改 L0 需人工审批。",
-                 tools=("read_file", "write_file", "python_exec"))
+                 tools=("read_file", "write_file", "python_exec"),
+                 memory_policy={"recall_topk": 5})
     return loop, h0, rep_dev, rep_ho
 
 

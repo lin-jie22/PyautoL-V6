@@ -109,6 +109,11 @@ class TemplateProposer:
     """
     name: str = "template"
     skills: Dict[str, str] = field(default_factory=dict)
+    #: 路由键。**默认按任务类别**，不按环境名（topic）。
+    #: ⛔ 按环境名路由（`textscore → 修法`）本身就是一种定点化：换一个环境
+    #:    这条路由立刻失效，于是"技能加了"却"在别处用不上"。
+    #:    按任务类别路由（`repair → 修法`）才是通用写法。
+    route_key: str = "repair"
 
     def propose(self, weakness: Dict[str, Any], harness: Harness,
                 n: int = 3) -> List[Capsule]:
@@ -118,12 +123,18 @@ class TemplateProposer:
 
         if kind in ("missing_skill", "unknown"):
             for i, (sname, body) in enumerate(list(self.skills.items())[:n]):
+                # ⛔ 胶囊（不是单基因）：技能 + 路由**必须一起改**。
+                #    只加技能 ⇒ 路由没接通 ⇒ 技能不可达 ⇒ reward 不变
+                #    ⇒ 过不了能力地板。这正是 Capsule 存在的理由，
+                #    由 tests/contract_agent_test.py 的 L1 组实测守住。
                 out.append(Capsule(
                     name=f"add_skill:{sname}",
                     genes=(Gene(op="set", target=f"L3.skills.{sname}",
                                 value=body, rationale=f"弱点={kind}"),
-                           Gene(op="set", target=f"L1.routing.{topic}",
-                                value=sname, rationale="新技能需可达")),
+                           Gene(op="set", target=f"L1.routing.{self.route_key}",
+                                value=sname,
+                                rationale=f"新技能需可达（按任务类别"
+                                          f"{self.route_key} 路由，不按环境名）")),
                     rationale=f"补技能 {sname} 并接通路由", origin="mined"))
 
         if kind == "missing_tool":

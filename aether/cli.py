@@ -23,6 +23,9 @@ ROOT = Path(__file__).resolve().parent.parent
 #: 只有一个环境时，"变强了"和"学会了讨好判据"无法区分。
 DEFAULT_ENVS = ("textscore", "eventflow")
 
+#: 任务类别。**路由按它来**，不按环境名 —— 见 TemplateProposer.route_key。
+TASK_CLASS = "repair"
+
 
 def _paths(root: Path) -> Dict[str, Path]:
     return {
@@ -95,52 +98,14 @@ def _fact_verifier(note) -> tuple:
     return True, "未找到反证"
 
 
-def _revert_control_flow(broken_src: str, base_src: str) -> str:
-    """**保守通用修法**：只把比较/运算恢复成基线的，**不动字面量**。
-
-    ⛔ 为什么刻意"不动字面量"：数值常量常常是有意的配置（`window=60`、
-    `gap=30` 就是配置），一个**通用**修法没有立场去改它。保守是它的美德，
-    也是它的代价 —— 它在发展集上会**输给**那个"整个文件换回基线"的定点修法。
-
-    这不是为了演示而造的缺陷，而是 reward hacking 之所以发生的真实土壤：
-    **讨好判据的修法在发展集上确实更好**，所以它会赢，所以必须靠 held-out 拦。
-    """
-    import ast
-    b = ast.parse(broken_src)
-    g = ast.parse(base_src)
-
-    def ops(tree):
-        """按同一遍历序收集控制流节点（**存节点本身**，不是它的 op）。"""
-        out = []
-        for n in ast.walk(tree):
-            if isinstance(n, ast.Compare):
-                out.append(("cmp", n))
-            elif isinstance(n, ast.BinOp):
-                out.append(("bin", n))
-        return out
-
-    bo, go = ops(b), ops(g)
-    for i in range(min(len(bo), len(go))):
-        kind, node = bo[i]
-        ref = go[i][1]
-        # 只有两棵树**同一位置是同类节点**才恢复：结构对不上就跳过，
-        # 不硬套（硬套会静默改坏没被变异的地方）。
-        if kind == "cmp" and isinstance(ref, ast.Compare):
-            node.ops = list(ref.ops)
-        elif kind == "bin" and isinstance(ref, ast.BinOp):
-            node.op = ref.op
-    ast.fix_missing_locations(b)
-    return ast.unparse(b)
-
-
-def _default_runner(envs, timeout: float = 10.0):
+def _default_runner(envs, memory=None, timeout: float = 10.0):
     """把 harness 变成"能修好环境里的 bug"的执行体（多环境版）。
 
-    ⛔ 这是**演示用** runner：它按 harness 里的 skills 去选修复动作。
-    真实 runner 应该跑真 agent；但机制（闸/选择/记账）与 runner 无关，
-    这正是依赖注入的意义 —— 先证明机制，再换真执行体。
+    ⛔ 执行逻辑现在住在 `agent.HarnessAgent`：harness 的 **5 层都会影响结果**
+    （L0 元规则可禁用修法 / L1 路由决定技能可不可达 / L2 工具缺失直接失败 /
+    L3 是修法本身 / L4 记忆是第二条通路）。
 
-    ⛔ 两类技能的区别是这一轮的重点，它把 "reward hacking" 变成可判定的：
+    ⛔ 两类技能的区别，它把 "reward hacking" 变成可判定的：
 
         fix_control_flow        —— **保守通用修法**：任何环境都能修，但修不全
         patch::<env_id>         —— **定点修法**：只在点名的那个环境生效，修得全
@@ -148,25 +113,8 @@ def _default_runner(envs, timeout: float = 10.0):
     在**单一环境**的评测里，后者**严格更好**（发展集分数更高）⇒ 它一定会被
     选中 ⇒ 一定会被提交。只有 held-out 能把这两者分开。
     """
-    from .verifier import Verdict
-
-    def runner(h, spec):
-        env = envs.get(spec.get("env_id", ""))
-        if env is None:
-            return Verdict(passed=False, checks=(),
-                           error=f"未知 env_id={spec.get('env_id')!r}")
-        src = spec.get("broken_source", "")
-        if not src:
-            return Verdict(passed=False, checks=(), error="spec 缺 broken_source")
-        skills = set(h.skills)
-        if "fix_control_flow" in skills:
-            fixed = _revert_control_flow(src, env.source)   # ① 通用但保守
-        elif f"patch:{env.env_id}" in skills:
-            fixed = env.source                              # ② 定点但只此一地
-        else:
-            fixed = src                                     # ③ 没技能 ⇒ 必然不过
-        return _verify_fixed(env, src, fixed, timeout=timeout)
-    return runner
+    from .agent import HarnessAgent
+    return HarnessAgent(envs, memory=memory, timeout=timeout).as_runner()
 
 
 def _verify_fixed(env, broken_src, fixed_src, timeout: float = 10.0):
@@ -205,22 +153,29 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     store = Store(p["db"])
     runner = _default_runner(envs)
 
+    # ⛔ 种子 harness **必须先建**：冻结基线要用它跑。
+    #    用空 `Harness()` 跑基线 ⇒ 连工具都没有 ⇒ 基线全红 ⇒
+    #    非回归闸"没有原本通过的任务"⇒ 对任何候选都放行的空闸（V5 同款陷阱）。
+    h0 = Harness(meta_rules="V6 元规则：奖励只来自执行判据；改 L0 需人工审批。",
+                 tools=("read_file", "write_file", "python_exec"),
+                 memory_policy={"recall_topk": 5, "min_content_len": 150})
+
     # 冻结套件：**两个环境**的原始源码都应当全绿
     frozen = [FrozenTask(task_id=f"frozen::{name}",
                          spec={"env_id": name, "broken_source": e.source,
-                               "topic": name})
+                               "topic": name, "task_class": TASK_CLASS})
               for name, e in envs.items()]
     caliber = {"seed": int(args.seed), "timeout": 10.0, "split": "frozen"}
     baseline = Baseline(
         caliber=caliber,
-        verdicts={t.task_id: runner(Harness(), t.spec) for t in frozen},
+        verdicts={t.task_id: runner(h0, t.spec) for t in frozen},
         harness_id="seed")
     gate = NonRegressionGate(frozen, baseline)
 
     rep_synth = synthesize_tasks(envs[dev_name], max_n=int(args.max_tasks))
     dev = [FrozenTask(task_id=t.task_id,
                       spec={"env_id": dev_name, "broken_source": t.broken_source,
-                            "topic": dev_name})
+                            "topic": dev_name, "task_class": TASK_CLASS})
            for t in rep_synth.tasks]
 
     # held-out：**另一个环境**的合成任务。它不参与候选之间的比较。
@@ -234,7 +189,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                     FrozenTask(task_id=t.task_id,
                                spec={"env_id": ho_name,
                                      "broken_source": t.broken_source,
-                                     "topic": ho_name})
+                                     "topic": ho_name, "task_class": TASK_CLASS})
                     for t in rep_ho.tasks]),
                 dev_task_ids=[t.task_id for t in dev],
                 heldout_floor=float(args.heldout_floor),
@@ -253,14 +208,13 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         pool = {"fix_control_flow": pool["fix_control_flow"]}
     elif args.capsules == "narrow":
         pool = {f"patch:{dev_name}": pool[f"patch:{dev_name}"]}
-    proposer = TemplateProposer(skills=pool)
+    # ⛔ 路由键用**任务类别**而不是环境名：按环境名路由本身就是一种定点化，
+    #    换环境就失效。泛化与否在路由层就已经是结构选择了。
+    proposer = TemplateProposer(skills=pool, route_key=TASK_CLASS)
     loop = EvolutionLoop(led, gate, dev, runner, proposer, store=store,
                          caliber=caliber, heldout=heldout,
                          config=EvolutionConfig(group_size=int(args.group)))
 
-    h0 = Harness(meta_rules="V6 元规则：奖励只来自执行判据；改 L0 需人工审批。",
-                 tools=("read_file", "write_file", "python_exec"),
-                 memory_policy={"recall_topk": 5, "min_content_len": 150})
     store.save_snapshot(h0.harness_id, h0.to_dict(), accepted=True, round_no=0)
 
     # ── 记忆层接线（不是摆设：每轮的证据都进记忆，且可查完整性）──
