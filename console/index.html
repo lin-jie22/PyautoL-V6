@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<!--
+  V6 · AETHER 控制台（零构建：纯静态 HTML + 原生 ES module）。
+
+  为什么不上 Vite/React：控制台的价值是"能随时打开看账本"，引入构建链
+  会让它变成另一个需要维护的服务。它只读 API（`aether/serve.py`），
+  不写任何状态 —— 与监督器一样遵循"只读"原则。
+
+  用法：
+      python -m aether.serve --console console      # 起 API + 静态托管
+      打开 http://127.0.0.1:8611/console/
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>V6 · AETHER 控制台</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --line: #30363d;
+    --fg: #e6edf3; --dim: #8b949e; --ok: #3fb950; --warn: #d29922;
+    --bad: #f85149; --acc: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  header { padding: 18px 24px; border-bottom: 1px solid var(--line);
+           display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0; letter-spacing: .5px; }
+  .sub { color: var(--dim); font-size: 12px; }
+  main { padding: 20px 24px; display: grid; gap: 18px;
+         grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .card { background: var(--panel); border: 1px solid var(--line);
+          border-radius: 8px; padding: 16px; }
+  .card h2 { font-size: 13px; margin: 0 0 12px; color: var(--dim);
+             text-transform: uppercase; letter-spacing: 1px; }
+  .kv { display: flex; justify-content: space-between; padding: 3px 0;
+        border-bottom: 1px dashed var(--line); }
+  .kv span:last-child { font-variant-numeric: tabular-nums; }
+  .badge { padding: 1px 8px; border-radius: 10px; font-size: 12px; }
+  .ok { background: rgba(63,185,80,.15); color: var(--ok); }
+  .bad { background: rgba(248,81,73,.15); color: var(--bad); }
+  .warn { background: rgba(210,153,34,.15); color: var(--warn); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--dim); font-weight: 500; }
+  .tree { font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+          white-space: pre; overflow-x: auto; color: var(--dim); }
+  .tree b { color: var(--acc); font-weight: 600; }
+  #bars { display: flex; align-items: flex-end; gap: 4px; height: 90px; }
+  .bar { flex: 1; background: var(--acc); border-radius: 2px 2px 0 0;
+         min-height: 2px; opacity: .85; }
+  .bar.zero { background: var(--bad); opacity: .5; }
+  footer { padding: 12px 24px; color: var(--dim); font-size: 11px;
+           border-top: 1px solid var(--line); }
+  code { background: rgba(110,118,129,.2); padding: 1px 5px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>V6 · AETHER</h1>
+  <span class="sub">可验证的自进化智能体 · 控制台（只读）</span>
+  <span id="chain" class="badge">…</span>
+  <span class="sub" id="updated"></span>
+</header>
+
+<main>
+  <section class="card">
+    <h2>系统状态</h2>
+    <div id="stats"></div>
+  </section>
+
+  <section class="card">
+    <h2>每轮平均 reward（发展集）</h2>
+    <div id="bars"></div>
+    <div class="sub" id="bars-note">按 harness 分组，红条=全 0</div>
+  </section>
+
+  <section class="card">
+    <h2>进化树（harness 血缘）</h2>
+    <div class="tree" id="tree">…</div>
+  </section>
+
+  <section class="card">
+    <h2>事件流（最近 20 条）</h2>
+    <table id="events"><thead><tr><th>#</th><th>kind</th><th>摘要</th></tr></thead>
+      <tbody></tbody></table>
+  </section>
+
+  <section class="card">
+    <h2>闸门裁决</h2>
+    <table id="gates"><thead><tr><th>capsule</th><th>闸</th><th>reward</th><th>优势</th><th>结论</th></tr></thead>
+      <tbody></tbody></table>
+  </section>
+</main>
+
+<footer>
+  数据来源：<code>GET /api/status</code> · 唯一事实源 = <code>data/ledger.jsonl</code>
+  （内容寻址 + 哈希链，改一条即断链）· 本页不写任何状态
+</footer>
+
+<script type="module">
+const API = location.origin.includes(":8611") ? "/api/status?limit=300"
+                                              : "http://127.0.0.1:8611/api/status?limit=300";
+
+const el = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[<>]/g, (c) => (c === "<" ? "&lt;" : "&gt;"));
+
+async function load() {
+  let data;
+  try {
+    const r = await fetch(API);
+    data = await r.json();
+  } catch (e) {
+    el("chain").textContent = "API 不可达";
+    el("chain").className = "badge bad";
+    el("stats").innerHTML = `<div class="kv"><span>提示</span><span>先跑
+      <code>python -m aether.serve --console console</code></span></div>
+      <div class="kv"><span>错误</span><span>${esc(e.message)}</span></div>`;
+    return;
+  }
+
+  const led = data.ledger ?? {};
+  const chain = el("chain");
+  chain.textContent = led.chain_ok ? "账本链 ✅ 完整" : "账本链 ❌ 断裂";
+  chain.className = "badge " + (led.chain_ok ? "ok" : "bad");
+  el("updated").textContent = "更新于 " + new Date().toLocaleTimeString();
+
+  // ── 状态 ────────────────────────────────────────────────────
+  const st = data.store ?? {};
+  const kinds = led.by_kind ?? {};
+  el("stats").innerHTML = [
+    ["事件总数", led.count ?? 0],
+    ["账本头 hash", (led.head ?? "—").slice(0, 12)],
+    ["harness 快照", st.n_snapshots ?? 0],
+    ["运行记录", st.n_runs ?? 0],
+    ["平均 reward", st.avg_reward ?? 0],
+    ["harness.commit", kinds["harness.commit"] ?? 0],
+    ["harness.revert", kinds["harness.revert"] ?? 0],
+    ["gate.result", kinds["gate.result"] ?? 0],
+    ["evolve.noop", kinds["evolve.noop"] ?? 0],
+  ].map(([k, v]) => `<div class="kv"><span>${k}</span><span>${esc(v)}</span></div>`).join("");
+
+  const evs = data.events ?? [];
+
+  // ── 事件流 ──────────────────────────────────────────────────
+  el("events").querySelector("tbody").innerHTML = evs.slice(-20).reverse().map((e) => {
+    const p = e.payload ?? {};
+    const summary = (p.task_id ? p.task_id + " " : "")
+      + (p.capsule ? p.capsule + " " : "")
+      + (p.reason ? p.reason : "")
+      + (typeof p.reward === "number" ? "r=" + p.reward : "")
+      + (p.regressions?.length ? " 回归:" + p.regressions.length : "");
+    return `<tr><td>${e.seq}</td><td>${esc(e.kind)}</td>
+            <td>${esc(summary).slice(0, 90)}</td></tr>`;
+  }).join("");
+
+  // ── reward 曲线（按 harness 分组）────────────────────────────
+  const byH = new Map();
+  for (const e of evs) {
+    if (e.kind !== "eval.verdict") continue;
+    const p = e.payload ?? {};
+    if (p.split !== "dev") continue;
+    const k = (p.harness_id ?? "?").slice(0, 8);
+    if (!byH.has(k)) byH.set(k, []);
+    byH.get(k).push(Number(p.reward ?? 0));
+  }
+  const rows = [...byH.entries()];
+  const max = Math.max(1, ...rows.map(([, v]) => v.length));
+  el("bars").innerHTML = rows.map(([k, v]) => {
+    const avg = v.reduce((a, b) => a + b, 0) / v.length;
+    return `<div class="bar ${avg === 0 ? "zero" : ""}"
+              style="height:${Math.max(3, (v.length / max) * 100)}%"
+              title="${k}: ${v.length} 条, 均值 ${avg.toFixed(2)}"></div>`;
+  }).join("") || '<div class="sub">暂无 dev 判定</div>';
+  el("bars-note").textContent = `${rows.length} 个 harness 变体 · 高度=判定条数 · 红=均值 0`;
+
+  // ── 进化树 ──────────────────────────────────────────────────
+  const byId = new Map();
+  for (const s of (data.snapshots ?? [])) byId.set(s.harness_id, s);
+  const children = new Map();
+  for (const s of (data.snapshots ?? [])) {
+    const par = s.parent_id || "#root";
+    if (!children.has(par)) children.set(par, []);
+    children.get(par).push(s);
+  }
+  const lines = [];
+  const walk = (id, depth) => {
+    for (const c of children.get(id) ?? []) {
+      lines.push("  ".repeat(depth) + "└─ " + `<b>${c.harness_id.slice(0, 8)}</b>`
+        + (c.accepted ? " ✅" : " ·") + (c.round_no ? `  r${c.round_no}` : ""));
+      walk(c.harness_id, depth + 1);
+    }
+  };
+  walk("#root", 0);
+  el("tree").innerHTML = lines.join("\n") || "（无快照：先跑 python -m aether.cli evolve）";
+
+  // ── 闸门裁决 ────────────────────────────────────────────────
+  const gates = evs.filter((e) => e.kind === "gate.result").map((e) => e.payload);
+  el("gates").querySelector("tbody").innerHTML = gates.slice(-12).map((g) => {
+    const ok = !!g.passed;
+    const reg = (g.regressions ?? []).length;
+    return `<tr><td>${esc(g.capsule)}</td>
+      <td><span class="badge ${ok ? "ok" : "bad"}">${ok ? "过" : "拦" + (reg ? "(" + reg + ")" : "")}</span></td>
+      <td>${esc(g.n_tasks ?? "—")}</td><td>—</td>
+      <td class="sub">${esc((g.regressions ?? []).join(";")).slice(0, 40) || "—"}</td></tr>`;
+  }).join("") || '<tr><td colspan="5" class="sub">暂无闸门记录</td></tr>';
+}
+
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>

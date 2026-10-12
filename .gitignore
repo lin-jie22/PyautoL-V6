@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+data/*.db
+data/*.jsonl
+data/archive/
+docs/demo_report_*.md
+node_modules/
+.DS_Store

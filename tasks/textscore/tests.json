@@ -1,0 +1,20 @@
+{
+  "env_id": "textscore",
+  "note": "文本打分工具的可执行判据集。每条都必须是**可计算**的 got vs expect。",
+  "tests": [
+    {"name": "clamp_low",  "call": "clamp", "args": [-5, 0, 10], "expect": 0},
+    {"name": "clamp_high", "call": "clamp", "args": [50, 0, 10], "expect": 10},
+    {"name": "clamp_mid",  "call": "clamp", "args": [5, 0, 10], "expect": 5},
+    {"name": "normalize_basic", "call": "normalize_scores",
+     "args": [{"a": 1, "b": 1}], "expect": {"a": 0.5, "b": 0.5}},
+    {"name": "normalize_zero_total", "call": "normalize_scores",
+     "args": [{"a": 0, "b": 0}], "expect": {}},
+    {"name": "top_n_basic", "call": "top_n",
+     "args": [[["a", 1], ["b", 3], ["c", 2]], 2], "expect": [["b", 3], ["c", 2]]},
+    {"name": "hollow_empty", "call": "is_hollow", "args": [""], "expect": true},
+    {"name": "hollow_placeholder", "call": "is_hollow", "args": ["ok"], "expect": true},
+    {"name": "hollow_real", "call": "is_hollow", "args": ["real content"], "expect": false},
+    {"name": "merge_keywords_order", "call": "merge_keywords",
+     "args": [["a", "b"], ["b", "c"]], "expect": ["a", "b", "c"]}
+  ]
+}

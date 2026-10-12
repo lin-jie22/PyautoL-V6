@@ -1,0 +1,16 @@
+{
+  "name": "aether-supervisor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "V6 · AETHER 外部监督器：只读账本 + 异常检测（TypeScript，Node ≥22 原生运行，零依赖）",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "check": "node src/index.ts --ledger ../data/ledger.jsonl",
+    "watch": "node src/index.ts --ledger ../data/ledger.jsonl --watch 30",
+    "selfcheck": "node src/selfcheck.ts",
+    "typecheck": "node --experimental-strip-types --check src/index.ts"
+  }
+}
