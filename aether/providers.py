@@ -18,8 +18,9 @@ import os
 import re
 import urllib.error
 import urllib.request
+
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Protocol
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 from .genome import Capsule, Gene, Harness
 from .runtime import Trajectory
@@ -151,6 +152,77 @@ class OllamaProvider:
                 f"empty_content（thinking 占 {self.last_thinking_len} 字，"
                 f"content 空 ⇒ 提高 max_tokens 或 think=False）")
         return content
+
+
+class MemoryAwareProposer:
+    """给任意提议器套一层**跨轮经验记忆**：试过并被闸拒的变异不再重复提。
+
+    ⛔ 存在理由（2026-10-13 实测）：记忆层在端到端进化里**一次都没被走到**
+    （89 次执行中 L4 通路触发 0 次）—— 记忆只在 `loop.run()` 之后写，
+    对 reward 零影响，是纯装饰。这个包装器让记忆**进入因果链**：
+    下一轮的候选集由上一轮的失败记忆决定。
+
+    ⛔ 只跳过**被闸拒绝**的变异（`gate_reject` / `overfit` / `partial` /
+    `blocked`），不跳过"没优势"（`no_advantage`）：后者是"这次没用"，
+    前者是"这条路被证明有害"。记错对象 ⇒ 系统会停止探索有用但不稳定的变异。
+
+    ⛔ 与内层提议器**同协议**可互换：闸一个不少（它只筛候选，不改判据）。
+    """
+
+    def __init__(self, inner: Any, memory: Any, marker: str = "tried"):
+        self.inner = inner
+        self.memory = memory
+        self.marker = marker
+        self.skipped: List[str] = []
+        self.asked = 0
+
+    @staticmethod
+    def _key(weakness: Dict[str, Any], cap_name: str) -> str:
+        return (f"{weakness.get('kind', '')}|{weakness.get('topic', '')}"
+                f"|{cap_name}")
+
+    def remember(self, weakness: Dict[str, Any], cap_name: str,
+                 reason: str) -> None:
+        """把一次**失败**记进记忆。只有被闸拒的才记（见类 docstring）。"""
+        if self.memory is None:
+            return
+        bad_marks = ("gate_reject", "overfit", "partial", "blocked",
+                     "apply_failed")
+        if not any(m in (reason or "") for m in bad_marks):
+            return
+        key = self._key(weakness, cap_name)
+        self.memory.write(
+            "L4",
+            f"{self.marker}:{key} —— 上一轮该变异被拒（{reason[:80]}），"
+            f"本轮不再重复提议，避免把算力反复花在同一条死路上。",
+            channel="system", source="evolution:reject",
+            tags=("experience", "exec"))
+
+    def propose(self, weakness: Dict[str, Any], harness: Harness,
+                n: int = 3) -> List[Capsule]:
+        self.asked += 1
+        caps = list(self.inner.propose(weakness, harness, n))
+        if self.memory is None:
+            return caps
+        out = []
+        for c in caps:
+            key = self._key(weakness, c.name)
+            try:
+                hits = self.memory.search(f"{self.marker}:{key}", top_k=3)
+            except Exception:  # noqa: BLE001 —— 记忆不可用 ⇒ 不筛，照原样提
+                hits = []
+            if any(f"{self.marker}:{key}" in (x.content or "") for x in hits):
+                self.skipped.append(c.name)
+                continue
+            out.append(c)
+        return out
+
+    def diagnostics(self) -> Dict[str, Any]:
+        inner = self.inner.diagnostics() if hasattr(self.inner, "diagnostics") \
+            else {"name": getattr(self.inner, "name", "unknown")}
+        return {**inner, "memory_skipped": list(self.skipped),
+                "memory_skipped_n": len(self.skipped),
+                "propose_calls": self.asked}
 
 
 @dataclass

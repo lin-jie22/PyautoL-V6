@@ -20,9 +20,10 @@ from typing import Any, Dict, List, Optional
 ROOT = Path(__file__).resolve().parent.parent
 
 
-#: 自带环境。**两个是刻意的**：一个当发展环境，一个当 held-out。
-#: 只有一个环境时，"变强了"和"学会了讨好判据"无法区分。
-DEFAULT_ENVS = ("textscore", "eventflow")
+#: 自带环境。**四个是刻意的**：两个只能区分"变强"与"讨好一个环境"，
+#: 四个才能让 held-out 有难度跨度、且 dev/held-out 可以任意配对。
+#: 解法形状刻意不同：数值归一化 / 流式聚合 / 图搜索 / 扫描线+贪心。
+DEFAULT_ENVS = ("textscore", "eventflow", "stateflow", "scheduler")
 
 #: 任务类别。**路由按它来**，不按环境名 —— 见 TemplateProposer.route_key。
 TASK_CLASS = "repair"
@@ -152,7 +153,56 @@ def cmd_evolve(args: argparse.Namespace) -> int:
 
     led = Ledger(p["ledger"])
     store = Store(p["db"])
-    runner = _default_runner(envs)
+
+    # ── 记忆层：**必须在 runner 之前**建好并注入 ──────────────────
+    # ⛔ 2026-10-13 实测：记忆原本建在 loop.run() **之后**，89 次执行里
+    #    L4 通路触发 0 次 ⇒ 记忆对 reward 零影响 ⇒ 5 层里的 L4 是装饰。
+    #    这里把每个环境的基线指纹写进 L2（curated 通道），L4 才有燃料。
+    # ⛔⛔ **不预置**任何环境的修法知识。2026-10-13 实测两种预置都失败：
+    #   · 预置"整份基线源码" ⇒ L4 一召回就把 reward 顶到 1.0 ⇒ 基线在天花板
+    #     ⇒ 再也挖不到弱点 ⇒ 进化永久空转（reward 满分是最隐蔽的假象）；
+    #   · 预置"用 fix_control_flow 修" ⇒ 记忆**复制**了技能的效果 ⇒
+    #     加这个技能不再有边际收益 ⇒ 候选增益 0 ⇒ 同样不提交。
+    #   共同根因：外部预置的知识**掩盖**了"这个系统没有技能"这个真实弱点。
+    #   记忆只能由**执行经验**填充：修好了什么、被什么闸拒了。
+    from .embeddings import HashingEmbedder
+    from .memory import MemoryOS
+    embedder = HashingEmbedder(dim=256)
+    embedder_report: Dict[str, Any] = {"chosen": "hashing:256",
+                                       "degraded": False, "decisions": []}
+    if getattr(args, "embedder", "hash") != "hash":
+        # ⛔ 换嵌入**必须过选型闸**：绝对余弦跨 embedder 不可比，
+        #    只能比排序判别力（recall@1 / MRR / margin）。
+        try:
+            from .embeddings import resolve_embedder
+            from .retrieval import (BENCH, BENCH_EN, EmbeddingSwitchGate,
+                                    evaluate)
+            cand, probe = resolve_embedder(args.embedder)
+            gate = EmbeddingSwitchGate()
+            for name, cases in (("zh", BENCH), ("en", BENCH_EN)):
+                cur = evaluate(HashingEmbedder(dim=256), cases)
+                new = evaluate(cand, cases)
+                v = gate.decide(cur, new)
+                embedder_report["decisions"].append(
+                    {"bench": name, **v.to_dict()})
+            # ⛔ 两套基准**都要**放行才切换（fail-closed）：
+            #    换嵌入要 reindex 全量重算，代价真实 ⇒ 一边说行一边说不行时
+            #    按"不行"处理（实测：nomic 在英文放行、中文拒绝）。
+            decs = embedder_report["decisions"]
+            allowed = len(decs) == 2 and all(d.get("allow") for d in decs)
+            embedder_report["probe"] = probe
+            if allowed:
+                embedder = cand
+                embedder_report["chosen"] = getattr(
+                    cand, "embedder_id", type(cand).__name__)
+            else:
+                embedder_report["note"] = "选型闸拒绝 ⇒ 保持 hashing（显式记账）"
+        except Exception as e:  # noqa: BLE001
+            # ⛔ 真嵌入不可用 ⇒ **显式降级并记账**，绝不静默混库
+            embedder_report = {"chosen": "hashing:256", "degraded": True,
+                               "error": f"{type(e).__name__}: {e}"}
+    mem = MemoryOS(embedder=embedder, min_content_len=60)
+    runner = _default_runner(envs, memory=mem)
 
     # ⛔ 种子 harness **必须先建**：冻结基线要用它跑。
     #    用空 `Harness()` 跑基线 ⇒ 连工具都没有 ⇒ 基线全红 ⇒
@@ -179,12 +229,22 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                             "topic": dev_name, "task_class": TASK_CLASS})
            for t in rep_synth.tasks]
 
+    # ⛔ 发展集也要有难度标签：泛化闸要靠它做**同层对照**。
+    #    只给 held-out 打标签 ⇒ 拿不到对照 ⇒ 闸 fail-closed ⇒
+    #    "通用修法修不动 hard"会被判成挑食 ⇒ 进化循环永久空转。
+    from .repair import difficulty_report
+    dev_diff = difficulty_report(envs[dev_name], dev)
+    dev_difficulty = dev_diff["labels"]
+    if not dev_diff["spread"]:
+        print(f"⚠️ 发展集只有单一难度（easy {dev_diff['n_easy']}"
+              f" / hard {dev_diff['n_hard']}）⇒ 泛化闸拿不到同层对照",
+              file=sys.stderr)
+
     # held-out：**另一个环境**的合成任务。它不参与候选之间的比较。
     heldout = None
     rep_ho = None
     diff_report = None
     if args.heldout == "on":
-        from .repair import difficulty_report
         rep_ho = synthesize_tasks(envs[ho_name], max_n=int(args.max_tasks))
         if rep_ho.tasks:
             ho_tasks = [
@@ -238,15 +298,50 @@ def cmd_evolve(args: argparse.Namespace) -> int:
             print(f"⚠️ 真模型不可用（{type(e).__name__}: {e}）⇒ 回退模板提议器",
                   file=sys.stderr)
             proposer = template
+    # ⛔ 记忆进入因果链：被闸拒的变异记进记忆 ⇒ 下一轮不再重复提。
+    #    同协议包装（只筛候选，不动判据），闸一个不少。
+    from .providers import MemoryAwareProposer
+    # ⛔ dev 与 held-out 的**难度层必须对得上**：held-out 有某层而发展集没有
+    #    ⇒ 那一层无从对照 ⇒ 泛化闸会判 inconclusive（拦截）。
+    #    不提示的话，"永远不提交"看起来和"候选不好"一模一样。
+    if diff_report and dev_difficulty:
+        missing = sorted(set(diff_report["labels"].values())
+                         - set(dev_difficulty.values()))
+        if missing:
+            print(f"⚠️ 发展集缺少难度层 {missing}（held-out 有）⇒ 这些层无从对照"
+                  f" ⇒ 泛化闸将判 inconclusive 并拦截"
+                  f"（提高 --max-tasks 或换环境以获得同层对照）", file=sys.stderr)
+
+    proposer = MemoryAwareProposer(proposer, mem)
+
+    def _remember_round(rep) -> None:
+        """把一轮的**执行经验**写进记忆 —— 记忆只能由执行填充。
+
+        ⛔ 与"被闸拒的经验"（MemoryAwareProposer.remember）相对：
+        这条记的是**修好了什么**。两者都是 L4 通路的燃料，
+        而且都不是预置答案 —— 没有执行过就没有内容。
+        """
+        if not rep.committed:
+            return
+        best = next((c for c in rep.candidates if c.accepted), None)
+        mem.write(
+            "L3",
+            f"repair_hint:{dev_name} 第 {rep.round_no} 轮：变异 "
+            f"{best.capsule_name if best else rep.committed[:8]} 修好了任务，"
+            f"基线 reward {rep.baseline_reward:.2f} → "
+            f"{(best.reward if best else 0.0):.2f}（全部由执行判据给出）。"
+            f"失败模式集中在控制流（比较与运算），保守修法覆盖其中一部分，"
+            f"技能不可达时它是第二条通路。",
+            channel="curated", source=f"round{rep.round_no}",
+            tags=("experience", "exec"))
+
     loop = EvolutionLoop(led, gate, dev, runner, proposer, store=store,
                          caliber=caliber, heldout=heldout,
+                         dev_difficulty=dev_difficulty,
+                         on_round_end=_remember_round,
                          config=EvolutionConfig(group_size=int(args.group)))
 
     store.save_snapshot(h0.harness_id, h0.to_dict(), accepted=True, round_no=0)
-
-    # ── 记忆层接线（不是摆设：每轮的证据都进记忆，且可查完整性）──
-    from .memory import MemoryOS
-    mem = MemoryOS(min_content_len=60)
     mem.write("L0", h0.meta_rules, channel="curated", source="seed-harness")
 
     t0 = time.time()
@@ -287,13 +382,18 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "synthesis_heldout": rep_ho.to_dict() if rep_ho is not None else None,
         "heldout_difficulty": ({k: v for k, v in diff_report.items()
                                 if k != "labels"} if diff_report else None),
+        "dev_difficulty": {k: v for k, v in dev_diff.items() if k != "labels"},
         "rounds": [r.to_dict() for r in reports],
         "final_harness_id": final.harness_id,
         "seed_harness_id": h0.harness_id,
         "improved": any(r.improved for r in reports),
         "cost_s": round(time.time() - t0, 2),
+        "embedder": embedder_report,
         "ledger": led.stats(),
         "memory": mem.integrity(),
+        #: ⛔ 记忆是否真的进了因果链：跳过数 > 0 才证明它被走到过
+        "memory_causal": proposer.diagnostics() if hasattr(
+            proposer, "diagnostics") else {},
         "memory_promote": promoted,
         "memory_promote_without_verifier": no_verifier_why,
         "memory_consolidated": len(consolidated),
@@ -329,6 +429,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     e.add_argument("--llm-model", default="", help="真模型名（默认 Qwen3.5-4B:latest）")
     e.add_argument("--heldout-floor", default="0.0",
                    help="held-out 增益地板（低于它判 overfit）")
+    e.add_argument("--embedder", default="hash", choices=["hash", "auto", "ollama"],
+                   help="嵌入器：hash（默认，离线）/ auto|ollama（须过选型闸）")
 
     args = ap.parse_args(argv)
     return {

@@ -221,7 +221,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="v6gen_") as td:
         # D1：把闸改成恒放行 ⇒ overfit 候选**必须**被提交
         g_open = mk_gate()
-        g_open.probe = lambda b, c, r, dev_gain=0.0: ProbeResult(
+        g_open.probe = lambda b, c, r, dev_gain=0.0, **kw: ProbeResult(
             verdict="generalize", dev_gain=dev_gain, heldout_gain=1.0,
             n_tasks=3, reason="事故版：恒放行")
         _, r_open = run_once(td, [capsule("narrow")], g_open)
@@ -230,7 +230,7 @@ def main():
 
         # D2：把闸改成恒拦截 ⇒ generalize 候选**必须**不被提交
         g_shut = mk_gate()
-        g_shut.probe = lambda b, c, r, dev_gain=0.0: ProbeResult(
+        g_shut.probe = lambda b, c, r, dev_gain=0.0, **kw: ProbeResult(
             verdict="overfit", dev_gain=dev_gain, heldout_gain=0.0,
             n_tasks=3, reason="事故版：恒拦截")
         _, r_shut = run_once(td, [capsule("gen")], g_shut)
@@ -248,6 +248,87 @@ def main():
         ck("D3 事故版：held-out 与发展集同环境 ⇒ 定点修法被误判泛化"
            "（所以 H2 的不重叠是硬约束）",
            p_same.verdict == "generalize", f"{p_same.verdict}")
+
+    # ── E 组：难度分层的**同层对照**（守"自指死锁"不再复发）────────
+    #
+    # ⛔ 背景（2026-10-13 实测事故）：`hard` 的定义是「通用修法修不好」
+    #    ⇒ 任何通用修法在 hard 层的增益必然为 0 ⇒ 只要判据是
+    #    "某层没涨 ⇒ 拦截"，唯一能泛化的修法就会被唯一能鉴别泛化的闸
+    #    永久拦住 ⇒ 端到端 evolve 三轮 × 两组全部不提交，improved=False。
+    #    修法：分层裁决要与发展集**同层**对照，区分「能力边界」与「挑食」。
+    print("\nE 组：难度分层同层对照 —— 能力边界 ≠ 挑食")
+
+    def mk_diff_gate(base_map, cand_map, difficulty):
+        """按 (task_id → reward) 精确控制 base/cand 在 held-out 的表现。"""
+        tasks = [FrozenTask(task_id=t, spec={"env": HO, "probe": 1})
+                 for t in sorted(base_map)]
+        suite = make_heldout(HO, tasks, difficulty=difficulty)
+        # 用 meta_rules 里的标记区分 base / cand（runner 只看 harness）
+        def _probe_runner(h, spec):
+            tid = spec.get("env", "") + "|" + str(spec.get("probe", ""))
+            tid = str(spec.get("tid", ""))
+            m = cand_map if "CAND" in (h.meta_rules or "") else base_map
+            return _ok(tid) if m.get(tid, 0.0) > 0 else _bad(tid)
+
+        suite_tasks = [FrozenTask(task_id=t, spec={"tid": t})
+                       for t in sorted(base_map)]
+        g = GeneralizationGate(
+            make_heldout(HO, suite_tasks, difficulty=difficulty),
+            dev_task_ids=["dev0"], base_at_ceiling=None)
+        base_h = Harness(meta_rules="BASE")
+        cand_h = Harness(meta_rules="CAND")
+        return g, base_h, cand_h, _probe_runner
+
+    DIFF = {"h_easy": "easy", "h_hard1": "hard", "h_hard2": "hard"}
+    # E1：通用修法 —— held-out easy 涨、hard 不涨；发展集 hard **同样**不涨
+    #     ⇒ 那是能力边界，不是挑食 ⇒ 必须放行（否则进化永久空转）
+    base_map = {"h_easy": 0.0, "h_hard1": 0.0, "h_hard2": 0.0}
+    cand_map = {"h_easy": 1.0, "h_hard1": 0.0, "h_hard2": 0.0}
+    g_e, b_h, c_h, pr_runner = mk_diff_gate(base_map, cand_map, DIFF)
+    p_e = g_e.probe(b_h, c_h, pr_runner, dev_gain=0.6,
+                    dev_by_difficulty={"easy": 1.0, "hard": 0.0})
+    ck("E1 能力边界：hard 未涨但发展集同层也未涨 ⇒ generalize（放行）",
+       p_e.verdict == "generalize", f"{p_e.verdict} / {p_e.reason[:60]}")
+    ck("E1b 放行时必须点名 out_of_reach（裁决可审计）",
+       tuple(p_e.out_of_reach) == ("hard",), f"{p_e.out_of_reach}")
+
+    # E2：挑食候选 —— held-out easy 涨、hard 不涨，但发展集 hard **涨了**
+    #     ⇒ 同一层，换个环境就修不动 ⇒ 真挑食 ⇒ 必须拦截
+    g_e2, b2, c2, pr2 = mk_diff_gate(base_map, cand_map, DIFF)
+    p_e2 = g_e2.probe(b2, c2, pr2, dev_gain=1.0,
+                      dev_by_difficulty={"easy": 1.0, "hard": 1.0})
+    ck("E2 挑食：hard 未涨但发展集同层涨了 ⇒ partial（拦截）",
+       p_e2.verdict == "partial" and p_e2.blocks,
+       f"{p_e2.verdict} / {p_e2.reason[:60]}")
+
+    # E3：拿不到同层对照 ⇒ **fail-closed 拦截**，但裁决必须是 inconclusive
+    #     （"缺数据"）而不是 partial（"有挑食证据"）—— V5：不可判别 ≠ 有罪。
+    #     两者的处置完全不同：前者该去补发展集的该难度层，后者该改候选。
+    g_e3, b3, c3, pr3 = mk_diff_gate(base_map, cand_map, DIFF)
+    p_e3 = g_e3.probe(b3, c3, pr3, dev_gain=0.6)
+    ck("E3 无对照数据 ⇒ fail-closed 拦截，且判 inconclusive（不是 partial）",
+       p_e3.verdict == "inconclusive" and p_e3.blocks, f"{p_e3.verdict}")
+    ck("E3b inconclusive 的理由必须点明『发展集没有该难度层』（可据以补数据）",
+       "没有" in p_e3.reason and "难度层" in p_e3.reason, p_e3.reason[:60])
+
+    # E4 反证：把对照判据反过来（发展集涨 ⇒ 当作超纲）⇒ E1/E2 必须翻转
+    g_e4, b4, c4, pr4 = mk_diff_gate(base_map, cand_map, DIFF)
+    _orig = g_e4.probe
+
+    def _inverted_probe(base_h, cand_h, runner, dev_gain,
+                        dev_by_difficulty=None):
+        flipped = {k: (-v if v > 0 else 1.0)
+                   for k, v in (dev_by_difficulty or {}).items()}
+        return _orig(base_h, cand_h, runner, dev_gain,
+                     dev_by_difficulty=flipped)
+
+    p_e4a = _inverted_probe(b4, c4, pr4, 0.6,
+                            {"easy": 1.0, "hard": 0.0})
+    p_e4b = _inverted_probe(b4, c4, pr4, 1.0,
+                            {"easy": 1.0, "hard": 1.0})
+    ck("F5 反证：对照判据反转 ⇒ E1/E2 裁决互换（说明 E 组不是巧合）",
+       p_e4a.verdict == "partial" and p_e4b.verdict == "generalize",
+       f"E1→{p_e4a.verdict} E2→{p_e4b.verdict}")
 
     print("\n" + "=" * 60)
     if FAILS:

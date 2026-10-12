@@ -50,6 +50,22 @@ DIRECTIVES: Dict[str, Tuple[str, ...]] = {
 REQUIRED_TOOLS: Tuple[str, ...] = ("read_file", "python_exec")
 
 
+def banned_by_L0(strategy: str, ds: FrozenSet[str]) -> bool:
+    """L0 元规则是否**禁用**这个策略。
+
+    ⛔ 必须覆盖**所有**"整文件换回基线"的形态，而不只是 `patch:*` 技能。
+    2026-10-13 实测：L4 记忆通路恢复出的 `memory_restore` 同样是整文件替换，
+    但旧代码只检查 `strategy.startswith("patch:")` ⇒ **L0 禁令有后门**：
+    元规则写着【禁止整文件替换】，记忆通路照样能整文件替换。
+    一个禁令只要有一条绕过路径，它就不再是禁令。
+    """
+    if not strategy:
+        return False
+    if "no_full_replace" in ds:
+        return strategy.startswith("patch:") or strategy == "memory_restore"
+    return False
+
+
 def directives(meta_rules: str) -> FrozenSet[str]:
     """从 L0 元规则里解析出生效的指令集。
 
@@ -98,8 +114,12 @@ class HarnessAgent:
         self.envs = envs
         self.memory = memory
         self.timeout = timeout
-        #: 记忆里"这个环境的基线"的标记。召回命中 ⇒ 可以用记忆修。
-        self.memory_marker = "baseline:"
+        #: 记忆里"这个环境该怎么修"的标记。召回命中 ⇒ 走记忆通路。
+        #: ⛔ 记忆里存的是**修法知识**，不是**答案**。2026-10-13 实测：
+        #: 存"整份基线源码"时，L4 通路一召回就把 reward 从 0.0 顶到 1.0
+        #: ⇒ 基线已在天花板 ⇒ 再也挖不到弱点 ⇒ 进化循环永久失去动力。
+        #: 看起来 reward 满分，实际是真实弱点（没有技能）被记忆掩盖了。
+        self.memory_marker = "repair_hint:"
 
     # ── 主流程 ──────────────────────────────────────────────────
     def run(self, h: Any, spec: Dict[str, Any]) -> AgentResult:
@@ -150,10 +170,10 @@ class HarnessAgent:
         ds = directives(h.meta_rules)
         if ds:
             used.append("L0")
-            if "no_full_replace" in ds and skill.startswith("patch:"):
+            if banned_by_L0(skill, ds):
                 steps.append(AgentStep(
                     "L0", "directive", False,
-                    "元规则【禁止整文件替换】⇒ 该修法被禁用（L0 真的有后果）"))
+                    f"元规则【禁止整文件替换】⇒ {skill} 被禁用（L0 真的有后果）"))
                 skill = ""
             else:
                 steps.append(AgentStep("L0", "directive", True,
@@ -169,14 +189,15 @@ class HarnessAgent:
                                        "recall_topk<=0 ⇒ 记忆通路关闭"))
             else:
                 notes = self.memory.search(
-                    f"{env.env_id} 基线 baseline", top_k=topk)
+                    f"{env.env_id} repair_hint 修法经验", top_k=topk)
                 hit = [n for n in notes
                        if f"{self.memory_marker}{env.env_id}" in (n.content or "")]
                 if hit:
-                    strategy = "memory_restore"
+                    strategy = "memory_hint"
                     steps.append(AgentStep(
                         "L4", "recall", True,
-                        f"召回 {len(hit)} 条带基线指纹的记忆 ⇒ 走记忆通路"))
+                        f"召回 {len(hit)} 条修法记忆 ⇒ 走记忆通路"
+                        f"（保守修法，不是整文件替换）"))
                 else:
                     steps.append(AgentStep("L4", "recall", False,
                                            "召回到了但没有任何基线指纹"))
@@ -195,8 +216,12 @@ class HarnessAgent:
             else:
                 fixed = src
                 applicable = False
-        elif strategy == "memory_restore":
-            fixed = env.source                             # 记忆里的基线
+        elif strategy == "memory_hint":
+            # ⛔ 记忆通路走的是**保守通用修法**，不是"把整份基线还给你"。
+            #    后者会让基线直接满分 ⇒ 弱点被掩盖 ⇒ 进化永久空转（已实测）。
+            #    前者只是让"技能不可达"时仍有路可走，且**修不全** ⇒
+            #    天花板仍在，进化的动力还在。
+            fixed = revert_control_flow(src, env.source)
         else:
             fixed = src                                    # 无策略 ⇒ 原样
         steps.append(AgentStep(

@@ -164,9 +164,20 @@ class _Phased:
         return _ok(i) if DIFF.get(f"ho::{i}") == "easy" else _bad(i)
 
 
-pr_partial = _gate(DIFF).probe(_H({}), _H({}), _Phased(), dev_gain=0.5)
-ck("D1 总体 +0.50，easy +1.00，hard +0.00 ⇒ 判 **partial**",
+# ⛔ 必须传**发展集同层增益**才能判出 partial：
+#    · dev 同层**也涨了** ⇒ 换环境就修不动 ⇒ 挑食 ⇒ partial
+#    · dev 同层没涨       ⇒ 能力边界 ⇒ 不处罚
+#    · 拿不到 dev 同层数据 ⇒ 无从判别 ⇒ inconclusive（不可判别 ≠ 有罪）
+pr_partial = _gate(DIFF).probe(_H({}), _H({}), _Phased(), dev_gain=0.5,
+                               dev_by_difficulty={"easy": 1.0, "hard": 1.0})
+ck("D1 总体 +0.50，easy +1.00，hard +0.00，且发展集 hard 同层涨了"
+   " ⇒ 判 **partial**（挑食）",
    pr_partial.verdict == "partial", str(pr_partial.to_dict()))
+pr_unknown = _gate(DIFF).probe(_H({}), _H({}), _Phased(), dev_gain=0.5)
+ck("D1b 同样情形但拿不到发展集同层数据 ⇒ 判 **inconclusive**"
+   "（缺数据 ≠ 有挑食证据，两者处置不同；同样拦截）",
+   pr_unknown.verdict == "inconclusive" and pr_unknown.blocks,
+   str(pr_unknown.to_dict()))
 ck("D2 分层明细记下来了（能看见是哪层拖后腿）",
    pr_partial.by_difficulty == {"easy": 1.0, "hard": 0.0},
    str(pr_partial.by_difficulty))

@@ -133,19 +133,46 @@ def main():
     # ── E 组：L4 记忆层（第二条通路）────────────────────────────
     print("E 组：L4 记忆层（技能不可达时的第二条路）")
     mem = MemoryOS(min_content_len=0)
-    mem.write("L2", f"{env.env_id} 的基线指纹 baseline:{env.env_id} "
-                    f"（fingerprint={env.fingerprint}）",
-              channel="curated", source="test")
+    mem.write("L2", f"{env.env_id} 的修法经验 repair_hint:{env.env_id} "
+                    f"（fingerprint={env.fingerprint}）：失败模式是控制流，"
+                    f"用保守修法 revert_control_flow。",
+              channel="curated", source="test", tags=("experience", "exec"))
     agent_mem = HarnessAgent(envs, memory=mem)
     ck("E1 无技能 + recall_topk=0 ⇒ reward 0（记忆通路关闭）",
        agent_mem.run(H(memory_policy={"recall_topk": 0}), SPEC).verdict.reward
        == 0.0)
-    ck("E2 无技能 + recall_topk=5 ⇒ 走记忆通路，reward 1",
-       agent_mem.run(H(memory_policy={"recall_topk": 5}), SPEC).verdict.reward
-       == 1.0)
-    ck("E3 记忆里没有基线指纹 ⇒ reward 0（召回不等于有用）",
+    r_mem = agent_mem.run(H(memory_policy={"recall_topk": 5}), SPEC)
+    ck("E2 无技能 + recall_topk=5 ⇒ 走记忆通路（strategy=memory_hint），reward 1",
+       r_mem.strategy == "memory_hint" and r_mem.verdict.reward == 1.0,
+       f"{r_mem.strategy}/{r_mem.verdict.reward}")
+    ck("E3 记忆里没有修法经验 ⇒ reward 0（召回不等于有用）",
        HarnessAgent(envs, memory=MemoryOS(min_content_len=0)).run(
            H(memory_policy={"recall_topk": 5}), SPEC).verdict.reward == 0.0)
+    # ⛔ E4 是本轮（2026-10-13）最关键的教训，必须有契约守着：
+    #    记忆里如果存"整份基线/答案"，L4 一召回就把 reward 顶到 1.0，
+    #    基线随即到达天花板 ⇒ 再也挖不到弱点 ⇒ 进化循环永久空转，
+    #    而所有数字都很好看。记忆必须只给**修法**，且修法**修不全**。
+    from aether.repair import classify_difficulty
+    hard_src = None
+    for w in range(0, 12):
+        try:
+            s, _d = mutate_source(env.source, which=w)
+        except Exception:  # noqa: BLE001
+            continue
+        if s != env.source and classify_difficulty(env, s) == "hard":
+            hard_src = s
+            break
+    if hard_src is None:
+        ck("E4 （跳过：本环境未合成出 hard 变异）", True)
+    else:
+        SPEC_HARD = dict(SPEC, broken_source=hard_src)
+        ck("E4 记忆通路在 hard 题上 reward 0（记忆给的是**修法**，不是答案）"
+           " ⇒ 不会把基线顶到天花板、不会掩盖弱点",
+           agent_mem.run(H(memory_policy={"recall_topk": 5}),
+                         SPEC_HARD).verdict.reward == 0.0)
+        ck("E4b 同一道题上，整文件替换能拿 1.0 ⇒ E4 的 0 确实来自"
+           "“记忆修法修不全”，不是题本身无解",
+           reward(with_skill(name=f"patch:{env.env_id}"), SPEC_HARD) == 1.0)
 
     # ── F 组：反证（证明每组判的不是恒 0/恒 1）──────────────────
     print("F 组：反证 —— 改掉判据，对应组必须翻转")

@@ -126,6 +126,9 @@ class Candidate:
     n_verdicts: int = 0
     #: 泛化闸裁决（只有被选为 best 的候选才会有值）
     generalization: Dict[str, Any] = field(default_factory=dict)
+    #: 发展集**按难度层**的增益。⛔ 泛化闸拿它做同层对照 —— 缺了它，
+    #: "能力边界"会被误判成"挑食"（见 generalization.probe 的自指死锁说明）。
+    dev_by_difficulty: Dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"capsule": self.capsule_name, "harness_id": self.harness_id,
@@ -135,6 +138,8 @@ class Candidate:
                 "advantage": round(self.advantage, 4),
                 "accepted": self.accepted, "reason": self.reason,
                 "blast": self.blast, "n_verdicts": self.n_verdicts,
+                "dev_by_difficulty": {k: round(v, 4)
+                                      for k, v in self.dev_by_difficulty.items()},
                 "generalization": self.generalization}
 
 
@@ -149,6 +154,8 @@ class RoundReport:
     ledger_seqs: List[int] = field(default_factory=list)
     #: 本轮 best 候选的泛化裁决（None = 没跑到这一步）
     generalization: Optional[Dict[str, Any]] = None
+    #: 提交后的**反事实层归因**（None = 没提交 / 未启用）
+    layer_credit: Optional[Dict[str, Any]] = None
 
     @property
     def improved(self) -> bool:
@@ -161,7 +168,8 @@ class RoundReport:
                 "candidates": [c.to_dict() for c in self.candidates],
                 "committed": self.committed, "revert_reason": self.revert_reason,
                 "ledger_seqs": self.ledger_seqs,
-                "generalization": self.generalization}
+                "generalization": self.generalization,
+                "layer_credit": self.layer_credit}
 
 
 @dataclass
@@ -173,6 +181,10 @@ class EvolutionConfig:
     max_size_growth_ratio: float = 0.5  # 产物增殖闸：体积涨 50% 以上需更强增益
     require_human_for_protected: bool = True   # L0 触碰 ⇒ 停等人工
     dev_pass_threshold: float = 0.0     # 发展集 reward 阈值（0=全部计入）
+    #: 提交后做一次**反事实层归因**（哪一层带来了这次提升）。
+    attribute_layers: bool = True
+    #: 归因只用前 N 个发展任务（消融要跑 5 层 × N 次，成本要可控）
+    attribution_tasks: int = 3
 
 
 class EvolutionLoop:
@@ -187,7 +199,9 @@ class EvolutionLoop:
                  proposer: Any, store: Optional[Store] = None,
                  caliber: Optional[Dict[str, Any]] = None,
                  config: Optional[EvolutionConfig] = None,
-                 heldout: Optional[Any] = None):
+                 heldout: Optional[Any] = None,
+                 dev_difficulty: Optional[Dict[str, str]] = None,
+                 on_round_end: Optional[Callable[[Any], None]] = None):
         self.ledger = ledger
         self.gate = gate
         self.dev_suite = dev_suite
@@ -199,6 +213,13 @@ class EvolutionLoop:
         #: 跨环境泛化闸（可选）。None ⇒ 不启用（保持旧行为）。
         #: ⛔ 它**只**在 best 选出之后跑，绝不参与候选之间的比较。
         self.heldout = heldout
+        #: 发展集的难度标签（task_id → easy/hard）。空 ⇒ 不做同层对照
+        #: （泛化闸届时 fail-closed，见 generalization.probe）。
+        self.dev_difficulty: Dict[str, str] = dict(dev_difficulty or {})
+        #: 每轮结束的回调（供调用方把**本轮经验**写进记忆等外部系统）。
+        #: ⛔ 必须在**循环内**触发：放在 loop.run() 之后写，这一轮的下一轮
+        #:    拿不到它 ⇒ 经验对因果链的影响恒为 0（V5：有机制 ≠ 被走到）。
+        self.on_round_end = on_round_end
         #: 内存态 run 账（**不依赖 store**）：机制正确性不该依赖外部存储存在。
         #: store 只是它的持久化投影。
         self._runs: List[RunRow] = []
@@ -244,6 +265,30 @@ class EvolutionLoop:
             return 0.0, vs
         return sum(v.reward for v in vs) / len(vs), vs
 
+    # ── 难度分层（发展集侧）────────────────────────────────────────
+    def reward_by_difficulty(self, vs: List[Verdict]) -> Dict[str, float]:
+        """把发展集的判定结果按难度层聚合（**与 held-out 同一口径**）。
+
+        ⛔ 两个集合的难度标签都由「通用修法能否修好」执行判定
+        （`repair.classify_difficulty`），所以**同层可比**。
+        没有难度标签 ⇒ 返回空（泛化闸届时 fail-closed）。
+        """
+        if not self.dev_difficulty or len(vs) != len(self.dev_suite):
+            return {}
+        buckets: Dict[str, List[float]] = {}
+        for t, v in zip(self.dev_suite, vs):
+            lv = self.dev_difficulty.get(t.task_id)
+            if not lv:
+                continue
+            buckets.setdefault(lv, []).append(v.reward)
+        return {lv: sum(xs) / len(xs) for lv, xs in buckets.items()}
+
+    @staticmethod
+    def _level_gain(base: Dict[str, float], cand: Dict[str, float]
+                    ) -> Dict[str, float]:
+        return {lv: cand.get(lv, 0.0) - base.get(lv, 0.0)
+                for lv in set(base) | set(cand)}
+
     # ── 单轮 ──────────────────────────────────────────────────────
     def run_round(self, h: Harness, round_no: int = 0) -> RoundReport:
         rep = RoundReport(round_no=round_no)
@@ -252,8 +297,9 @@ class EvolutionLoop:
         #    第一轮时库里没有任何 run ⇒ 挖不到弱点 ⇒ 循环"什么都不做"
         #    却记为成功，这是自进化系统最难发现的假成功形态。
         #    先跑一次发展集，把失败证据写进库，再谈挖掘。
-        base_reward, _ = self.evaluate_dev(h, tag="base:")
+        base_reward, base_vs = self.evaluate_dev(h, tag="base:")
         rep.baseline_reward = base_reward
+        base_by_level = self.reward_by_difficulty(base_vs)
 
         # 2) MINE —— 弱点必须由**当前 harness 的**失败证据支撑。
         #    ⛔ 按 harness_id 过滤：拿旧 harness 的失败当证据 ⇒ 修好后
@@ -318,6 +364,8 @@ class EvolutionLoop:
             reward, vs = self.evaluate_dev(cand_h, tag="cand:")
             c.reward = reward
             c.n_verdicts = len(vs)
+            c.dev_by_difficulty = self._level_gain(
+                base_by_level, self.reward_by_difficulty(vs))
             cands.append(c)
 
         # 6) 组内相对优势（只对过了闸且有评估结果的候选算）
@@ -357,8 +405,12 @@ class EvolutionLoop:
         if best is not None and self.heldout is not None:
             new_h_probe = apply_capsule(
                 h, next(cp for cp in capsules if cp.name == best.capsule_name))
-            pr = self.heldout.probe(h, new_h_probe, self.runner,
-                                    dev_gain=best.reward - base_reward)
+            pr = self.heldout.probe(
+                h, new_h_probe, self.runner,
+                dev_gain=best.reward - base_reward,
+                # ⛔ 同层对照：没有它，"能力边界"会被误判成"挑食"，
+                #    通用修法将永远过不了闸 ⇒ 进化循环永久空转。
+                dev_by_difficulty=best.dev_by_difficulty or None)
             best.generalization = pr.to_dict()
             rep.generalization = pr.to_dict()
             rep.ledger_seqs.append(self.ledger.append(
@@ -372,6 +424,17 @@ class EvolutionLoop:
                 best = None
 
         rep.candidates = cands
+
+        # 7.8) 跨轮经验记忆：把**这一轮被拒的变异**交给提议器记住。
+        #      ⛔ 必须在**循环内部**调用，不能等 loop.run() 结束再补：
+        #      补在结束后的话，这次运行的下一轮拿不到它；而 MemoryOS 是
+        #      进程内存储 ⇒ 下次运行也拿不到 ⇒ 记忆对因果链的影响恒为 0。
+        #      ⛔ 鸭子类型（`hasattr`）：提议器**同协议**可替换，没有
+        #      remember 的提议器行为完全不变（不是强制依赖）。
+        remember = getattr(self.proposer, "remember", None)
+        if callable(remember) and rep.weakness is not None:
+            for c in cands:
+                remember(rep.weakness.to_dict(), c.capsule_name, c.reason)
 
         # 8) 提交 / 回滚 —— 两种结果都进账本
         if best is None:
@@ -403,6 +466,22 @@ class EvolutionLoop:
             self.store.save_snapshot(new_h.harness_id, new_h.to_dict(),
                                      parent_id=h.harness_id, accepted=True,
                                      round_no=round_no)
+
+        # 9) 反事实层归因 —— **提交之后**才算，且**绝不参与选择**。
+        #    ⛔ 顺序与 held-out 同理：归因一旦进入 group_relative 或 best
+        #    排序，它就变成了第二张发展集，进化会去讨好归因本身。
+        if self.cfg.attribute_layers:
+            from .attribution import attribute_layers
+            try:
+                specs = [t.spec for t in self.dev_suite][:self.cfg.attribution_tasks]
+                lc = attribute_layers(self.runner, new_h, specs)
+                rep.layer_credit = lc.to_dict()
+                self.ledger.append("attribution.layer", {
+                    "round_no": round_no, "harness_id": new_h.harness_id,
+                    **lc.to_dict()}, actor="evolution")
+            except Exception as e:  # noqa: BLE001 —— 归因失败不得影响提交
+                rep.layer_credit = {"available": False,
+                                    "reason": f"{type(e).__name__}: {e}"}
         return rep
 
     # ── 多轮 ──────────────────────────────────────────────────────
@@ -417,6 +496,11 @@ class EvolutionLoop:
         for i in range(rounds):
             rep = self.run_round(cur, round_no=i + 1)
             reports.append(rep)
+            if self.on_round_end is not None:
+                try:
+                    self.on_round_end(rep)
+                except Exception:  # noqa: BLE001 —— 回调失败不得中断进化
+                    pass
             if rep.committed and self.store is not None:
                 snap = [s for s in self.store.snapshots()
                         if s["harness_id"] == rep.committed]

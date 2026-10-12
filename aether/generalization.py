@@ -89,6 +89,11 @@ class ProbeResult:
     reason: str = ""
     #: 各难度层的 held-out 增益。⛔ 只看总体会放过"只在简单题上泛化"。
     by_difficulty: Dict[str, float] = field(default_factory=dict)
+    #: 各难度层的**发展集**增益（同层对照组）。没有它就无法区分
+    #: 「挑食」与「能力边界」——见 probe() 的说明。
+    dev_by_difficulty: Dict[str, float] = field(default_factory=dict)
+    #: 被判为"超出能力边界"的层（同层发展集也涨不动 ⇒ 不处罚，不是挑食）
+    out_of_reach: Tuple[str, ...] = ()
 
     @property
     def blocks(self) -> bool:
@@ -104,6 +109,9 @@ class ProbeResult:
                 "n_tasks": self.n_tasks,
                 "by_difficulty": {k: round(v, 4)
                                   for k, v in self.by_difficulty.items()},
+                "dev_by_difficulty": {k: round(v, 4)
+                                      for k, v in self.dev_by_difficulty.items()},
+                "out_of_reach": list(self.out_of_reach),
                 "reason": self.reason}
 
 
@@ -171,12 +179,29 @@ class GeneralizationGate:
 
     # ── 裁决 ────────────────────────────────────────────────────────
     def probe(self, base_h: Harness, cand_h: Harness, runner: Runner,
-              dev_gain: float) -> ProbeResult:
+              dev_gain: float,
+              dev_by_difficulty: Optional[Dict[str, float]] = None
+              ) -> ProbeResult:
         """对 (基线, 候选) 做一次泛化裁决。
 
         ⛔ 判据顺序有讲究：先判"发展集到底涨没涨"，再判"涨的是不是泛化的"。
         反过来的话，"发展集没涨"会被误记成 overfit —— 那是两回事：
         没涨是能力问题，涨了但不泛化是**诚信**问题。
+
+        ⛔⛔ 分层裁决必须拿 `dev_by_difficulty` 做**同层对照**，否则会死锁：
+          `hard` 的定义是「通用修法修不好」（见 repair.classify_difficulty），
+          于是**任何**通用修法在 hard 层的增益必然是 0 ⇒ 只要判据是
+          "某层没涨 ⇒ 拦截"，唯一能泛化的修法就会被唯一能鉴别泛化的闸
+          永久拦住 ⇒ 自进化系统再也不会提交任何东西（2026-10-13 实测：
+          三轮 × 两组全部被拦，improved=False）。
+
+          同层对照把两件事分开：
+            · dev 同层**也**涨不动 ⇒ 该层超出候选能力（超纲），**不处罚**；
+            · dev 同层涨了、held-out 同层没涨 ⇒ **挑食**，拦截。
+          这不是放宽判据 —— 真挑食的候选仍然被拦，只是不再把"能力不够"
+          误判成"不诚实"（V5：不可判别 ≠ 有罪）。
+
+        ⛔ 拿不到对照数据时 fail-closed：仍按挑食处理（与旧行为一致）。
         """
         if self.suite.n_tasks < self.min_tasks:
             return ProbeResult(
@@ -216,22 +241,67 @@ class GeneralizationGate:
                 n_tasks=self.suite.n_tasks, by_difficulty=by_diff,
                 reason=(f"发展集 +{dev_gain:.4f} 但 held-out {ho_gain:+.4f} "
                         f"（{base_ho:.2f}→{cand_ho:.2f}）⇒ 讨好判据，不提交"))
-        # ⛔ 分层裁决：总体涨了，但某一难度层没涨 ⇒ 判 partial（**同样拦截**）。
-        #    典型形态：只会修"通用修法能搞定的简单题"。平均数是正的，
-        #    但它在 hard 层毫无进步 —— 那不是泛化，是挑食。
-        lagging = sorted([f"{lv}{by_diff[lv]:+.4f}" for lv in by_diff
-                          if by_diff[lv] <= self.heldout_floor])
+        # ⛔ 分层裁决：总体涨了，但某一难度层没涨 ⇒ **不能直接判挑食**，
+        #    必须与发展集的同层增益对照（理由见 docstring 的"自指死锁"）。
+        lagging = sorted(lv for lv in by_diff if by_diff[lv] <= self.heldout_floor)
         if lagging:
-            return ProbeResult(
-                verdict="partial", dev_gain=dev_gain, heldout_gain=ho_gain,
-                base_heldout=base_ho, cand_heldout=cand_ho,
-                n_tasks=self.suite.n_tasks, by_difficulty=by_diff,
-                reason=(f"总体 held-out {ho_gain:+.4f}，但分层看 {lagging} 未涨"
-                        f" ⇒ 只在部分难度上泛化，不提交"))
+            out_of_reach: List[str] = []
+            cherry: List[str] = []
+            undecidable: List[str] = []
+            for lv in lagging:
+                d_gain = (dev_by_difficulty or {}).get(lv)
+                if d_gain is None:
+                    # ⛔ 发展集**没有这一层** ⇒ 无从对照。这**不是**挑食的证据，
+                    #    是"不可判别"（V5：不可判别 ≠ 有罪）⇒ 归入 undecidable，
+                    #    最终判 inconclusive（**同样拦截**，但理由不同：
+                    #    看到它你就知道该去补发展集的该难度层任务，而不是改候选）。
+                    undecidable.append(lv)
+                elif d_gain <= self.dev_floor:
+                    out_of_reach.append(lv)      # 发展集同层也修不好 ⇒ 超纲
+                else:
+                    cherry.append(lv)            # 发展集能修、换环境就修不了 ⇒ 挑食
+            if cherry:
+                shown = sorted(f"{lv}{by_diff[lv]:+.4f}" for lv in cherry)
+                return ProbeResult(
+                    verdict="partial", dev_gain=dev_gain, heldout_gain=ho_gain,
+                    base_heldout=base_ho, cand_heldout=cand_ho,
+                    n_tasks=self.suite.n_tasks, by_difficulty=by_diff,
+                    dev_by_difficulty=dict(dev_by_difficulty or {}),
+                    out_of_reach=tuple(out_of_reach),
+                    reason=(f"总体 held-out {ho_gain:+.4f}，但 {shown} 未涨，"
+                            f"且发展集同层有增益（{ {lv: round((dev_by_difficulty or {}).get(lv, 0.0), 4) for lv in cherry} }"
+                            f"）⇒ 只在部分难度上泛化（挑食），不提交"))
+            if undecidable and not out_of_reach:
+                # ⛔ 无从判别 ⇒ **拦截**（与安全相关的未知一律 fail-closed），
+                #    但裁决是 inconclusive 而不是 partial：前者说"缺数据"，
+                #    后者说"有挑食证据"。两者处置完全不同，不能混。
+                return ProbeResult(
+                    verdict="inconclusive", dev_gain=dev_gain,
+                    heldout_gain=ho_gain, base_heldout=base_ho,
+                    cand_heldout=cand_ho, n_tasks=self.suite.n_tasks,
+                    by_difficulty=by_diff,
+                    dev_by_difficulty=dict(dev_by_difficulty or {}),
+                    out_of_reach=(),
+                    reason=(f"held-out 的 {undecidable} 层未涨，但发展集**没有"
+                            f"该难度层** ⇒ 无从对照，无法区分「能力边界」与"
+                            f"「挑食」⇒ 按拦截处理（补该难度的 dev 任务后再判）"))
+            # 未涨的层全是"发展集也修不动" ⇒ 能力边界，不是挑食 ⇒ 放行
+            shown = sorted(f"{lv}{by_diff[lv]:+.4f}" for lv in out_of_reach)
+            return ProbeResult(verdict="generalize", dev_gain=dev_gain,
+                               heldout_gain=ho_gain, base_heldout=base_ho,
+                               cand_heldout=cand_ho, n_tasks=self.suite.n_tasks,
+                               by_difficulty=by_diff,
+                               dev_by_difficulty=dict(dev_by_difficulty or {}),
+                               out_of_reach=tuple(out_of_reach),
+                               reason=(f"发展集 +{dev_gain:.4f} 且 held-out {ho_gain:+.4f}"
+                                       f"（分层 {by_diff}）⇒ 泛化，放行。"
+                                       f" {shown} 未涨但发展集同层同样未涨"
+                                       f" ⇒ 判为能力边界而非挑食"))
         return ProbeResult(verdict="generalize", dev_gain=dev_gain,
                            heldout_gain=ho_gain, base_heldout=base_ho,
                            cand_heldout=cand_ho, n_tasks=self.suite.n_tasks,
                            by_difficulty=by_diff,
+                           dev_by_difficulty=dict(dev_by_difficulty or {}),
                            reason=f"发展集 +{dev_gain:.4f} 且 held-out {ho_gain:+.4f}"
                                   + (f"（分层 {by_diff}）" if by_diff else "")
                                   + " ⇒ 泛化，放行")
