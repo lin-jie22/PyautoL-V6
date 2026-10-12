@@ -263,6 +263,143 @@ def main():
     ck("F5 diagnostics 暴露跳过数（'记忆没生效'必须可观测）",
        p.diagnostics().get("memory_skipped_n") == 1, f"{p.diagnostics()}")
 
+    # ── G 组：记忆跨运行持久化 + 继承闸 ────────────────────────────
+    # 2026-10-13 实测：两次 CLI 运行的记忆**完全相同**（L0:1 L2:2 L4:1）
+    # ⇒ 记忆是纯进程内的 ⇒ "经验跨运行积累"是假的。
+    # ⛔⛔ 但持久化之后马上出现二阶效应：继承的记忆把同一个种子 harness 的
+    #    基线从 0.0 抬到 0.6 ⇒ 结果依赖历史 ⇒ 不可复现，且记忆在冒充能力。
+    print("G 组：记忆跨运行持久化（含装载污染闸与继承闸）")
+    from aether.embeddings import HashingEmbedder, SynonymEmbedder
+    with tempfile.TemporaryDirectory() as td:
+        mp = Path(td) / "memory.json"
+        m1 = MemoryOS(embedder=HashingEmbedder(dim=256), min_content_len=0)
+        m1.write("L2", "repair_hint:textscore 这个环境的失败模式集中在控制流，"
+                       "保守通用修法可修好其中一部分但修不全。",
+                 channel="curated", source="exec:round1")
+        m1.write("L3", "这是一条含未验证标记的备忘：失败模式大概是控制流的"
+                       "问题，具体原因待确认之后再补充完整证据。",
+                 channel="learner", source="round1")
+        n_saved = m1.save(mp)
+        ck("G1 save 落盘条数 == 库中条数", n_saved == 2, f"{n_saved}")
+
+        m2, r2 = MemoryOS.load(mp, HashingEmbedder(dim=256),
+                               min_content_len=0)
+        ck("G2 同名同 dim 的 embedder ⇒ 干净条目完整装载（污染条目被拦下）",
+           r2["loaded"] == 1, f"{r2}")
+        ck("G3 装载的条目带 `inherited` 标记（供继承闸识别）",
+           all("inherited" in n.tags for n in m2.notes.values()),
+           f"{[n.tags for n in m2.notes.values()]}")
+        ck("G4 污染闸：含'大概是/待确认'的条目被拒载（跨运行累积 ≠ 累积噪声）",
+           r2["rejected_unverified"] == 1, f"{r2}")
+        ck("G5 字段完整性：装载进来的都真的可检索（不是'读出来但没向量'）",
+           all(n.has_embedding for n in m2.notes.values()))
+
+        # ⛔ 反证：换个 embedder 必须**整库拒载**，而不是"能读几条读几条"
+        m3, r3 = MemoryOS.load(mp, SynonymEmbedder(), min_content_len=0)
+        ck("G6 反证：embedder 不同 ⇒ 整库拒载（不得混库，要换须 reindex）",
+           r3["loaded"] == 0 and r3["rejected_embedder_mismatch"] == 2,
+           f"{r3}")
+        # ⛔ 反证：不存在的路径 ⇒ 空库 + 显式说明，不是崩
+        m4, r4 = MemoryOS.load(Path(td) / "nope.json", HashingEmbedder(dim=256))
+        ck("G7 反证：无快照 ⇒ 空库且注明（首次运行与'库损坏'必须可分）",
+           r4["loaded"] == 0 and "no_snapshot" in (r4.get("note") or ""),
+           f"{r4}")
+
+    # ⛔⛔ G8：继承闸 —— 继承的记忆**不得**抬高基线（这是本轮最硬的教训）
+    #    反证组：同一条记忆若不带 inherited，基线必须真的上去；
+    #            带了就上不去。两侧都测 ⇒ 证明闸在拦，而不是"恰好没命中"。
+    from aether.agent import HarnessAgent
+    from aether.environment import Environment, mutate_source
+    env = Environment.from_dir(ROOT / "tasks" / "textscore")
+    broken, _ = mutate_source(env.source, which=2)
+    SPEC = {"env_id": env.env_id, "broken_source": broken,
+            "topic": env.env_id, "task_class": "repair"}
+    h_base = Harness(meta_rules="V6 元规则。",
+                     tools=("read_file", "write_file", "python_exec"),
+                     memory_policy={"recall_topk": 5, "min_content_len": 0})
+
+    def _rew_hit(inherited: bool):
+        m = MemoryOS(embedder=HashingEmbedder(dim=256), min_content_len=0)
+        m.write("L2", f"repair_hint:{env.env_id} 这个环境的失败模式集中在"
+                      f"控制流（比较与运算），保守通用修法可修好其中一部分。",
+                channel="curated", source="exec")
+        if inherited:
+            for n in list(m.notes.values()):
+                n.tags = tuple(n.tags) + ("inherited",)
+        return HarnessAgent({env.env_id: env}, memory=m).run(
+            h_base, SPEC).verdict.reward
+
+    r_inh = _rew_hit(True)
+    r_sess = _rew_hit(False)
+    ck("G8 继承的记忆不进 L4 ⇒ 基线不漂移（可复现性）",
+       r_inh == 0.0, f"inherited reward={r_inh}")
+    ck("G9 反证：同一条记忆若属本轮（无 inherited）⇒ 基线真的上去"
+       "（证明 G8 的 0 来自闸，不是来自'没召回'）",
+       r_sess > 0.0, f"session reward={r_sess}")
+
+    # ── H 组：层归因必须挑"提升真的发生"的任务 ────────────────────
+    # 2026-10-13 实测：归因固定取发展集前 N 条 ⇒ scheduler/stateflow 组
+    # 前 3 条落在 hard 上（reward 恒 0）⇒ 消融任何层 Δ 都是 0 ⇒
+    # 输出"L0–L4 全无贡献"。那不是层没贡献，是**在永远读 0 的尺子上量差值**。
+    print("H 组：层归因的任务挑选（不在恒 0 的尺子上量差值）")
+    from aether.attribution import attribute_layers
+
+    def _zero_always(h, spec):
+        """恒 0 的任务：任何 harness 都修不好（hard 到超纲）。"""
+        return _bad_runner(h, spec)
+
+    def _needs_skill(h, spec):
+        """需要 L1 路由 + L2 工具 + L3 技能齐备才拿 1 的任务。"""
+        if "python_exec" not in h.tools:
+            return _bad_runner(h, spec)
+        r = h.routing.get("repair") or ""
+        return _ok_runner(h, spec) if r and r in h.skills else _bad_runner(h, spec)
+
+    def _mixed_runner(h, spec):
+        return (_zero_always(h, spec) if spec.get("always_zero")
+                else _needs_skill(h, spec))
+
+    h_skill2 = H(skills={"gen": "修法"}, routing={"repair": "gen"})
+    # 反证：specs 全选恒 0 的任务 ⇒ 归因必然全 0（仪器盲区，不是层无贡献）
+    lc_blind = attribute_layers(_mixed_runner, h_skill2,
+                                [{"always_zero": True}] * 3)
+    ck("H1 反证：在恒 0 的任务上归因 ⇒ 全 0 且**自己报出**无判别力"
+       "（不许把仪器盲区读成'层没贡献'）",
+       all(abs(v) < 1e-9 for v in lc_blind.per_layer.values())
+       and "没有判别力" in lc_blind.reason, f"{lc_blind.to_dict()}")
+    # 正确：挑"提升真的发生"的任务 ⇒ 归因必须显出贡献
+    lc_ok = attribute_layers(_mixed_runner, h_skill2, [{}] * 3)
+    ck("H2 在提升真的发生的任务上 ⇒ L1/L2/L3 显出贡献（与 H1 对照）",
+       lc_ok.per_layer.get("L1", 0) > 0 and lc_ok.per_layer.get("L3", 0) > 0,
+       f"{lc_ok.to_dict()}")
+    ck("H3 联合消融读数存在（单变量消融会低估互为备份的层）",
+       "L3+L4" in lc_ok.joint_ablation, f"{lc_ok.joint_ablation}")
+
+    # 挑选逻辑本身：dev 前面全是恒 0 时，必须跳过它们
+    with tempfile.TemporaryDirectory() as td:
+        dev_mixed = [FrozenTask(task_id=f"m{i}",
+                                spec={"always_zero": True} if i < 3 else {})
+                     for i in range(6)]
+        loop_m = EvolutionLoop(Ledger(Path(td) / "l.jsonl"),
+                               NonRegressionGate([], Baseline(caliber={},
+                                                              verdicts={},
+                                                              harness_id="s")),
+                               dev_mixed, _mixed_runner, FixedProposer([]),
+                               config=EvolutionConfig(attribution_tasks=2))
+        picked = loop_m._pick_attribution_specs(h_skill2)
+        ck("H4 前 N 条全是恒 0 ⇒ 跳过它们，挑到提升真的发生的任务",
+           len(picked) == 2 and not any(s.get("always_zero") for s in picked),
+           f"{picked}")
+        ck("H5 全部任务都恒 0 ⇒ 退回前 N 条（不得返回空 ⇒ 归因静默消失）",
+           len(EvolutionLoop(
+               Ledger(Path(td) / "l2.jsonl"),
+               NonRegressionGate([], Baseline(caliber={}, verdicts={},
+                                              harness_id="s")),
+               [FrozenTask(task_id="z0", spec={"always_zero": True})],
+               _mixed_runner, FixedProposer([]),
+               config=EvolutionConfig(attribution_tasks=2)
+           )._pick_attribution_specs(h_skill2)) == 1)
+
     print("\n" + "=" * 60)
     if FAILS:
         print(f"❌ {len(FAILS)} 项未通过：")

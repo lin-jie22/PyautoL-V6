@@ -24,7 +24,7 @@ held-out 也可能是**偏的**：如果 held-out 全是 easy 题，一个"只�
 from __future__ import annotations
 
 import ast
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from .environment import Environment, verify_source
 
@@ -109,6 +109,60 @@ def classify_difficulty(env: Environment, broken_source: str,
     """easy = 有通用修法能修好；hard = 都不行。"""
     rs = repair_rewards(env, broken_source, repairs, timeout=timeout)
     return "easy" if rs and max(rs.values()) >= 1.0 else "hard"
+
+
+def grow_for_difficulty(env: Environment,
+                        synth: Callable[[int], List[Any]],
+                        want_levels: Iterable[str],
+                        *, max_n: int = 8, ceiling: int = 32,
+                        timeout: float = 10.0) -> Dict[str, Any]:
+    """扩大合成采样，直到发展集覆盖 `want_levels` 里的每个难度层。
+
+    ⛔ 为什么必须补（2026-10-13 实测）：难度层由"通用修法能否修好"定义，
+       是**候选无关**的属性。发展集没采到 hard 题 ⇒ 那一层无从对照 ⇒
+       泛化闸只能判 `inconclusive`（拦截）。而"没采到"是**采样配置**问题：
+
+           max_tasks=8   ⇒ dev easy/hard = 3/0 ⇒ 三轮全部 inconclusive
+           max_tasks=12  ⇒ dev easy/hard = 3/2 ⇒ generalize 并提交
+
+       让候选为采样不足背锅，和"永远不提交"长得一模一样 ——
+       把罪名从 partial 改成 inconclusive 只是改了说法，没改结局。
+
+    ⛔ 补采样**只加题不加判据**：合成任务来自 AST 变异（`mutate_source`），
+       与候选无关 ⇒ 扩大采样不会给任何候选优待，它只解决"无从对照"。
+       这一步的代价是真实的执行时间（实测 8→24 约 1–3s），所以用
+       `ceiling` 封顶；到顶仍缺层 ⇒ 明确报出 missing，不假装补齐。
+    """
+    want = {str(x) for x in want_levels}
+    steps: List[Dict[str, Any]] = []
+    n = max(1, int(max_n))
+    tasks = list(synth(n))
+    labels = difficulty_report(env, tasks, timeout=timeout)["labels"]
+    have = {str(v) for v in labels.values()}
+
+    def _snap() -> Dict[str, Any]:
+        dist: Dict[str, int] = {}
+        for v in labels.values():
+            dist[str(v)] = dist.get(str(v), 0) + 1
+        return {"max_n": n, "n_tasks": len(tasks), "dist": dist}
+
+    steps.append(_snap())
+    while (want - have) and n < ceiling:
+        n = min(int(ceiling), n * 2)
+        tasks = list(synth(n))
+        labels = difficulty_report(env, tasks, timeout=timeout)["labels"]
+        have = {str(v) for v in labels.values()}
+        steps.append(_snap())
+
+    missing = sorted(want - have)
+    return {"tasks": tasks, "labels": labels, "max_n_used": n,
+            "steps": steps, "missing": missing, "covered": not missing,
+            "note": ("补采样到上限仍缺难度层 " + "/".join(missing)
+                     + " ⇒ 该环境配对与 held-out 难度分布不可比，"
+                       "请提高 --max-tasks 或换一组环境配对"
+                     if missing else
+                     (f"采样自愈：{max_n}→{n} 补齐了缺失的难度层"
+                      if n != max_n else ""))}
 
 
 def difficulty_report(env: Environment, tasks: List[Any],

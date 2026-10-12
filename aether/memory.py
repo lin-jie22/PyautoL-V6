@@ -21,10 +21,13 @@ V5 的对应教训（直接写进实现）：
 from __future__ import annotations
 
 import hashlib
+import json
 import math
+import os
 import re
 import time
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from .embeddings import (HashingEmbedder, cosine, cosine_or_none,
@@ -40,6 +43,31 @@ CHANNEL_WRITABLE: Dict[str, Tuple[str, ...]] = {
 }
 
 _WORD = re.compile(r"[\u4e00-\u9fff]|[A-Za-z_][A-Za-z0-9_]*|\d+")
+
+#: ⛔ **唯一事实源**：记忆内容的"可信度"词表。
+#: 跨运行持久化之后，上一轮的**自述 / 占位 / 未验证**条目会跟着库一起
+#: 复活并在下一轮被检索到 —— 那等于让脏记忆进入因果链。
+#: 这个词表同时供「写入后提升(promote)」与「装载时污染闸」使用，
+#: 分成两份就会漂移（V5 血泪：改了一处忘了另一处 ⇒ 闸形同虚设）。
+UNVERIFIED_MARKS: Tuple[str, ...] = ("TODO", "待确认", "可能", "大概是",
+                                     "FIXME", "应该是", "估计")
+PLACEHOLDER_BODIES = frozenset({"pass", "ok", "done", "todo", "n/a", "-", ""})
+
+
+def memory_purity(note: "MemNote", min_len: int = 40) -> Tuple[bool, str]:
+    """记忆内容的**可信度**判定：职责是证伪，不是确认。
+
+    ⛔ 方向不能反：默认"通过"的验证等于没有验证。这里主动找反证。
+    """
+    body = (getattr(note, "content", "") or "").strip()
+    if len(body) < min_len:
+        return False, f"内容过短（{len(body)} < {min_len}），不足以作为稳定事实"
+    if body.lower() in PLACEHOLDER_BODIES:
+        return False, "占位内容"
+    hit = [m for m in UNVERIFIED_MARKS if m in body]
+    if hit:
+        return False, f"含未验证标记 {hit}"
+    return True, "未找到反证"
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -412,6 +440,112 @@ class MemoryOS:
                 "foreign_embedder": sum(c for e, c in embs.items()
                                         if e != self.embedder_id),
                 "stats": dict(self.stats)}
+
+    # ── 持久化（跨运行复用）──────────────────────────────────────
+    # ⛔ 2026-10-13 实测：两次 CLI 运行的记忆**完全相同**（L0:1 L2:2 L4:1）⇒
+    #    记忆是纯进程内的 ⇒ "经验跨运行积累"是假的，每次都从零开始。
+    # ⛔⛔ 但持久化会把**上一轮的脏记忆**也一起复活（自述 / 占位 / 未验证），
+    #    于是装载必须过污染闸，否则跨运行累积 = 跨运行累积噪声。
+    def snapshot(self) -> Dict[str, Any]:
+        """序列化。**带 embedder_id 与 dim** —— 这是装载时的对齐契约。"""
+        return {"schema": 1, "embedder_id": self.embedder_id,
+                "dim": self.dim, "min_content_len": self.min_content_len,
+                "notes": [{**n.__dict__, "embedding": list(n.embedding)}
+                          for n in self.notes.values()]}
+
+    def save(self, path: str | Path) -> int:
+        """原子写（⛔ 半截 JSON 会让下一轮**整个库**读不出来）。"""
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        tmp.write_text(json.dumps(self.snapshot(), ensure_ascii=False),
+                       encoding="utf-8")
+        os.replace(tmp, p)
+        return len(self.notes)
+
+    @classmethod
+    def load(cls, path: str | Path, embedder: Any = None, *,
+             dim: int = 0, link_topk: int = 3,
+             min_content_len: Optional[int] = None,
+             purity: bool = True) -> Tuple["MemoryOS", Dict[str, Any]]:
+        """从磁盘装载记忆。返回 (MemoryOS, 装载报告)。
+
+        ⛔⛔ **embedder 不匹配 ⇒ 整库拒载**，而不是"能读几条读几条"：
+        换嵌入后绝对余弦跨 embedder 不可比，混库的表现是"库越来越大、
+        检索越来越差"，且没有任何报错（V5 教训：float32 与 json 混在一张表里，
+        169 条全部解析失败却写着"写入成功"）。要换嵌入必须显式 `reindex()`。
+
+        ⛔⛔ 继承来的记忆一律打 `inherited` 标记，**不得进入 L4 通路**
+        （2026-10-13 实测）：跨运行累积会让同一个种子 harness 的基线漂移 ——
+        空库时 base=0.0、装载后 base=0.6，同一个 h0 的能力取决于历史状态
+        ⇒ 进化结果不可复现 ⇒ 回归测试失去意义。而且那 0.6 不是 harness 变强了，
+        是记忆在**冒充能力**：真实弱点（没有技能）被抬高后的基线掩盖住。
+        于是继承的记忆只做一件事 —— 让提议器少走弯路（不重复提被闸拒的变异），
+        绝不参与 reward 判据。本轮执行产生的记忆才进 L4。
+
+        ⛔ 逐条还要过三道闸：维度一致 / 字段完整 / 内容可信（污染闸）。
+        """
+        rep: Dict[str, Any] = {"path": str(path), "loaded": 0,
+                               "rejected_embedder_mismatch": 0,
+                               "rejected_dim_mismatch": 0,
+                               "rejected_no_embedding": 0,
+                               "rejected_unverified": 0, "reasons": []}
+        mem = cls(embedder=embedder, dim=dim, link_topk=link_topk)
+        p = Path(path)
+        if not p.exists():
+            rep["note"] = "no_snapshot（首次运行，从空记忆开始）"
+            return mem, rep
+        try:
+            payload = json.loads(p.read_text(encoding="utf-8"))
+        except Exception as e:  # noqa: BLE001
+            # ⛔ 读不出来 ⇒ **空库 + 显式记账**，绝不带着半个库继续跑
+            rep["note"] = f"unreadable（{type(e).__name__}: {e}）⇒ 从空记忆开始"
+            return mem, rep
+        if min_content_len is not None:
+            mem.min_content_len = int(min_content_len)
+
+        file_emb = str(payload.get("embedder_id") or "")
+        file_dim = int(payload.get("dim") or 0)
+        if file_emb and file_emb != mem.embedder_id:
+            rep["rejected_embedder_mismatch"] = len(payload.get("notes") or [])
+            rep["note"] = (f"整库拒载：文件 embedder={file_emb} ≠ 当前 "
+                           f"{mem.embedder_id} ⇒ 需显式 reindex() 全量重算")
+            return mem, rep
+        if file_dim and file_dim != mem.dim:
+            rep["rejected_dim_mismatch"] = len(payload.get("notes") or [])
+            rep["note"] = f"整库拒载：文件 dim={file_dim} ≠ 当前 {mem.dim}"
+            return mem, rep
+
+        for raw in (payload.get("notes") or []):
+            try:
+                note = MemNote(**{k: v for k, v in raw.items()
+                                  if k in MemNote.__dataclass_fields__})
+            except Exception:  # noqa: BLE001
+                rep["rejected_no_embedding"] += 1
+                continue
+            if len(note.embedding) != mem.dim:
+                rep["rejected_dim_mismatch"] += 1
+                continue
+            if not note.has_embedding:
+                rep["rejected_no_embedding"] += 1
+                continue
+            if purity:
+                ok, why = memory_purity(note)
+                if not ok:
+                    rep["rejected_unverified"] += 1
+                    if len(rep["reasons"]) < 5:
+                        rep["reasons"].append(why)
+                    continue
+            # ⛔ `inherited` 标记：这条是**跨运行继承**的，不是本轮执行产生的。
+            #    见 `load` 的 docstring —— 继承的记忆只供提议器参考，
+            #    不得进入 L4 通路，否则基线会随历史漂移。
+            if "inherited" not in note.tags:
+                note.tags = tuple(note.tags) + ("inherited",)
+            note.embedder = mem.embedder_id
+            mem.notes[note.note_id] = note
+            mem._by_fp[note.fingerprint] = note.note_id
+            rep["loaded"] += 1
+        return mem, rep
 
 
 def _higher_tier(a: str, b: str) -> str:

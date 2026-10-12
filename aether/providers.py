@@ -20,7 +20,8 @@ import urllib.error
 import urllib.request
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
+from typing import (Any, Callable, Dict, List, Optional, Protocol, Sequence,
+                    Tuple)
 
 from .genome import Capsule, Gene, Harness
 from .runtime import Trajectory
@@ -539,14 +540,47 @@ value 只能是字符串、数字或布尔值，不能是对象或数组。
 """
 
 
-def build_prompt(weakness: Dict[str, Any], harness: Harness, n: int = 3) -> str:
-    """把"当前 harness + 弱点"讲清楚，让模型有依据而不是瞎猜。"""
+def build_prompt(weakness: Dict[str, Any], harness: Harness, n: int = 3,
+                 route_keys: Sequence[str] = (),
+                 skill_vocab: Sequence[str] = (),
+                 env_ids: Sequence[str] = ()) -> str:
+    """把"当前 harness + 弱点 + **接口契约**"讲清楚，让模型有依据而不是瞎猜。
+
+    ⛔⛔ 2026-10-13 实测：不给契约时，Qwen3.5-4B 输出**结构完全合法**的 capsule
+        （甚至自己在 rationale 里写了"需同步添加路由"），但两处猜错：
+
+          · 路由键写成技能名 `L1.routing.textscore_eval`
+            —— 真实键是**任务类别**（如 `repair`）；
+          · 技能正文写自然语言描述 `L3.skills.xxx`
+            —— 真实技能名只有 `fix_control_flow` / `patch::<env_id>`。
+
+        结果：过闸 reward=0 ⇒ `no_advantage`，系统看起来"闸在工作"，
+        实际是**模型不知道接口**。这不是模型能力问题，是 prompt 缺 API 文档。
+
+    ⛔ 契约**由调用方注入**，不在这里硬编码：proposers 是通用模块，
+       环境 / 任务类别 / 可用技能是部署的事。硬编码 ⇒ 换个环境就骗模型。
+    """
+    contract: List[str] = []
+    if route_keys:
+        contract.append(
+            "路由键必须是**任务类别**，不是技能名。本系统当前的任务类别："
+            + "、".join(f"`{k}`" for k in route_keys)
+            + "。写成别的键 ⇒ 技能永不可达。")
+    if skill_vocab:
+        contract.append(
+            "可用的技能名**只有**这些（写别的名字 ⇒ 空转，reward 为 0）："
+            + "、".join(f"`{s}`" for s in skill_vocab) + "。")
+    if env_ids:
+        contract.append("已知环境 id：" + "、".join(f"`{e}`" for e in env_ids)
+                        + "（`patch::<env_id>` 只在点名的环境生效）。")
     return (
         "当前 harness 状态（JSON）：\n"
         f"{json.dumps(harness.to_dict(), ensure_ascii=False)[:1500]}\n\n"
         "观测到的弱点：\n"
         f"{json.dumps(weakness, ensure_ascii=False)[:800]}\n\n"
-        f"请提出最多 {n} 个候选 capsule，每个 capsule 是一组**必须一起生效**的编辑"
+        + ("⚠️ 接口契约（写错 ⇒ 该 capsule 完全无效）：\n- "
+           + "\n- ".join(contract) + "\n\n" if contract else "")
+        + f"请提出最多 {n} 个候选 capsule，每个 capsule 是一组**必须一起生效**的编辑"
         "（例如：加技能必须同时加路由，否则技能不可达）。\n"
         "只输出 JSON。"
     )
@@ -581,6 +615,13 @@ class LLMProposer:
     last_raw_len: int = 0
     last_raw_tail: str = ""
     n_retries_used: int = 0
+    #: 完整原始输出（⛔ 只记账不参与判定；没有它，"模型猜错接口"和
+    #:   "模型没输出"在诊断里长得一样）
+    last_raw: str = ""
+    #: 接口契约，**由调用方注入**（见 `build_prompt` 的实测注释）
+    route_keys: Tuple[str, ...] = ()
+    skill_vocab: Tuple[str, ...] = ()
+    env_ids: Tuple[str, ...] = ()
 
     def propose(self, weakness: Dict[str, Any], harness: Harness,
                 n: int = 3) -> List[Capsule]:
@@ -588,8 +629,12 @@ class LLMProposer:
         self.last_rejects = []
         self.last_raw_len = 0
         self.last_raw_tail = ""
+        self.last_raw = ""
         self.n_retries_used = 0
-        prompt = build_prompt(weakness, harness, n)
+        prompt = build_prompt(weakness, harness, n,
+                              route_keys=self.route_keys,
+                              skill_vocab=self.skill_vocab,
+                              env_ids=self.env_ids)
         for attempt in range(self.retries + 1):
             if attempt:
                 self.n_retries_used += 1
@@ -602,6 +647,7 @@ class LLMProposer:
                 # ⛔ 显式记账后返回空：供给失败 ≠ "模型认为无需修改"
                 self.last_error = f"{type(e).__name__}: {e}"
                 return []
+            self.last_raw = raw or ""
             self.last_raw_len = len(raw or "")
             self.last_raw_tail = (raw or "")[-120:]
             if hasattr(self.llm, "STUB_MARK") and self.llm.STUB_MARK in (raw or ""):
@@ -633,4 +679,5 @@ class LLMProposer:
                 "rejects": list(self.last_rejects),
                 "raw_len": self.last_raw_len,
                 "raw_tail": self.last_raw_tail,
+                "raw": self.last_raw[:600],
                 "retries_used": self.n_retries_used}

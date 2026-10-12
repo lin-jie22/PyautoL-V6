@@ -33,6 +33,7 @@ def _paths(root: Path) -> Dict[str, Path]:
     return {
         "ledger": root / "data" / "ledger.jsonl",
         "db": root / "data" / "aether.db",
+        "memory": root / "data" / "memory.json",
         "task": root / "tasks" / "textscore",
         "tasks_root": root / "tasks",
     }
@@ -88,16 +89,13 @@ def _fact_verifier(note) -> tuple:
 
     ⛔ 方向不能反：默认"通过"的提升等于没有验证。这里主动找反证
     （内容太短、含占位词、含未验证标记），找到就证伪。
+
+    ⛔ 判据**必须复用** `memory.memory_purity`：跨运行装载的污染闸用同一个
+    词表。分成两份就会漂移 —— 写入侧放行、装载侧拦截（或反过来），
+    而两边都以为自己在守闸。
     """
-    from .memory import MemNote
-    body = (note.content or "").strip()
-    if len(body) < 40:
-        return False, "内容过短，不足以作为稳定事实"
-    if body.lower() in {"pass", "ok", "done", "todo", "n/a"}:
-        return False, "占位内容"
-    if any(mark in body for mark in ("TODO", "待确认", "可能", "大概是")):
-        return False, "含未验证标记（可能/大概是/TODO）"
-    return True, "未找到反证"
+    from .memory import memory_purity
+    return memory_purity(note)
 
 
 def _default_runner(envs, memory=None, timeout: float = 10.0):
@@ -201,7 +199,12 @@ def cmd_evolve(args: argparse.Namespace) -> int:
             # ⛔ 真嵌入不可用 ⇒ **显式降级并记账**，绝不静默混库
             embedder_report = {"chosen": "hashing:256", "degraded": True,
                                "error": f"{type(e).__name__}: {e}"}
-    mem = MemoryOS(embedder=embedder, min_content_len=60)
+    # ⛔ 跨运行持久化：不落盘的话每次运行都从空记忆开始 ⇒ "经验积累"是假的
+    #    （2026-10-13 实测两次运行记忆完全相同）。装载必须过污染闸与
+    #    embedder 对齐闸，详见 `MemoryOS.load`。
+    mem, mem_load = MemoryOS.load(p["memory"], embedder, min_content_len=60)
+    if mem_load.get("note"):
+        print(f"💾 记忆装载：{mem_load['note']}", file=sys.stderr)
     runner = _default_runner(envs, memory=mem)
 
     # ⛔ 种子 harness **必须先建**：冻结基线要用它跑。
@@ -223,27 +226,14 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         harness_id="seed")
     gate = NonRegressionGate(frozen, baseline)
 
-    rep_synth = synthesize_tasks(envs[dev_name], max_n=int(args.max_tasks))
-    dev = [FrozenTask(task_id=t.task_id,
-                      spec={"env_id": dev_name, "broken_source": t.broken_source,
-                            "topic": dev_name, "task_class": TASK_CLASS})
-           for t in rep_synth.tasks]
-
-    # ⛔ 发展集也要有难度标签：泛化闸要靠它做**同层对照**。
-    #    只给 held-out 打标签 ⇒ 拿不到对照 ⇒ 闸 fail-closed ⇒
-    #    "通用修法修不动 hard"会被判成挑食 ⇒ 进化循环永久空转。
-    from .repair import difficulty_report
-    dev_diff = difficulty_report(envs[dev_name], dev)
-    dev_difficulty = dev_diff["labels"]
-    if not dev_diff["spread"]:
-        print(f"⚠️ 发展集只有单一难度（easy {dev_diff['n_easy']}"
-              f" / hard {dev_diff['n_hard']}）⇒ 泛化闸拿不到同层对照",
-              file=sys.stderr)
+    from .repair import difficulty_report, grow_for_difficulty
 
     # held-out：**另一个环境**的合成任务。它不参与候选之间的比较。
+    # ⛔ 它必须**先**合成：发展集要照着它的难度层补采样（见下）。
     heldout = None
     rep_ho = None
     diff_report = None
+    ho_levels: set = set()
     if args.heldout == "on":
         rep_ho = synthesize_tasks(envs[ho_name], max_n=int(args.max_tasks))
         if rep_ho.tasks:
@@ -256,19 +246,54 @@ def cmd_evolve(args: argparse.Namespace) -> int:
             # ⛔ held-out 也要有**难度跨度**：全是简单题的话，它会放行
             #    "只会修简单题"的候选。难度由"通用修法能否修好"执行判定。
             diff_report = difficulty_report(envs[ho_name], ho_tasks)
+            ho_levels = set(diff_report["labels"].values())
             if not diff_report["spread"]:
                 print(f"⚠️ held-out 只有单一难度（easy {diff_report['n_easy']}"
                       f" / hard {diff_report['n_hard']}）⇒ 判别力不足，"
                       f"它无法区分「真泛化」与「只会修这类题」", file=sys.stderr)
-            heldout = GeneralizationGate(
-                make_heldout(ho_name, ho_tasks,
-                             difficulty=diff_report["labels"]),
-                dev_task_ids=[t.task_id for t in dev],
-                heldout_floor=float(args.heldout_floor),
-                base_at_ceiling=1.0)
         else:
             print(f"⚠️ held-out 环境 {ho_name} 合成 yield=0 ⇒ 泛化闸无从裁决",
                   file=sys.stderr)
+
+    # ── 发展集：**照着 held-out 的难度层补采样** ─────────────────
+    # ⛔ 2026-10-13 实测：max_tasks=8 时 dev easy/hard=3/0 而 ho=2/1 ⇒
+    #    泛化闸三轮全判 inconclusive（拦截）；max_tasks=12 时 dev=3/2 ⇒
+    #    generalize 并提交。缺层是**采样配置**问题，不是候选的错 ——
+    #    让候选为采样不足背锅，效果和"永远不提交"完全一样。
+    #    补采样只加题不加判据（合成任务与候选无关），所以它不给任何优待。
+    grow_report: Dict[str, Any] = {}
+    rep_synth = synthesize_tasks(envs[dev_name], max_n=int(args.max_tasks))
+    dev_src_tasks = rep_synth.tasks
+    if ho_levels:
+        g = grow_for_difficulty(
+            envs[dev_name], lambda n: synthesize_tasks(
+                envs[dev_name], max_n=n).tasks,
+            ho_levels, max_n=int(args.max_tasks))
+        dev_src_tasks = g["tasks"]
+        grow_report = {k: v for k, v in g.items() if k != "tasks"}
+        if g["note"]:
+            print(("✅ " if g["covered"] else "⚠️ ") + g["note"],
+                  file=sys.stderr)
+    dev = [FrozenTask(task_id=t.task_id,
+                      spec={"env_id": dev_name, "broken_source": t.broken_source,
+                            "topic": dev_name, "task_class": TASK_CLASS})
+           for t in dev_src_tasks]
+
+    # ⛔ 发展集也要有难度标签：泛化闸要靠它做**同层对照**。
+    dev_diff = difficulty_report(envs[dev_name], dev)
+    dev_difficulty = dev_diff["labels"]
+    if not dev_diff["spread"]:
+        print(f"⚠️ 发展集只有单一难度（easy {dev_diff['n_easy']}"
+              f" / hard {dev_diff['n_hard']}）⇒ 泛化闸拿不到同层对照",
+              file=sys.stderr)
+
+    if rep_ho is not None and rep_ho.tasks and diff_report is not None:
+        heldout = GeneralizationGate(
+            make_heldout(ho_name, ho_tasks,
+                         difficulty=diff_report["labels"]),
+            dev_task_ids=[t.task_id for t in dev],
+            heldout_floor=float(args.heldout_floor),
+            base_at_ceiling=1.0)
 
     # ⛔ 两类技能刻意并列：通用但保守 vs 定点但只此一地。
     #    在**发展集**上后者严格更好 ⇒ 一定会被选中 ⇒ 一定会被提交，
@@ -292,7 +317,14 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         model = getattr(args, "llm_model", "") or os.environ.get(
             "V6_OLLAMA_MODEL", "Qwen3.5-4B:latest")
         try:
-            proposer = LLMProposer(OllamaProvider(model=model, think=False))
+            # ⛔ 接口契约必须注入：不告诉模型"路由键是任务类别 / 技能名只有
+            #    这几个"，它就会猜 —— 实测猜错时输出结构完全合法却 reward=0，
+            #    看起来像"闸在工作"，实际是 prompt 缺文档（providers 里有实测）。
+            proposer = LLMProposer(
+                OllamaProvider(model=model, think=False),
+                route_keys=(TASK_CLASS,),
+                skill_vocab=tuple(sorted(pool)),
+                env_ids=tuple(sorted(envs)))
             print(f"🧠 proposer=llm（{model}）", file=sys.stderr)
         except Exception as e:  # noqa: BLE001
             print(f"⚠️ 真模型不可用（{type(e).__name__}: {e}）⇒ 回退模板提议器",
@@ -380,6 +412,9 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "proposer": diag,
         "synthesis": rep_synth.to_dict(),
         "synthesis_heldout": rep_ho.to_dict() if rep_ho is not None else None,
+        #: ⛔ 发展集缺难度层时的**补采样**记录（没有它，"永远判 inconclusive"
+        #:   和"候选不好"在输出里长得一模一样）
+        "grow": grow_report or None,
         "heldout_difficulty": ({k: v for k, v in diff_report.items()
                                 if k != "labels"} if diff_report else None),
         "dev_difficulty": {k: v for k, v in dev_diff.items() if k != "labels"},
@@ -398,6 +433,9 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "memory_promote_without_verifier": no_verifier_why,
         "memory_consolidated": len(consolidated),
     }
+    mem_saved = mem.save(p["memory"])
+    out["memory_load"] = mem_load
+    out["memory_saved"] = mem_saved
     print(json.dumps(out, ensure_ascii=False, indent=2))
     store.close()
     return 0

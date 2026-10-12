@@ -54,6 +54,14 @@ LAYER_ABLATIONS: Dict[str, Callable[[Harness], Harness]] = {
 
 LAYERS: Tuple[str, ...] = ("L0", "L1", "L2", "L3", "L4")
 
+#: ⛔ 互为备份的层组合。**单变量消融必然低估它们**：
+#: L3（技能）与 L4（记忆通路）在"技能不可达时走记忆"的设计下天然互为备份
+#: —— 去掉 L3，L4 接管 ⇒ Δ=0；去掉 L4，L3 还在 ⇒ Δ=0；
+#: 但两个一起去掉 ⇒ reward 掉到底。于是只读 per_layer 会得出
+#: "这两层都没贡献"的错误结论（实测 scheduler/stateflow 组正是全 0）。
+#: 联合消融把这种**结构性冗余**显式读出来。
+REDUNDANT_PAIRS: Tuple[Tuple[str, str], ...] = (("L3", "L4"),)
+
 
 @dataclass
 class LayerCredit:
@@ -64,13 +72,20 @@ class LayerCredit:
     reason: str = ""
     replay_consistent: bool = True
     top_layers: Tuple[str, ...] = ()
+    #: 联合消融（见 `REDUNDANT_PAIRS`）：单变量消融低估的**结构性冗余**
+    joint_ablation: Dict[str, float] = field(default_factory=dict)
+    #: 联合增益 > 各层单独增益之和 ⇒ 这两层互为备份
+    redundant: Tuple[str, ...] = ()
 
     def to_dict(self) -> Dict[str, Any]:
         return {"per_layer": {k: round(v, 4) for k, v in self.per_layer.items()},
                 "baseline_reward": round(self.baseline_reward, 4),
                 "available": self.available, "reason": self.reason,
                 "replay_consistent": self.replay_consistent,
-                "top_layers": list(self.top_layers)}
+                "top_layers": list(self.top_layers),
+                "joint_ablation": {k: round(v, 4)
+                                   for k, v in self.joint_ablation.items()},
+                "redundant": list(self.redundant)}
 
 
 def mean_reward(runner: Runner, h: Harness,
@@ -122,11 +137,32 @@ def attribute_layers(runner: Runner, h: Harness,
             per[lv] = 0.0
             continue
         per[lv] = round(r1 - mean_reward(runner, ablated, specs), 6)
+    # ── 联合消融：把"互为备份"读出来 ──────────────────────────────
+    joint: Dict[str, float] = {}
+    redundant: List[str] = []
+    for a, b in REDUNDANT_PAIRS:
+        fa, fb = abl.get(a), abl.get(b)
+        if fa is None or fb is None:
+            continue
+        try:
+            both = fb(fa(h))
+        except Exception:  # noqa: BLE001
+            continue
+        j = round(r1 - mean_reward(runner, both, specs), 6)
+        joint[f"{a}+{b}"] = j
+        # ⛔ 判据：联合增益**超过**各自单独增益之和 ⇒ 这两层在互相兜底
+        if j > (per.get(a, 0.0) + per.get(b, 0.0)) + 1e-9:
+            redundant.append(f"{a}+{b}")
+
     top = tuple(sorted(per, key=lambda k: per[k], reverse=True)[:3])
     flat = all(abs(v) < 1e-9 for v in per.values())
+    reason = ("所有层消融后 reward 均不变 ⇒ 这组任务对这 5 层"
+              "没有判别力（不是归因失败，是无从判别）" if flat else
+              f"归因完成：主要贡献层 {list(top)}")
+    if redundant:
+        reason += (f"；⚠️ {', '.join(redundant)} 联合消融才显出贡献 ⇒ "
+                   "这两层互为备份，单看 per_layer 会低估它们")
     return LayerCredit(per_layer=per, baseline_reward=r1, available=True,
                        replay_consistent=True, top_layers=top,
-                       reason=("所有层消融后 reward 均不变 ⇒ 这组任务对这 5 层"
-                               "没有判别力（不是归因失败，是无从判别）"
-                               if flat else
-                               f"归因完成：主要贡献层 {list(top)}"))
+                       joint_ablation=joint, redundant=tuple(redundant),
+                       reason=reason)

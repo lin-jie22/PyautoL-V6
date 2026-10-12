@@ -190,8 +190,13 @@ class HarnessAgent:
             else:
                 notes = self.memory.search(
                     f"{env.env_id} repair_hint 修法经验", top_k=topk)
+                # ⛔⛔ 跨运行**继承**的记忆不得进 L4 通路：它会让同一个种子
+                #    harness 的基线随历史漂移（实测空库 base=0.0、装载后 0.6）
+                #    ⇒ 结果不可复现，且记忆冒充了能力、掩盖真实弱点。
+                #    继承的记忆只供提议器参考，reward 判据必须只依赖本轮执行。
                 hit = [n for n in notes
-                       if f"{self.memory_marker}{env.env_id}" in (n.content or "")]
+                       if f"{self.memory_marker}{env.env_id}" in (n.content or "")
+                       and "inherited" not in (n.tags or ())]
                 if hit:
                     strategy = "memory_hint"
                     steps.append(AgentStep(

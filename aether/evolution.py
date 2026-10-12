@@ -289,6 +289,38 @@ class EvolutionLoop:
         return {lv: cand.get(lv, 0.0) - base.get(lv, 0.0)
                 for lv in set(base) | set(cand)}
 
+    def _pick_attribution_specs(self, h: Harness) -> List[Dict[str, Any]]:
+        """挑"这次提升**真的发生了**"的任务来做归因。
+
+        ⛔⛔ 2026-10-13 实测：归因原本固定取发展集**前 N 条** ⇒
+        scheduler/stateflow 组 dev 是 3 easy / 8 hard，前 3 条落在 hard 上
+        ⇒ 提交后的 harness 在这些题上 reward 恒 0 ⇒ 消融任何层 Δ 都是 0
+        ⇒ 输出"L0–L4 贡献全为 0"。那不是"这些层没贡献"，是**仪器盲区**：
+        在一把永远读 0 的尺子上量不出任何差值。
+
+        ⛔ 判据不能有循环论证：不能"挑消融后会变的任务"（那等于先知道答案）。
+        这里用的是**提升是否发生** —— 归因回答"这次提升来自哪一层"，
+        就必须在提升真的发生的那批任务上测；全都没提升 ⇒ 退回前 N 条，
+        由 `attribute_layers` 自己报"这组任务对 5 层没有判别力"。
+        """
+        n = max(1, int(self.cfg.attribution_tasks))
+        all_specs = [t.spec for t in self.dev_suite]
+        if len(all_specs) <= n:
+            return all_specs
+        scored: List[Tuple[float, Dict[str, Any]]] = []
+        for s in all_specs:
+            try:
+                r = self.runner(h, s).reward
+            except Exception:  # noqa: BLE001
+                r = 0.0
+            scored.append((r, s))
+        # ⛔ 优先取 reward > 0 的（提升真的发生了）；全 0 ⇒ 取分数最高的前 n 条
+        picked = [s for r, s in scored if r > 0.0][:n]
+        if not picked:
+            scored.sort(key=lambda x: -x[0])
+            picked = [s for _, s in scored[:n]]
+        return picked
+
     # ── 单轮 ──────────────────────────────────────────────────────
     def run_round(self, h: Harness, round_no: int = 0) -> RoundReport:
         rep = RoundReport(round_no=round_no)
@@ -473,7 +505,7 @@ class EvolutionLoop:
         if self.cfg.attribute_layers:
             from .attribution import attribute_layers
             try:
-                specs = [t.spec for t in self.dev_suite][:self.cfg.attribution_tasks]
+                specs = self._pick_attribution_specs(new_h)
                 lc = attribute_layers(self.runner, new_h, specs)
                 rep.layer_credit = lc.to_dict()
                 self.ledger.append("attribution.layer", {

@@ -236,6 +236,51 @@ finally:
 ck("F4 恢复后 hard 层重新出现（通用修法必须是**保守**的）",
    difficulty_report(e, rep.tasks)["n_hard"] > 0)
 
+# ══ G 组：发展集缺难度层时的**采样自愈** ═══════════════════════════
+# 2026-10-13 实测：max_tasks=8 时 dev easy/hard=3/0 而 ho=2/1 ⇒
+# 泛化闸三轮全判 inconclusive（拦截）；max_tasks=12 时 dev=3/2 ⇒
+# generalize 并提交。缺层是**采样配置**问题，不是候选的错 ——
+# 让候选为采样不足背锅，效果和"永远不提交"完全一样。
+print()
+print("== G 组：发展集缺难度层 ⇒ 采样自愈（不拿候选顶罪）==")
+from aether.repair import grow_for_difficulty  # noqa: E402
+
+
+def _synth(n):
+    return synthesize_tasks(e, max_n=n).tasks
+
+
+g_ok = grow_for_difficulty(e, _synth, ("easy", "hard"), max_n=8)
+ck("G1 发展集缺 hard ⇒ 自动扩大采样补齐（不是判 inconclusive 了事）",
+   g_ok["covered"] and not g_ok["missing"], str(g_ok))
+ck("G2 补齐后两层都在（能与发展集做**同层对照**）",
+   set(g_ok["labels"].values()) >= {"easy", "hard"},
+   str({k: v for k, v in g_ok["labels"].items()}))
+ck("G3 max_n_used > max_n（真的扩了，不是原地打转）",
+   g_ok["max_n_used"] > 8, str(g_ok["max_n_used"]))
+ck("G4 补采样记录可观测（steps 逐步可查）",
+   len(g_ok["steps"]) >= 2 and g_ok["note"], str(g_ok["steps"]))
+
+# ⛔ 反证：把 ceiling 卡死 ⇒ 必须**明确报缺**，不能假装补齐
+g_cap = grow_for_difficulty(e, _synth, ("easy", "hard"), max_n=8, ceiling=8)
+ck("G5 反证：ceiling 卡死 ⇒ covered=False 且报出 missing",
+   (not g_cap["covered"]) and g_cap["missing"], str(g_cap))
+ck("G6 反证：缺层时必须给出**可行动**建议（换环境/提高 --max-tasks）",
+   ("--max-tasks" in g_cap["note"]) and ("环境配对" in g_cap["note"]),
+   g_cap["note"])
+
+# 已经覆盖 ⇒ 不该浪费执行时间
+g_noop = grow_for_difficulty(e, _synth, ("easy",), max_n=8)
+ck("G7 已经覆盖所需的层 ⇒ 不扩采样（不无谓地烧执行时间）",
+   g_noop["max_n_used"] == 8 and not g_noop["note"],
+   f"{g_noop['max_n_used']} / {g_noop['note']!r}")
+
+# ⛔ 补采样只加题不加判据：合成是确定性的 ⇒ 已有条目的标签不得变
+g_a = grow_for_difficulty(e, _synth, ("easy",), max_n=8)
+g_b = grow_for_difficulty(e, _synth, ("easy",), max_n=8)
+ck("G8 补采样确定性：两次调用标签完全一致（判据不因采样次数而漂移）",
+   g_a["labels"] == g_b["labels"])
+
 print()
 print(f"{'ALL PASS' if not FAILS else str(len(FAILS)) + ' FAILED'}"
       f"  ({len(FAILS)} failures)")
