@@ -1,0 +1,25 @@
+{
+  "env_id": "eventflow",
+  "note": "事件流聚合的可执行判据集。每条都是可计算的 got vs expect，不接受自述。",
+  "tests": [
+    {"name": "sessionize_split", "call": "sessionize",
+     "args": [[{"id": "a", "ts": 0}, {"id": "b", "ts": 10}, {"id": "c", "ts": 100}], 30],
+     "expect": [["a", "b"], ["c"]]},
+    {"name": "sessionize_single", "call": "sessionize",
+     "args": [[{"id": "a", "ts": 0}], 30],
+     "expect": [["a"]]},
+    {"name": "sessionize_empty", "call": "sessionize", "args": [[], 30], "expect": []},
+    {"name": "dedup_keeps_first", "call": "dedup_stream",
+     "args": [[{"id": "a", "ts": 0}, {"id": "a", "ts": 5}, {"id": "b", "ts": 6}]],
+     "expect": ["a", "b"]},
+    {"name": "dedup_empty", "call": "dedup_stream", "args": [[]], "expect": []},
+    {"name": "rolling_window", "call": "rolling_count",
+     "args": [[{"id": "a", "ts": 0}, {"id": "b", "ts": 10}, {"id": "c", "ts": 100}], 60],
+     "expect": [1, 2, 1]},
+    {"name": "pct_median", "call": "pct", "args": [[1, 2, 3, 4], 50], "expect": 2.5},
+    {"name": "pct_single", "call": "pct", "args": [[5], 50], "expect": 5.0},
+    {"name": "pct_empty", "call": "pct", "args": [[], 50], "expect": 0.0},
+    {"name": "pct_p90", "call": "pct", "args": [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 90],
+     "expect": 9.1}
+  ]
+}

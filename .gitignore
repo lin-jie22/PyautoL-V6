@@ -4,5 +4,6 @@ data/*.db
 data/*.jsonl
 data/archive/
 docs/demo_report_*.md
+docs/ab_generalization_*.md
 node_modules/
 .DS_Store

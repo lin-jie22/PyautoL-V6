@@ -138,7 +138,37 @@ export function detect(events: Event[], cfg: AnomalyConfig = DEFAULT_CONFIG): Fi
     }
   }
 
-  // ── 6. 受保护层被自动改动：必须人工确认 ───────────────────────
+  // ── 6. 泛化闸：判非 generalize 却仍提交 ⇒ 闸被绕过 ─────────────
+  //     ⛔ 这条是**跨语言不变量**：Python 侧说"我拦下了"，监督器只读账本
+  //     就能独立验证"确实没提交"。两侧用同一份事实、各自算一遍 ——
+  //     任何一方绕过闸门都会在这里被发现，不需要信任对方的日志。
+  const probes = events.filter((e) => e.kind === "gen.probe");
+  for (const pe of probes) {
+    const v = String(payloadOf(pe).verdict ?? "");
+    if (v === "generalize") continue;
+    const rn = payloadOf(pe).round_no;
+    const bad = commits.filter((c) => payloadOf(c).round_no === rn && c.seq > pe.seq);
+    if (bad.length) {
+      out.push({
+        code: "GENERALIZATION_GATE_BYPASSED", severity: "critical",
+        detail: `@${pe.seq} 泛化闸裁决=${v}（round ${rn}），但同轮仍提交了 harness ⇒ 闸被绕过`,
+        evidence: bad.map((c) => `@${c.seq} ${payloadOf(c).harness_id}`),
+      });
+    }
+  }
+  const overfit = probes.filter((e) => payloadOf(e).verdict === "overfit");
+  if (overfit.length) {
+    out.push({
+      code: "OVERFIT_REJECTED", severity: "info",
+      detail: `${overfit.length} 次候选在发展集上变好但未泛化 ⇒ 已拦下（闸在工作）`,
+      evidence: overfit.slice(-3).map((e) => {
+        const p = payloadOf(e);
+        return `@${e.seq} ${p.capsule}: dev ${p.dev_gain} / held-out ${p.heldout_gain}`;
+      }),
+    });
+  }
+
+  // ── 7. 受保护层被自动改动：必须人工确认 ───────────────────────
   const blocked = events.filter((e) => e.kind === "gate.blocked");
   if (blocked.length) {
     out.push({ code: "PROTECTED_LAYER_TOUCHED", severity: "warn",

@@ -24,6 +24,11 @@ V6 相对这些工作多做的三件事（来自 V5 的硬教训 + 2026 文献�
      · proliferation gate —— harness 体积膨胀要有增益支撑，
        否则拒绝（文献：artifact proliferation 会让系统退化）。
 
+  4. **跨环境泛化闸**（`generalization.py`）：非回归闸只防"变坏"，
+     防不了"假变好"——在单一判据集上做选择，最优策略会滑向讨好判据。
+     所以另开一个**从不参与选择**的 held-out 环境，只在最后裁决一次：
+     dev 涨而 held-out 不涨 ⇒ 判 overfit，不提交。
+
 ⛔ 两种"成功"都要记账：提交成功、以及**正确地拒绝**。
    后者同样是有价值的信息（V5：只记成功 ⇒ 无法区分"没机会"和"没能力"）。
 """
@@ -119,6 +124,8 @@ class Candidate:
     reason: str = ""
     blast: Dict[str, Any] = field(default_factory=dict)
     n_verdicts: int = 0
+    #: 泛化闸裁决（只有被选为 best 的候选才会有值）
+    generalization: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"capsule": self.capsule_name, "harness_id": self.harness_id,
@@ -127,7 +134,8 @@ class Candidate:
                 "reward": round(self.reward, 4),
                 "advantage": round(self.advantage, 4),
                 "accepted": self.accepted, "reason": self.reason,
-                "blast": self.blast, "n_verdicts": self.n_verdicts}
+                "blast": self.blast, "n_verdicts": self.n_verdicts,
+                "generalization": self.generalization}
 
 
 @dataclass
@@ -139,6 +147,8 @@ class RoundReport:
     committed: Optional[str] = None
     revert_reason: str = ""
     ledger_seqs: List[int] = field(default_factory=list)
+    #: 本轮 best 候选的泛化裁决（None = 没跑到这一步）
+    generalization: Optional[Dict[str, Any]] = None
 
     @property
     def improved(self) -> bool:
@@ -150,7 +160,8 @@ class RoundReport:
                 "baseline_reward": round(self.baseline_reward, 4),
                 "candidates": [c.to_dict() for c in self.candidates],
                 "committed": self.committed, "revert_reason": self.revert_reason,
-                "ledger_seqs": self.ledger_seqs}
+                "ledger_seqs": self.ledger_seqs,
+                "generalization": self.generalization}
 
 
 @dataclass
@@ -175,7 +186,8 @@ class EvolutionLoop:
                  dev_suite: List[FrozenTask], runner: Runner,
                  proposer: Any, store: Optional[Store] = None,
                  caliber: Optional[Dict[str, Any]] = None,
-                 config: Optional[EvolutionConfig] = None):
+                 config: Optional[EvolutionConfig] = None,
+                 heldout: Optional[Any] = None):
         self.ledger = ledger
         self.gate = gate
         self.dev_suite = dev_suite
@@ -184,6 +196,9 @@ class EvolutionLoop:
         self.store = store
         self.caliber = caliber or {"seed": 0}
         self.cfg = config or EvolutionConfig()
+        #: 跨环境泛化闸（可选）。None ⇒ 不启用（保持旧行为）。
+        #: ⛔ 它**只**在 best 选出之后跑，绝不参与候选之间的比较。
+        self.heldout = heldout
         #: 内存态 run 账（**不依赖 store**）：机制正确性不该依赖外部存储存在。
         #: store 只是它的持久化投影。
         self._runs: List[RunRow] = []
@@ -335,11 +350,34 @@ class EvolutionLoop:
             best.accepted = True
             best.reason = "accepted"
 
+        # 7.5) 跨环境泛化闸 —— **在 best 选出之后**才跑，且只跑一次。
+        #      ⛔ 顺序不能反：held-out 的 reward 一旦参与选 best，
+        #      它就变成了第二张发展集，闸自我取消（见 generalization.py H1）。
+        overfit_reason = ""
+        if best is not None and self.heldout is not None:
+            new_h_probe = apply_capsule(
+                h, next(cp for cp in capsules if cp.name == best.capsule_name))
+            pr = self.heldout.probe(h, new_h_probe, self.runner,
+                                    dev_gain=best.reward - base_reward)
+            best.generalization = pr.to_dict()
+            rep.generalization = pr.to_dict()
+            rep.ledger_seqs.append(self.ledger.append(
+                "gen.probe", {"round_no": round_no, "capsule": best.capsule_name,
+                              "harness_id": best.harness_id,
+                              **pr.to_dict()}, actor="gate").seq)
+            if pr.blocks:
+                overfit_reason = pr.reason
+                best.reason = f"{pr.verdict}: {pr.reason}"
+                best.accepted = False
+                best = None
+
         rep.candidates = cands
 
         # 8) 提交 / 回滚 —— 两种结果都进账本
         if best is None:
-            rep.revert_reason = "no_candidate_passed（闸/地板/增殖 至少一项未过）"
+            rep.revert_reason = (
+                f"generalization_gate（{overfit_reason}）" if overfit_reason
+                else "no_candidate_passed（闸/地板/增殖 至少一项未过）")
             rep.ledger_seqs.append(self.ledger.append(
                 "harness.revert", {"round_no": round_no, "harness_id": h.harness_id,
                                    "reason": rep.revert_reason,
@@ -359,6 +397,7 @@ class EvolutionLoop:
                 "baseline_reward": base_reward,
                 "gain": round(best.reward - base_reward, 4),
                 "advantage": round(best.advantage, 4),
+                "generalization": best.generalization,
             }, actor="evolution").seq)
         if self.store is not None:
             self.store.save_snapshot(new_h.harness_id, new_h.to_dict(),

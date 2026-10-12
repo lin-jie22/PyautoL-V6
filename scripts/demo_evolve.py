@@ -41,13 +41,31 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rounds", default="3")
     ap.add_argument("--group", default="3")
-    ap.add_argument("--max-tasks", default="8")
+    # 默认 12：8 只能合成出比较符变异（3 条），通用修法与定点修法在发展集上
+    # 会打平 ⇒ 泛化闸的拦截路径根本走不到。12 才能同时产出字面量变异。
+    ap.add_argument("--max-tasks", default="12")
     args = ap.parse_args()
 
     t0 = time.time()
     print("① 跑 self-harness 进化…")
     evo = run_cli("evolve", "--rounds", args.rounds, "--group", args.group,
                   "--max-tasks", args.max_tasks)
+
+    # ── 泛化闸对照：**同一个系统**，只换候选池 / 闸开关 ────────────
+    print("①b 泛化闸对照（只换候选池，其余不变）…")
+    ab = {}
+    for tag, extra in (("general", ["--capsules", "general"]),
+                       ("narrow", ["--capsules", "narrow"]),
+                       ("both_闸关", ["--capsules", "both", "--heldout", "off"])):
+        r = run_cli("evolve", "--rounds", "1", "--group", args.group,
+                    "--max-tasks", args.max_tasks, *extra)
+        rr = r["rounds"][0]
+        g = rr.get("generalization") or {}
+        ab[tag] = {"verdict": g.get("verdict"),
+                   "dev_gain": g.get("dev_gain"),
+                   "ho_gain": g.get("heldout_gain"),
+                   "committed": rr.get("committed") is not None,
+                   "reason": rr.get("revert_reason", "")}
 
     print("② 校验账本链…")
     p = subprocess.run([PY, "-m", "aether.cli", "verify-chain"],
@@ -73,7 +91,7 @@ def main() -> int:
     from aether.runtime import Trajectory, assign_credit
     traj = Trajectory(task_id="demo:textscore", harness_id=evo["final_harness_id"])
     traj.add("think", "分析弱点：missing_skill / textscore")
-    traj.add("call", "应用 capsule add_skill:restore_from_baseline")
+    traj.add("call", "应用 capsule add_skill:fix_control_flow")
     traj.add("observation", "沙箱返回 10/10 passed, env_fingerprint=fb264f947155c6f4")
     traj.add("answer", "提交 harness")
     credit = assign_credit(traj)   # 无 replay_fn ⇒ 明确标注不可用，不给近似值
@@ -92,9 +110,13 @@ def main() -> int:
     lines = [
         f"# V6 端到端 demo 报告（{ts}）",
         "",
-        f"- 环境：`{evo['env']}`",
-        f"- 合成：attempted {evo['synthesis']['attempted']} → **valid "
+        f"- 发展环境：`{evo['dev_env']}` ／ held-out 环境：`{evo['heldout_env']}`",
+        f"- 合成（发展集）：attempted {evo['synthesis']['attempted']} → **valid "
         f"{evo['synthesis']['valid']}**（yield {evo['synthesis']['yield_rate']:.0%}）",
+        (f"- 合成（held-out）：**valid "
+         f"{evo['synthesis_heldout']['valid']}**（yield "
+         f"{evo['synthesis_heldout']['yield_rate']:.0%}）"
+         if evo.get("synthesis_heldout") else "- 合成（held-out）：未启用"),
         f"- 种子 harness `{evo['seed_harness_id'][:8]}` → 最终 `{evo['final_harness_id'][:8]}`",
         f"- 是否进化：{'✅ 是' if evo['improved'] else '否（本轮无有效增益）'}",
         f"- 耗时：{evo['cost_s']}s（总计 {time.time() - t0:.1f}s）",
@@ -107,6 +129,22 @@ def main() -> int:
         "",
         "> ⛔ 两侧都用**同一条判据**重算哈希链。只要 canonical 序列化有一处漂移"
         "（`sort_keys` / 紧凑分隔 / 数字 `1.0` vs `1` / ts 精度），这一项立刻变红。",
+        "",
+        "## 泛化闸（发展集涨 ≠ 变强）",
+        "",
+        "| 候选池 | 发展集增益 | held-out 增益 | 裁决 | 提交 |",
+        "|---|---|---|---|---|",
+    ]
+    for tag, r in ab.items():
+        lines.append(
+            f"| `{tag}` | {r['dev_gain'] if r['dev_gain'] is not None else '-'} "
+            f"| {r['ho_gain'] if r['ho_gain'] is not None else '-'} "
+            f"| {r['verdict'] or '（无闸）'} | {'✅' if r['committed'] else '❌'} |")
+    lines += [
+        "",
+        "> 定点修法在**发展集上严格更好**（1.00 > 0.60）⇒ 系统一定会选它；",
+        "> 它在 held-out 上增益为 0 ⇒ 判 overfit ⇒ 不提交。",
+        "> 最后一行只把闸关掉，同一个候选就被提交了 —— 拦住它的是闸，不是别的。",
         "",
         "## 逐轮裁决",
         "",
@@ -130,6 +168,10 @@ def main() -> int:
                     f"❌ 拦({len(c['gate_regressions'])})")
                 lines.append(f"| `{c['capsule']}` | {gate} | {c['reward']:.2f} "
                              f"| {c['advantage']:+.2f} | {c['reason']} |")
+        g = r.get("generalization")
+        if g:
+            lines.append(f"- 泛化闸：`{g['verdict']}` —— 发展集 {g['dev_gain']:+.2f} / "
+                         f"held-out {g['heldout_gain']:+.2f}（{g['reason']}）")
         lines.append("")
         if r.get("committed"):
             lines.append(f"→ **提交** `{r['committed'][:8]}`")

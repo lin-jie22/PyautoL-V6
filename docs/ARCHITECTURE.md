@@ -41,6 +41,7 @@
 | `verifier.py` | RLVR 内核；reward 唯一定义；反作弊 | 不做"综合评分"（只有 0/1 + 逐条 check） |
 | `genome.py` | harness 5 层；基因/胶囊；纯函数变换 + 爆炸半径 | 不就地修改（每次变异产出新对象） |
 | `nongression.py` | 冻结非回归闸（准入）+ 口径闸 + supersede | 不做 trade-off（不允许"少量回归换增益"） |
+| `generalization.py` | held-out 泛化闸：发展集涨 ≠ 变强 | **不参与候选选择**（一参与就变第二张发展集） |
 | `environment.py` | 共享环境 + AST 变异合成 + 执行验证 + yield 统计 | 不做 Docker（缩到本机秒级，接口可换） |
 | `runtime.py` | 轨迹；token 归属（masking 同款记账）；信用分配 | 不可重放时**不给**近似归因 |
 | `memory.py` | 5 层记忆；链接演化；睡眠巩固；对抗验证；剪枝 | 不默认生成式摘要（防幻觉污染事实层） |
@@ -63,6 +64,7 @@
 | evidence 闸 | `Verdict.validate` | 作废 | 判定无效 |
 | 口径闸 | `nongression.check_caliber` | 准入 | 判"不可比"，禁止对比 |
 | 非回归闸 | `NonRegressionGate.evaluate` | 准入 | 候选淘汰，不进发展集 |
+| 泛化闸（held-out） | `GeneralizationGate.probe` | 准入 | dev 涨而 held-out 不涨 ⇒ 判 overfit，不提交 |
 | 受保护层闸（L0） | `evolution.run_round` | 阻断 | 停等人工审批 |
 | 能力地板 | `EvolutionConfig.min_reward_gain` | 评估 | 不提交 |
 | 产物增殖闸 | `EvolutionConfig.max_size_growth_ratio` | 评估 | 不提交 |
@@ -89,8 +91,14 @@ run_round(h, n):
       reward = evaluate_dev(cand)                  # ⑤ 发展集（另一批任务）
   adv = group_relative([base] + rewards)           # ⑥ 基线进组（防 G=1 退化）
   best = 优势为正 ∧ 增益过地板 ∧ 体积未失控
+  pr = heldout.probe(h, best)                      # ⑥.5 **选出之后**才跑，只跑一次
   commit(best) 或 revert(reason)                   # ⑦ 两种都进账本
 ```
+
+⛔ **第 ⑥.5 步的位置不能挪**。held-out 的分数一旦进入 `group_relative`
+或 best 排序，它就变成了第二张发展集，泛化闸自我取消。契约测试
+`contract_generalization_test.py` 的 C4 用"换掉 held-out 打分方式 ⇒
+发展集判定必须一字不差"把这条钉死。
 
 ---
 
@@ -99,11 +107,55 @@ run_round(h, n):
 1. **runner 是演示实现**：`cli._default_runner` 用"harness 有没有某个技能"
    来决定修法。真 agent 的 runner 要接进来 —— 机制与 runner 无关（依赖注入），
    这正是这套设计的意义：先证明机制，再换真执行体。
-2. **环境只带了一个 toy**（`tasks/textscore`）。SWE-smith 式的规模
-   （共享 Docker + 上千实例）是接口上的扩展，不是结构上的改动。
+2. **环境只有两个 toy**（`tasks/textscore`、`tasks/eventflow`）。
+   两个是**最低要求**：一个当发展环境、一个当 held-out，否则
+   "变强了"和"讨好判据"无法区分。SWE-smith 式的规模（共享 Docker +
+   上千实例）是接口上的扩展，不是结构上的改动。
 3. **proposer 是模板化的**（`TemplateProposer`）。真 LLM proposer 通过
    `Proposer` 协议注入，接口不变。
 4. **嵌入是 hashing trick**：确定性、离线、零依赖，但语义能力弱于真模型。
    换真模型通过 `MemoryOS(embedder=...)` 注入。
 5. **不训练权重**：这是刻意的定位选择（见 `FRONTIER_2026.md` §5）。
 6. **沙箱是 subprocess + 超时**，不是容器级隔离。跑不可信代码前需要加强。
+
+---
+
+## 6. 泛化闸：为什么"发展集涨了"还不够
+
+非回归闸回答**有没有变坏**，回答不了另一个方向：
+
+> 在单一判据集上做选择，最优策略会滑向**针对判据硬编码**。
+> 它每一轮都在涨，但它没有变强。
+
+这是 reward hacking 在自进化系统里的温和形态，也是最难被发现的 ——
+所有数字都很好看，而且每一步都**真的**通过了执行判据。
+
+V6 的处理：另开一个**从不参与选择**的环境，只在裁决时用一次。
+
+### 实测（`scripts/ab_generalization.py`，单变量对照）
+
+| 组 | 候选池 | 泛化闸 | 发展集增益 | held-out 增益 | 裁决 | 提交 |
+|---|---|---|---|---|---|---|
+| A | 通用修法 | on | +0.60 | +0.60 | generalize | ✅ |
+| B | 定点修法 | on | +1.00 | **+0.00** | overfit | ❌ |
+| C | 两类都给 | on | +1.00 | **+0.00** | overfit | ❌ |
+| D | 两类都给 | **off** | — | — | （无闸） | ✅ |
+
+C 组是重点：定点修法在发展集上**严格更好**（1.00 > 0.60）⇒ 系统一定会
+选它 ⇒ 只有闸拦得住。D 组只把闸关掉，同一个候选就被提交了 ——
+这证明拦住它的是闸，不是别的。
+
+### 三条硬纪律
+
+| | 纪律 | 怎么保证不是口号 |
+|---|---|---|
+| H1 | held-out **不参与选择** | 契约 C4：换掉 held-out 打分 ⇒ 发展集判定必须一字不差 |
+| H2 | 与发展集**结构性不重叠** | 构造期校验，重叠直接抛异常（契约 A2） |
+| H3 | dev 涨而 held-out 不涨 ⇒ **不提交** | 判据用 `<=`（等于地板也算没涨），契约 B2 |
+
+### 一个反直觉的取舍
+
+held-out 基线若已在天花板（reward=1.0），任何候选的增益都是 0，
+会被误判成 overfit —— 那是把"无从判别"当成"有罪"。所以这种情况下
+判 `inconclusive`（**同样拦截**，因为没被证明泛化），而不是放行，
+也不是判 overfit。

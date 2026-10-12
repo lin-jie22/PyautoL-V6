@@ -105,6 +105,32 @@ print(L.head_hash())
   ck("C6 正常提交 ⇒ 无 critical", !okEv.some((f) => f.severity === "critical"),
      JSON.stringify(okEv.map((f) => f.code)));
 
+  // ── C7/C8：泛化闸的跨语言不变量 ───────────────────────────────
+  //     Python 侧说"我拦下了 overfit 候选" ⇒ 账本里同轮**不该**有提交。
+  //     监督器不读 Python 的任何日志，只看账本就能验证这件事。
+  const ev = (seq: number, kind: string, payload: Record<string, unknown>) =>
+    ({ seq, ts: seq, kind, actor: "t", payload, prev_hash: "", hash: "" });
+
+  const bypassed = detect([
+    ev(1, "gen.probe", { round_no: 1, capsule: "narrow", verdict: "overfit",
+                         dev_gain: 1, heldout_gain: 0 }),
+    ev(2, "harness.commit", { round_no: 1, harness_id: "h1", gain: 1 }),
+  ]);
+  ck("C7 泛化闸判 overfit 却仍提交 ⇒ critical（闸被绕过）",
+     bypassed.some((f) => f.code === "GENERALIZATION_GATE_BYPASSED"
+                          && f.severity === "critical"),
+     JSON.stringify(bypassed.map((f) => f.code)));
+
+  const rejected = detect([
+    ev(1, "gen.probe", { round_no: 1, capsule: "narrow", verdict: "overfit",
+                         dev_gain: 1, heldout_gain: 0 }),
+    ev(2, "harness.revert", { round_no: 1, reason: "generalization_gate" }),
+  ]);
+  ck("C8 拦下即无提交 ⇒ 不报 bypass（只有真绕过才 critical）",
+     !rejected.some((f) => f.code === "GENERALIZATION_GATE_BYPASSED")
+     && rejected.some((f) => f.code === "OVERFIT_REJECTED"),
+     JSON.stringify(rejected.map((f) => f.code)));
+
   // ── D 组：真实账本（如果 V6 跑过）─────────────────────────────
   console.log("D 组：真实账本");
   const real = join(ROOT, "data", "ledger.jsonl");

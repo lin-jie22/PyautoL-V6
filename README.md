@@ -17,6 +17,7 @@ V6 做的事是把这些纪律**下沉成系统的结构**：
 | V5 的做法 | V6 的结构 |
 |---|---|
 | 靠人记得"先写红测试" | 冻结非回归闸是**准入条件**：闸不过，根本不评估它有没有变好 |
+| 靠人记得"发展集涨了也可能是假的" | held-out 泛化闸：另一个**从不参与选择**的环境，只在裁决时用一次 |
 | 靠人记得"别信自述" | `Verdict` 无 evidence 即作废；自述/打分字段出现 ⇒ 判定作废 |
 | 靠人记得"判据同源" | `Verdict.reward` 是唯一奖励定义，结构上去掉了第二条通路 |
 | 靠人记得"口径变了要留痕" | `supersede()` 强制返回（新基线, 旧基线标记），旧基线禁止再当基准 |
@@ -64,6 +65,7 @@ V6/
 │   ├── verifier.py         RLVR 内核：奖励只来自可执行判据
 │   ├── genome.py           harness 5 层 + 基因/胶囊 + 爆炸半径
 │   ├── nongression.py      冻结非回归闸（准入，不是评估项）
+│   ├── generalization.py   held-out 泛化闸（发展集涨 ≠ 变强）
 │   ├── environment.py      环境优先 + 任务合成 + 执行验证（F2P）
 │   ├── runtime.py          轨迹 + token 归属记账 + 信用分配
 │   ├── memory.py           5 层记忆 OS + 链接演化 + 睡眠巩固 + 对抗验证
@@ -71,11 +73,13 @@ V6/
 │   ├── store.py            SQLite 投影（可由账本重建）
 │   ├── providers.py        可插拔 LLM（默认确定性 stub）
 │   ├── cli.py / serve.py   命令行 / 只读 HTTP API
-├── tasks/textscore/        自带的可验证环境（task.py + tests.json）
-├── tests/                  4 个契约测试（RED→GREEN + 反证组）
+├── tasks/textscore/        自带的可验证环境（发展集用）
+├── tasks/eventflow/        第二个环境（**held-out 用**，不同任务族）
+├── tests/                  5 个契约测试（RED→GREEN + 反证组）
 ├── supervisor/             TypeScript 外部监督器（只读账本 + 异常检测）
 ├── console/                零构建的只读可视化控制台
 ├── scripts/demo_evolve.py  端到端 demo + 报告
+├── scripts/ab_generalization.py  泛化闸单变量对照实验（A/B/C/D 四组）
 └── docs/                   ARCHITECTURE / FRONTIER_2026 / demo 报告
 ```
 
@@ -98,16 +102,18 @@ V6/
 
 ## 5. 系统如何自证（判据清单）
 
-这七条是 V6 的"宪法"。每条都有对应的契约测试守着：
+这八条是 V6 的"宪法"。每条都有对应的契约测试守着：
 
 1. **事实只有一份**：账本（hash 链）。SQLite 是投影，`rebuild_from_ledger()` 可重建。
 2. **奖励只来自执行判据**：`Verdict.reward` ∈ {0,1}，来自 `verify(env_state)`，
    不来自模型自述/打分（`SELF_REPORT_KEYS` 一出现即作废）。
 3. **没有证据的判定不算判定**：check 缺 evidence ⇒ 判定无效、reward 归 0。
 4. **先证没变坏，再谈变好**：非回归闸（冻结套件）是准入；闸不过 ⇒ 不评估发展集。
-5. **口径不可比就不比**：`check_caliber` fail-closed；改口径必须 supersede 并留痕。
-6. **弱点必须有证据**：没有失败 run ⇒ 这一轮正确地什么都不做（并记账）。
-7. **两种结果都算成功**：提交成功、正确地拒绝 —— 都进账本。
+5. **发展集涨了 ≠ 变强了**：held-out 泛化闸 —— dev 涨而 held-out 不涨 ⇒
+   判 overfit，不提交。held-out **不参与候选选择**（一参与就变第二张发展集）。
+6. **口径不可比就不比**：`check_caliber` fail-closed；改口径必须 supersede 并留痕。
+7. **弱点必须有证据**：没有失败 run ⇒ 这一轮正确地什么都不做（并记账）。
+8. **两种结果都算成功**：提交成功、正确地拒绝 —— 都进账本。
 
 ---
 
