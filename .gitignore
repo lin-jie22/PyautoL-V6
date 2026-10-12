@@ -1,6 +1,8 @@
 __pycache__/
 *.pyc
 data/*.db
+data/*.db-shm
+data/*.db-wal
 data/*.jsonl
 data/archive/
 docs/demo_report_*.md

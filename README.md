@@ -66,21 +66,28 @@ V6/
 │   ├── agent.py            确定性执行体：harness 5 层**都有后果**
 │   ├── genome.py           harness 5 层 + 基因/胶囊 + 爆炸半径
 │   ├── nongression.py      冻结非回归闸（准入，不是评估项）
-│   ├── generalization.py   held-out 泛化闸（发展集涨 ≠ 变强）
+│   ├── generalization.py   held-out 泛化闸（发展集涨 ≠ 变强）+ 难度分层
+│   ├── repair.py           修法基线 + **可执行**难度分层（easy/hard）
 │   ├── environment.py      环境优先 + 任务合成 + 执行验证（F2P）
+│   ├── embeddings.py       可插拔嵌入 + dim 契约 + 显式降级（禁静默混库）
+│   ├── retrieval.py        检索判别力基准 + 嵌入选型闸
 │   ├── runtime.py          轨迹 + token 归属记账 + 信用分配
 │   ├── memory.py           5 层记忆 OS + 链接演化 + 睡眠巩固 + 对抗验证
 │   ├── evolution.py        self-harness 循环（MINE/PROPOSE/VALIDATE/SELECT/COMMIT）
 │   ├── store.py            SQLite 投影（可由账本重建）
-│   ├── providers.py        可插拔 LLM（默认确定性 stub）
+│   ├── providers.py        可插拔 LLM + LLMProposer（模型输出当不可信输入）
 │   ├── cli.py / serve.py   命令行 / 只读 HTTP API
-├── tasks/textscore/        自带的可验证环境（发展集用）
-├── tasks/eventflow/        第二个环境（**held-out 用**，不同任务族）
-├── tests/                  6 个契约测试（RED→GREEN + 反证组）
+├── tasks/                  4 个可验证环境（解法形状刻意不同）
+│   ├── textscore/          数值归一化与打分
+│   ├── eventflow/          事件流聚合（会话切分 / 滑动窗口 / 分位数）
+│   ├── stateflow/          状态机（转移 / 合法性 / 可达性 / 路径计数）
+│   └── scheduler/          区间调度（冲突 / 最大并发 / 贪心 / 区间合并）
+├── tests/                  9 个契约测试（RED→GREEN + 反证组）
 ├── supervisor/             TypeScript 外部监督器（只读账本 + 异常检测）
 ├── console/                零构建的只读可视化控制台
 ├── scripts/demo_evolve.py  端到端 demo + 报告
 ├── scripts/ab_generalization.py  泛化闸单变量对照实验（A/B/C/D 四组）
+├── scripts/embedding_bench.py    嵌入判别力对照（中/英）+ 选型闸裁决
 └── docs/                   ARCHITECTURE / FRONTIER_2026 / demo 报告
 ```
 
@@ -103,7 +110,7 @@ V6/
 
 ## 5. 系统如何自证（判据清单）
 
-这九条是 V6 的"宪法"。每条都有对应的契约测试守着：
+这十一条是 V6 的"宪法"。每条都有对应的契约测试守着：
 
 1. **事实只有一份**：账本（hash 链）。SQLite 是投影，`rebuild_from_ledger()` 可重建。
 2. **奖励只来自执行判据**：`Verdict.reward` ∈ {0,1}，来自 `verify(env_state)`，
@@ -112,11 +119,16 @@ V6/
 4. **先证没变坏，再谈变好**：非回归闸（冻结套件）是准入；闸不过 ⇒ 不评估发展集。
 5. **发展集涨了 ≠ 变强了**：held-out 泛化闸 —— dev 涨而 held-out 不涨 ⇒
    判 overfit，不提交。held-out **不参与候选选择**（一参与就变第二张发展集）。
-6. **harness 的 5 层都有后果**：改 L0/L1/L2/L4 都会改变 reward（单变量实测）。
+6. **held-out 自己也要有判别力**：难度分层（easy/hard，由"通用修法能否修好"
+   **执行判定**）。只在简单层涨 ⇒ 判 partial，同样拦截。
+7. **harness 的 5 层都有后果**：改 L0/L1/L2/L4 都会改变 reward（单变量实测）。
    路由键按"任务类别"而非"环境名"—— 前者换环境仍可达，后者立刻失效。
-7. **口径不可比就不比**：`check_caliber` fail-closed；改口径必须 supersede 并留痕。
-8. **弱点必须有证据**：没有失败 run ⇒ 这一轮正确地什么都不做（并记账）。
-9. **两种结果都算成功**：提交成功、正确地拒绝 —— 都进账本。
+8. **口径不可比就不比**：`check_caliber` fail-closed；改口径必须 supersede
+   并留痕；绝对相似度跨 embedder 不可比（嵌入切换只认 recall@1 与 margin）。
+9. **弱点必须有证据**：没有失败 run ⇒ 这一轮正确地什么都不做（并记账）。
+10. **两种结果都算成功**：提交成功、正确地拒绝 —— 都进账本。
+11. **模型输出是不可信输入**：语法闸（L0 双锁/白名单）→ 解析闸（不返回
+    半成品）→ 语义闸（与模板提议器完全相同）。模型再差也只是少提变异。
 
 ---
 

@@ -37,7 +37,8 @@ from .verifier import Verdict, error_verdict
 Runner = Callable[[Harness, Dict[str, Any]], Verdict]
 
 #: 裁决取值。**封闭集合**：出现集合外的值说明有新的失败形态没被归类。
-VERDICTS = ("generalize", "overfit", "no_gain", "inconclusive")
+#: `partial` = 整体涨了但**只在部分难度层涨**（典型：只会修简单题）。
+VERDICTS = ("generalize", "overfit", "partial", "no_gain", "inconclusive")
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,9 @@ class HeldOutSuite:
     name: str
     tasks: Tuple[FrozenTask, ...]
     env_id: str = ""
+    #: task_id → 难度（easy/hard）。空 ⇒ 不分层（行为与早期版本一致）。
+    #: 见 aether/repair.py：难度由"通用修法能否修好"**执行判定**，不靠标注。
+    difficulty: Tuple[Tuple[str, str], ...] = ()
 
     @property
     def task_ids(self) -> Tuple[str, ...]:
@@ -54,6 +58,23 @@ class HeldOutSuite:
     @property
     def n_tasks(self) -> int:
         return len(self.tasks)
+
+    @property
+    def difficulty_map(self) -> Dict[str, str]:
+        return dict(self.difficulty)
+
+    def ids_of(self, level: str) -> Tuple[str, ...]:
+        d = self.difficulty_map
+        return tuple(t.task_id for t in self.tasks if d.get(t.task_id) == level)
+
+    @property
+    def levels(self) -> Tuple[str, ...]:
+        return tuple(sorted({v for _k, v in self.difficulty}))
+
+    @property
+    def spread(self) -> bool:
+        """有没有难度跨度。⛔ 没有跨度的 held-out **判别力不足**。"""
+        return len(self.levels) >= 2
 
 
 @dataclass
@@ -66,6 +87,8 @@ class ProbeResult:
     cand_heldout: float = 0.0
     n_tasks: int = 0
     reason: str = ""
+    #: 各难度层的 held-out 增益。⛔ 只看总体会放过"只在简单题上泛化"。
+    by_difficulty: Dict[str, float] = field(default_factory=dict)
 
     @property
     def blocks(self) -> bool:
@@ -79,6 +102,8 @@ class ProbeResult:
                 "base_heldout": round(self.base_heldout, 4),
                 "cand_heldout": round(self.cand_heldout, 4),
                 "n_tasks": self.n_tasks,
+                "by_difficulty": {k: round(v, 4)
+                                  for k, v in self.by_difficulty.items()},
                 "reason": self.reason}
 
 
@@ -121,6 +146,29 @@ class GeneralizationGate:
             return 0.0, vs
         return sum(v.reward for v in vs) / len(vs), vs
 
+    def _gain_by_difficulty(self, base_vs: List[Verdict],
+                            cand_vs: List[Verdict]) -> Dict[str, float]:
+        """按难度层分别算 held-out 增益。
+
+        ⛔ 总体增益会**掩盖**"只在简单题上泛化"：easy 涨、hard 不动，
+        平均下来仍然是正的。分层之后这种候选会被判 `partial`。
+        """
+        d = self.suite.difficulty_map
+        if not d:
+            return {}
+        ids = self.suite.task_ids
+        base_by_id = {tid: v.reward for tid, v in zip(ids, base_vs)}
+        cand_by_id = {tid: v.reward for tid, v in zip(ids, cand_vs)}
+        out: Dict[str, float] = {}
+        for level in self.suite.levels:
+            sel = self.suite.ids_of(level)
+            if not sel:
+                continue
+            b = sum(base_by_id.get(t, 0.0) for t in sel) / len(sel)
+            c = sum(cand_by_id.get(t, 0.0) for t in sel) / len(sel)
+            out[level] = c - b
+        return out
+
     # ── 裁决 ────────────────────────────────────────────────────────
     def probe(self, base_h: Harness, cand_h: Harness, runner: Runner,
               dev_gain: float) -> ProbeResult:
@@ -136,9 +184,10 @@ class GeneralizationGate:
                 reason=f"held-out 任务数 {self.suite.n_tasks} < 最小要求 {self.min_tasks}"
                        f" ⇒ 无法裁决，按拦截处理")
 
-        base_ho, _ = self.evaluate(base_h, runner)
-        cand_ho, _ = self.evaluate(cand_h, runner)
+        base_ho, base_vs = self.evaluate(base_h, runner)
+        cand_ho, cand_vs = self.evaluate(cand_h, runner)
         ho_gain = cand_ho - base_ho
+        by_diff = self._gain_by_difficulty(base_vs, cand_vs)
 
         # ⛔ 与 heldout_floor 同一个口径：**等于地板也算"没涨"**。
         #    两侧口径不一致会让"dev 涨 0"和"ho 涨 0"得到相反的对待。
@@ -164,18 +213,33 @@ class GeneralizationGate:
             return ProbeResult(
                 verdict="overfit", dev_gain=dev_gain, heldout_gain=ho_gain,
                 base_heldout=base_ho, cand_heldout=cand_ho,
-                n_tasks=self.suite.n_tasks,
+                n_tasks=self.suite.n_tasks, by_difficulty=by_diff,
                 reason=(f"发展集 +{dev_gain:.4f} 但 held-out {ho_gain:+.4f} "
                         f"（{base_ho:.2f}→{cand_ho:.2f}）⇒ 讨好判据，不提交"))
+        # ⛔ 分层裁决：总体涨了，但某一难度层没涨 ⇒ 判 partial（**同样拦截**）。
+        #    典型形态：只会修"通用修法能搞定的简单题"。平均数是正的，
+        #    但它在 hard 层毫无进步 —— 那不是泛化，是挑食。
+        lagging = sorted([f"{lv}{by_diff[lv]:+.4f}" for lv in by_diff
+                          if by_diff[lv] <= self.heldout_floor])
+        if lagging:
+            return ProbeResult(
+                verdict="partial", dev_gain=dev_gain, heldout_gain=ho_gain,
+                base_heldout=base_ho, cand_heldout=cand_ho,
+                n_tasks=self.suite.n_tasks, by_difficulty=by_diff,
+                reason=(f"总体 held-out {ho_gain:+.4f}，但分层看 {lagging} 未涨"
+                        f" ⇒ 只在部分难度上泛化，不提交"))
         return ProbeResult(verdict="generalize", dev_gain=dev_gain,
                            heldout_gain=ho_gain, base_heldout=base_ho,
                            cand_heldout=cand_ho, n_tasks=self.suite.n_tasks,
+                           by_difficulty=by_diff,
                            reason=f"发展集 +{dev_gain:.4f} 且 held-out {ho_gain:+.4f}"
-                                  f" ⇒ 泛化，放行")
+                                  + (f"（分层 {by_diff}）" if by_diff else "")
+                                  + " ⇒ 泛化，放行")
 
 
-def make_heldout(env_id: str, tasks: List[FrozenTask],
-                 name: str = "") -> HeldOutSuite:
-    """便捷构造：给一组冻结任务打上 env_id。"""
-    return HeldOutSuite(name=name or f"heldout::{env_id}", tasks=tuple(tasks),
-                        env_id=env_id)
+def make_heldout(env_id: str, tasks: List[FrozenTask], name: str = "",
+                 difficulty: Optional[Dict[str, str]] = None) -> HeldOutSuite:
+    """便捷构造：给一组冻结任务打上 env_id（可选带上难度标签）。"""
+    return HeldOutSuite(
+        name=name or f"heldout::{env_id}", tasks=tuple(tasks), env_id=env_id,
+        difficulty=tuple(sorted((difficulty or {}).items())))

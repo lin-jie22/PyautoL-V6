@@ -27,6 +27,8 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+from .embeddings import (HashingEmbedder, cosine, cosine_or_none,
+                         hash_embedding)
 from .ledger import content_hash
 
 TIERS = ("L0", "L1", "L2", "L3", "L4")
@@ -41,32 +43,10 @@ _WORD = re.compile(r"[\u4e00-\u9fff]|[A-Za-z_][A-Za-z0-9_]*|\d+")
 
 
 # ──────────────────────────────────────────────────────────────────
-# 嵌入：可插拔，默认 hashing trick（确定性、离线、零依赖）
+# 嵌入：见 aether/embeddings.py（此处 re-export 保持旧引用可用）
 # ──────────────────────────────────────────────────────────────────
-def hash_embedding(text: str, dim: int = 256) -> List[float]:
-    """词袋 hashing trick。同文本 ⇒ 同向量（跨进程确定性）。
-
-    ⛔ 为什么默认不用真模型：写入端不能因为"模型没加载"就写空向量
-    （V5 的 169 条事故）。确定性哈希保证**任何环境**写进去都可读。
-    真模型通过 `embedder=` 注入，签名一致。
-    """
-    vec = [0.0] * dim
-    toks = _WORD.findall(text or "")
-    if not toks:
-        return vec
-    for t in toks:
-        h = int(hashlib.blake2b(t.encode("utf-8"), digest_size=8).hexdigest(), 16)
-        idx = h % dim
-        vec[idx] += 1.0
-    norm = math.sqrt(sum(x * x for x in vec)) or 1.0
-    return [x / norm for x in vec]
-
-
-def cosine(a: Iterable[float], b: Iterable[float]) -> float:
-    va, vb = list(a), list(b)
-    if not va or not vb or len(va) != len(vb):
-        return 0.0
-    return sum(x * y for x, y in zip(va, vb))
+__all__ = ["hash_embedding", "cosine", "MemoryOS", "MemNote", "TIERS",
+           "CHANNEL_WRITABLE"]
 
 
 @dataclass
@@ -86,6 +66,9 @@ class MemNote:
     created_at: float = 0.0
     last_access: float = 0.0
     supersedes: str = ""
+    #: 建这条记忆时用的嵌入器（名字+dim）。⛔ 它是**可查的事实**：
+    #  换模型后旧笔记的 embedder 不匹配 ⇒ integrity() 会点名。
+    embedder: str = ""
 
     @property
     def fingerprint(self) -> str:
@@ -108,18 +91,44 @@ class MemNote:
 class MemoryOS:
     """5 层记忆 + 链接演化 + 检索 + 睡眠巩固 + 对抗验证。"""
 
-    def __init__(self, embedder: Optional[Callable[[str], List[float]]] = None,
-                 dim: int = 256, link_topk: int = 3,
+    def __init__(self, embedder: Any = None, dim: int = 0, link_topk: int = 3,
                  min_content_len: int = 0):
-        self.dim = dim
-        self._embed = embedder or (lambda t: hash_embedding(t, dim))
+        """embedder 可以是 `Embedder` 对象（推荐，带 name/dim），
+        也可以是 `Callable[[str], List[float]]`（旧接口，dim 需显式给）。
+
+        ⛔ 库与 embedder **强绑定**：`self.dim` 与 `self.embedder_id` 一旦确定，
+        所有入库存量必须是同一个 dim。换 embedder 只能走 `reindex()` 全量重算，
+        ⛔⛔ 绝不静默降级混入（V5 教训：两种格式混在一个库里，写入端显示成功、
+        检索端全废，而且没有任何报错）。
+        """
+        if embedder is None:
+            embedder = HashingEmbedder(dim=dim or 256)
+        self.embedder = embedder
+        self.dim = int(getattr(embedder, "dim", 0) or dim or 256)
+        self.embedder_id = str(getattr(embedder, "embedder_id",
+                                       getattr(embedder, "name", "callable")))
         self.link_topk = link_topk
         #: ⛔ 检索下限（V5 r108a：极短条目余弦虚高，会霸占 top-k）
         self.min_content_len = min_content_len
         self.notes: Dict[str, MemNote] = {}
         self._by_fp: Dict[str, str] = {}
         self.stats = {"written": 0, "deduped": 0, "rejected_channel": 0,
-                      "rejected_empty": 0, "promoted": 0, "refuted": 0}
+                      "rejected_empty": 0, "promoted": 0, "refuted": 0,
+                      "rejected_dim_mismatch": 0, "rejected_embed_error": 0,
+                      "search_dim_mismatch": 0}
+
+    # ── 嵌入调用（含维度契约）────────────────────────────────────
+    def _embed_one(self, text: str) -> List[float]:
+        """⛔ 真嵌入失败必须**向上抛**，由调用方记账并拒写。
+
+        绝不能 `except: return hash_embedding(text)` —— 那会把 256 维混进
+        768 维的库，余弦在维度不符时静默返回 0.0，表现为"知识越存越多、
+        检索越来越差"，而没有任何一条错误日志。
+        """
+        emb = self.embedder
+        if hasattr(emb, "embed"):
+            return list(emb.embed([text])[0])
+        return list(emb(text))      # 旧接口：Callable
 
     # ── 写入（含通道闸 + 去重 + 字段完整性）──────────────────────
     def write(self, tier: str, content: str, *, source: str = "",
@@ -145,7 +154,11 @@ class MemoryOS:
 
         ts = now if now is not None else time.time()
         kw = tuple(keywords or _auto_keywords(body))
-        emb = self._embed(body)
+        try:
+            emb = self._embed_one(body)
+        except Exception as e:  # noqa: BLE001
+            self.stats["rejected_embed_error"] += 1
+            return MemNote(), f"rejected_embed_error:{type(e).__name__}"
 
         probe = MemNote(content=body, keywords=kw, embedding=emb)
         fp = probe.fingerprint
@@ -161,11 +174,17 @@ class MemoryOS:
         if not emb or not any(x != 0.0 for x in emb):
             self.stats["rejected_empty"] += 1
             return MemNote(), "rejected_no_embedding"
+        if len(emb) != self.dim:
+            # ⛔ 这是"库被污染"的最后一道闸：宁可拒写，也不让异维向量入库
+            self.stats["rejected_dim_mismatch"] += 1
+            return MemNote(), (f"rejected_dim_mismatch:{len(emb)}!={self.dim}"
+                               f"（换 embedder 必须 reindex，禁止混库）")
 
         nid = f"{tier}:{fp}"
         note = MemNote(note_id=nid, tier=tier, content=body, keywords=kw,
                        tags=tuple(tags or ()), embedding=emb, source=source,
-                       channel=channel, trust=trust, created_at=ts, last_access=ts)
+                       channel=channel, trust=trust, created_at=ts,
+                       last_access=ts, embedder=self.embedder_id)
         self.notes[nid] = note
         self._by_fp[fp] = nid
         self._link(note)
@@ -193,7 +212,12 @@ class MemoryOS:
                tiers: Optional[Iterable[str]] = None,
                update_access: bool = True,
                expand_links: bool = True) -> List[MemNote]:
-        q = self._embed(query or "")
+        try:
+            q = self._embed_one(query or "")
+        except Exception:  # noqa: BLE001
+            # 查询侧嵌入失败 ⇒ 记 error verdict 由调用方处理；这里退化为关键词检索
+            self.stats["rejected_embed_error"] += 1
+            q = []
         allowed = set(tiers) if tiers else None
         scored: List[Tuple[float, MemNote]] = []
         for n in self.notes.values():
@@ -203,7 +227,12 @@ class MemoryOS:
                 continue
             if not n.has_embedding:
                 continue
-            s = cosine(q, n.embedding)
+            s = cosine_or_none(q, n.embedding)
+            if s is None:
+                # ⛔ 维度不符 = 库脏了。跳过并**计数**，让它可被看见，
+                #    而不是当成"不相关"（那是不可判别与不相关被混为一谈）。
+                self.stats["search_dim_mismatch"] += 1
+                continue
             # 关键词命中做小幅加权（纯向量对短查询不稳）
             if any(k and k in (query or "") for k in n.keywords):
                 s += 0.05
@@ -318,6 +347,46 @@ class MemoryOS:
                 self._by_fp.pop(n.fingerprint, None)
         return victims
 
+    # ── 重索引：换 embedder 的**唯一**合法路径 ──────────────────────
+    def reindex(self, new_embedder: Any) -> Dict[str, Any]:
+        """全量重算所有记忆的嵌入。
+
+        ⛔ 这是换嵌入器的**唯一**入口。直接改 `self.embedder` 会让库里同时
+        存在两种 dim 的向量 —— 检索时维度不符被静默跳过，表现为"知识越存
+        越多、越搜越差"，且没有任何报错（V5 的 169 条就是这个形态）。
+
+        ⛔ 逐条失败 ⇒ 该条标记 `embed_missing`（不删内容），
+        **绝不**用零向量占位：零向量能通过 `has_embedding` 之外的检查，
+        但它在余弦里恒为 0，等于一条永远召不回的死记录。
+        """
+        old_embedder, old_id, old_dim = self.embedder, self.embedder_id, self.dim
+        self.embedder = new_embedder
+        self.dim = int(getattr(new_embedder, "dim", 0) or self.dim)
+        self.embedder_id = str(getattr(
+            new_embedder, "embedder_id", getattr(new_embedder, "name", "callable")))
+        ok = bad = 0
+        try:
+            texts = [n.content for n in self.notes.values()]
+            vecs = new_embedder.embed(texts) if hasattr(new_embedder, "embed") \
+                else [new_embedder(t) for t in texts]
+        except Exception as e:  # noqa: BLE001
+            # 库**还没被改**（重算发生在替换之前）⇒ 原样回滚，不产生半吊子状态
+            self.embedder, self.dim, self.embedder_id = old_embedder, old_dim, old_id
+            return {"ok": 0, "failed": len(self.notes), "rolled_back": True,
+                    "error": f"{type(e).__name__}: {e}"}
+        for n, v in zip(list(self.notes.values()), vecs):
+            if not v or len(v) != self.dim or not any(x != 0.0 for x in v):
+                bad += 1
+                self.notes[n.note_id] = replace(n, embedding=[],
+                                                tags=tuple(n.tags) + ("embed_missing",))
+                continue
+            ok += 1
+            self.notes[n.note_id] = replace(
+                n, embedding=list(v), embedder=self.embedder_id,
+                tags=tuple(t for t in n.tags if t != "embed_missing"))
+        return {"ok": ok, "failed": bad, "rolled_back": False,
+                "from": f"{old_id}:{old_dim}", "to": f"{self.embedder_id}:{self.dim}"}
+
     # ── 视图 ──────────────────────────────────────────────────────
     def layer_sizes(self) -> Dict[str, int]:
         out = {t: 0 for t in TIERS}
@@ -330,8 +399,18 @@ class MemoryOS:
         tot = len(self.notes)
         ok = sum(1 for n in self.notes.values() if n.has_embedding)
         no_link = sum(1 for n in self.notes.values() if not n.links)
+        dims: Dict[int, int] = {}
+        embs: Dict[str, int] = {}
+        for n in self.notes.values():
+            dims[len(n.embedding)] = dims.get(len(n.embedding), 0) + 1
+            embs[n.embedder or "unknown"] = embs.get(n.embedder or "unknown", 0) + 1
         return {"total": tot, "retrievable": ok, "unretrievable": tot - ok,
                 "no_links": no_link, "layer_sizes": self.layer_sizes(),
+                "embedder_id": self.embedder_id, "dim": self.dim,
+                "dim_histogram": dims, "embedder_histogram": embs,
+                #: ⛔ 库里出现非当前 embedder 的笔记 = 混库事故，必须点名
+                "foreign_embedder": sum(c for e, c in embs.items()
+                                        if e != self.embedder_id),
                 "stats": dict(self.stats)}
 
 

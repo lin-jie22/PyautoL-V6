@@ -127,8 +127,15 @@ def main():
         ck("A2 H2：held-out 与发展集重叠 ⇒ 构造期抛异常（不靠自觉）",
            "重叠" in str(e), str(e))
 
-    ck("A3 裁决取值是封闭集合", set(VERDICTS) ==
-       {"generalize", "overfit", "no_gain", "inconclusive"}, f"{VERDICTS}")
+    # ⛔ 这条刻意写死：新增一个裁决取值，必须**有人来这里确认是有意的**。
+    #    （改成 `>=` 就废了这条闸 —— 那时任何人都能悄悄加一种"放行"态。）
+    #    2026-10-13 人工确认新增 `partial`：总体涨但只在部分难度层涨
+    #    （典型：只会修 easy 题）。它**拦截**，不放行。见 contract_difficulty_test。
+    ck("A3 裁决取值是封闭集合（新增取值须人工确认，此处已确认 partial）",
+       set(VERDICTS) == {"generalize", "overfit", "partial", "no_gain",
+                         "inconclusive"}, f"{VERDICTS}")
+    ck("A3b partial 是**拦截**态（新增取值不得偷偷放行）",
+       ProbeResult(verdict="partial").blocks is True)
     ck("A4 blocks 语义：只有 generalize 放行（未知一律拦，fail-closed）",
        ProbeResult(verdict="generalize").blocks is False
        and all(ProbeResult(verdict=v).blocks for v in VERDICTS

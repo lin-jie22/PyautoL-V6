@@ -36,6 +36,7 @@ from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
 
 from .environment import Environment, verify_source
 from .memory import MemoryOS
+from .repair import revert_control_flow          # 唯一事实源（难度分层也用它）
 from .verifier import Verdict, error_verdict
 
 #: L0 元规则指令表。**指令是有后果的**，不是注释。
@@ -59,40 +60,6 @@ def directives(meta_rules: str) -> FrozenSet[str]:
     t = (meta_rules or "").lower()
     return frozenset(name for name, keys in DIRECTIVES.items()
                      if any(k.lower() in t for k in keys))
-
-
-def revert_control_flow(broken_src: str, base_src: str) -> str:
-    """**保守通用修法**：只把比较/运算恢复成基线的，**不动字面量**。
-
-    ⛔ 为什么刻意"不动字面量"：数值常量常常是有意的配置（`window=60`、
-    `gap=30` 就是配置），一个**通用**修法没有立场去改它。保守是它的美德，
-    也是它的代价 —— 它在发展集上会**输给**那个"整个文件换回基线"的定点修法。
-    """
-    b = ast.parse(broken_src)
-    g = ast.parse(base_src)
-
-    def ops(tree):
-        """按同一遍历序收集控制流节点（**存节点本身**，不是它的 op）。"""
-        out: List[Tuple[str, Any]] = []
-        for n in ast.walk(tree):
-            if isinstance(n, ast.Compare):
-                out.append(("cmp", n))
-            elif isinstance(n, ast.BinOp):
-                out.append(("bin", n))
-        return out
-
-    bo, go = ops(b), ops(g)
-    for i in range(min(len(bo), len(go))):
-        kind, node = bo[i]
-        ref = go[i][1]
-        # 只有两棵树**同一位置是同类节点**才恢复：结构对不上就跳过，
-        # 不硬套（硬套会静默改坏没被变异的地方）。
-        if kind == "cmp" and isinstance(ref, ast.Compare):
-            node.ops = list(ref.ops)
-        elif kind == "bin" and isinstance(ref, ast.BinOp):
-            node.op = ref.op
-    ast.fix_missing_locations(b)
-    return ast.unparse(b)
 
 
 @dataclass(frozen=True)
