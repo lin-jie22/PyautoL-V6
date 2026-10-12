@@ -4,6 +4,7 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 data/*.jsonl
+data/*.json
 data/archive/
 docs/demo_report_*.md
 docs/ab_generalization_*.md

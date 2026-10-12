@@ -19,12 +19,21 @@ import re
 import urllib.error
 import urllib.request
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import (Any, Callable, Dict, List, Optional, Protocol, Sequence,
                     Tuple)
 
 from .genome import Capsule, Gene, Harness
 from .runtime import Trajectory
+
+
+def _accepts(fn: Any, arg: str) -> bool:
+    """内层提议器是否接受某个关键字参数（鸭子探测，不强制协议）。"""
+    try:
+        import inspect
+        return arg in inspect.signature(fn).parameters
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _post_json(url: str, body: Dict[str, Any], timeout: float) -> Dict[str, Any]:
@@ -202,7 +211,16 @@ class MemoryAwareProposer:
     def propose(self, weakness: Dict[str, Any], harness: Harness,
                 n: int = 3) -> List[Capsule]:
         self.asked += 1
-        caps = list(self.inner.propose(weakness, harness, n))
+        #: ⛔ 先把失败史**交给模型**，再筛。顺序有讲究：
+        #    对 LLM 提议器来说，只筛不说是浪费 —— 模型白跑一次推理，
+        #    产出的还是同一条死路（下一轮继续撞）。说清楚"这些方案试过、
+        #    被判 XX 拦下"，模型才知道该往哪个方向改。
+        rejected = self._rejected_for(weakness)
+        if rejected and _accepts(self.inner.propose, "rejected"):
+            caps = list(self.inner.propose(weakness, harness, n,
+                                           rejected=rejected))
+        else:
+            caps = list(self.inner.propose(weakness, harness, n))
         if self.memory is None:
             return caps
         out = []
@@ -216,6 +234,28 @@ class MemoryAwareProposer:
                 self.skipped.append(c.name)
                 continue
             out.append(c)
+        return out
+
+    def _rejected_for(self, weakness: Dict[str, Any]) -> List[Tuple[str, str]]:
+        """取出与本轮弱点相关的失败史（变异名 + 被拒原因）。"""
+        if self.memory is None:
+            return []
+        try:
+            notes = self.memory.search(
+                f"{self.marker} 被拒 overfit partial 变异", top_k=8)
+        except Exception:  # noqa: BLE001
+            return []
+        out: List[Tuple[str, str]] = []
+        for nt in notes or []:
+            body = nt.content or ""
+            if f"{self.marker}:" not in body:
+                continue
+            key = body.split(f"{self.marker}:", 1)[1].split(" ", 1)[0]
+            cap = key.rsplit("|", 1)[-1]
+            why = body.split("被拒（", 1)[-1].rstrip("）。") \
+                if "被拒（" in body else "被闸拒"
+            if cap and (cap, why) not in out:
+                out.append((cap, why))
         return out
 
     def diagnostics(self) -> Dict[str, Any]:
@@ -377,6 +417,17 @@ def parse_capsules(raw: str, *, allow_protected: bool = False,
         #    （能修 ≠ 没问题 —— 补过的输出要能被看出来）。
         fixed = _repair_missing_braces(text, start)
         if fixed is None:
+            #: ⛔⛔ 2026-10-13 实测：模型在第 3 个 capsule 里塞了一整段源码
+            #    ⇒ 超预算被截断 ⇒ 整个 JSON 作废 ⇒ **前两个合法的 capsule
+            #    一起被丢掉**（"一个坏 capsule 拖垮整批"）。
+            #    整批作废会让"模型啰嗦"被记成"模型没产出" —— 两者处置不同。
+            #    降级为逐对象扫描：完整的保留，截断的丢弃并记账。
+            salvaged = _salvage_objects(text, start, max_genes=max_genes)
+            if salvaged:
+                rejects.append(
+                    f"partial_parse:truncated_tail（整批被截断 ⇒ 逐对象抢救，"
+                    f"保留 {len(salvaged)} 个完整 capsule，丢弃 1 个截断的）")
+                return salvaged, rejects
             return [], ["unbalanced_braces（输出不完整，还差 "
                         f"{_brace_depth(text, start)} 层括号未闭合）"]
         blob = fixed
@@ -476,6 +527,76 @@ def _repair_missing_braces(text: str, start: int) -> Optional[str]:
     return cand
 
 
+def _salvage_objects(text: str, start: int, max_genes: int = 4) -> List[Capsule]:
+    """整体 JSON 被截断时，逐对象抢救出**完整的** capsule。
+
+    ⛔ 纪律不松动：每个被保留的 capsule 自身都是完整解析 + 过语法闸的。
+    这里做的是**隔离**（把坏的那个单独丢掉），不是"返回半成品" ——
+    宁可少一个候选，也不让一条截断的基因混进合法候选里伪装成"试过了没用"。
+
+    ⛔ 抢救必须**显式记账**：调用方要能看出"这一批丢了多少个"，
+    否则"模型只提了 2 个"和"模型提了 3 个、1 个被截断丢掉"无法区分。
+    """
+    #: 定位到数组起点（"capsules": [ 之后），逐个平衡扫描子对象
+    m = re.search(r'"capsules"\s*:\s*\[', text[start:start + 200])
+    scan_from = start + m.end() if m else start
+    out: List[Capsule] = []
+    dropped = 0
+    i = scan_from
+    n = len(text)
+    while i < n:
+        if text[i] != "{":
+            i += 1
+            continue
+        blob = _scan_json_object(text, i)
+        if blob is None:
+            dropped += 1          #: 截断在这个对象里 ⇒ 它和后面的都救不了
+            break
+        try:
+            it = json.loads(blob)
+        except Exception:  # noqa: BLE001
+            dropped += 1
+            i += 1
+            continue
+        cap = _capsule_from_item(it, max_genes=max_genes)
+        if cap is None:
+            dropped += 1
+        else:
+            out.append(cap)
+        i += len(blob)
+    if not out:
+        return []
+    #: ⛔ 记账写进 capsule 自身（frozen ⇒ 用 replace）：丢弃数必须跟着
+    #   候选走到账本里，否则"这一批丢了多少"在账本上查不到。
+    return [replace(c, rationale=(c.rationale or "")
+                    + f" [salvaged:kept={len(out)},dropped={dropped}]")
+            for c in out]
+
+
+def _capsule_from_item(it: Any, max_genes: int = 4) -> Optional[Any]:
+    """把一个已解析的 capsule 字典过语法闸（与整批路径**同一套判据**）。"""
+    if not isinstance(it, dict):
+        return None
+    from .genome import Capsule, Gene
+    name = str(it.get("name") or "").strip()
+    genes_raw = it.get("genes")
+    if not name or not isinstance(genes_raw, list) or not genes_raw:
+        return None
+    genes: List[Any] = []
+    for g in genes_raw:
+        ok, why = validate_gene(g)
+        if not ok:
+            return None        #: ⛔ 一条非法 ⇒ 整个 capsule 丢（不返回半成品）
+        genes.append(Gene(op=str(g.get("op")), target=str(g.get("target")),
+                          value=g.get("value"),
+                          rationale=str(g.get("rationale") or "")))
+    if len(genes) > max_genes:
+        return None
+    return Capsule(name=name, genes=tuple(genes),
+                   rationale=str(it.get("rationale") or ""),
+                   origin=str(it.get("origin") or "llm"))
+
+
 def _brace_depth(text: str, start: int) -> int:
     depth = 0
     for c in text[start:]:
@@ -543,7 +664,9 @@ value 只能是字符串、数字或布尔值，不能是对象或数组。
 def build_prompt(weakness: Dict[str, Any], harness: Harness, n: int = 3,
                  route_keys: Sequence[str] = (),
                  skill_vocab: Sequence[str] = (),
-                 env_ids: Sequence[str] = ()) -> str:
+                 env_ids: Sequence[str] = (),
+                 rejected: Sequence[Tuple[str, str]] = (),
+                 heldout_note: str = "") -> str:
     """把"当前 harness + 弱点 + **接口契约**"讲清楚，让模型有依据而不是瞎猜。
 
     ⛔⛔ 2026-10-13 实测：不给契约时，Qwen3.5-4B 输出**结构完全合法**的 capsule
@@ -573,13 +696,27 @@ def build_prompt(weakness: Dict[str, Any], harness: Harness, n: int = 3,
     if env_ids:
         contract.append("已知环境 id：" + "、".join(f"`{e}`" for e in env_ids)
                         + "（`patch::<env_id>` 只在点名的环境生效）。")
+    #: ⛔⛔ 评估规则 vs 解法：这里只能讲**规则**，绝不能讲解法。
+    #    讲"要在另一个环境上验证、只对当前环境有效的会被拦"是规则；
+    #    讲"你应该提通用修法 fix_control_flow"是**预置答案** ——
+    #    那会把"这个系统还不会修"这个真实弱点掩盖掉（与 V6 那条
+    #    "记忆只能由执行填充"是同一条纪律：外部预置的知识会让 reward
+    #    顶到天花板 ⇒ 进化永久空转）。模型能不能自己想到，是它要考的试。
+    rules: List[str] = list(contract)
+    if heldout_note:
+        rules.append(heldout_note)
+    if rejected:
+        rules.append(
+            "这些变异**已经试过并被闸拦下**，不要重复提（提了也会被拦，"
+            "等于浪费一次机会）：\n  "
+            + "\n  ".join(f"· `{name}` —— {why}" for name, why in rejected[:8]))
     return (
         "当前 harness 状态（JSON）：\n"
         f"{json.dumps(harness.to_dict(), ensure_ascii=False)[:1500]}\n\n"
         "观测到的弱点：\n"
         f"{json.dumps(weakness, ensure_ascii=False)[:800]}\n\n"
-        + ("⚠️ 接口契约（写错 ⇒ 该 capsule 完全无效）：\n- "
-           + "\n- ".join(contract) + "\n\n" if contract else "")
+        + ("⚠️ 规则与接口（违反 ⇒ 该 capsule 无效或被拦）：\n- "
+           + "\n- ".join(rules) + "\n\n" if rules else "")
         + f"请提出最多 {n} 个候选 capsule，每个 capsule 是一组**必须一起生效**的编辑"
         "（例如：加技能必须同时加路由，否则技能不可达）。\n"
         "只输出 JSON。"
@@ -622,17 +759,23 @@ class LLMProposer:
     route_keys: Tuple[str, ...] = ()
     skill_vocab: Tuple[str, ...] = ()
     env_ids: Tuple[str, ...] = ()
+    #: ⛔ 评估规则**只讲判据**，不讲答案（见 `build_prompt` 的纪律注释）
+    heldout_note: str = ""
 
     def propose(self, weakness: Dict[str, Any], harness: Harness,
-                n: int = 3) -> List[Capsule]:
+                n: int = 3, rejected: Sequence[Tuple[str, str]] = ()
+                ) -> List[Capsule]:
         self.last_error = ""
         self.last_rejects = []
         self.last_raw_len = 0
         self.last_raw_tail = ""
         self.last_raw = ""
         self.n_retries_used = 0
+        self.last_rejected = list(rejected)
         prompt = build_prompt(weakness, harness, n,
                               route_keys=self.route_keys,
+                              rejected=rejected,
+                              heldout_note=self.heldout_note,
                               skill_vocab=self.skill_vocab,
                               env_ids=self.env_ids)
         for attempt in range(self.retries + 1):
@@ -680,4 +823,9 @@ class LLMProposer:
                 "raw_len": self.last_raw_len,
                 "raw_tail": self.last_raw_tail,
                 "raw": self.last_raw[:600],
-                "retries_used": self.n_retries_used}
+                "retries_used": self.n_retries_used,
+                #: ⛔ 注入了什么必须可查：否则"模型没听进去"和
+                #    "根本没告诉它"在诊断里长得一样
+                "rejected_shown": [n for n, _ in getattr(self,
+                                                         "last_rejected", ())],
+                "heldout_note_shown": bool(self.heldout_note)}

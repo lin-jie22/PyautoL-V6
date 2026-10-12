@@ -376,7 +376,8 @@ class MemoryOS:
         return victims
 
     # ── 重索引：换 embedder 的**唯一**合法路径 ──────────────────────
-    def reindex(self, new_embedder: Any) -> Dict[str, Any]:
+    def reindex(self, new_embedder: Any, *,
+                from_label: str = "") -> Dict[str, Any]:
         """全量重算所有记忆的嵌入。
 
         ⛔ 这是换嵌入器的**唯一**入口。直接改 `self.embedder` 会让库里同时
@@ -412,8 +413,11 @@ class MemoryOS:
             self.notes[n.note_id] = replace(
                 n, embedding=list(v), embedder=self.embedder_id,
                 tags=tuple(t for t in n.tags if t != "embed_missing"))
+        #: ⛔ `old_id/old_dim` 在被 `load_for_reindex` 装载后已经是**新**值，
+        #    真实来源只能由调用方传进来（否则 "from == to" 是句废话）
         return {"ok": ok, "failed": bad, "rolled_back": False,
-                "from": f"{old_id}:{old_dim}", "to": f"{self.embedder_id}:{self.dim}"}
+                "from": from_label or f"{old_id}:{old_dim}",
+                "to": f"{self.embedder_id}:{self.dim}"}
 
     # ── 视图 ──────────────────────────────────────────────────────
     def layer_sizes(self) -> Dict[str, int]:
@@ -462,6 +466,66 @@ class MemoryOS:
                        encoding="utf-8")
         os.replace(tmp, p)
         return len(self.notes)
+
+    @classmethod
+    def load_for_reindex(cls, path: str | Path, new_embedder: Any = None, *,
+                         min_content_len: Optional[int] = None
+                         ) -> Tuple["MemoryOS", Dict[str, Any]]:
+        """**只装载内容、丢弃旧向量** —— `reindex()` 的唯一合法前置。
+
+        ⛔⛔ 这是拒载之后的**恢复路径**，不是绕过闸的后门。区别在语义：
+        拒载时装出来的库是空的（"我读不了"）；这里装出来的库是**无向量的**
+        （"我读得了，但每条都必须重算才能用"）。后者必须紧接着调用
+        `reindex()`，任何一条漏算都会以 `embed_missing` 显式留痕，
+        而 `integrity()` 会把它们点名 —— 不存在"看起来能用"的中间态。
+
+        ⛔ 旧向量一律丢弃：异维向量混在库里就是 V5 那 169 条的形态
+        （写入成功、检索永远搜不到、且没有任何报错）。
+        """
+        rep: Dict[str, Any] = {"path": str(path), "loaded": 0,
+                               "dropped_vectors": 0, "rejected_unverified": 0,
+                               "reasons": []}
+        mem = cls(embedder=new_embedder)
+        p = Path(path)
+        if min_content_len is not None:
+            mem.min_content_len = int(min_content_len)
+        if not p.exists():
+            rep["note"] = "no_snapshot（没有可重算的记忆库）"
+            return mem, rep
+        try:
+            payload = json.loads(p.read_text(encoding="utf-8"))
+        except Exception as e:  # noqa: BLE001
+            rep["note"] = f"unreadable（{type(e).__name__}: {e}）"
+            return mem, rep
+        #: ⛔ 记账必须说真话：`reindex()` 会拿 `self.embedder_id` 当"来源"，
+        #    而这里 mem 已经指向**新** embedder ⇒ 不记录文件里的真实来源，
+        #    报告就会写成 "from hashing:256 → to hashing:256"（同义反复，
+        #    看起来像什么都没干，实际全量重算过）。
+        rep["from_embedder"] = str(payload.get("embedder_id") or "unknown")
+        rep["from_dim"] = int(payload.get("dim") or 0)
+        for raw in (payload.get("notes") or []):
+            try:
+                note = MemNote(**{k: v for k, v in raw.items()
+                                  if k in MemNote.__dataclass_fields__})
+            except Exception:  # noqa: BLE001
+                continue
+            if len(note.embedding):
+                rep["dropped_vectors"] += 1
+            ok, why = memory_purity(note)
+            if not ok:
+                rep["rejected_unverified"] += 1
+                if len(rep["reasons"]) < 5:
+                    rep["reasons"].append(why)
+                continue
+            #: 向量清空 + 打标 ⇒ 没重算的条目一眼可见，不会被当成可用记忆
+            note = replace(note, embedding=[],
+                           tags=tuple(note.tags) + ("embed_missing",))
+            mem.notes[note.note_id] = note
+            mem._by_fp[note.fingerprint] = note.note_id
+            rep["loaded"] += 1
+        rep["note"] = (f"装载 {rep['loaded']} 条内容（丢弃 {rep['dropped_vectors']} "
+                       f"条旧向量）⇒ **必须立刻 reindex()**")
+        return mem, rep
 
     @classmethod
     def load(cls, path: str | Path, embedder: Any = None, *,

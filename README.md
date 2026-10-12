@@ -36,7 +36,11 @@ PY=/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/bin/python3
 $PY -m aether.cli synth            # 合成任务：看 yield，不是看尝试次数
 $PY -m aether.cli evolve --rounds 3 --group 3
 $PY -m aether.cli verify-chain     # 账本链是否被篡改过
+$PY -m aether.cli memory show      # 记忆库完整性读数（混库/空向量/污染）
+$PY -m aether.cli memory reindex --to hash   # 换 embedder 后的唯一恢复路径
 $PY scripts/demo_evolve.py         # 端到端 demo + 出报告
+$PY scripts/llm_e2e.py --rounds 3  # 真模型端到端：跑通 vs 赢过
+$PY scripts/llm_e2e.py --no-llm    # 离线对照组（模板提议器）
 
 # 契约测试（含反证组）
 for t in tests/contract_*_test.py; do $PY $t --e2e; done
@@ -77,18 +81,19 @@ V6/
 │   ├── evolution.py        self-harness 循环（MINE/PROPOSE/VALIDATE/SELECT/COMMIT）
 │   ├── store.py            SQLite 投影（可由账本重建）
 │   ├── providers.py        可插拔 LLM + LLMProposer（模型输出当不可信输入）
-│   ├── cli.py / serve.py   命令行 / 只读 HTTP API
+│   ├── cli.py / serve.py   命令行 / 只读 HTTP API（共用同一份记忆读数）
 ├── tasks/                  4 个可验证环境（解法形状刻意不同）
 │   ├── textscore/          数值归一化与打分
 │   ├── eventflow/          事件流聚合（会话切分 / 滑动窗口 / 分位数）
 │   ├── stateflow/          状态机（转移 / 合法性 / 可达性 / 路径计数）
 │   └── scheduler/          区间调度（冲突 / 最大并发 / 贪心 / 区间合并）
-├── tests/                  10 个契约测试（RED→GREEN + 反证组）
+├── tests/                  11 个契约测试（RED→GREEN + 反证组）
 ├── supervisor/             TypeScript 外部监督器（只读账本 + 异常检测）
 ├── console/                零构建的只读可视化控制台
 ├── scripts/demo_evolve.py  端到端 demo + 报告
 ├── scripts/ab_generalization.py  泛化闸单变量对照实验（A/B/C/D 四组）
 ├── scripts/embedding_bench.py    嵌入判别力对照（中/英）+ 选型闸裁决
+├── scripts/llm_e2e.py            真模型端到端：跑通 vs 赢过（可复现读数）
 └── docs/                   ARCHITECTURE / FRONTIER_2026 / demo 报告
 ```
 
@@ -149,6 +154,15 @@ V6/
 15. **缺的是采样还是能力，别搞混**：发展集没采到某个难度层 ⇒ 无从同层对照
     ⇒ 闸只能判"不可判别"。那是**采样配置**问题，不能让候选背锅 ——
     自动补采样补齐（合成任务与候选无关，不给任何优待）。
+16. **观测侧不得有假仪表**：不随被测对象变化的读数等于没有读数。
+    实测 `/api/status` 的 memory 段是硬编码的 `{"tiers": ["L0".."L4"]}`
+    —— 库里 0 条也报五层、被污染也报正常 ⇒ 污染在账本里可见、在控制台
+    不可见。读数判据必须与写入侧**同源**（词表不抄第二份）。
+17. **一条闸配一条出口**：换 embedder ⇒ 整库拒载（正确），但拒载后若无
+    恢复路径就是死胡同。`memory reindex` 是唯一出口，且失败**不落盘**。
+18. **「跑通」≠「赢过」**：真模型能产出 9 个过闸候选（跑通），但泛化闸
+    放行 0 次（没赢过）。为了让它赢去放宽闸 = 把"讨好判据"判成"泛化"。
+    ⛔ 只能告诉模型**规则**，不能告诉它**答案**（讲了就是替它考试）。
 
 ---
 

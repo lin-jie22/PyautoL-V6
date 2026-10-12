@@ -55,6 +55,71 @@ def cmd_status(args: argparse.Namespace) -> int:
         s.close()
     ok = st["chain_ok"]
     print("账本链：" + ("✅ 完整" if ok else f"❌ 断裂 @seq={st['first_bad_seq']} {st['reason']}"))
+    #: 记忆完整性也进 status（与 serve 用**同一个**读数函数，不抄第二份）
+    from .serve import memory_report
+    mr = memory_report(p["memory"])
+    print(json.dumps({"memory": mr}, ensure_ascii=False, indent=2))
+    if mr.get("present") and not mr.get("integrity_ok"):
+        print(f"⚠️ 记忆库不完整：{ {k: v for k, v in mr.items() if k.startswith(('foreign', 'wrong', 'no_embedding', 'unverified')) } }",
+              file=sys.stderr)
+    return 0 if ok else 1
+
+
+def cmd_memory(args: argparse.Namespace) -> int:
+    """记忆库：读数（show）与换嵌入后的全量重算（reindex）。
+
+    ⛔ `reindex` 存在的理由：换 embedder 后 `MemoryOS.load` 会**整库拒载**
+    （设计正确 —— 异维余弦不可比）。但拒载之后如果没有恢复路径，系统就
+    永久停在"读不了"的状态。这里是那条恢复路径，且它只走 `reindex()`。
+    """
+    from .embeddings import HashingEmbedder, resolve_embedder
+    from .memory import MemoryOS
+    from .serve import memory_report
+    p = _paths(Path(args.root))
+
+    if args.memory_cmd == "show":
+        print(json.dumps(memory_report(p["memory"]), ensure_ascii=False,
+                         indent=2))
+        return 0
+
+    # ── reindex ──────────────────────────────────────────────────
+    before = memory_report(p["memory"])
+    if not before.get("present"):
+        print(f"❌ 没有可重算的记忆库（{p['memory']}）", file=sys.stderr)
+        return 1
+    emb: Any = HashingEmbedder(dim=256)
+    if args.to != "hash":
+        try:
+            cand, probe = resolve_embedder(args.to)
+            if probe.get("chosen") != "ollama" and args.to == "ollama":
+                print(f"❌ 目标嵌入不可用：{probe}", file=sys.stderr)
+                return 1
+            emb = cand
+        except Exception as e:  # noqa: BLE001
+            print(f"❌ 目标嵌入不可用（{type(e).__name__}: {e}）", file=sys.stderr)
+            return 1
+    mem, rep = MemoryOS.load_for_reindex(p["memory"], emb, min_content_len=60)
+    if not rep["loaded"]:
+        print(f"❌ 没有可重算的条目：{rep.get('note')}", file=sys.stderr)
+        return 1
+    r = mem.reindex(emb, from_label=f"{rep.get('from_embedder')}:{rep.get('from_dim')}")
+    out = {"before": before, "load": rep, "reindex": r}
+    if r.get("rolled_back"):
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        print(f"❌ reindex 失败已回滚：{r.get('error')}", file=sys.stderr)
+        return 1
+    #: ⛔ 有条目没算出来 ⇒ 不落盘（落盘 = 把 embed_missing 固化成"正常库"）
+    if r.get("failed"):
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        print(f"❌ {r['failed']} 条重算失败 ⇒ **不落盘**（库保持原样）",
+              file=sys.stderr)
+        return 1
+    mem.save(p["memory"])
+    out["after"] = memory_report(p["memory"])
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    ok = out["after"].get("integrity_ok") and \
+        len(out["after"].get("dim_histogram", {})) <= 1
+    print("✅ 记忆库已重算并落盘" if ok else "⚠️ 落盘后仍不完整（见 after）")
     return 0 if ok else 1
 
 
@@ -320,11 +385,24 @@ def cmd_evolve(args: argparse.Namespace) -> int:
             # ⛔ 接口契约必须注入：不告诉模型"路由键是任务类别 / 技能名只有
             #    这几个"，它就会猜 —— 实测猜错时输出结构完全合法却 reward=0，
             #    看起来像"闸在工作"，实际是 prompt 缺文档（providers 里有实测）。
+            #: ⛔⛔ held-out 规则**只讲判据，不讲答案**：
+            #    "会在另一个环境上验证"是规则 ⇒ 该说；
+            #    "你应该提通用修法"是答案 ⇒ 说了就是把模型该考的试替它考了
+            #    （外部预置知识会掩盖真实弱点，与"记忆只能由执行填充"
+            #     同一条纪律）。模型能不能自己想到，正是要测的。
+            ho_note = ""
+            if heldout is not None:
+                ho_note = (
+                    f"你提的变异会在**另一个环境** `{ho_name}` 上复核："
+                    f"只有在发展集和 held-out **都**变好才会被采纳；"
+                    f"只针对某一个环境（或某几道特定题）的修法会被判"
+                    f" overfit 拦下。提变异时优先考虑**跨环境都成立**的改法。")
             proposer = LLMProposer(
                 OllamaProvider(model=model, think=False),
                 route_keys=(TASK_CLASS,),
                 skill_vocab=tuple(sorted(pool)),
-                env_ids=tuple(sorted(envs)))
+                env_ids=tuple(sorted(envs)),
+                heldout_note=ho_note)
             print(f"🧠 proposer=llm（{model}）", file=sys.stderr)
         except Exception as e:  # noqa: BLE001
             print(f"⚠️ 真模型不可用（{type(e).__name__}: {e}）⇒ 回退模板提议器",
@@ -450,6 +528,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     sub.add_parser("verify-chain", help="校验账本哈希链")
     s = sub.add_parser("synth", help="合成任务并统计 yield")
     s.add_argument("--max", default="8")
+    m = sub.add_parser("memory", help="记忆库：读数 / 换嵌入后全量重算")
+    ms = m.add_subparsers(dest="memory_cmd", required=True)
+    ms.add_parser("show", help="打印记忆库完整性读数")
+    mr = ms.add_parser("reindex", help="换 embedder 后的唯一合法恢复路径")
+    mr.add_argument("--to", default="hash", choices=["hash", "ollama"],
+                    help="目标嵌入器")
     e = sub.add_parser("evolve", help="跑 self-harness 进化")
     e.add_argument("--rounds", default="3")
     e.add_argument("--group", default="3")
@@ -475,6 +559,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "status": cmd_status,
         "verify-chain": cmd_verify_chain,
         "synth": cmd_synth,
+        "memory": cmd_memory,
         "evolve": cmd_evolve,
     }[args.cmd](args)
 

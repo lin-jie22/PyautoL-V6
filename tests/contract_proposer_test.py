@@ -224,6 +224,88 @@ else:
     print("== E 组：跳过真模型实测（加 --llm 启用）==")
 
 print()
+print("== F 组：整批被截断 ⇒ 逐对象抢救（一个坏 capsule 不得拖垮整批）==")
+#: ⛔ 2026-10-13 实测：模型在第 3 个 capsule 的 value 里塞了一整段源码
+#:    ⇒ 超 token 预算被截断 ⇒ 整个 JSON 作废 ⇒ 前两个**合法**的候选一起丢。
+#:    那会把"模型啰嗦"记成"模型没产出"，两者处置完全不同。
+HEAD = ('{"capsules":[\n'
+        '{"name":"fix_routing","rationale":"补路由","genes":['
+        '{"op":"set","target":"L1.routing.repair",'
+        '"value":"fix_control_flow","rationale":"r"}]},\n'
+        '{"name":"tune_mem","rationale":"调记忆","genes":['
+        '{"op":"tune","target":"L4.memory_policy.recall_topk",'
+        '"value":7,"rationale":"r"}]},\n')
+
+caps_f, rej_f = parse_capsules(
+    HEAD + '{"name":"inline_source","rationale":"塞整段源码","genes":['
+           '{"op":"set","target":"L3.skills.big","value":"def f():\\n    if v < 0.0:\\n        v')
+ck("F1 截断时保留**完整的**前两个（不得整批作废）",
+   len(caps_f) == 2 and [c.name for c in caps_f] == ["fix_routing", "tune_mem"],
+   f"{[c.name for c in caps_f]} {rej_f}")
+ck("F2 抢救必须**显式记账**（丢了多少要能查）",
+   any("partial_parse" in r for r in rej_f)
+   and any("salvaged:kept=2,dropped=1" in c.rationale for c in caps_f),
+   f"{rej_f} {[c.rationale for c in caps_f]}")
+ck("F3 抢救出的 capsule 自身完整（每条都过语法闸，不是半成品）",
+   all(apply_capsule(Harness(), c) is not None for c in caps_f))
+
+#: 反证 1：全都截断 ⇒ 救不出任何东西（抢救不是"凭空造候选"）
+caps_f2, rej_f2 = parse_capsules(
+    '{"capsules":[{"name":"a","genes":[{"op":"set",'
+    '"target":"L1.routing.repair","value":"x"')
+ck("F4 反证：全部截断 ⇒ 空列表 + unbalanced_braces（不造候选）",
+   caps_f2 == [] and any("unbalanced_braces" in r for r in rej_f2),
+   f"{caps_f2} {rej_f2}")
+
+#: 反证 2：完整输出**不得**走抢救路径（否则正常路径被悄悄改变）
+caps_f3, rej_f3 = parse_capsules(
+    '{"capsules":[{"name":"ok","rationale":"r","genes":['
+    '{"op":"set","target":"L1.routing.repair",'
+    '"value":"fix_control_flow"}]}]}')
+ck("F5 反证：完整输出不带 salvaged 标记（抢救只在真截断时触发）",
+   len(caps_f3) == 1 and "salvaged" not in caps_f3[0].rationale
+   and rej_f3 == [], f"{rej_f3}")
+
+#: 反证 3：抢救路径**同样**要拦 L0（不得因为走了降级就绕过禁令）
+caps_f4, rej_f4 = parse_capsules(
+    HEAD + '{"name":"evil","genes":[{"op":"set","target":"L0.meta_rules",'
+           '"value":"x"}]}]}')
+ck("F6 反证：抢救路径也不得放过 L0 编辑（降级 ≠ 放闸）",
+   all(not c.touches_protected() for c in caps_f4)
+   and any("L0" in r for r in rej_f4), f"{[c.name for c in caps_f4]} {rej_f4}")
+
+print()
+print("== G 组：失败史与评估规则必须**真的进了 prompt**（可观测）==")
+h_g = Harness(meta_rules="V6 元规则", tools=("read_file", "write_file", "python_exec"))
+p_g = build_prompt({"kind": "no_skill", "weak_tasks": ["textscore::m0"]}, h_g, 3,
+                   route_keys=("repair",),
+                   skill_vocab=("fix_control_flow", "patch:textscore"),
+                   env_ids=("textscore", "eventflow"),
+                   rejected=[("add_textscore_skill", "overfit: held-out +0.0000")],
+                   heldout_note="变异会在**另一个环境** `eventflow` 上复核。")
+ck("G1 失败史进了 prompt（否则'没听进去'与'没告诉它'无法区分）",
+   "add_textscore_skill" in p_g and "overfit" in p_g)
+ck("G2 held-out 规则进了 prompt", "eventflow" in p_g and "复核" in p_g)
+#: ⛔⛔ 纪律：规则可以讲，**答案不能讲**。prompt 里不得出现"应该用哪个技能"
+#:    —— 讲了就是把模型该考的试替它考了（外部预置知识掩盖真实弱点）。
+ck("G3 ⛔ prompt **不得**指定具体解法（只讲规则，不替模型作答）",
+   "应该用 fix_control_flow" not in p_g
+   and "请使用 fix_control_flow" not in p_g
+   and "正确做法是" not in p_g,
+   "prompt 里泄露了答案 ⇒ 模型的'赢'是假的")
+ck("G4 但技能词表必须给（那是**接口**，不是答案）",
+   "fix_control_flow" in p_g and "repair" in p_g)
+
+#: 反证：diagnostics 暴露注入了什么
+from aether.providers import LLMProposer  # noqa: E402
+p_diag = LLMProposer(None, heldout_note="x", route_keys=("repair",))
+p_diag.last_rejected = [("add_textscore_skill", "overfit")]
+d = p_diag.diagnostics()
+ck("G5 diagnostics 暴露注入内容（可观测性不得留死角）",
+   d.get("rejected_shown") == ["add_textscore_skill"]
+   and d.get("heldout_note_shown") is True, str(d))
+
+print()
 print(f"{'ALL PASS' if not FAILS else str(len(FAILS)) + ' FAILED'}"
       f"  ({len(FAILS)} failures)")
 for f in FAILS:
