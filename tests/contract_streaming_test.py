@@ -692,13 +692,119 @@ def group_i() -> None:
            f"tail(0)={len(led.tail(0))} tail(-5)={len(led.tail(-5))}")
 
 
+def group_l() -> None:
+    """判据侧不得有**隐性上限** —— 一致性判据必须覆盖全量。
+
+    ⛔ 这条守的不是性能，是"判据不能静默少看"：原本 `run_digests()` /
+    `run_ids()` 默认 `limit=100000`，而一致性判据正是用**默认**调用的 ⇒
+    表超过 10 万行后判据只比前 10 万行，却**照旧报"一致"**。注释当时还写着
+    "不传 limit 即可全量" —— 注释与实现矛盾，比没有注释更危险。
+    """
+    print("  （L 组：判据侧不得有隐性上限）")
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        led = Ledger(root / "l.jsonl")
+        for i in range(5):
+            led.append("eval.verdict", {"run_id": f"r{i}", "reward": 0.5,
+                                        "passed": True, "harness_id": "h"})
+        s = Store(root / "a.db")
+        try:
+            s.rebuild_from_ledger(led.events())
+            n = s.conn.execute("SELECT COUNT(*) c FROM runs").fetchone()["c"]
+            ck("L1 判据侧 run_digests()/run_ids() 默认 = **全量**"
+               "（旧默认 100000 会在 10 万行后静默截断）",
+               n == 5 and len(s.run_digests()) == n and len(s.run_ids()) == n,
+               f"COUNT={n} run_digests={len(s.run_digests())} "
+               f"run_ids={len(s.run_ids())}")
+            ck("L1b 显式传 limit 时上限仍生效（2 ⇒ 2 条；负 ⇒ 0 条）",
+               len(s.run_digests(limit=2)) == 2
+               and len(s.run_digests(limit=-1)) == 0,
+               f"limit=2 → {len(s.run_digests(limit=2))}, "
+               f"limit=-1 → {len(s.run_digests(limit=-1))}")
+
+            #: ⛔⛔ 断言的是**签名默认值**，不是"调用时传了什么"。
+            #:    我第一版写的是后者 —— 注入"默认改回 100000"的事故版后
+            #:    **L 组 5 条全绿**：调用方本来就不传 limit，spy 永远记到
+            #:    None ⇒ 恒真断言（与 V5"原语无 success 键"同形）。
+            #:    ⇒ 想知道"默认有没有上限"，就得去看那个默认值本身。
+            import inspect
+            d_ids = inspect.signature(Store.run_ids).parameters["limit"].default
+            d_dig = inspect.signature(Store.run_digests).parameters["limit"].default
+            ck("L2 run_ids/run_digests 的 limit **默认值是 None**"
+               "（判据不得有隐性上限；这是真判据）",
+               d_ids is None and d_dig is None,
+               f"run_ids 默认={d_ids!r} run_digests 默认={d_dig!r}")
+
+            #: 护栏：判据调用时也不该自己传一个上限
+            seen: List[Any] = []
+            orig = Store.run_digests
+
+            def _spy(self, limit=None):
+                seen.append(limit)
+                return orig(self, limit)
+
+            Store.run_digests = _spy
+            try:
+                agg = s.consistency_agg()
+                for ev in led.iter_events():
+                    agg.feed(ev)
+                rep = agg.result()
+            finally:
+                Store.run_digests = orig
+            ck("L2b 护栏：一致性判据调用 run_digests 时不自带上限",
+               seen == [None], f"实得 {seen}")
+
+            #: ⛔ 反证分**两个方向**：`run_ids` 管键级（漏 ⇒ missing 假红），
+            #:    `run_digests` 管字段级（漏 ⇒ drift 假绿）。只证明一个方向
+            #:    会让人误判风险的朝向。
+            orig_ids = Store.run_ids
+            Store.run_ids = lambda self, limit=None: orig_ids(self)[:1]
+            try:
+                agg2 = s.consistency_agg()
+                for ev in led.iter_events():
+                    agg2.feed(ev)
+                rep2 = agg2.result()
+            finally:
+                Store.run_ids = orig_ids
+            ck("L3 反证·假红：键集合被截断 ⇒ 投影里有的被算成 missing",
+               rep["ok"] and rep2["missing_count"] > rep["missing_count"],
+               f"全量 ok={rep['ok']} missing={rep['missing_count']} / "
+               f"截断 ok={rep2['ok']} missing={rep2['missing_count']}")
+
+            #: 造一处真的 drift（投影 reward 与账本不一致），再看截断能否检出
+            s.conn.execute("UPDATE runs SET reward=0.9 WHERE run_id='r2'")
+            s.conn.commit()
+            agg3 = s.consistency_agg()
+            for ev in led.iter_events():
+                agg3.feed(ev)
+            rep3 = agg3.result()
+            Store.run_digests = lambda self, limit=None: dict(
+                list(orig(self).items())[:1])
+            try:
+                agg4 = s.consistency_agg()
+                for ev in led.iter_events():
+                    agg4.feed(ev)
+                rep4 = agg4.result()
+            finally:
+                Store.run_digests = orig
+            ck("L4 反证·假绿：drift 真实存在时，字段级截断会**漏检**"
+               "（这个方向更危险：判据会照样报 ok）",
+               "r2" in rep3["drifted"] and rep4["drift_count"] == 0
+               and rep4["ok"],
+               f"全量 drifted={rep3['drifted']} / 截断 ok={rep4['ok']} "
+               f"drift={rep4['drift_count']}")
+        finally:
+            s.close()
+
+
 def main() -> int:
     print("契约测试：一次磁盘遍历（streaming）")
     for name, fn in (("A 不物化", group_a), ("B 流式==物化", group_b),
                      ("C 语义保持", group_c), ("D 内存峰值", group_d),
                      ("E 聚合器同源", group_e), ("F 一致性不失真", group_f),
                      ("G 响应形状", group_g), ("H 另一个端点", group_h),
-                     ("I/J/K CLI+热路径", group_i)):
+                     ("I/J/K CLI+热路径", group_i),
+                     ("L 判据无隐性上限", group_l)):
         print(f"\n{name}")
         fn()
     print(f"\n{N_CK - len(FAILS)}/{N_CK} 通过")

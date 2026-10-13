@@ -235,13 +235,30 @@ class Store:
         return [r["harness_id"] for r in self.conn.execute(
             "SELECT harness_id FROM harness_snapshots").fetchall()]
 
-    def run_ids(self, limit: int = 100000) -> List[str]:
-        #: ⛔ 同上：`LIMIT -1` == 无限制。判据调用方**不传** limit 即可全量。
+    def run_ids(self, limit: Optional[int] = None) -> List[str]:
+        """⛔ 默认（不传 limit）= **全量**。
+
+        ⛔⛔ 2026-10-13 修掉的静默降级：这里原本默认 `limit=100000`，注释
+        还写着"不传 limit 即可全量" —— **注释与实现矛盾**（比没注释更危险，
+        它会让人以为判据是全量的）。而一致性判据（`ConsistencyAgg`）正是
+        用**默认**调用的 ⇒ 表超过 10 万行后，溢出部分不进比对，**两个方向
+        同时失真**：
+          · 不进 `run_ids` ⇒ 被算成"账本有、投影没有" ⇒ `missing` **假红**；
+          · 不进 `run_digests` ⇒ 那些行根本不做字段比对 ⇒ `drift` **假绿**。
+        （L3/L4 两条反证分别钉死这两个方向。）
+        这与"绝不静默降级"直接冲突：判据宁可慢，也不能悄悄少看。
+
+        ⛔ 负数仍然夹 `max(0, ...)`：`LIMIT -1` 在 SQLite 里是**无限制**，
+        把它当成"取 0 条"以外的任何意思都会翻车（见 §18）。
+        """
+        if limit is None:
+            return [r["run_id"] for r in self.conn.execute(
+                "SELECT run_id FROM runs").fetchall()]
         return [r["run_id"] for r in self.conn.execute(
             "SELECT run_id FROM runs LIMIT ?",
             (max(0, int(limit)),)).fetchall()]
 
-    def run_digests(self, limit: int = 100000
+    def run_digests(self, limit: Optional[int] = None
                     ) -> Dict[str, Tuple[float, bool, Any]]:
         """一致性判定要的**三列**（reward / passed / harness_id）。
 
@@ -254,10 +271,18 @@ class Store:
         ⛔ 字段取值必须与 `RunRow` **逐字一致**（`float(reward or 0)` /
         `bool(passed)` / harness_id 原样，可能是 None）—— 不一致就会让
         drift 判据在"db 里是 NULL"这种边界上给出不同结论。
+
+        ⛔ 默认（不传 limit）= **全量**：一致性判据用默认调用，绝不能有一
+        个"看不见的上限"（原本是 100000，见 `run_ids` 的注释）。
         """
-        rows = self.conn.execute(
-            "SELECT run_id, reward, passed, harness_id FROM runs LIMIT ?",
-            (max(0, int(limit)),)).fetchall()
+        if limit is None:
+            rows = self.conn.execute(
+                "SELECT run_id, reward, passed, harness_id FROM runs"
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT run_id, reward, passed, harness_id FROM runs LIMIT ?",
+                (max(0, int(limit)),)).fetchall()
         return {r["run_id"]: (float(r["reward"] or 0), bool(r["passed"]),
                               r["harness_id"]) for r in rows}
 
