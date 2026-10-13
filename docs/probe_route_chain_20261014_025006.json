@@ -1,0 +1,84 @@
+{
+  "ts": "2026-10-14 02:50:06",
+  "dev_env": "textscore",
+  "max_n": 12,
+  "rows": [
+    {
+      "case": "single:fix_control_flow",
+      "dev_by_layer": {
+        "easy": 1.0,
+        "hard": 0.0
+      }
+    },
+    {
+      "case": "single:fix_literals",
+      "dev_by_layer": {
+        "easy": 0.0,
+        "hard": 1.0
+      }
+    },
+    {
+      "case": "chain:cf+lit",
+      "dev_by_layer": {
+        "easy": 1.0,
+        "hard": 1.0
+      }
+    },
+    {
+      "case": "override(set):lit",
+      "dev_by_layer": {
+        "easy": 0.0,
+        "hard": 1.0
+      }
+    },
+    {
+      "case": "chain:lit+cf",
+      "dev_by_layer": {
+        "easy": 1.0,
+        "hard": 1.0
+      }
+    }
+  ],
+  "heldout": [
+    {
+      "env": "eventflow",
+      "by_layer": {
+        "easy": 1.0,
+        "hard": 1.0
+      },
+      "n": {
+        "easy": 3,
+        "hard": 2
+      }
+    },
+    {
+      "env": "stateflow",
+      "by_layer": {
+        "easy": 1.0,
+        "hard": 0.5
+      },
+      "n": {
+        "easy": 1,
+        "hard": 4
+      }
+    },
+    {
+      "env": "scheduler",
+      "by_layer": {
+        "easy": 1.0,
+        "hard": 0.75
+      },
+      "n": {
+        "easy": 3,
+        "hard": 8
+      }
+    }
+  ],
+  "verdicts": {
+    "J1_stackable": true,
+    "J2_override_regression": true,
+    "J3_order_independent": true,
+    "J4_generalizes": true
+  },
+  "cost_s": 71.3
+}

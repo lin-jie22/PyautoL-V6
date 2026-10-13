@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
 
 from .environment import Environment, verify_source
+from .genome import parse_route          # 路由语义的唯一解释处（不可另抄一份）
 from .memory import MemoryOS
 from .repair import revert_control_flow, revert_literals   # 唯一事实源（难度分层也用它）
 from .verifier import Verdict, error_verdict
@@ -162,37 +163,44 @@ class HarnessAgent:
         steps.append(AgentStep("L2", "require_tools", True,
                                "+".join(REQUIRED_TOOLS) + " 可用"))
 
-        # ── L1 路由 → L3 技能 ──────────────────────────────────
+        # ── L1 路由 → L3 技能链 ────────────────────────────────
+        #: ⛔ 路由值是**链**（有序技能序列），不是单值。2026-10-14 实测：
+        #:    单值路由下"装一个新技能"= 把旧的顶掉 ⇒ 两个通用能力维度
+        #:    （控制流 / 字面量）互斥 ⇒ 闭环第一轮之后必然停滞。
+        #:    链让能力**可叠加**：新技能追加到链尾，旧的仍在链上。
         used.append("L1")
         routed = h.routing.get(task_class) or h.routing.get(topic) or ""
-        skill = ""
-        if routed and routed in h.skills:
-            skill = routed
-            steps.append(AgentStep("L1", "route", True,
-                                   f"{task_class} → {skill}"))
-        elif routed:
-            steps.append(AgentStep("L1", "route", False,
-                                   f"路由指向不存在的技能 {routed!r}"))
+        chain = parse_route(routed)
+        if chain:
+            missing = [s for s in chain if s not in h.skills]
+            steps.append(AgentStep(
+                "L1", "route", any(s in h.skills for s in chain),
+                f"{task_class} → 链 {list(chain)}"
+                + (f"（未装载的 {missing} 已跳过）" if missing else "")))
         else:
             steps.append(AgentStep("L1", "route", False,
                                    f"没有可达路由（task_class={task_class}）"))
 
-        # ── L0 元规则闸门（会**禁用**具体策略）──────────────────
+        # ── L0 元规则闸门（会**禁用**链上具体策略）──────────────
         ds = directives(h.meta_rules)
+        banned: List[str] = []
         if ds:
             used.append("L0")
-            if banned_by_L0(skill, ds):
+            banned = [s for s in chain if banned_by_L0(s, ds)]
+            if banned:
                 steps.append(AgentStep(
                     "L0", "directive", False,
-                    f"元规则【禁止整文件替换】⇒ {skill} 被禁用（L0 真的有后果）"))
-                skill = ""
+                    f"元规则【禁止整文件替换】⇒ {banned} 被禁，从链上摘除"
+                    f"（L0 真的有后果）"))
             else:
                 steps.append(AgentStep("L0", "directive", True,
-                                       f"元规则生效 {sorted(ds)}，未禁用当前修法"))
+                                       f"元规则生效 {sorted(ds)}，未禁用链上任何修法"))
+        #: 真正会被应用的：装载了 且 未被 L0 禁用
+        active = tuple(s for s in chain if s in h.skills and s not in banned)
 
         # ── L4 记忆通路（技能不可达时的第二条路）────────────────
-        strategy = skill
-        if not strategy and self.memory is not None:
+        strategy = "|".join(active)
+        if not active and self.memory is not None:
             used.append("L4")
             topk = int(h.memory_policy.get("recall_topk", 0) or 0)
             if topk <= 0:
@@ -218,53 +226,78 @@ class HarnessAgent:
                     steps.append(AgentStep("L4", "recall", False,
                                            "召回到了但没有任何基线指纹"))
 
-        # ── 应用策略 ───────────────────────────────────────────
+        # ── 应用策略链（能力**叠加**）──────────────────────────
+        #: ⛔ 语义是"叠加"不是"依次尝试到通过"：后者要为链上每项各跑一次
+        #:    执行判据 ⇒ reward 变成"试出来的"，违反"reward 只来自一次执行"
+        #:    这条唯一来源纪律，且成本随链长线性增长（观测改变了被测成本）。
+        #:    叠加只跑**一次**判据，成不成立由它一次说了算。
         used.append("L3")
-        applicable = True
-        if strategy.startswith("uci:"):
-            #: 外部接入的技能（见 interop 模块）。⛔ 技能给的源码**照样**要过
-            #: 下面的 `verify_source` —— 判据只来自执行，技能自称修好了不算。
-            fixed, applicable = self._uci_apply(
-                strategy[len("uci:"):], src, env, spec, steps)
-        elif strategy == "fix_control_flow":
-            fixed = revert_control_flow(src, env.source)   # 通用但保守
-        elif strategy == "fix_literals":
-            #: 通用字面量修法：**另一个能力维度**（只对齐数值常量）。
-            #: ⛔ 它跟 `fix_control_flow` 一样是通用的（不点名环境），
-            #:    换环境照样生效 ⇒ 能不能过 held-out 由闸判，不在这里预判。
-            fixed = revert_literals(src, env.source)
-        elif strategy.startswith("patch:"):
-            # ⛔ 定点修法必须**校验环境是否匹配**。不校验的话它会在任何环境
-            #    都"生效" ⇒ 定点退化成通用 ⇒ 泛化闸再也发现不了它。
-            target = strategy[len("patch:"):]
-            if target == env.env_id:
-                fixed = env.source
-            else:
-                fixed = src
-                applicable = False
-        elif strategy == "memory_hint":
-            # ⛔ 记忆通路走的是**保守通用修法**，不是"把整份基线还给你"。
-            #    后者会让基线直接满分 ⇒ 弱点被掩盖 ⇒ 进化永久空转（已实测）。
-            #    前者只是让"技能不可达"时仍有路可走，且**修不全** ⇒
-            #    天花板仍在，进化的动力还在。
-            fixed = revert_control_flow(src, env.source)
-        else:
-            fixed = src                                    # 无策略 ⇒ 原样
+        plan = ("memory_hint",) if strategy == "memory_hint" else active
+        fixed = src
+        applied: List[str] = []
+        for s in plan:
+            prev = fixed
+            new_fixed, applicable = self._apply_one(s, prev, env, spec, steps)
+            if applicable:
+                fixed = new_fixed
+                applied.append(s)
+            steps.append(AgentStep(
+                "L3", "apply", applicable,
+                f"链项 {s}：changed={applicable and new_fixed != prev}"
+                + ("" if applicable
+                   else f"（对 {env.env_id} 不适用 ⇒ 该项跳过，链继续）")))
         steps.append(AgentStep(
-            "L3", "apply", bool(strategy) and applicable,
-            f"strategy={strategy or 'none'}，changed={fixed != src}"
-            + ("" if applicable else f"（对 {env.env_id} 不适用，定点修法失配）")))
+            "L3", "apply", bool(applied),
+            f"链={list(plan) or ['none']} 生效={applied} 总 changed={fixed != src}"))
 
         v = verify_source(env, source=fixed, timeout=self.timeout)
         return AgentResult(
             verdict=Verdict(
                 passed=v.passed, checks=v.checks,
                 evidence={**(v.evidence or {}), "strategy": strategy,
+                          #: ⛔ `chain` 是**归因**字段：链上哪一项真的改了源码。
+                          #: 没有它，"链修好了这道题"就说不清是谁修的。
+                          "chain": list(plan), "applied": list(applied),
                           "layers_used": sorted(set(used)),
                           "n_steps": len(steps)},
                 error=v.error, env_fingerprint=env.fingerprint, cost_s=v.cost_s),
             steps=tuple(steps), strategy=strategy,
             layers_used=tuple(sorted(set(used))))
+
+    def _apply_one(self, strategy: str, src: str, env: Any,
+                   spec: Dict[str, Any], steps: List[AgentStep]
+                   ) -> Tuple[str, bool]:
+        """应用链上的**一项**策略，返回 (修后的源码, 是否适用)。
+
+        ⛔ 与旧的单值分支一一对应，语义一处都没改 —— 变的只是"被调用几次、
+        结果怎么叠加"。这样"链"不会顺手改变任何单项修法的行为，
+        新旧对照才是同口径的。
+        """
+        if strategy.startswith("uci:"):
+            #: 外部接入的技能（见 interop 模块）。⛔ 技能给的源码**照样**要过
+            #: 后面的 `verify_source` —— 判据只来自执行，技能自称修好了不算。
+            return self._uci_apply(
+                strategy[len("uci:"):], src, env, spec, steps)
+        if strategy == "fix_control_flow":
+            return revert_control_flow(src, env.source), True   # 通用但保守
+        if strategy == "fix_literals":
+            #: 通用字面量修法：**另一个能力维度**（只对齐数值常量）。
+            #: ⛔ 它跟 `fix_control_flow` 一样是通用的（不点名环境），
+            #:    换环境照样生效 ⇒ 能不能过 held-out 由闸判，不在这里预判。
+            return revert_literals(src, env.source), True
+        if strategy.startswith("patch:"):
+            # ⛔ 定点修法必须**校验环境是否匹配**。不校验的话它会在任何环境
+            #    都"生效" ⇒ 定点退化成通用 ⇒ 泛化闸再也发现不了它。
+            if strategy[len("patch:"):] == env.env_id:
+                return env.source, True
+            return src, False
+        if strategy == "memory_hint":
+            # ⛔ 记忆通路走的是**保守通用修法**，不是"把整份基线还给你"。
+            #    后者会让基线直接满分 ⇒ 弱点被掩盖 ⇒ 进化永久空转（已实测）。
+            #    前者只是让"技能不可达"时仍有路可走，且**修不全** ⇒
+            #    天花板仍在，进化的动力还在。
+            return revert_control_flow(src, env.source), True
+        return src, True                                       # 未知 ⇒ 原样
 
     # ── 接入层：外部技能（UCI）────────────────────────────────
     @staticmethod

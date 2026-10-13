@@ -23,7 +23,7 @@ from dataclasses import dataclass, field, replace
 from typing import (Any, Callable, Dict, List, Optional, Protocol, Sequence,
                     Tuple)
 
-from .genome import Capsule, Gene, Harness
+from .genome import Capsule, Gene, Harness, parse_route
 from .runtime import Trajectory
 
 
@@ -292,7 +292,17 @@ class TemplateProposer:
         out: List[Capsule] = []
 
         if kind in ("missing_skill", "unknown"):
-            for i, (sname, body) in enumerate(list(self.skills.items())[:n]):
+            #: ⛔⛔ 路由是**链**：新技能 `append` 到现有链尾，不是 `set` 覆盖。
+            #:    2026-10-14 实测：set 覆盖 ⇒ 装一个新技能就顶掉旧的 ⇒
+            #:    两个通用能力维度（控制流 / 字面量）互斥 ⇒ dev 分层的
+            #:    easy 从 +1.0 掉到 −1.0 ⇒ 候选永远过不了闸 ⇒ 闭环停滞
+            #:    （旧读数：round2/3 `no_candidate_passed`）。
+            #:    append 之后能力**可叠加**，旧的仍在链上。
+            cur = parse_route(harness.routing.get(self.route_key, ""))
+            # ⛔ 已在链上的技能不再是"弱点" ⇒ 不再重复提（否则提议器会一直
+            #    提同一个东西，进化循环看起来在动，实际原地踏步）。
+            for sname, body in [(s, b) for s, b in self.skills.items()
+                                if s not in cur][:n]:
                 # ⛔ 胶囊（不是单基因）：技能 + 路由**必须一起改**。
                 #    只加技能 ⇒ 路由没接通 ⇒ 技能不可达 ⇒ reward 不变
                 #    ⇒ 过不了能力地板。这正是 Capsule 存在的理由，
@@ -301,10 +311,11 @@ class TemplateProposer:
                     name=f"add_skill:{sname}",
                     genes=(Gene(op="set", target=f"L3.skills.{sname}",
                                 value=body, rationale=f"弱点={kind}"),
-                           Gene(op="set", target=f"L1.routing.{self.route_key}",
+                           Gene(op="append", target=f"L1.routing.{self.route_key}",
                                 value=sname,
-                                rationale=f"新技能需可达（按任务类别"
-                                          f"{self.route_key} 路由，不按环境名）")),
+                                rationale=f"新技能**追加**到现有链 {list(cur)} 尾"
+                                          f"（按任务类别 {self.route_key} 路由，"
+                                          f"不按环境名；不覆盖已有能力）")),
                     rationale=f"补技能 {sname} 并接通路由", origin="mined"))
 
         if kind == "missing_tool":
@@ -647,7 +658,7 @@ SYSTEM_PROMPT = """\
 你是一个自进化 agent 系统的变异提议器。你只输出 JSON，不输出任何解释文字。
 
 可编辑的层（target 必须以这些开头）：
-  L1.routing.<键>          任务类别 → 技能名的路由
+  L1.routing.<键>          任务类别 → 技能名（或 `技能A|技能B` 表示按顺序叠加）
   L2.tools                 工具名（用 op=append，value 是工具名字符串）
   L3.skills.<技能名>       技能正文（op=set）
   L4.memory_policy.<键>    记忆策略参数（op=tune 时 value 是数字增量）

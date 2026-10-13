@@ -148,6 +148,53 @@ class Harness:
         return len(canonical_json(self.to_dict()))
 
 
+def parse_route(value: Any) -> Tuple[str, ...]:
+    """把一个路由值解释成**技能链**（有序）。
+
+    ⛔ 这是路由语义的**唯一解释处**。agent / 提议器 / 审计都必须走它，
+    各自 `if isinstance(v, str)` 判断一遍就会漂移（写入侧存 list、读取侧
+    当 str 用），而两边都以为自己读的是同一条路由。
+
+    接受三种写法（都为兼容已有 harness 与 LLM 输出）：
+        "fix_control_flow"          ⇒ ("fix_control_flow",)
+        "a|b"                       ⇒ ("a", "b")      串写（LLM 友好）
+        ["a", "b"]                  ⇒ ("a", "b")      结构化
+        "" / None                   ⇒ ()              无路由
+
+    链的含义是**能力叠加**：依次应用到同一个源码，最后**只跑一次判据**。
+    不是"依次尝试直到通过"——后者要跑 N 次执行判据，会把 reward 变成
+    "试出来的"，破坏"reward 只来自一次执行"这条唯一来源纪律。
+    """
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return ()
+        if "|" in s:
+            return tuple(x.strip() for x in s.split("|") if x.strip())
+        return (s,)
+    if isinstance(value, (list, tuple)):
+        return tuple(str(x).strip() for x in value if str(x).strip())
+    s = str(value).strip()
+    return (s,) if s else ()
+
+
+def _route_value(value: Any) -> Any:
+    """路由值的**存储**形态：单值保持 str（向后兼容），多值转 list。
+
+    ⛔ 刻意不做"一律转 list"：已有 harness / 测试 / 账本里 routing 是
+    `{"repair": "fix_control_flow"}` 这种 str，强行改类型会让所有既有
+    断言和 harness_id 一起漂。归一化放在**读取侧**（`parse_route`）。
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        items = [str(x).strip() for x in value if str(x).strip()]
+        return items[0] if len(items) == 1 else items
+    return value
+
+
 def apply_gene(h: Harness, gene: Gene) -> Harness:
     """应用一个基因编辑，返回**新** Harness（原对象不受影响）。
 
@@ -191,9 +238,25 @@ def apply_gene(h: Harness, gene: Gene) -> Harness:
             raise ValueError(f"routing target 需形如 routing.<kind>，实得 {gene.target}")
         routing = dict(h.routing)
         if gene.op == "remove":
-            routing.pop(parts[1], None)
+            #: remove 支持"从链上摘掉某一项"，而不是整条路由消失 ——
+            #: 摘掉一个技能不该把别的技能一起带走。
+            cur = parse_route(routing.get(parts[1]))
+            want = str(gene.value or "")
+            rest = [x for x in cur if x != want] if want else list(cur)
+            if not rest:
+                routing.pop(parts[1], None)
+            else:
+                routing[parts[1]] = _route_value(rest)
+        elif gene.op == "append":
+            #: append = **能力叠加**（链尾追加），这是 L1 从"单值"升级成
+            #: "链"的关键：装一个新技能不再顶掉旧的。
+            cur = list(parse_route(routing.get(parts[1])))
+            for x in parse_route(gene.value):
+                if x not in cur:
+                    cur.append(x)
+            routing[parts[1]] = _route_value(cur)
         else:
-            routing[parts[1]] = str(gene.value)
+            routing[parts[1]] = _route_value(gene.value)
         return replace(h, routing=routing)
 
     if layer == "tools":
