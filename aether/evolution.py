@@ -381,21 +381,32 @@ class EvolutionLoop:
         return out
 
     # ── 死路账：同一候选在同一环境对上被拦了多少次 ──────────────────
-    def _deadend_accum(self, ev: Any, total: Dict[str, int],
-                       ever_gen: set) -> None:
+    def _deadend_accum(self, ev: Any, streak: Dict[str, int]) -> None:
         """把**一条**事件累加进死路账（增量与全量共用同一份累加逻辑）。
 
         ⛔ 只 factored 出"累加"，不 factored 出"读"：读只有 `iter_events`
         一个实现，两条路径（全量 / 增量）都必须走它 —— 多一份读法就会
         在坏行、编码、偏移上漂移，而漂移是静默的。
+
+        ⛔ 累加的是**连续**计数（streak），不是累计总数：
+            · `generalize` ⇒ 归零（成功一次就重新给机会）；
+            · 其它 verdict ⇒ +1。
+          `streak` 是"连续"语义的**充分统计量**：正序流式扫一遍就能维护，
+          不需要重放历史，也不需要额外记"曾否成功过"的集合 —— 所以增量
+          路径与全量路径在数学上严格等价（不存在"增量算出来的值和全量
+          不一样"这条漂移路径）。
         """
         if ev.kind != "gen.probe":
             return
         p = ev.payload or {}
         key = f"{p.get('capsule', '')}|{p.get('env_pair', 'unknown')}"
-        total[key] = total.get(key, 0) + 1
+        #: ⛔ 严格匹配 `"generalize"`（不大小写折叠、不把 `partial` 算成功）：
+        #:    这是改造前就有的口径，改判据属于**另一件事**，要有自己的交叉
+        #:    表。当前口径下 `partial`/`GENERALIZE` 都计入"被拦"（+1）。
         if str(p.get("verdict")) == "generalize":
-            ever_gen.add(key)
+            streak[key] = 0
+        else:
+            streak[key] = streak.get(key, 0) + 1
 
     def _ensure_deadend_stats(self) -> None:
         """惰性初始化统计。**幂等**（重复调用不重置计数）。
@@ -419,20 +430,19 @@ class EvolutionLoop:
         而新增的第一条可以是任何 kind。记成 gen.probe 的会让校验在
         「探测之后又写了别的事件」时误判成"账本被改过" ⇒ 每轮全扫。
         """
-        total: Dict[str, int] = {}
-        ever_gen: set = set()
+        streak: Dict[str, int] = {}
         self._ensure_deadend_stats()
         prog: Dict[str, Any] = {"offset": 0}
         head = self._genesis_hash()
         n = 0
         for ev in self.ledger.iter_events(progress=prog):
-            self._deadend_accum(ev, total, ever_gen)
+            self._deadend_accum(ev, streak)
             head = ev.hash
             n += 1
         self._deadend_stats["full"] += 1
         self._deadend_stats["scanned"] += n
         return {"offset": int(prog["offset"]), "head_hash": head,
-                "total": total, "ever_gen": ever_gen, "fp": self._deadend_fp()}
+                "streak": streak, "fp": self._deadend_fp()}
 
     @staticmethod
     def _genesis_hash() -> str:
@@ -472,9 +482,29 @@ class EvolutionLoop:
         冷却**。这是判据层的 bug，不是性能问题；改它会改变冷却的触发面，
         必须先做「成败 × 是否命中冷却」交叉表再拍板。
 
-        ⇒ 本次**只换实现、不动语义**，保持二元值；I 组测试用旧实现当
-        oracle 做随机对拍（含 `[G, 拦, 拦]` 这个边界），把当前语义钉死 ——
-        哪天要修成"连续"，那条测试会先红，改的人必须先看交叉表。
+        ⇒ 第 14 轮**只换实现、不动语义**，保持二元值，并用旧实现当 oracle
+        做随机对拍（含 `[G, 拦, 拦]` 这个边界）把语义钉死 —— 就是为了让
+        修它的人**必须先看到交叉表**。
+
+        ⛔⛔ **2026-10-13 第 17 轮：已按"连续"语义修好**。拍板依据是实测
+        交叉表（不是"看起来 better"）：
+
+          · 生产账本 `data/ledger.jsonl`：39 条 `gen.probe` / 7 个 key，
+            **0 个** key 处在「曾 generalize 过、但末尾连续被拦」的形态
+            （所有成功过的 key 序列都是纯 G 或以 G 结尾）
+            ⇒ 两种语义在当前账本上**逐 key 同值，零决策翻转**（零回归面）。
+          · 冷却阈值本身的误伤率（历史上"连续失败 ≥k 次后下一次真
+            generalize"）：k=3 时 12 次命中 / 0 次误伤。样本小，但方向上
+            支持"阈值 3 不激进"。
+          · ⛔ 反面也记清楚：样本只有 39 条，**证明不了未来零影响**，只证明
+            当前零回归。真正保证不永久封死的是 `deadend_probation_every`
+            出口（每 5 轮强制试探一次），不是这份统计。
+
+        ⛔⛔ 修的不是"值算错了"，而是**充分统计量选错了**：旧实现记的是
+        `total` + `ever_gen`（曾否成功），由此只能算出二元值；连续语义的
+        充分统计量是 `streak`（当前连续失败数），正序扫一遍即可维护，
+        **并且让增量路径与全量路径严格等价**（不需要重放历史）。
+        ⇒ 副作用：`ever_gen` 集合消失，state 更小。
 
         ⛔⛔ 2026-10-13 第 16 轮：上面那版已经流式了，但它**每轮仍全扫一遍
         账本**（只是不再物化）。账本 10 万条时每轮仍要解析 10 万行 ⇒ 轮数
@@ -492,9 +522,9 @@ class EvolutionLoop:
            否则"每轮全扫"和"真增量"在外部看起来一模一样（假仪表）。
         """
         state = self._deadend_state()
-        ever_gen = state["ever_gen"]
-        return {k: (0 if k in ever_gen else state["total"][k])
-                for k in state["total"]}
+        #: ⛔ 返回副本：调用方拿到的是快照，改它不会污染增量缓存
+        #:    （缓存里的 dict 是要被后续事件继续累加的）。
+        return dict(state["streak"])
 
     def _deadend_state(self) -> Dict[str, Any]:
         """取（必要时更新）死路账的**增量状态**。"""
@@ -532,7 +562,7 @@ class EvolutionLoop:
             return self._deadend_cache
 
         for ev in new:
-            self._deadend_accum(ev, c["total"], c["ever_gen"])
+            self._deadend_accum(ev, c["streak"])
         c["head_hash"] = new[-1].hash
         c["offset"] = int(prog["offset"])
         c["fp"] = fp

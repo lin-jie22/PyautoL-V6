@@ -451,12 +451,14 @@ def _drain(lp: Path) -> List[Dict[str, Any]]:
 
 
 # ── I 组：CLI 也是"读数入口"，而且它从未被数过遍数 ─────────────────
-def _old_deadend(ledger: Any) -> Dict[str, int]:
-    """`_deadend_map` 的**改造前实现** —— 当 oracle 用，不参与生产。
+def _legacy_binary_deadend(ledger: Any) -> Dict[str, int]:
+    """**第 14 轮的二元实现**（有 bug 的那版）—— 只当反证物，不作 oracle。
 
-    ⛔ 逐字照抄 `git show 4cd3054:aether/evolution.py` 的版本（倒序 +
-    `done` 集合），不许"顺手改成更好懂的写法" —— oracle 一旦被美化，
-    它就不再证明"新旧同值"，只证明"新旧都好看"。
+    ⛔ 逐字保留（倒序 + `done` 集合），不许"顺手改成更好懂的写法"。
+    它的语义是**二元**的：曾 generalize ⇒ 0，否则 ⇒ 全部条数。
+    ⛔⛔ 2026-10-13 第 17 轮已把生产改成"连续"语义 ⇒ 这个函数**不再**
+    是对拍基准（对拍用 `_naive_streak`）。它现在的唯一用途是反证
+    "新语义确实不是旧的二元语义"（J2c）—— 留着它，改回去的人会立刻红。
     """
     out: Dict[str, int] = {}
     done: set = set()
@@ -470,6 +472,44 @@ def _old_deadend(ledger: Any) -> Dict[str, int]:
         if str(p.get("verdict")) == "generalize":
             out[key] = 0
             done.add(key)
+        else:
+            out[key] = out.get(key, 0) + 1
+    return out
+
+
+def _naive_streak(ledger: Any) -> Dict[str, int]:
+    """**朴素"连续"实现** —— 当 oracle 用，不参与生产。
+
+    ⛔ 算法必须**独立于**生产实现，否则对拍是恒真的：
+        · 生产：正序流式遍历 + 增量缓存，维护 `streak`（遇 G 归零 / 否则 +1）；
+        · 这里：**倒序**从末尾往前数，遇到第一条 `generalize` 就停。
+      两者算法不同（一个累加、一个回看），同值才说明语义真的是"连续"。
+
+    ⛔ 它同时充当 J3 的"物化版"峰值基线（`ledger.events()` 物化整份）。
+      换成 `_legacy_binary_deadend` 不行 —— 语义不同，值对不上就没法
+      把"峰值降了"和"值没变"放在同一条断言里。
+    """
+    out: Dict[str, int] = {}
+    #: ⛔ "停止标记"必须是**独立集合**：若用 `key in out` 判断，第一次赋值
+    #:    后它就为真 ⇒ 第二次遇到同一 key 会被 continue 掉 ⇒ 非 G 序列永远
+    #:    只数到 1（我第一版就写错了，对拍却仍"绿" —— 因为两边都不对）。
+    stopped: set = set()
+    for ev in reversed(ledger.events()):
+        if ev.kind != "gen.probe":
+            continue
+        p = ev.payload or {}
+        key = f"{p.get('capsule', '')}|{p.get('env_pair', 'unknown')}"
+        if key in stopped:
+            continue
+        if str(p.get("verdict")) == "generalize":
+            #: ⛔⛔ **停止，但不要清零**！倒序已经数到的那 k 条"末尾连续
+            #:    被拦"是真实存在的：序列 `[G, 拦, 拦]` 的连续数是 **2**，
+            #:    不是 0。写成 `out[key] = 0`（照抄旧二元实现的写法）就把
+            #:    oracle 自己也变成二元的 ⇒ 对拍拿一个错的基准去比，
+            #:    J1 实测 **24/40 组假红**（我第一版就踩了）。
+            #:    ⇒ oracle 不能照抄被测对象的控制流结构，只能照抄**定义**。
+            out[key] = out.get(key, 0)
+            stopped.add(key)
         else:
             out[key] = out.get(key, 0) + 1
     return out
@@ -606,25 +646,48 @@ def group_i() -> None:
                     "verdict": random.choice(verdicts)})
                 if random.random() < 0.3:
                     led.append("other.kind", {"x": i})
-            if _old_deadend(led) != new_deadend(led):
+            if _naive_streak(led) != new_deadend(led):
                 bad += 1
-    ck("J1 随机对拍 40 组：与改造前实现**逐 key 相等**（只换实现不动语义）",
+    ck("J1 随机对拍 40 组：与**独立算法**（倒序回看）逐 key 相等"
+       "（连续语义的正序累加实现）",
        bad == 0, f"{bad} 组不一致")
 
-    #: ⛔ 这条把**当前语义钉死**。旧实现是二元的（曾否成功 ⇒ 0 或全部），
-    #:    与 docstring 声称的"连续"不符 ⇒ 「成功过、之后又连续被拦两次」
-    #:    给 0 而不是 2 ⇒ 这类候选永远不会进冷却。
-    #:    ⛔ 这是**已知判据 bug**，本次故意不改（改它要先做交叉表）。
-    #:    哪天要修成"连续"语义，这条会先红 —— 红的人必须先看交叉表。
+    #: ⛔⛔ J2/J2b/J2c 三条一起把"连续"语义钉死 —— 三个方向都得挡住：
+    #:     二元（曾成功⇒0）/ 累计（不归零）/ 方向搞反。
+    #:     拍板依据见 `evolution._deadend_map` docstring 里的交叉表。
+    def _streak_of(seq) -> int:
+        with tempfile.TemporaryDirectory() as td:
+            led = Ledger(Path(td) / "l.jsonl")
+            for v in seq:
+                led.append("gen.probe", {"capsule": "c", "env_pair": "p",
+                                         "verdict": v})
+            return new_deadend(led).get("c|p", "MISSING")
+
+    ck("J2 【已修】[G,拦,拦] ⇒ 2（旧二元实现给 0 ⇒ 成功过的候选永不冷却）",
+       _streak_of(("generalize", "blocked", "blocked")) == 2,
+       f"实得 {_streak_of(('generalize', 'blocked', 'blocked'))}")
+
+    ck("J2b 遇 generalize **归零**（不是累计）：[拦,拦,G,拦,拦] ⇒ 2 而非 4",
+       _streak_of(("blocked", "blocked", "generalize", "blocked",
+                   "blocked")) == 2,
+       f"实得 {_streak_of(('blocked','blocked','generalize','blocked','blocked'))}")
+
+    #: ⛔ 这条是"修好了"的**可观测证据**：同一个序列在旧二元实现下不冷却、
+    #:    在新语义下冷却。只断言值（J2）不证明判据面变了，得断言到阈值。
     with tempfile.TemporaryDirectory() as td:
         led = Ledger(Path(td) / "l.jsonl")
-        for v in ("generalize", "blocked", "blocked"):
+        for v in ("generalize", "blocked", "blocked", "blocked"):
             led.append("gen.probe", {"capsule": "c", "env_pair": "p",
                                      "verdict": v})
-        got = new_deadend(led).get("c|p")
-        ck("J2 【已知语义 bug，故意保留】[G,拦,拦] ⇒ 0 而非 2"
-           "（旧实现是二元值 ⇒ 成功过的候选永不冷却；改前先做交叉表）",
-           got == 0, f"实得 {got}")
+        new_v = new_deadend(led).get("c|p")
+        old_v = _legacy_binary_deadend(led).get("c|p")
+        ck("J2c 修复面可观测：[G,拦,拦,拦] 旧语义不冷却(0) / 新语义冷却(≥3)",
+           old_v == 0 and new_v >= 3,
+           f"旧={old_v} 新={new_v}")
+
+    ck("J2d 末尾停在 generalize ⇒ 0（成功过就重新给机会，不许记旧账）",
+       _streak_of(("blocked", "blocked", "generalize")) == 0,
+       f"实得 {_streak_of(('blocked','blocked','generalize'))}")
 
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
@@ -644,7 +707,7 @@ def group_i() -> None:
             tracemalloc.stop()
             return p, r
 
-        p_old, m_old = peak_of(lambda: _old_deadend(led))
+        p_old, m_old = peak_of(lambda: _naive_streak(led))
         p_new, m_new = peak_of(lambda: new_deadend(led))
         mb = 1024 * 1024
         ck("J3 流式版峰值 < 物化版的 10%（只换实现，值仍逐 key 相等）",
@@ -915,8 +978,8 @@ def group_m() -> None:
             _probe(led2)
         got = loop._deadend_map()
         ck("M2 rebuild（重写整份）后仍与全量 oracle 同值",
-           got == _old_deadend(_Led(p)),
-           f"got={got} want={_old_deadend(_Led(p))} "
+           got == _naive_streak(_Led(p)),
+           f"got={got} want={_naive_streak(_Led(p))} "
            f"reasons={loop._deadend_stats['reasons']}")
         ck("M2b rebuild 必须被**记为一次失效**（否则外部看不出增量白做）",
            loop._deadend_stats["invalidated"] >= 1,
@@ -934,9 +997,9 @@ def group_m() -> None:
         p.write_text("".join(lines), encoding="utf-8")
         got = loop._deadend_map()
         ck("M3 truncate（文件变短）后仍与全量 oracle 同值",
-           got == _old_deadend(_Led(p))
+           got == _naive_streak(_Led(p))
            and loop._deadend_stats["reasons"]["shrunk"] >= 1,
-           f"got={got} want={_old_deadend(_Led(p))} "
+           f"got={got} want={_naive_streak(_Led(p))} "
            f"reasons={loop._deadend_stats['reasons']}")
 
     # ── M4 真判据：半行（并发 append 写到一半）不得污染 offset ──
@@ -978,7 +1041,7 @@ def group_m() -> None:
             for _ in range(3):
                 loop._deadend_map()
                 _probe(led)
-            if loop._deadend_map() != _old_deadend(_Led(p)):
+            if loop._deadend_map() != _naive_streak(_Led(p)):
                 bad += 1
     ck("M5 随机对拍 60 组：增量路径与全量 oracle **逐键同值**",
        bad == 0, f"不一致 {bad} 组")
@@ -1016,7 +1079,7 @@ def group_m() -> None:
         bare.ledger = led
         try:
             got = bare._deadend_map()
-            ok = got == _old_deadend(_Led(p))
+            ok = got == _naive_streak(_Led(p))
             detail = f"got={got}"
         except Exception as e:  # noqa: BLE001
             ok, detail = False, f"{type(e).__name__}: {e}"
