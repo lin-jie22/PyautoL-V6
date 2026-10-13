@@ -126,7 +126,7 @@ V6/
 
 ## 5. 系统如何自证（判据清单）
 
-这三十二条是 V6 的"宪法"。每条都有对应的契约测试守着：
+这三十五条是 V6 的"宪法"。每条都有对应的契约测试守着：
 
 1. **事实只有一份**：账本（hash 链）。SQLite 是投影，`rebuild_from_ledger()` 可重建。
    ⛔⛔ 实测（2026-10-13）：投影曾**丢掉 89.7% 的执行历史** —— 账本 495 条
@@ -335,6 +335,36 @@ V6/
     ⇒ 想知道"默认有没有上限"，就必须去看**签名默认值本身**
     （`inspect.signature(...).parameters["limit"].default is None`），
     事故版下立刻转红。
+33. **增量缓存必须能证明"前面没变"，不能靠"相信文件只会追加"**。
+    `_deadend_map` 每轮全扫账本 ⇒ O(轮 × 账本)。改成记住文件偏移 + 链头，
+    只解析新增部分；三条失效检查（偏移只停行边界 / 新增首条 `prev_hash`
+    接得上 / 无新行但文件被写过 ⇒ 可疑）任一不成立就回退全量。
+    ⛔⛔ **踩到的坑**：文本模式下 `for line in f` 里调 `f.tell()` 直接抛
+    `OSError: telling position disabled by next() call`；第一版用
+    `except: pass` 兜住 ⇒ 偏移永远是 0 ⇒ 每次都从头读，而 `stats` 里
+    `full=6 / incremental=0` 一眼看穿。**吞掉失败 = 把降级伪装成成功**。
+    ⛔ **失效必须可观测**（`_deadend_stats.invalidated`）：不记的话，
+    "真增量"和"每轮全扫"在外部完全等价（假仪表）。
+34. **rlimit 设不上就是设不上，不许靠记账假装生效**。
+    实测 macOS 上 `RLIMIT_AS` / `RLIMIT_DATA` / `RLIMIT_RSS` **三条全抛**
+    `ValueError: current limit exceeds maximum limit`。⇒ 改两条实测有效
+    的路线：进程内看 `ru_maxrss` 自杀（⛔ 单位跨平台不同：macOS 字节 /
+    Linux KB）+ 父进程 `ps` 看门狗（覆盖"守卫线程没机会跑"）。
+    文件系统隔离补 audit hook 层（白名单 = 工作目录 + `sys.prefix`，
+    ⛔ 少了 stdlib 冷 import 也会被拒），**探测式接入**（跑同一份 runner
+    的 `--selftest`，不写第二份探测代码）。
+    ⛔⛔ **拒绝事件必须与"代码有 bug"分开记账**（`sandbox.denied`）：
+    混在一起，自演化会把"被沙箱拦下"当成 bug 去修一个不存在的 bug。
+    ⛔ 字段也拆开：`os_isolated`（OS 层）≠ `fs_isolated`（能力，含 audit
+    层）—— 合成的字段会把真生效的隔离判成谎报。
+35. **断言的判别力必须靠注入事故版量，不许靠"我觉得它能抓到"**。
+    本轮实测：M 组我以为 5 条是真判据，注入后只有 **M1/M2b/M6** 转红；
+    M2 在"去掉链校验"下**值仍同值**（rebuild 前后 payload 一样），真正
+    抓到"抱着旧缓存"的是 M2b；M4 被两条兜底路径救回，注入"offset 记在
+    解析前"也照样绿 ⇒ 是护栏。E2 只查第一条时也不红（块边界没落到它身上）
+    ⇒ 改成断言**每一条**。
+    ⛔ 连带：**替身要透传 `*a, **k`**（J4 的 `lambda self:` 在新签名下
+    TypeError —— 那是替身跟不上接口，不是被测代码错了）。
 
 ---
 

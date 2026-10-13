@@ -31,6 +31,7 @@ from typing import Any, Dict, List
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from aether.evolution import EvolutionLoop                # noqa: E402
 from aether.ledger import Ledger, LedgerStatsAgg          # noqa: E402
 from aether.serve import (                                 # noqa: E402
     MemoryLedgerAgg, TailWindowAgg, _collect, _event_dict,
@@ -654,8 +655,11 @@ def group_i() -> None:
         oe, oi = Ledger.events, Ledger.iter_events
         ne, ni = {"n": 0}, {"n": 0}
         Ledger.events = lambda self: (ne.__setitem__("n", ne["n"] + 1), oe(self))[1]
-        Ledger.iter_events = lambda self: (ni.__setitem__("n", ni["n"] + 1),
-                                           oi(self))[1]
+        #: ⛔ 替身必须**透传** `*a, **k`：增量版会传 `since_offset=` /
+        #:    `progress=`，写死 `lambda self:` 会 TypeError —— 那是替身
+        #:    跟不上接口，不是被测代码错了（2026-10-13 回归里真踩到）。
+        Ledger.iter_events = lambda self, *a, **k: (
+            ni.__setitem__("n", ni["n"] + 1), oi(self, *a, **k))[1]
         try:
             new_deadend(Ledger(root / "data" / "l.jsonl"))
         finally:
@@ -797,6 +801,241 @@ def group_l() -> None:
             s.close()
 
 
+class _FixedProposer:
+    """啥也不提的提议器（M 组只问死路账，跑不到 propose）。"""
+
+    def __init__(self, caps):
+        self.caps = caps
+
+    def propose(self, weakness, harness, n=3):
+        return list(self.caps)
+
+
+def _mk_deadend_loop(ledger: Any) -> Any:
+    """装一个**只用来问死路账**的 loop。
+
+    ⛔ 刻意走**真实构造函数**：M7 要证明 `__init__` 真的初始化了增量状态。
+    用 `EvolutionLoop.__new__` 手工塞属性会绕过这件事 —— 哪天有人删了
+    `__init__` 里那两行，测试照样全绿而生产直接崩（假绿）。
+    """
+    from aether.evolution import EvolutionLoop
+    from aether.nongression import Baseline, FrozenTask, NonRegressionGate
+    from aether.verifier import Verdict
+
+    def runner(h, spec):
+        return Verdict(passed=True, reward=1.0, evidence={}, error="")
+
+    dev = [FrozenTask(task_id="d0", spec={"env": "A"})]
+    frozen = [FrozenTask(task_id="fz", spec={"env": "A", "frozen": True})]
+    cal = {"seed": 0}
+    base = Baseline(caliber=cal, verdicts={}, harness_id="seed")
+    return EvolutionLoop(ledger, NonRegressionGate(frozen, base), dev,
+                         runner, _FixedProposer([]), caliber=cal)
+
+
+def group_m() -> None:
+    """M 组：死路账**不得每轮全扫账本**（增量 + 失效可证）。
+
+    ⛔ 上一轮（4b5db89）已经把 `_deadend_map` 从"物化整份"改成"流式遍历"，
+       但它**每轮仍解析全账本**：账本 N 条 × 轮数 R ⇒ O(R×N)。本组守的是
+       "只读新增"，以及"一旦不能证明前面的部分没变，就必须退回全量"。
+
+    ⛔⛔ **判别力是注入事故版实测出来的，不是我以为的**（2026-10-13）：
+
+       真判据（对应事故下确实转红）：
+         M1  ← 事故「忽略 since_offset」→ 红灯 M1,M6
+         M2b ← 事故「去掉链连续性校验」→ 红灯 M2b
+         M6  ← 事故「去掉 no_new_but_touched 回退」→ 红灯 M6
+
+       护栏（对应事故下**仍绿**，别拿它当战果）：
+         · M2 —— 事故 B 下值**依然同值**：这次 rebuild 前后 payload 相同，
+           统计值本来就不变。它守的是"值不错"，真正抓到"抱着旧缓存"的是
+           **M2b**（失效必须被记账）。
+         · M3 —— 事故 C（去掉 shrink 检查）下也红，但红的只是
+           `reasons.shrunk` 计数：**值**是由 M6 那条兜底路径救回来的。
+           ⇒ 单看 M3 会以为 shrink 检查在守正确性，其实它守的是可观测性。
+         · M4a/M4b —— 事故 D（offset 记在解析前 ⇒ 半行也推进）**两条都绿**：
+           半行只可能是文件最后一行，推进后要么链接不上、要么读不到新行，
+           **两条兜底路径都会把它拉回全量** ⇒ 最坏是多扫一次，不会永久
+           错位。⇒ M4 证明的是"最终仍读得到"，不是"offset 从没错过"。
+         · M5 —— 随机对拍，任何实现漂移都会红（覆盖面，非判别力）。
+         · M7 —— 证明 `__init__` 真的初始化了（防手塞属性的测试漏掉）。
+    """
+    print("  （M 组：死路账增量 —— 只读新增，且失效必须能证）")
+    import os
+    import random
+
+    from aether.ledger import Ledger as _Led
+
+    rng = random.Random(11)
+    caps = ["a", "b", "c"]
+
+    def _probe(led, cap=None, verdict=None, pair="p1"):
+        return led.append("gen.probe", {
+            "capsule": cap if cap is not None else rng.choice(caps),
+            "env_pair": pair,
+            "verdict": verdict or rng.choice(["generalize", "overfit",
+                                              "blocked"])}, actor="t")
+
+    # ── M1 真判据：追加场景下扫描条数 ≈ 账本总数，不随轮数线性增长 ──
+    with tempfile.TemporaryDirectory(prefix="v6m_") as td:
+        p = Path(td) / "l.jsonl"
+        led = _Led(p)
+        loop = _mk_deadend_loop(led)
+        rounds, per = 6, 40
+        for _ in range(rounds):
+            for _ in range(per):
+                if rng.random() < 0.7:
+                    _probe(led)
+                else:
+                    led.append("other.kind", {"x": rng.random()}, actor="t")
+            loop._deadend_map()
+        st = loop._deadend_stats
+        total = rounds * per
+        ck("M1 追加场景：6 轮只扫 ≈账本总量（旧版 = 轮数×总量 240 vs 1440）",
+           st["scanned"] <= total * 1.1 and st["incremental"] >= rounds - 1,
+           f"scanned={st['scanned']} total={total} inc={st['incremental']} "
+           f"full={st['full']}")
+
+    # ── M2 真判据：账本被 rebuild 重写 ⇒ 必须发现并回退全量 ──
+    with tempfile.TemporaryDirectory(prefix="v6m_") as td:
+        p = Path(td) / "l.jsonl"
+        led = _Led(p)
+        loop = _mk_deadend_loop(led)
+        for _ in range(30):
+            _probe(led)
+        loop._deadend_map()
+        #: rebuild：重写整份（内容相同但 hash 重算、文件被重写）
+        evs = _Led(p).events()
+        p.write_text("", encoding="utf-8")
+        led2 = _Led(p)
+        for e in evs:
+            led2.append(e.kind, dict(e.payload or {}), actor=e.actor)
+        for _ in range(5):
+            _probe(led2)
+        got = loop._deadend_map()
+        ck("M2 rebuild（重写整份）后仍与全量 oracle 同值",
+           got == _old_deadend(_Led(p)),
+           f"got={got} want={_old_deadend(_Led(p))} "
+           f"reasons={loop._deadend_stats['reasons']}")
+        ck("M2b rebuild 必须被**记为一次失效**（否则外部看不出增量白做）",
+           loop._deadend_stats["invalidated"] >= 1,
+           f"invalidated={loop._deadend_stats['invalidated']}")
+
+    # ── M3 真判据：账本被 truncate 变短 ⇒ 偏移越界，必须回退 ──
+    with tempfile.TemporaryDirectory(prefix="v6m_") as td:
+        p = Path(td) / "l.jsonl"
+        led = _Led(p)
+        loop = _mk_deadend_loop(led)
+        for _ in range(40):
+            _probe(led)
+        loop._deadend_map()
+        lines = p.read_text(encoding="utf-8").splitlines(True)[:10]
+        p.write_text("".join(lines), encoding="utf-8")
+        got = loop._deadend_map()
+        ck("M3 truncate（文件变短）后仍与全量 oracle 同值",
+           got == _old_deadend(_Led(p))
+           and loop._deadend_stats["reasons"]["shrunk"] >= 1,
+           f"got={got} want={_old_deadend(_Led(p))} "
+           f"reasons={loop._deadend_stats['reasons']}")
+
+    # ── M4 真判据：半行（并发 append 写到一半）不得污染 offset ──
+    with tempfile.TemporaryDirectory(prefix="v6m_") as td:
+        p = Path(td) / "l.jsonl"
+        led = _Led(p)
+        loop = _mk_deadend_loop(led)
+        for _ in range(10):
+            _probe(led)
+        loop._deadend_map()
+        #: 半行：不带换行、JSON 不完整（另一个进程正在写）
+        with p.open("a", encoding="utf-8") as f:
+            #: ⛔ 半行必须**停在字符串值中间**（`"zz` 而不是 `"zz"`）：
+            #:    写成一个"已经是合法 JSON 的前缀"的话，补全后反而变成
+            #:    `"zz"z"` ⇒ 非法 JSON ⇒ 两条路径都读不到 ⇒ 断言恒绿。
+            f.write('{"seq":9999,"kind":"gen.probe","payload":{"capsule":"zz')
+        m_half = loop._deadend_map()
+        ck("M4a 半行**不计入**死路账（解析失败的行不许当事件）",
+           not any(k.startswith("zz|") for k in m_half), f"got={m_half}")
+        #: 补全这一行
+        with p.open("a", encoding="utf-8") as f:
+            f.write('z","env_pair":"p9","verdict":"overfit"},'
+                    '"prev_hash":"x","hash":"y"}\n')
+        m_full = loop._deadend_map()
+        ck("M4b 补全后**必须**读得到（offset 没被半行推过去 ⇒ 不永久错位）",
+           any(k.startswith("zzz|p9") for k in m_full), f"got={m_full}")
+
+    # ── M5 护栏：随机对拍（含 [G,拦,拦] 边界），增量中间多次问 ──
+    bad = 0
+    for _ in range(60):
+        with tempfile.TemporaryDirectory(prefix="v6m_") as td:
+            p = Path(td) / "l.jsonl"
+            led = _Led(p)
+            loop = _mk_deadend_loop(led)
+            for v in ("generalize", "overfit", "overfit"):
+                _probe(led, cap="a", verdict=v, pair="p1")
+            for _ in range(rng.randint(0, 20)):
+                _probe(led)
+            for _ in range(3):
+                loop._deadend_map()
+                _probe(led)
+            if loop._deadend_map() != _old_deadend(_Led(p)):
+                bad += 1
+    ck("M5 随机对拍 60 组：增量路径与全量 oracle **逐键同值**",
+       bad == 0, f"不一致 {bad} 组")
+
+    # ── M6 真判据：文件被写过却没有新行 ⇒ 不可证明 ⇒ 必须回退全量 ──
+    with tempfile.TemporaryDirectory(prefix="v6m_") as td:
+        p = Path(td) / "l.jsonl"
+        led = _Led(p)
+        loop = _mk_deadend_loop(led)
+        for _ in range(10):
+            _probe(led)
+        loop._deadend_map()
+        before = loop._deadend_stats["full"]
+        #: touch 文件（mtime 变、大小不变、无新行）
+        st0 = os.stat(p)
+        os.utime(p, ns=(st0.st_atime_ns, st0.st_mtime_ns + 10 ** 9))
+        loop._deadend_map()
+        ck("M6 无新行但文件被 touch ⇒ 无法证明缓存成立 ⇒ 回退全量"
+           "（fail-closed：宁可多扫一次，不抱可能过时的缓存）",
+           loop._deadend_stats["full"] > before
+           and loop._deadend_stats["reasons"]["no_new_but_touched"] >= 1,
+           f"full {before}->{loop._deadend_stats['full']} "
+           f"reasons={loop._deadend_stats['reasons']}")
+
+    # ── M7 真判据：`__new__` 构造的对象也必须能用（类级兜底）──
+    #     ⛔ 这不是假想：J 组就是用 `EvolutionLoop.__new__` 手塞属性来测
+    #        `_deadend_map` 的 —— 增量状态一变成实例属性，那条路径当场
+    #        AttributeError（回归里真的炸了）。与 V5 的 `_exp_store` 同形态。
+    with tempfile.TemporaryDirectory(prefix="v6m_") as td:
+        p = Path(td) / "l.jsonl"
+        led = _Led(p)
+        for _ in range(3):
+            _probe(led)
+        bare = EvolutionLoop.__new__(EvolutionLoop)
+        bare.ledger = led
+        try:
+            got = bare._deadend_map()
+            ok = got == _old_deadend(_Led(p))
+            detail = f"got={got}"
+        except Exception as e:  # noqa: BLE001
+            ok, detail = False, f"{type(e).__name__}: {e}"
+        ck("M7 经 `__new__` 构造（拿不到 `__init__` 赋值）也**不许**崩"
+           " ⇒ 增量状态必须有类级兜底",
+           ok, detail)
+
+    # ── M8 护栏：真实构造函数下增量状态已初始化 ──
+    with tempfile.TemporaryDirectory(prefix="v6m_") as td:
+        p = Path(td) / "l.jsonl"
+        loop = _mk_deadend_loop(_Led(p))
+        ck("M8 `EvolutionLoop.__init__` 初始化了增量状态（空账本 ⇒ 空表）",
+           getattr(loop, "_deadend_cache", "MISSING") is None
+           and isinstance(getattr(loop, "_deadend_stats", None), dict)
+           and loop._deadend_map() == {},
+           f"cache={getattr(loop, '_deadend_cache', 'MISSING')} "
+           f"stats={getattr(loop, '_deadend_stats', 'MISSING')}")
+
+
 def main() -> int:
     print("契约测试：一次磁盘遍历（streaming）")
     for name, fn in (("A 不物化", group_a), ("B 流式==物化", group_b),
@@ -804,7 +1043,8 @@ def main() -> int:
                      ("E 聚合器同源", group_e), ("F 一致性不失真", group_f),
                      ("G 响应形状", group_g), ("H 另一个端点", group_h),
                      ("I/J/K CLI+热路径", group_i),
-                     ("L 判据无隐性上限", group_l)):
+                     ("L 判据无隐性上限", group_l),
+                     ("M 死路账增量", group_m)):
         print(f"\n{name}")
         fn()
     print(f"\n{N_CK - len(FAILS)}/{N_CK} 通过")

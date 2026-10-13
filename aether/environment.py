@@ -28,6 +28,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,7 +42,95 @@ PY = sys.executable or "python3"
 # 沙箱内执行器：读源码 + 测试 spec，输出 JSON。
 # ⛔ 它**不判断**"好不好"，只报"每个断言的实际结果"——判断在 verifier 里。
 _RUNNER = r'''
-import json, sys, io, traceback, contextlib
+import json, sys, io, os, traceback, contextlib
+
+# ── V6 沙箱引导（audit hook）────────────────────────────────────────
+# ⛔ 装在**执行被测代码之前**：被测代码是不可信输入，它可能读 ~/.ssh、
+#    写工作目录之外、或起子进程。⛔ OS 层沙箱（seatbelt / bwrap）在部分
+#    环境用不了（实测 macOS 宿主里 `deny default` 一律 Operation not
+#    permitted），这一层是**唯一能跨平台生效的文件系统闸门**。
+_SB = {"audit": False, "denied": [], "error": "", "mem_guard": False}
+_cfg = {}
+try:
+    try:
+        _cfg = json.loads(open(sys.argv[2], encoding="utf-8").read())
+    except Exception:
+        _cfg = {}
+    _allow = [os.path.realpath(p) for p in (_cfg.get("allow") or [])]
+    _path_events = set(_cfg.get("path_events") or [])
+    _deny_events = set(_cfg.get("deny_events") or [])
+
+    def _ok_path(p):
+        try:
+            rp = os.path.realpath(os.fspath(p))
+        except Exception:
+            return True                       # 判不了 ⇒ 放行（不误伤）
+        for a in _allow:
+            if rp == a or rp.startswith(a + os.sep):
+                return True
+        return False
+
+    def _hook(event, args):
+        if event in _deny_events:
+            _SB["denied"].append(event)
+            raise PermissionError("V6_SANDBOX_DENY:" + event)
+        if event in _path_events:
+            for p in args:
+                if isinstance(p, int):        # fd：不是路径
+                    continue
+                if isinstance(p, (str, bytes, os.PathLike)) and not _ok_path(p):
+                    _SB["denied"].append(event + ":" + str(p)[:120])
+                    raise PermissionError("V6_SANDBOX_DENY:" + event)
+    sys.addaudithook(_hook)
+    _SB["audit"] = True
+except Exception as _e:
+    _SB["error"] = f"{type(_e).__name__}: {_e}"
+
+# ── 内存守卫（进程内自限）────────────────────────────────────────────
+# ⛔⛔ 2026-10-13 实测：macOS 上 RLIMIT_AS / RLIMIT_DATA / RLIMIT_RSS
+#    **三条全部**抛 `ValueError: current limit exceeds maximum limit`
+#    ⇒ "限制内存"在 rlimit 层根本没生效，而调用方看到的 sandbox.rlimits
+#    却写着 1 GB（假仪表）。进程内看 RSS 并自杀是这里唯一能生效的路线。
+try:
+    import resource as _res, threading as _th, time as _tm
+    _cap = int(_cfg.get("mem_cap_bytes") or 0)
+    if _cap > 0:
+        #: ⛔ ru_maxrss 单位**跨平台不同**：macOS = 字节，Linux = KB。
+        _scale = 1 if sys.platform == "darwin" else 1024
+        def _guard():
+            while True:
+                try:
+                    if _res.getrusage(_res.RUSAGE_SELF).ru_maxrss * _scale > _cap:
+                        sys.stderr.write("V6_MEMGUARD_KILL\n")
+                        sys.stderr.flush()
+                        os._exit(137)
+                except Exception:
+                    return
+                _tm.sleep(0.02)
+        _th.Thread(target=_guard, daemon=True).start()
+        _SB["mem_guard"] = True
+except Exception:
+    _SB["mem_guard"] = False
+
+# ── 自检模式：给父进程做探测（与真实执行**同源**，不写第二份逻辑）────
+if "--selftest" in sys.argv:
+    _probe = {"audit": _SB["audit"], "ok": False, "denied": list(_SB["denied"])}
+    try:
+        import math                                   # 冷 import 不许被误伤
+        _f = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_rw.tmp")
+        open(_f, "w").write("ok"); os.remove(_f)      # 界线内读写不许被误伤
+        try:
+            open("/etc/hosts").read(4)                # 越界读**必须**被拒
+            _probe["escaped"] = True
+        except PermissionError:
+            _probe["escaped"] = False
+        _probe["ok"] = (_SB["audit"] and not _probe["escaped"]
+                        and len(_SB["denied"]) >= 1)
+    except Exception as _pe:
+        _probe["error"] = f"{type(_pe).__name__}: {_pe}"
+    print(json.dumps(_probe))
+    sys.exit(0)
+
 src = sys.stdin.read()
 payload = json.loads(open(sys.argv[1], encoding="utf-8").read())
 tests = payload["tests"]
@@ -72,7 +161,7 @@ for t in tests:
     except Exception:
         out.append({"name": name, "passed": False,
                     "evidence": traceback.format_exc().splitlines()[-1][:200]})
-print(json.dumps({"results": out, "import_error": err}))
+print(json.dumps({"results": out, "import_error": err, "sandbox": _SB}))
 '''
 
 
@@ -151,6 +240,26 @@ RLIMIT_AS_BYTES = 1024 * 1024 * 1024
 
 #: 单文件写入上限（字节）。
 RLIMIT_FSIZE_BYTES = 32 * 1024 * 1024
+
+#: 内存上限（字节）。⛔ 在 macOS 上**不是**靠 rlimit 生效的（AS/DATA/RSS
+#: 三条全拒，见 `_child_limits`），而是靠进程内守卫 + 父进程看门狗。
+MEM_CAP_BYTES = 256 * 1024 * 1024
+
+#: audit hook 拦的**路径类**事件（越界即拒）。
+_AUDIT_PATH_EVENTS = (
+    "open", "os.open", "os.remove", "os.rename", "os.rmdir", "os.mkdir",
+    "os.makedirs", "os.listdir", "os.scandir", "os.chdir", "os.link",
+    "os.symlink", "os.readlink", "os.stat", "os.lstat", "os.chmod",
+    "os.truncate", "os.utime", "os.access", "shutil.copyfile",
+    "shutil.copytree", "shutil.move", "shutil.rmtree",
+)
+#: audit hook **一律拒绝**的事件（沙箱里不该起进程、不该联网）。
+_AUDIT_DENY_EVENTS = (
+    "os.system", "os.exec", "os.execv", "os.execve", "os.execvp",
+    "os.execvpe", "os.spawn", "os.spawnv", "os.spawnve", "os.posix_spawn",
+    "os.fork", "os.forkpty", "subprocess.Popen", "os.popen",
+    "socket.connect", "socket.bind", "socket.create_connection",
+)
 
 
 def build_child_env(workdir: str) -> Dict[str, str]:
@@ -316,6 +425,107 @@ def _sb_str(s: str) -> str:
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+_AUDIT_PROBE: Dict[str, Any] = {}
+
+
+def _audit_allowed_paths(workdir: str) -> List[str]:
+    """audit hook 的**白名单**：界线内 = 工作目录 + Python 运行时。
+
+    ⛔ 为什么必须有 `sys.prefix` / `sys.exec_prefix`：装了 hook 之后
+       **冷 import 也会触发 open 事件**（要读 .py 源文件）。只放行工作
+       目录的话，被测代码 `import math` 就会被拒 ⇒ 沙箱把自己要执行的代码
+       一起拒了（实测：放行 stdlib 后冷 import 零误伤）。
+    ⛔ `/dev/null` 与 `/dev/urandom`：子进程的 stdout/stderr 与随机源。
+    """
+    out = [os.path.realpath(workdir)]
+    for p in (getattr(sys, "prefix", ""), getattr(sys, "exec_prefix", "")):
+        if p:
+            out.append(os.path.realpath(p))
+    for p in ("/dev/null", "/dev/urandom", "/dev/zero"):
+        out.append(p)
+    return out
+
+
+def _probe_audit(workdir: str) -> bool:
+    """**实测** audit hook 在这个环境能不能用（能用才启用）。
+
+    ⛔ 与真实执行**同源**：跑的是同一份 `_RUNNER` 的 `--selftest` 分支，
+       不是另外写一段探测代码 —— 另写一份就会在"哪些事件被拦"上漂移，
+       探测通过而真实执行误伤（或反之）。
+    ⛔ 结果缓存：每次执行都探测会把成本翻倍。
+    """
+    key = "ok"
+    if key in _AUDIT_PROBE:
+        return bool(_AUDIT_PROBE[key])
+    with tempfile.TemporaryDirectory(prefix="v6audit_") as td:
+        cfg = Path(td) / "sb.json"
+        cfg.write_text(json.dumps({
+            "allow": _audit_allowed_paths(td),
+            "path_events": list(_AUDIT_PATH_EVENTS),
+            "deny_events": list(_AUDIT_DENY_EVENTS),
+            "mem_cap_bytes": 0,
+        }), encoding="utf-8")
+        runner = Path(td) / "runner.py"
+        runner.write_text(_RUNNER, encoding="utf-8")
+        try:
+            p = subprocess.run([PY, str(runner), str(cfg), str(cfg),
+                                "--selftest"],
+                               capture_output=True, text=True, timeout=20,
+                               cwd=td, env=build_child_env(td))
+            data = json.loads((p.stdout or "{}").strip().splitlines()[-1])
+            ok = bool(data.get("ok"))
+        except Exception:  # noqa: BLE001
+            data, ok = {"error": "probe-failed"}, False
+    _AUDIT_PROBE[key] = ok
+    _AUDIT_PROBE["detail"] = data
+    return ok
+
+
+def _ps_rss_kb(pid: int) -> Optional[int]:
+    """读某个**运行中**进程的 RSS（KB）。不可用返回 None（不许猜）。
+
+    ⛔ macOS 没有 /proc；`resource.getrusage(RUSAGE_CHILDREN)` 只统计
+       **已终止**的子进程 ⇒ 对"正在吃内存"的那个进程拿不到数。
+    """
+    try:
+        out = subprocess.run(["ps", "-o", "rss=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=5)
+        if out.returncode != 0:
+            return None
+        return int((out.stdout or "").strip().split()[0])
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _mem_watchdog(proc: Any, cap_bytes: int, stop: Dict[str, bool],
+                  report: Dict[str, Any]) -> None:
+    """父进程侧内存看门狗：进程内守卫被卡住时（例如 C 扩展不释放 GIL，
+    守护线程没机会跑）**外面**还能砍一刀。
+
+    ⛔ 这层是**补充不是替代**：进程内守卫不依赖 ps、响应更快；看门狗能在
+       子进程完全不配合时兜底。两层都记账，缺哪一层外部都看得见。
+    """
+    cap_kb = cap_bytes // 1024
+    peak = 0
+    while not stop.get("stop"):
+        rss = _ps_rss_kb(getattr(proc, "pid", 0) or 0)
+        if rss is None:
+            report["watchdog_usable"] = False
+            return
+        report["watchdog_usable"] = True
+        peak = max(peak, rss)
+        report["peak_rss_kb"] = peak
+        if rss > cap_kb:
+            report["killed"] = True
+            report["peak_rss_kb"] = rss
+            try:
+                proc.kill()
+            except Exception:  # noqa: BLE001
+                pass
+            return
+        time.sleep(0.2)
+
+
 def run_in_sandbox(source: str, tests: List[Dict[str, Any]],
                    timeout: float = 10.0) -> ExecResult:
     """跑一次测试。**不做判断**，只报事实。
@@ -345,17 +555,37 @@ def run_in_sandbox(source: str, tests: List[Dict[str, Any]],
         runner.write_text(_RUNNER, encoding="utf-8")
 
         osb = _os_sandbox_cmd(td)
-        cmd = (osb[0] if osb else []) + [PY, str(runner), str(spec)]
+        #: audit 层：**探测式**接入（能用才用，不能用就记账降级，不静默）
+        audit_ok = _probe_audit(td)
+        sb_cfg = Path(td) / "_sandbox.json"
+        sb_cfg.write_text(json.dumps({
+            "allow": _audit_allowed_paths(td) if audit_ok else [],
+            "path_events": list(_AUDIT_PATH_EVENTS) if audit_ok else [],
+            "deny_events": list(_AUDIT_DENY_EVENTS) if audit_ok else [],
+            "mem_cap_bytes": int(MEM_CAP_BYTES),
+        }), encoding="utf-8")
+        cmd = (osb[0] if osb else []) + [PY, str(runner), str(spec),
+                                         str(sb_cfg)]
         sandbox: Dict[str, Any] = {
             "tier": "seatbelt" if osb else "process",
             "os_sandbox": (osb[1] if osb else None),
             "env_purged": True,
-            "fs_isolated": bool(osb),     # ⛔ 只有 OS 层能挡住越界读写
+            #: ⛔ `os_isolated` 与 `fs_isolated` **必须分成两个字段**：
+            #:    2026-10-13 加了 audit 层之后，文件系统隔离不再只有 OS 层
+            #:    一条路。合成一个 `fs_isolated = bool(osb)` 会把真正生效的
+            #:    audit 层说成不存在（假仪表）；而继续让 `fs_isolated` 跟着
+            #:    tier 走又会让"OS 层没拿到"这件事消失。
+            #:    ⇒ `os_isolated` = OS 层是否生效；`fs_isolated` = **能力**
+            #:      （OS 层或 audit 层任一生效），且它的真假由 G 组的实测盯。
+            "os_isolated": bool(osb),
+            "fs_isolated": bool(osb) or bool(audit_ok),
+            "fs_audit": bool(audit_ok),
             "rlimits": {"as_bytes": RLIMIT_AS_BYTES,
                         "data_bytes": RLIMIT_AS_BYTES,
                         "fsize_bytes": RLIMIT_FSIZE_BYTES,
                         "cpu_s": int(max(1.0, float(timeout))) + 2,
                         "nofile": 256},
+            "mem_cap_bytes": int(MEM_CAP_BYTES),
         }
 
         out_f = Path(td) / "_out.txt"
@@ -371,6 +601,15 @@ def run_in_sandbox(source: str, tests: List[Dict[str, Any]],
                                      preexec_fn=_child_limits(timeout,
                                                               str(rl_f)),
                                      close_fds=True)
+                #: 内存看门狗（父进程侧）：进程内守卫之外的第二道。
+                #: ⛔ 只在 ps 能用时才算"装上了"，不能用要记账（不许假装）。
+                wd: Dict[str, Any] = {"watchdog_usable": False,
+                                      "killed": False, "peak_rss_kb": 0}
+                stop: Dict[str, bool] = {"stop": False}
+                wd_th = threading.Thread(
+                    target=_mem_watchdog,
+                    args=(p, int(MEM_CAP_BYTES), stop, wd), daemon=True)
+                wd_th.start()
                 try:
                     p.communicate(input=source.encode("utf-8"),
                                   timeout=timeout)
@@ -382,6 +621,8 @@ def run_in_sandbox(source: str, tests: List[Dict[str, Any]],
                     except Exception:  # noqa: BLE001
                         pass
                     rc = 124
+                finally:
+                    stop["stop"] = True
         except Exception as e:  # noqa: BLE001
             return ExecResult(rc=1, cost_s=time.time() - t0,
                               stderr=f"{type(e).__name__}: {e}",
@@ -390,6 +631,23 @@ def run_in_sandbox(source: str, tests: List[Dict[str, Any]],
         out, out_cut = _read_capped(out_f, MAX_OUTPUT_BYTES)
         err, err_cut = _read_capped(err_f, MAX_OUTPUT_BYTES)
         sandbox["output_truncated"] = bool(out_cut or err_cut)
+        #: 父进程看门狗的**实测**结果（与进程内守卫分开记：两层缺一层都可见）
+        sandbox["mem_watchdog"] = {
+            "usable": bool(wd.get("watchdog_usable")),
+            "killed": bool(wd.get("killed")),
+            "peak_rss_kb": int(wd.get("peak_rss_kb") or 0),
+        }
+        if wd.get("killed"):
+            rc = 137
+            err = (err or "") + " | mem_watchdog_killed"
+        #: ⛔ 被杀的进程**没有输出** ⇒ 子进程自报的那几个 applied 字段会是
+        #:    None。别让 None 被读成"守卫没启用"（那是假仪表）：死法本身
+        #:    就是证据，这里显式记一层"谁动的手"。
+        if rc == 137:
+            sandbox["mem_killed"] = ("watchdog" if wd.get("killed")
+                                     else "in_process_guard"
+                                     if "V6_MEMGUARD_KILL" in (err or "")
+                                     else "unknown")
         #: ⛔ **实测**生效了什么，与上面的"意图"分开记。两者不一致
         #:    ⇒ 声明的限制是假的（实测 macOS 上 AS 就设不上）。
         try:
@@ -406,6 +664,19 @@ def run_in_sandbox(source: str, tests: List[Dict[str, Any]],
         data = json.loads((out or "{}").strip().splitlines()[-1])
         res.results = data.get("results", [])
         res.import_error = data.get("import_error") or ""
+        #: ⛔ 子进程**自己报**的沙箱状态（audit 装没装、内存守卫起没起、
+        #:    拒了几次）。与父进程的"意图"分开：两者不一致 ⇒ 声明是假的。
+        sb = data.get("sandbox")
+        if isinstance(sb, dict):
+            sandbox["fs_audit_applied"] = bool(sb.get("audit"))
+            sandbox["mem_guard_applied"] = bool(sb.get("mem_guard"))
+            #: ⛔⛔ 拒绝事件**必须单独记账**，不许混进"测试失败"：
+            #:    混进去的话，自演化会以为"这段代码有 bug"去修一个
+            #:    根本不存在的 bug（V5 同款病：静默降级 ⇒ 假信号）。
+            sandbox["denied"] = list(sb.get("denied") or [])
+            sandbox["denied_count"] = len(sandbox["denied"])
+            if sb.get("error"):
+                sandbox["audit_error"] = str(sb["error"])[:200]
     except Exception:  # noqa: BLE001
         res.stderr = (res.stderr or "") + " | unparsable-runner-output"
     return res

@@ -212,7 +212,15 @@ class EvolutionLoop:
 
     ⛔ 依赖注入（runner / proposer / gate / store）：本类不做 I/O 决策，
     于是**机制正确性**可以被确定性测试（V5 纪律：先证明机制跑得通）。
+
+    ⛔⛔ **这两个类属性不是装饰，是兜底**：对象可能经 `__new__` / pickle
+        构造，**拿不到 `__init__` 里的赋值** ⇒ 那时访问 `self._deadend_cache`
+        会直接 AttributeError（2026-10-13 实测：J 组正是用 `__new__`
+        手塞属性来测 `_deadend_map` 的，加实例属性后它当场炸了）。
+        与 V5 的 `_exp_store = None` 完全同形态：新属性一律给类级兜底。
     """
+    _deadend_cache: Optional[Dict[str, Any]] = None
+    _deadend_stats: Optional[Dict[str, Any]] = None
 
     def __init__(self, ledger: Ledger, gate: NonRegressionGate,
                  dev_suite: List[FrozenTask], runner: Runner,
@@ -248,6 +256,17 @@ class EvolutionLoop:
         #:    组合的第二次执行会 `INSERT OR REPLACE` 掉第一次 ⇒ 账本 495 条
         #:    执行、投影只剩 51 条。锚在账本 seq 上 ⇒ 跨运行也不重置。
         self._run_seq: int = int(getattr(self.ledger, "seq", 0) or 0)
+        #: 死路账的**增量缓存**。⛔ 它是"能从账本重建出来的派生量"，不是事实
+        #: 源 —— 任何时候丢了都要能靠全量重扫拿回同一个值（有测试盯这点）。
+        self._deadend_cache: Optional[Dict[str, Any]] = None
+        #: ⛔ 增量**必须可观测**：不记这两个数，"真增量"与"每轮全扫"在外部
+        #:    完全等价（假仪表 = V5 同款病）。`invalidated` 高说明缓存
+        #:    一直在失效（比如有人每轮 rebuild 账本）⇒ 增量形同虚设。
+        self._deadend_stats: Dict[str, Any] = {
+            "full": 0, "incremental": 0, "invalidated": 0, "scanned": 0,
+            "reasons": {"shrunk": 0, "chain_broken": 0,
+                        "no_new_but_touched": 0},
+        }
 
     def next_run_id(self, h, task_id: str, tag: str = "") -> str:
         """生成**全局唯一**的 run_id（唯一事实源：只有这里产它）。"""
@@ -362,6 +381,73 @@ class EvolutionLoop:
         return out
 
     # ── 死路账：同一候选在同一环境对上被拦了多少次 ──────────────────
+    def _deadend_accum(self, ev: Any, total: Dict[str, int],
+                       ever_gen: set) -> None:
+        """把**一条**事件累加进死路账（增量与全量共用同一份累加逻辑）。
+
+        ⛔ 只 factored 出"累加"，不 factored 出"读"：读只有 `iter_events`
+        一个实现，两条路径（全量 / 增量）都必须走它 —— 多一份读法就会
+        在坏行、编码、偏移上漂移，而漂移是静默的。
+        """
+        if ev.kind != "gen.probe":
+            return
+        p = ev.payload or {}
+        key = f"{p.get('capsule', '')}|{p.get('env_pair', 'unknown')}"
+        total[key] = total.get(key, 0) + 1
+        if str(p.get("verdict")) == "generalize":
+            ever_gen.add(key)
+
+    def _ensure_deadend_stats(self) -> None:
+        """惰性初始化统计。**幂等**（重复调用不重置计数）。
+
+        ⛔ 必须有：`__new__` / pickle 构造的对象拿不到 `__init__` 的赋值，
+            类级兜底是 `None`。不加这一步，`_deadend_map` 会在那条路径上
+            抛 AttributeError（实测：J 组就是这么构造的）。
+        """
+        if self._deadend_stats is None:
+            self._deadend_stats = {
+                "full": 0, "incremental": 0, "invalidated": 0, "scanned": 0,
+                "reasons": {"shrunk": 0, "chain_broken": 0,
+                            "no_new_but_touched": 0},
+            }
+
+    def _deadend_full(self) -> Dict[str, Any]:
+        """全量重扫（增量失效时的兜底，也是第一次调用的路径）。
+
+        ⛔ `head_hash` 取**最后一条任意 kind** 的事件，不是最后一条
+        `gen.probe`：增量校验要比的是"新增部分的第一条"的 `prev_hash`，
+        而新增的第一条可以是任何 kind。记成 gen.probe 的会让校验在
+        「探测之后又写了别的事件」时误判成"账本被改过" ⇒ 每轮全扫。
+        """
+        total: Dict[str, int] = {}
+        ever_gen: set = set()
+        self._ensure_deadend_stats()
+        prog: Dict[str, Any] = {"offset": 0}
+        head = self._genesis_hash()
+        n = 0
+        for ev in self.ledger.iter_events(progress=prog):
+            self._deadend_accum(ev, total, ever_gen)
+            head = ev.hash
+            n += 1
+        self._deadend_stats["full"] += 1
+        self._deadend_stats["scanned"] += n
+        return {"offset": int(prog["offset"]), "head_hash": head,
+                "total": total, "ever_gen": ever_gen, "fp": self._deadend_fp()}
+
+    @staticmethod
+    def _genesis_hash() -> str:
+        #: ⛔ 用 `Ledger.GENESIS_HASH`（类属性），不抄一份 `"0"*64`：
+        #:    抄了就是第二个事实源，哪天创世值变了这里静默失配。
+        return Ledger.GENESIS_HASH
+
+    def _deadend_fp(self) -> Tuple[int, int]:
+        """账本文件指纹 (大小, mtime_ns) —— 用来发现"被写过但没新增"。"""
+        try:
+            st = self.ledger.path.stat()
+            return (int(st.st_size), int(st.st_mtime_ns))
+        except OSError:
+            return (0, 0)
+
     def _deadend_map(self) -> Dict[str, int]:
         """从账本统计每个 (候选, 环境对) 的**连续**被拦次数。
 
@@ -389,18 +475,70 @@ class EvolutionLoop:
         ⇒ 本次**只换实现、不动语义**，保持二元值；I 组测试用旧实现当
         oracle 做随机对拍（含 `[G, 拦, 拦]` 这个边界），把当前语义钉死 ——
         哪天要修成"连续"，那条测试会先红，改的人必须先看交叉表。
+
+        ⛔⛔ 2026-10-13 第 16 轮：上面那版已经流式了，但它**每轮仍全扫一遍
+        账本**（只是不再物化）。账本 10 万条时每轮仍要解析 10 万行 ⇒ 轮数
+        一多就成了 O(轮 × 账本)。改：**增量** —— 记住上次读到的文件偏移与
+        链头，只解析新增部分。
+
+        ⛔ 增量**不是**"相信文件只会追加"，而是**能证明前面的部分没变**：
+          ① 偏移只停在行边界（见 `iter_events` 注释：半行不推进）；
+          ② 新增第一条的 `prev_hash` 必须等于缓存的链头 ⇒ 中间被插入或
+             改写（rebuild）会立刻发现 ⇒ 回退全量；
+          ③ 一条新增都没有、但文件指纹变了 ⇒ **可疑**（`rebuild_from_ledger`
+             重写整份、或 truncate 后长度恰好没变）⇒ 宁可全扫一次，
+             不可抱着一份可能过时的缓存（fail-closed）。
+        ⛔ 缓存失效必须**可观测**：每次全量都记进 `self._deadend_stats`，
+           否则"每轮全扫"和"真增量"在外部看起来一模一样（假仪表）。
         """
-        total: Dict[str, int] = {}
-        ever_gen: set = set()
-        for ev in self.ledger.iter_events():
-            if ev.kind != "gen.probe":
-                continue
-            p = ev.payload or {}
-            key = f"{p.get('capsule', '')}|{p.get('env_pair', 'unknown')}"
-            total[key] = total.get(key, 0) + 1
-            if str(p.get("verdict")) == "generalize":
-                ever_gen.add(key)
-        return {k: (0 if k in ever_gen else total[k]) for k in total}
+        state = self._deadend_state()
+        ever_gen = state["ever_gen"]
+        return {k: (0 if k in ever_gen else state["total"][k])
+                for k in state["total"]}
+
+    def _deadend_state(self) -> Dict[str, Any]:
+        """取（必要时更新）死路账的**增量状态**。"""
+        self._ensure_deadend_stats()
+        c = self._deadend_cache
+        if c is None:
+            self._deadend_cache = self._deadend_full()
+            return self._deadend_cache
+
+        fp = self._deadend_fp()
+        # ① 文件变小（truncate / 被重写成更短）⇒ 偏移已经越界 ⇒ 全量
+        if fp[0] < c["offset"]:
+            self._deadend_stats["invalidated"] += 1
+            self._deadend_stats["reasons"]["shrunk"] += 1
+            self._deadend_cache = self._deadend_full()
+            return self._deadend_cache
+
+        prog: Dict[str, Any] = {"offset": c["offset"]}
+        new: List[Any] = list(self.ledger.iter_events(since_offset=c["offset"],
+                                                      progress=prog))
+        if not new:
+            # ② 一条新增都没有，但文件被写过 ⇒ 无法证明缓存仍然成立
+            if fp != c["fp"]:
+                self._deadend_stats["invalidated"] += 1
+                self._deadend_stats["reasons"]["no_new_but_touched"] += 1
+                self._deadend_cache = self._deadend_full()
+                return self._deadend_cache
+            return c
+
+        # ③ 链必须接得上：接不上说明中间的 history 不是我上次看到的那段
+        if new[0].prev_hash != c["head_hash"]:
+            self._deadend_stats["invalidated"] += 1
+            self._deadend_stats["reasons"]["chain_broken"] += 1
+            self._deadend_cache = self._deadend_full()
+            return self._deadend_cache
+
+        for ev in new:
+            self._deadend_accum(ev, c["total"], c["ever_gen"])
+        c["head_hash"] = new[-1].hash
+        c["offset"] = int(prog["offset"])
+        c["fp"] = fp
+        self._deadend_stats["incremental"] += 1
+        self._deadend_stats["scanned"] += len(new)
+        return c
 
     def _in_cooldown(self, cap_name: str, env_pair: str,
                      deadend: Dict[str, int], round_no: int

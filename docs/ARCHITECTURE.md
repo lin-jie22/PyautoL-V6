@@ -1401,3 +1401,89 @@ split 成行数组             +0.10 MB
 `detect` 共用同一份 `events`）⇒ 没有 §16/§19 那种"多遍读不同快照"的正确性
 问题，只是成本结构问题。监督器是**按需运行的独立进程**，当前规模不构成
 问题；账本涨到 100 MB 量级时会到 350 MB ⇒ 那时再改流式行读取。
+
+## §21 三处收口：死路账增量 / 监督器流式 / 沙箱隔离
+
+§20 之后剩下的三处边界，本轮一起收口。三处的共同点：**都不是"功能没写"，
+而是"写了但只在部分条件下成立"**。
+
+### 21.1 死路账从"每轮全扫"改成"只读新增"（+ 失效必须能证）
+
+`_deadend_map` 上一轮已经流式化，但仍**每轮解析全账本** ⇒ O(轮 × 账本)。
+改：缓存 `(offset, head_hash, total, ever_gen)`，只解析新增部分。
+
+⛔ 增量**不是**"相信文件只会追加"，而是**能证明前面没变**：
+
+| 检查 | 抓什么 | 失效时 |
+|---|---|---|
+| offset 只停在行边界 | 并发 append 写半行 | 重读一条（不错位） |
+| 新增首条 `prev_hash` == 缓存链头 | 中间被插入 / rebuild | 回退全量 |
+| 文件变小 ⇒ 偏移越界 | truncate | 回退全量 |
+| 无新行但文件指纹变了 | rebuild 后长度恰好没变 | 回退全量（fail-closed） |
+
+⛔⛔ **踩到的坑：文本模式下 `for line in f` 里调 `f.tell()` 直接抛
+`OSError: telling position disabled by next() call`**。第一版用
+`except: pass` 兜住 ⇒ 位置永远没被记录（停在 0）⇒ 每次续读都从头开始，
+而 `stats` 里 `full=6 / incremental=0` 一眼看穿。**把失败吞掉就是把降级
+伪装成成功**（V5 同款病）。改二进制读 + 不再吞异常。
+
+实测（6 轮 × 40 条）：扫描条数 **240**（= 账本总量）而不是 1440。
+失效路径（rebuild / truncate / touch）全部回退全量且与 oracle 同值。
+
+⛔ **判别力是注入事故版量出来的，不是我以为的**：真判据只有 M1/M2b/M6；
+M2 在"去掉链校验"下**值仍同值**（rebuild 前后 payload 一样），真正抓到
+"抱着旧缓存"的是 M2b（失效必须记账）；M4 被两条兜底路径救回来，注入
+"offset 记在解析前"也照样绿 ⇒ 是护栏不是判据。
+
+### 21.2 TS 监督器改流式行读取
+
+`readLedger` 改为分块读 + `StringDecoder`。同口径（生产账本 1.54 MB /
+1533 条）堆增量 **7.75 MB → 4.58 MB（-41%）**。
+
+⛔ 两个必须处理的坑：**跨块多字节字符**（块边界落在中文字符中间 ⇒
+直接 `toString("utf8")` 会变成 U+FFFD ⇒ hash 校验把好事件判成"被篡改"）、
+**跨块行**（残留留到下一块）。
+
+⛔ 顺带修了一处**注释与实现矛盾**：旧注释写"坏行计入统计，由调用方决定
+是否告警"，代码里却只有 `continue` —— 统计根本不存在。现在 `ReadStats`
+真的记 `bad`，`readLedger(path, stats?)` 可选传入。
+
+⛔ **剩下的 3.5 MB 是 `detect` 必须持有的 `Event[]`**（实测不 collect 时
+只读 1.15 MB）。`detect` 有 7 个检测项、且要"用 probe 找它之后的 commit"
+⇒ 改单遍聚合器等于**重写跨语言判据逻辑**。判据漂移的代价（假绿）远大于
+3.5 MB ⇒ **不做这个交易**，如实记在这里。
+
+### 21.3 沙箱：audit hook 层 + 内存的两条替代路线
+
+⛔⛔ **内存 rlimit 在本机是死路**：实测 macOS 上 `RLIMIT_AS` /
+`RLIMIT_DATA` / `RLIMIT_RSS` **三条全部**抛
+`ValueError: current limit exceeds maximum limit`（即使宿主 hard limit 是
+无限，收紧也被拒）。⇒ 换两条路线，都实测有效：
+
+1. **进程内 RSS 守卫**：runner 里起守护线程看 `ru_maxrss`，超限 `os._exit(137)`
+   （⛔ `ru_maxrss` 单位跨平台不同：macOS 字节 / Linux KB）。实测 0.54s 拦住。
+2. **父进程看门狗**：`ps -o rss= -p <pid>` 轮询，超限 kill。它覆盖"进程内
+   守卫线程没机会跑"的情况（例如 C 扩展不释放 GIL）。`ps` 不可用 ⇒ 记账
+   `usable=False`，**不假装装上了**。
+
+**文件系统隔离**加了 audit hook 层（`sys.addaudithook`）：白名单 = 工作目录
++ `sys.prefix`/`exec_prefix`（⛔ 少了它，冷 `import math` 都会被拒 ——
+装了 hook 之后 import 也要读 .py 文件）+ `/dev/null`、`/dev/urandom`；
+拦截越界 `open`/`os.open`/`os.remove`/… 与 `subprocess.Popen`/`socket.connect`。
+**探测式接入**：跑同一份 runner 的 `--selftest` 分支（与真实执行同源，
+不写第二份探测代码），失败就降级并记账。
+
+实测：越界读 `/etc/hosts` 被拒、越界写 `/tmp` **文件真的没被创建**、
+冷 import 零误伤、正常代码零误伤。
+
+⛔⛔ **拒绝事件必须与"代码有 bug"分开记账**（`sandbox.denied`）：混在一起
+的话，自演化会把"被沙箱拦下"当成"这段代码有 bug"去修一个不存在的 bug
+（V5 同款病：静默降级 ⇒ 假信号）。
+
+⛔ 字段也拆了：`os_isolated`（OS 层是否生效）与 `fs_isolated`（能力：OS 层
+或 audit 层任一生效）不再混为一谈 —— 原来 `fs_isolated == (tier=="seatbelt")`
+的断言在加了 audit 层之后会**把真生效的隔离判成谎报**，已改成"OS 层管字段
+一致、`fs_isolated` 管行为实测"（D2/D2b）。
+
+⛔ **诚实边界**：audit hook 拦得住 Python 层的 `open`，拦不住 ctypes /
+原生代码直接系统调用。想堵住仍需 OS 层，而 OS 层在部分环境用不了。

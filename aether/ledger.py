@@ -260,7 +260,9 @@ class Ledger:
             fh.close()
 
     # ── 读 ────────────────────────────────────────────────────────
-    def iter_events(self) -> Iterator[Event]:
+    def iter_events(self, since_offset: int = 0,
+                    progress: Optional[Dict[str, Any]] = None,
+                    ) -> Iterator[Event]:
         """**流式**遍历：一次只在内存里留一条事件。
 
         ⛔ `events()` 物化整份账本 —— 4000 条 / 5 MB 的账本实测峰值
@@ -271,18 +273,50 @@ class Ledger:
         ⛔ 与 `events()` **逐条同源**：`events()` 就是 `list(iter_events())`。
         绝不写第二份解析逻辑 —— 两份逻辑会在坏行/编码上漂移，漂移后
         "流式读数"与"全量读数"不一致，而没人会发现。
+
+        ⛔⛔ `since_offset` / `progress` 只服务**增量消费者**（2026-10-13
+        第 16 轮 `_deadend_map`）：续读时传上次记下的 `progress["offset"]`，
+        就只读新增部分。
+          · `progress["offset"]` **只在一条事件被完整解析之后**才推进 ⇒
+            offset 永远停在行边界上。
+          · 为什么必须这样：并发 append 时最后一行可能**只写了一半**
+            （写锁在行写完才释放，但我们可能在写完前读到）。若把半行后的
+            位置记成 offset，下次 `seek` 会落在**一行的中间** ⇒ 之后每次
+            都从中间读起，错位是永久且静默的（读到的都是垃圾行，而垃圾行
+            被 `except` 吞掉 ⇒ 看起来像"账本没新事件"）。
+            ⇒ 宁可**重读一条**，不可**错位一行**。
+          · 调用方仍需自己校验链的连续性（`prev_hash`）—— 偏移只保证
+            "从哪读"，不保证"前面的内容没被改过"。
+
+        ⛔⛔ **为什么这里用二进制打开而不是 `open(..., "r")`**：文本模式下
+        `for line in f` 迭代期间调 `f.tell()` 会直接抛
+        `OSError: telling position disabled by next() call`（2026-10-13
+        实测）。第一版用文本模式 + `except: pass` 兜住 —— 于是位置**永远
+        没被记录**（停在 0），每次续读都从头开始，看上去"增量逻辑跑通了"，
+        实测 `incremental=0 / full=6`。**把失败吞掉就等于把降级伪装成成功**
+        （V5 同款病）⇒ 这里改为二进制读，`tell()` 是精确的字节偏移，
+        且**不再吞异常**：记不下位置就让调用方看见。
         """
         if not self.path.exists():
             return
-        with self.path.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
+        with self.path.open("rb") as f:
+            if since_offset and since_offset > 0:
+                f.seek(since_offset)
+            for raw in f:
+                try:
+                    line = raw.decode("utf-8").strip()
+                except UnicodeDecodeError:
+                    #: 坏编码行：与坏 JSON 行同等处理（跳过，不污染整份读）
+                    continue
                 if not line:
                     continue
                 try:
-                    yield Event.from_dict(json.loads(line))
+                    ev = Event.from_dict(json.loads(line))
                 except Exception:  # noqa: BLE001
                     continue
+                if progress is not None:
+                    progress["offset"] = f.tell()
+                yield ev
 
     def events(self) -> List[Event]:
         return list(self.iter_events())

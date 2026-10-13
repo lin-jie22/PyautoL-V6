@@ -198,9 +198,25 @@ print()
 print("== D 组：OS 层沙箱拿不到 ⇒ 降级，但必须看得见 ==")
 ck("D1 结果里带 `tier`（要么是 process 要么是 seatbelt）",
    sb.get("tier") in ("process", "seatbelt"), str(sb.get("tier")))
-ck("D2 `fs_isolated` 与 `tier` **一致**（不许谎报已隔离）",
-   sb.get("fs_isolated") is (sb.get("tier") == "seatbelt"),
-   f"tier={sb.get('tier')} fs_isolated={sb.get('fs_isolated')}")
+# ⛔ 2026-10-13 加了 audit 层之后，`fs_isolated` 不再等价于"OS 层是否生效"：
+#    audit 层**实测**能拦住越界读写（G2/G3），所以 OS 层拿不到时它仍是真的。
+#    ⇒ 原来那条 `fs_isolated == (tier=="seatbelt")` 的断言已经**不能表达**
+#      "不许谎报"这个不变量了（它会把真生效的 audit 层判成谎报）。
+#    改成两条，一条管 OS 层字段、一条管**行为**（比字段相等更强）。
+ck("D2 `os_isolated` 与 `tier` **一致**（OS 层不许谎报）",
+   sb.get("os_isolated") is (sb.get("tier") == "seatbelt"),
+   f"tier={sb.get('tier')} os_isolated={sb.get('os_isolated')}")
+_esc = "/tmp/v6_d2_escape.txt"
+if os.path.exists(_esc):
+    os.remove(_esc)
+_ex_esc = E.run_in_sandbox(
+    f"def f(x):\n    open('{_esc}', 'w').write('pwned')\n    return x+1\n",
+    [{"name": "t", "call": "f", "args": [1], "expect": 2}], timeout=10)
+ck("D2b `fs_isolated=True` 必须是**实测**的（越界写真被拦），"
+   "不是字段自述 —— 这条比原来的字段相等更强",
+   (not sb.get("fs_isolated")) or (not os.path.exists(_esc)),
+   f"fs_isolated={sb.get('fs_isolated')} 越界文件存在={os.path.exists(_esc)} "
+   f"denied={_ex_esc.sandbox.get('denied')}")
 ck("D3 `env_purged` 如实为 True（净化是进程层，总能生效）",
    sb.get("env_purged") is True, str(sb.get("env_purged")))
 # ⛔ 断言不许写成"要么 None 要么 tuple" —— 那是恒真的（什么都能过）。
@@ -265,6 +281,83 @@ with redirect_stderr(buf2):
 ck("F1 第一次提示", "未隔离" in buf1.getvalue(), buf1.getvalue()[:80])
 ck("F2 ⛔ 第二次不再提示（环境级属性，不是每次执行的事件）",
    buf2.getvalue() == "", buf2.getvalue()[:80])
+
+# ══ G 组：audit 层（跨平台的文件系统闸门）══════════════════════════
+#     ⛔ 为什么必须有这一层：OS 层（seatbelt/bwrap）在部分环境用不了
+#        （实测 macOS 宿主里 deny-default 一律 Operation not permitted），
+#        而 rlimit 层的内存限制在本机**三条全拒**（AS/DATA/RSS 都抛
+#        ValueError）。这两层缺了之后，"隔离"只剩净化 env —— 不够。
+print()
+print("== G 组：audit hook 层（越界文件系统访问必须被拦）==")
+
+_TESTS = [{"name": "t", "call": "f", "args": [1], "expect": 2}]
+_OK_SRC = "def f(x):\n    return x+1\n"
+
+ex0 = E.run_in_sandbox(_OK_SRC, _TESTS, timeout=10)
+ck("G1 正常代码**零误伤**（沙箱不许把自己要跑的代码一起拒了）",
+   ex0.rc == 0 and ex0.n_passed == 1
+   and ex0.sandbox.get("denied_count", 0) == 0,
+   f"rc={ex0.rc} passed={ex0.n_passed} "
+   f"denied={ex0.sandbox.get('denied')}")
+
+ex1 = E.run_in_sandbox(
+    "def f(x):\n    d = open('/etc/hosts').read()\n    return x+1\n",
+    _TESTS, timeout=10)
+ck("G2 越界**读**被拦，且**记账**（不是悄悄失败）",
+   ex1.sandbox.get("denied_count", 0) >= 1
+   and any("hosts" in d for d in ex1.sandbox.get("denied") or []),
+   f"denied={ex1.sandbox.get('denied')}")
+
+_tmp_escape = "/tmp/v6_escape_contract.txt"
+if os.path.exists(_tmp_escape):
+    os.remove(_tmp_escape)
+ex2 = E.run_in_sandbox(
+    f"def f(x):\n    open('{_tmp_escape}', 'w').write('pwned')\n"
+    f"    return x+1\n", _TESTS, timeout=10)
+ck("G3 越界**写**被拦：文件**真的没被创建**（判据只看事实）",
+   not os.path.exists(_tmp_escape)
+   and ex2.sandbox.get("denied_count", 0) >= 1,
+   f"exists={os.path.exists(_tmp_escape)} denied={ex2.sandbox.get('denied')}")
+
+ex3 = E.run_in_sandbox(
+    "import math, json, itertools, statistics\n"
+    "def f(x):\n    return math.ceil(x + 0.1)\n", _TESTS, timeout=10)
+ck("G4 冷 import 不被误伤（stdlib 必须在白名单里，否则沙箱=拒绝执行）",
+   ex3.rc == 0 and ex3.n_passed == 1
+   and ex3.sandbox.get("denied_count", 0) == 0,
+   f"rc={ex3.rc} denied={ex3.sandbox.get('denied')}")
+
+ck("G5 audit 层的**意图与实测分开记**（装没装 ≠ 说没说）",
+   ex0.sandbox.get("fs_audit") is True
+   and ex0.sandbox.get("fs_audit_applied") is True,
+   f"{ex0.sandbox.get('fs_audit')} / {ex0.sandbox.get('fs_audit_applied')}")
+
+ck("G6 `fs_isolated` 现在包含 audit 层（OS 层拿不到也仍为 True）",
+   ex0.sandbox.get("fs_isolated") is True,
+   f"os_sandbox={ex0.sandbox.get('os_sandbox')} "
+   f"fs_isolated={ex0.sandbox.get('fs_isolated')}")
+
+# ══ H 组：内存限制（rlimit 在本机失效后的两条替代路线）═════════════
+print()
+print("== H 组：内存限制（rlimit 三条全拒 ⇒ 进程内守卫 + 父进程看门狗）==")
+
+_orig_cap = E.MEM_CAP_BYTES
+E.MEM_CAP_BYTES = 64 * 1024 * 1024      # ⛔ 压到 64 MB：别真吃 256 MB
+try:
+    ex4 = E.run_in_sandbox(
+        "def f(x):\n    a = []\n    while True:\n"
+        "        a.append(bytearray(1024 * 1024))\n    return x\n",
+        _TESTS, timeout=20)
+    ck("H1 吃内存的代码被**杀掉**（rc=137），不是把机器拖死",
+       ex4.rc == 137, f"rc={ex4.rc} stderr={(ex4.stderr or '')[:80]}")
+    ck("H2 死法被记账（谁动的手必须看得见，否则无法区分超时/OOM/自杀）",
+       ex4.sandbox.get("mem_killed") in ("in_process_guard", "watchdog"),
+       f"mem_killed={ex4.sandbox.get('mem_killed')}")
+    ck("H3 父进程看门狗的可用性**如实记账**（ps 不可用 ⇒ usable=False）",
+       "usable" in (ex4.sandbox.get("mem_watchdog") or {}),
+       f"{ex4.sandbox.get('mem_watchdog')}")
+finally:
+    E.MEM_CAP_BYTES = _orig_cap
 
 print()
 print("=" * 60)

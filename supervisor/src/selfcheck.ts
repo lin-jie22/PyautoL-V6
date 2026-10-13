@@ -13,8 +13,8 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readLedger, verifyChain, canonicalJson, contentHash,
-         identity } from "./ledger.ts";
+import { readLedger, readLedgerIter, verifyChain, canonicalJson, contentHash,
+         identity, type ReadStats } from "./ledger.ts";
 import { detect, exitCode } from "./anomaly.ts";
 
 const FAILS: string[] = [];
@@ -287,6 +287,65 @@ print(L.session)
     }
   } catch {
     console.log("  (跳过：真实账本不存在)");
+  }
+
+  // ── E 组：流式读取（跨块 / 多字节 / 坏行 / 末行）───────────────
+  //     ⛔ 这组守的是"读法"，不是判据：判据一项都不能变，变的是
+  //        整份文本与整份行数组不再同时驻留（实测 1.54 MB 账本
+  //        7.75 MB → 4.58 MB 堆增量）。
+  console.log("E 组：流式读取");
+  {
+    const big = join(dir, "big.jsonl");
+    // 中文长 payload：块边界**必然**落在多字节字符中间（chunk 很小）
+    const zh = "判据同源很重要".repeat(40);
+    const lines: string[] = [];
+    for (let i = 0; i < 60; i++) {
+      lines.push(JSON.stringify({
+        seq: i, ts: 1700000000 + i, kind: "eval.verdict", actor: "probe",
+        payload: { zh, i, note: "x".repeat(60) },
+        prev_hash: "0".repeat(64), hash: "a".repeat(64),
+      }));
+    }
+    writeFileSync(big, lines.join("\n") + "\n", "utf8");
+
+    const st0: ReadStats = { lines: 0, bad: 0 };
+    const a = readLedger(big, st0);
+    const b2 = Array.from(readLedgerIter(big, 7));     // 7 字节一块
+    ck("E1 块大小不影响结果（7 字节块 ⇒ 每行都被切成十几段）",
+       a.length === 60 && b2.length === 60
+       && JSON.stringify(a) === JSON.stringify(b2),
+       `默认=${a.length} 小块=${b2.length}`);
+    // ⛔ 必须用**小块读的结果**断言中文：默认块 64 KiB 一次就把 60 行读完
+    //    ⇒ 根本没跨块 ⇒ 去掉 StringDecoder 也照样绿（注入事故实测：E2 不红）。
+    //    只有 7 字节块才会把每个中文字符切开 ⇒ 这一条才对"多字节跨块"敏感。
+    // ⛔ 必须断言**每一条**：只查第一条的话，块边界通常还没落到它身上
+    //    ⇒ 去掉 StringDecoder 也照样绿（注入事故实测：只查第一条时不红）。
+    ck("E2 小块读时中文不被块边界切坏（多字节跨块 ⇒ U+FFFD ⇒ hash 全错）",
+       b2.length === 60 && b2.every((e) => String(e.payload.zh) === zh),
+       `n=${b2.length} 首条=${String(b2[0]?.payload?.zh ?? "").slice(0, 24)}`);
+
+    // 末行没有换行符
+    const nonl = join(dir, "nonl.jsonl");
+    writeFileSync(nonl, lines.slice(0, 5).join("\n"), "utf8");  // 末尾无 \n
+    const e3 = readLedger(nonl);
+    ck("E3 末行无换行符也读得到（否则永远丢最后一条）", e3.length === 5,
+       `got=${e3.length}`);
+
+    // 坏行必须**可观测**，不能被静默吞掉
+    const badf = join(dir, "bad.jsonl");
+    writeFileSync(badf, lines[0] + "\n{broken json\n" + lines[1] + "\n", "utf8");
+    const st: ReadStats = { lines: 0, bad: 0 };
+    const e4 = readLedger(badf, st);
+    ck("E4 坏行被跳过且**计入统计**（旧注释说会统计，代码其实没统计）",
+       e4.length === 2 && st.bad === 1 && st.lines === 3,
+       `events=${e4.length} bad=${st.bad} lines=${st.lines}`);
+
+    // 与"整份 split"的老读法对拍（同一份文件，两种读法必须逐条相同）
+    const oldWay = readFileSync(big, "utf8").split("\n")
+      .map((s) => s.trim()).filter(Boolean).map((s) => JSON.parse(s));
+    ck("E5 与旧读法（整份 split）逐条同值",
+       JSON.stringify(a) === JSON.stringify(oldWay),
+       `new=${a.length} old=${oldWay.length}`);
   }
 
   console.log("\n" + "=".repeat(60));
