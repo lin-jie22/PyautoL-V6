@@ -96,7 +96,7 @@ V6/
 │   ├── eventflow/          事件流聚合（会话切分 / 滑动窗口 / 分位数）
 │   ├── stateflow/          状态机（转移 / 合法性 / 可达性 / 路径计数）
 │   └── scheduler/          区间调度（冲突 / 最大并发 / 贪心 / 区间合并）
-├── tests/                  14 个契约测试（RED→GREEN + 反证组）
+├── tests/                  15 个契约测试（RED→GREEN + 反证组）
 ├── supervisor/             TypeScript 外部监督器（只读账本 + 异常检测）
 ├── console/                零构建的只读可视化控制台
 ├── scripts/demo_evolve.py  端到端 demo + 报告
@@ -125,7 +125,7 @@ V6/
 
 ## 5. 系统如何自证（判据清单）
 
-这二十八条是 V6 的"宪法"。每条都有对应的契约测试守着：
+这二十九条是 V6 的"宪法"。每条都有对应的契约测试守着：
 
 1. **事实只有一份**：账本（hash 链）。SQLite 是投影，`rebuild_from_ledger()` 可重建。
    ⛔⛔ 实测（2026-10-13）：投影曾**丢掉 89.7% 的执行历史** —— 账本 495 条
@@ -241,10 +241,21 @@ V6/
     黑名单（黑名单拦不住没见过的名字）。⛔ **声明了意图 ≠ 生效了**：
     `RLIMIT_AS`/`DATA`/`RSS` 在本机全部 `ValueError` 却被 except 吞掉，
     结果里却写着"1 GB" ⇒ 必须把 `rlimits`（意图）与 `rlimits_applied`（实测）
-    分开显示。⛔ OS 层（macOS `sandbox-exec`）**探测式**接入：实测 deny-default
+    分开显示。    ⛔ OS 层（macOS `sandbox-exec`）**探测式**接入：实测 deny-default
     一律 `Operation not permitted` ⇒ 用不了就降级到 `process`，但
     `fs_isolated=false` 必须落进每个 Verdict 与控制台。⛔ **审计探针自己不许
     成为 DoS**（第一版把机器内存吃光，load 打到 9.3）。
+28. **只读 ≠ 无隐私：对外暴露面必须默认关闭，且不得用前缀判断**。
+    `/api/status` 上的 `/api/status_extra` 会误命中 ⇒ 端点按**路径边界**
+    匹配；静态文件 `str(f).startswith(str(base))` 会把 `/app/console_bak/x`
+    当成 console 子路径 ⇒ 按**路径分量**判断；硬编码
+    `Access-Control-Allow-Origin: *` 让任意网页的 JS 能读本机账本（含 harness
+    状态与记忆正文）⇒ CORS 默认不发、开了也回显 origin 而不回 `*`；
+    `/api/ledger/raw` 无上限 ⇒ append-only 账本的内存峰值随历史线性增长。
+    ⛔ **全绿的断言不等于有判别力**：把新测试对着旧代码跑一遍，F1/F2/F3
+    两边都绿（旧版两个端点的键集合本就相同、`Event` 也不是 slots）⇒
+    它们是护栏不是战果；真正能证伪的是"给序列化函数打标记看两端是否同时
+    带上"这类反证。
 
 ---
 
