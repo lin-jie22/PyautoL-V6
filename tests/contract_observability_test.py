@@ -242,6 +242,51 @@ with tempfile.TemporaryDirectory() as td:
        ok2 is True, why2)
 
 print()
+print("== F 组：账本 vs 投影 的一致性读数必须**进观测侧** ==")
+#    ⛔ 2026-10-13 实测：投影丢掉 89.7% 的执行历史（账本 495 / 投影 51），
+#    而控制台只显示"运行记录 51" —— 事故在账本里可见、在观测侧不可见。
+#    观测侧不报这件事，等于替写入侧遮丑。
+with tempfile.TemporaryDirectory() as td:
+    from aether.ledger import Ledger
+    from aether.serve import _collect
+    from aether.store import RunRow, Store
+
+    root = Path(td)
+    (root / "data").mkdir()
+    led = Ledger(root / "data" / "ledger.jsonl")
+    st = Store(root / "data" / "aether.db")
+
+    def _verdict(i, rid):
+        led.append("eval.verdict", {"run_id": rid, "harness_id": "h",
+                                    "task_id": f"t{i}", "reward": 1.0,
+                                    "passed": True, "split": "dev"})
+        st.save_run(RunRow(run_id=rid, harness_id="h", task_id=f"t{i}",
+                           reward=1.0, passed=True, gate_ok=False,
+                           payload={}))
+
+    for i in range(3):
+        _verdict(i, f"r{i}")
+    c1 = _collect(root)["consistency"]
+    ck("F1 正常写入 ⇒ 观测侧读到 ok=True（不是恒红）",
+       c1.get("ok") is True and c1["ledger_verdicts"] == c1["projection_runs"],
+       str(c1))
+
+    #: 反证：账本加一条而投影没写 ⇒ 读数必须**翻**（不随被测对象变的读数=假）
+    led.append("eval.verdict", {"run_id": "r9", "harness_id": "h",
+                                "task_id": "t9", "reward": 0.0,
+                                "passed": False, "split": "dev"})
+    c2 = _collect(root)["consistency"]
+    ck("F2 账本多一条、投影没写 ⇒ ok 翻转到 False（读数随被测对象变化）",
+       c2.get("ok") is False and c2["missing_count"] == 1, str(c2))
+
+    #: 出口：rebuild 之后必须重新一致（一条闸配一条出口）
+    st.rebuild_from_ledger(led.events())
+    c3 = _collect(root)["consistency"]
+    ck("F3 rebuild 之后重新一致（判出来的问题有恢复路径）",
+       c3.get("ok") is True, str(c3))
+    st.close()
+
+print()
 print("=" * 60)
 if FAILS:
     print(f"❌ {len(FAILS)} 项未通过：")

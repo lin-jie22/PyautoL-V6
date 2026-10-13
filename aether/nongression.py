@@ -77,6 +77,8 @@ class GateResult:
     deltas: Dict[str, float] = field(default_factory=dict)
     verdicts: Dict[str, Verdict] = field(default_factory=dict)
     errors: List[str] = field(default_factory=list)
+    #: ⛔ 与 errors 分开：**不拦**但要说清这次裁决的判别力（例如基线全 0）
+    warnings: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -87,6 +89,7 @@ class GateResult:
             "deltas": self.deltas,
             "n_tasks": len(self.verdicts),
             "errors": self.errors,
+            "warnings": self.warnings,
         }
 
 
@@ -133,6 +136,24 @@ class NonRegressionGate:
         if not ok:
             return GateResult(passed=False, caliber_ok=False, caliber_reason=why)
 
+        # ⛔⛔ 2026-10-13 实测：套件为空时，regressions 与 errors 都是空 ⇒
+        #     `passed = (not regressions) and (not errors)` = **True**。
+        #    准入闸在自己最该响的时候恒绿 —— 任何变体都能"证明没变坏"。
+        #    这是最危险的假绿灯形态：不是读数假，是**闸本身**假。
+        #    ⇒ 空套件 = 无从判别 = fail-closed 拦下（与 caliber 不可比同处理）。
+        if not self.suite:
+            return GateResult(
+                passed=False, caliber_ok=True,
+                errors=["empty_frozen_suite: 冻结套件为空 ⇒ 无从证明"
+                        "「没变坏」（fail-closed：没被证明 ⇒ 不放行）"])
+        #: ⛔⛔ 但"基线里没有一条通过"**不能**同样拦死 —— 那会自指死锁：
+        #:    系统还没能力 ⇒ 基线全 0 ⇒ 任何候选都被拦 ⇒ 永远无法进化。
+        #:    它与"套件为空"是两件事：套件非空时闸**跑得起来**（崩溃会被
+        #:    errors 抓到），只是"没有可回归的东西"。所以判据照跑，只**标注**
+        #:    这次裁决的判别力为零（同层对照里的「能力边界 vs 挑食」同构）。
+        no_passing = not any(v.reward > 0
+                             for v in self.baseline.verdicts.values())
+
         verdicts: Dict[str, Verdict] = {}
         errors: List[str] = []
         for t in self.suite:
@@ -165,6 +186,9 @@ class NonRegressionGate:
             deltas=deltas,
             verdicts=verdicts,
             errors=errors,
+            warnings=([("baseline_all_red: 基线里没有一条原本通过的任务 ⇒"
+                        " 本次闸**无回归可判**（不等于『已证明无回归』）")]
+                      if no_passing else []),
         )
 
 

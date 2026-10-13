@@ -115,6 +115,36 @@ def main():
     ck("F4 3 中 1 且 k=1 ⇒ 1/3", abs(pass_at_k([1, 0, 0], 1) - 1 / 3) < 1e-9)
     ck("F5 空列表 ⇒ 0（不崩）", pass_at_k([]) == 0.0)
 
+    # ── G 组：空套件不得恒绿（2026-10-13 实测事故）─────────────────
+    #    实测：NonRegressionGate([], 空基线).evaluate() ⇒ passed=True。
+    #    准入闸在自己最该响的时候静默放行 —— 那不是读数假，是**闸本身**假。
+    #    ⇒ 与口径不可比同源处理：无从判别 = fail-closed。
+    print("G 组：空套件 ⇒ fail-closed（不是恒绿）")
+    g_empty = NonRegressionGate([], Baseline(caliber=CAL, verdicts={}))
+    r5 = g_empty.evaluate(Harness(), runner_all_green, CAL)
+    ck("G1 空套件 ⇒ 不放行", not r5.passed, f"{r5.to_dict()}")
+    ck("G2 空套件的原因被点名（能说清为什么拦）",
+       any("empty_frozen_suite" in e for e in r5.errors), f"{r5.errors}")
+
+    # ⛔ 但"基线全 0"**不能**跟着拦死：系统还没能力 ⇒ 基线恒 0 ⇒ 每个候选
+    #    都被拦 ⇒ 永远无法进化（与难度分层的自指死锁同形态）。
+    #    它与"套件为空"是两件事：套件非空时闸跑得起来（崩溃会被 errors 抓），
+    #    只是"没有可回归的东西" ⇒ 判据照跑，**标注**判别力为零即可。
+    g_nobase = NonRegressionGate(
+        suite, Baseline(caliber=CAL, verdicts={"t1": mk_verdict(False),
+                                               "t2": mk_verdict(False)}))
+    r6 = g_nobase.evaluate(Harness(), runner_all_green, CAL)
+    ck("G3 基线全 0 但套件非空 ⇒ 放行（不得自指死锁，否则永远无法进化）",
+       r6.passed, f"{r6.to_dict()}")
+    ck("G4 但必须标注『无回归可判』（判别力为零不是'已证明无回归'）",
+       any("baseline_all_red" in w for w in r6.warnings), f"{r6.warnings}")
+    ck("G5 基线全 0 时 runner 崩溃 ⇒ 仍然拦（闸不是被标注成摆设）",
+       not g_nobase.evaluate(Harness(), runner_boom, CAL).passed)
+
+    #: 反证：套件非空 + 基线有通过项 ⇒ 同一个闸**必须**放行（不是恒红）
+    ck("G6 反证：正常套件 + 全绿 runner ⇒ 放行（闸不是被改成恒红）",
+       gate.evaluate(Harness(), runner_all_green, CAL).passed)
+
     print("\n" + "=" * 60)
     if FAILS:
         print(f"❌ {len(FAILS)} 项未通过：")

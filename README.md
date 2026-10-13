@@ -36,14 +36,18 @@ PY=/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/bin/python3
 $PY -m aether.cli synth            # 合成任务：看 yield，不是看尝试次数
 $PY -m aether.cli evolve --rounds 3 --group 3
 $PY -m aether.cli verify-chain     # 账本链是否被篡改过
+$PY -m aether.cli rebuild --check  # 投影（SQLite）与账本对不对得上
+$PY -m aether.cli rebuild          # 对不上时的恢复路径（备份旧库 → 重放 → 再对账）
 $PY -m aether.cli memory show      # 记忆库完整性读数（混库/空向量/污染）
 $PY -m aether.cli memory reindex --to hash   # 换 embedder 后的唯一恢复路径
 $PY scripts/demo_evolve.py         # 端到端 demo + 出报告
 $PY scripts/llm_e2e.py --rounds 3  # 真模型端到端：跑通 vs 赢过
 $PY scripts/llm_e2e.py --no-llm    # 离线对照组（模板提议器）
 
-# 契约测试（含反证组）
-for t in tests/contract_*_test.py; do $PY $t --e2e; done
+# 契约测试（含反证组）—— ⛔ **两种模式都要跑**
+# e2e 组默认跳过；只跑默认模式等于把最重的那几组永久关掉
+# （实测：e2e 组因接口变更坏掉而无人发现，就是因为它从没被跑过）
+for t in tests/contract_*_test.py; do $PY $t; $PY $t --e2e; done
 
 # TypeScript 监督器（Node ≥22 原生跑 TS，无需 npm install）
 cd supervisor && node src/selfcheck.ts                     # 含跨语言一致性验证
@@ -79,7 +83,7 @@ V6/
 │   ├── attribution.py      反事实层归因（逐层消融 + 联合消融 ⇒ 冗余）
 │   ├── memory.py           5 层记忆 OS + 持久化 + 装载污染闸 + 继承闸
 │   ├── evolution.py        self-harness 循环（MINE/PROPOSE/VALIDATE/SELECT/COMMIT）
-│   ├── store.py            SQLite 投影（可由账本重建）
+│   ├── store.py            SQLite 投影（可由账本重建 + 账本/投影对账）
 │   ├── providers.py        可插拔 LLM + LLMProposer（模型输出当不可信输入）
 │   ├── cli.py / serve.py   命令行 / 只读 HTTP API（共用同一份记忆读数）
 ├── tasks/                  4 个可验证环境（解法形状刻意不同）
@@ -119,6 +123,11 @@ V6/
 这十一条是 V6 的"宪法"。每条都有对应的契约测试守着：
 
 1. **事实只有一份**：账本（hash 链）。SQLite 是投影，`rebuild_from_ledger()` 可重建。
+   ⛔⛔ 实测（2026-10-13）：投影曾**丢掉 89.7% 的执行历史** —— 账本 495 条
+   `eval.verdict`、库里只剩 51 条（`run_id` 不唯一 ⇒ `INSERT OR REPLACE`
+   互相覆盖），而"库只是视图"这句话被一个**恒真断言**（`n >= 0`）绿了很久。
+   修法三处：run_id 唯一化（锚在账本 seq）、账本带上 run_id、初始 harness
+   也必须先进账本。现在 `rebuild` 是命令，`status` 每次都对账（见第 19 条）。
 2. **奖励只来自执行判据**：`Verdict.reward` ∈ {0,1}，来自 `verify(env_state)`，
    不来自模型自述/打分（`SELF_REPORT_KEYS` 一出现即作废）。
 3. **没有证据的判定不算判定**：check 缺 evidence ⇒ 判定无效、reward 归 0。
@@ -163,6 +172,19 @@ V6/
 18. **「跑通」≠「赢过」**：真模型能产出 9 个过闸候选（跑通），但泛化闸
     放行 0 次（没赢过）。为了让它赢去放宽闸 = 把"讨好判据"判成"泛化"。
     ⛔ 只能告诉模型**规则**，不能告诉它**答案**（讲了就是替它考试）。
+19. **视图必须能与事实源对账**：`status` 每次都做「账本 vs 投影」比对
+    （键集合 + 字段 + **条数**），对不上就明确报"基于投影的读数不可信"，
+    且 `rebuild` 是它的出口（备份旧库 → 从账本重放 → 再对账）。
+    ⛔ 条数比对是**丢历史**的唯一抓法：键比对只能发现"对不上"，发现不了
+    "压根没写进来"（495 → 51 就是这么被抓到的，控制台当时只显示 51）。
+    ⛔ 同键覆盖本身必须进账（`overwrite_count`）：静默正确是这里最大的风险。
+20. **闸自己不能是假的**：冻结套件为空时，非回归闸原本恒绿
+    （`passed = 无回归 and 无错误`）—— **准入闸在自己最该响的时候放行**。
+    改成 fail-closed。
+    ⛔⛔ 但"基线里没有一条通过"**不能**同样拦死：系统还没能力 ⇒ 基线全 0
+    ⇒ 每个候选都被拦 ⇒ 永远无法进化 —— 与难度分层那个自指死锁同形态。
+    两者的分界是：**套件为空 = 无从判别（拦）**；
+    **套件非空而基线全 0 = 确实没有可回归的东西（照跑，只标注判别力为零）**。
 
 ---
 

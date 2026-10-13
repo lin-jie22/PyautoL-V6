@@ -49,12 +49,33 @@ def cmd_status(args: argparse.Namespace) -> int:
     led = Ledger(p["ledger"])
     st = led.stats()
     print(json.dumps({"ledger": st}, ensure_ascii=False, indent=2))
+    chain_ok = st["chain_ok"]
+    cons_ok = True
     if p["db"].exists():
         s = Store(p["db"])
         print(json.dumps({"store": s.stats()}, ensure_ascii=False, indent=2))
+        #: ⛔ 账本（事实源）与投影（视图）是否对得上 —— 这是**判据**，不是
+        #:    附带信息：对不上 ⇒ 控制台/监督器基于投影的读数都不可信。
+        cons = s.consistency_report(led.events())
+        print(json.dumps({"consistency": cons}, ensure_ascii=False, indent=2))
         s.close()
-    ok = st["chain_ok"]
-    print("账本链：" + ("✅ 完整" if ok else f"❌ 断裂 @seq={st['first_bad_seq']} {st['reason']}"))
+        if not cons["ok"]:
+            print(f"⚠️ 投影与账本不一致（缺 {cons['missing_count']} / "
+                  f"漂移 {cons['drift_count']} / 快照缺 "
+                  f"{len(cons['snapshot_missing'])} / "
+                  f"账本 {cons['ledger_verdicts']} 条 vs 投影 "
+                  f"{cons['projection_runs']} 条）⇒ 基于投影的读数不可信"
+                  f"（修法：python -m aether.cli rebuild）", file=sys.stderr)
+            cons_ok = False
+        if cons["overwrite_count"]:
+            print(f"⚠️ 投影发生过 {cons['overwrite_count']} 次同键覆盖"
+                  f" ⇒ 执行历史被抹掉过", file=sys.stderr)
+            cons_ok = False
+    #: ⛔ 两条判据**分开报**：合成一个 ok 再用链的文案输出，等于把"投影
+    #:    不一致"报成"账本链断裂" —— 那是另一种假仪表（文案与判据不对应）。
+    print("账本链：" + ("✅ 完整" if chain_ok
+                    else f"❌ 断裂 @seq={st['first_bad_seq']} {st['reason']}"))
+    print("投影一致性：" + ("✅ 与账本一致" if cons_ok else "❌ 与账本不一致"))
     #: 记忆完整性也进 status（与 serve 用**同一个**读数函数，不抄第二份）
     from .serve import memory_report
     mr = memory_report(p["memory"])
@@ -62,7 +83,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     if mr.get("present") and not mr.get("integrity_ok"):
         print(f"⚠️ 记忆库不完整：{ {k: v for k, v in mr.items() if k.startswith(('foreign', 'wrong', 'no_embedding', 'unverified')) } }",
               file=sys.stderr)
-    return 0 if ok else 1
+    return 0 if (chain_ok and cons_ok) else 1
 
 
 def cmd_memory(args: argparse.Namespace) -> int:
@@ -129,6 +150,67 @@ def cmd_verify_chain(args: argparse.Namespace) -> int:
     ok, seq, why = led.verify_chain()
     print("✅ 链完整" if ok else f"❌ 断裂 @seq={seq}: {why}")
     return 0 if ok else 1
+
+
+def cmd_rebuild(args: argparse.Namespace) -> int:
+    """从账本重建 SQLite 投影 —— **「库只是视图」的唯一验证方式**。
+
+    ⛔ 为什么需要这条命令（2026-10-13 实测）：`rebuild_from_ledger` 写好了
+    两年多……不，写好之后**只有测试调过一次，而且那次断言是 `n >= 0`**
+    —— 恒真。真跑一遍才发现：账本 495 条执行、投影只剩 51 条，且键空间
+    完全不同（账本不带 run_id）⇒ "库可由账本重建"其实**从未被验证过**。
+
+    ⛔ 与 `memory reindex` 同一形态的纪律：**一条闸配一条出口**。
+    投影被判"不可信"之后必须有恢复动作，否则就是死胡同。
+
+    ⛔ 不删旧库：先改名备份（保留现场），再重建。
+    """
+    import shutil
+    from .ledger import Ledger
+    from .store import Store
+    p = _paths(Path(args.root))
+    led = Ledger(p["ledger"])
+    evs = led.events()
+
+    if args.check:
+        if not p["db"].exists():
+            print(f"❌ 没有投影库可校验（{p['db']}）", file=sys.stderr)
+            return 1
+        s = Store(p["db"])
+        rep = s.consistency_report(evs)
+        s.close()
+        print(json.dumps(rep, ensure_ascii=False, indent=2))
+        print("✅ 投影与账本一致" if rep["ok"] else "❌ 投影与账本不一致 ⇒ 需重建")
+        return 0 if rep["ok"] else 1
+
+    ok, seq, why = led.verify_chain()
+    if not ok:
+        print(f"❌ 账本链已断裂 @seq={seq}: {why} ⇒ 拒绝重建"
+              f"（事实源本身不可信，重建只会把错误固化）", file=sys.stderr)
+        return 1
+
+    target = Path(args.out) if args.out else p["db"]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    backup = None
+    if target.exists() and not args.force:
+        #: ⛔ 默认**不删**现场：旧库留一份带时间戳的副本，事后还能对账
+        backup = target.with_name(target.name + f".bak_{int(time.time())}")
+        shutil.copy2(target, backup)
+        target.unlink()
+
+    s = Store(target)
+    counts = s.rebuild_from_ledger(evs)
+    rep = s.consistency_report(evs)
+    s.close()
+    out = {"rebuilt": counts, "consistency": rep,
+           "backup": str(backup) if backup else None, "db": str(target)}
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    if counts["derived"]:
+        print(f"⚠️ {counts['derived']} 条历史事件缺 run_id ⇒ 用派生键"
+              f" rebuilt:{{seq}} 补齐（可溯源，但与当年那次运行的键对不上）",
+              file=sys.stderr)
+    print("✅ 已从账本重建且与账本一致" if rep["ok"] else "❌ 重建后仍不一致（见 consistency）")
+    return 0 if rep["ok"] else 1
 
 
 def cmd_synth(args: argparse.Namespace) -> int:
@@ -451,7 +533,9 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                          on_round_end=_remember_round,
                          config=EvolutionConfig(group_size=int(args.group)))
 
-    store.save_snapshot(h0.harness_id, h0.to_dict(), accepted=True, round_no=0)
+    #: ⛔ 初始 harness 必须**先进账本**再落投影：只写库的话，从账本重建会
+    #:    丢掉它（实测 7 个快照重建只剩 6 个）⇒ "账本是唯一事实源"被违反。
+    loop.register_root(h0)
     mem.write("L0", h0.meta_rules, channel="curated", source="seed-harness")
 
     t0 = time.time()
@@ -524,8 +608,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--root", default=str(ROOT), help="V6 根目录")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("status", help="账本 + 库统计")
+    sub.add_parser("status", help="账本 + 库统计 + 投影一致性")
     sub.add_parser("verify-chain", help="校验账本哈希链")
+    rb = sub.add_parser("rebuild", help="从账本重建 SQLite 投影（库只是视图）")
+    rb.add_argument("--check", action="store_true",
+                    help="只校验投影与账本是否一致，不重建")
+    rb.add_argument("--out", default="", help="重建到别的库（默认覆盖 data/aether.db）")
+    rb.add_argument("--force", action="store_true",
+                    help="（保留位）不备份旧库 —— 默认总是备份")
     s = sub.add_parser("synth", help="合成任务并统计 yield")
     s.add_argument("--max", default="8")
     m = sub.add_parser("memory", help="记忆库：读数 / 换嵌入后全量重算")
@@ -558,6 +648,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     return {
         "status": cmd_status,
         "verify-chain": cmd_verify_chain,
+        "rebuild": cmd_rebuild,
         "synth": cmd_synth,
         "memory": cmd_memory,
         "evolve": cmd_evolve,

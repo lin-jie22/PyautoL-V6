@@ -223,6 +223,31 @@ class EvolutionLoop:
         #: 内存态 run 账（**不依赖 store**）：机制正确性不该依赖外部存储存在。
         #: store 只是它的持久化投影。
         self._runs: List[RunRow] = []
+        #: ⛔ run_id 的**单调锚**：起点取账本当前 seq，之后每次执行 +1。
+        #:    2026-10-13 实测事故：run_id 曾由 (harness, task) 拼出 ⇒ 同一
+        #:    组合的第二次执行会 `INSERT OR REPLACE` 掉第一次 ⇒ 账本 495 条
+        #:    执行、投影只剩 51 条。锚在账本 seq 上 ⇒ 跨运行也不重置。
+        self._run_seq: int = int(getattr(self.ledger, "seq", 0) or 0)
+
+    def next_run_id(self, h, task_id: str, tag: str = "") -> str:
+        """生成**全局唯一**的 run_id（唯一事实源：只有这里产它）。"""
+        self._run_seq += 1
+        return f"{tag}{h.harness_id[:8]}:{task_id}#{self._run_seq}"
+
+    def register_root(self, h) -> None:
+        """把**初始 harness** 记进账本，再落投影。
+
+        ⛔ 2026-10-13 实测：CLI 原先直接 `store.save_snapshot(h0)`，绕过账本
+        ⇒ 初始 harness 只存在于库里 ⇒ 从账本重建会**丢掉它**（实测 7 vs 6）。
+        宪法第 1 条"任何想成为事实的东西必须先 append"被自己的代码违反了。
+        """
+        self.ledger.append("harness.init", {
+            "harness_id": h.harness_id, "round_no": 0,
+            "payload": h.to_dict(), "parent_id": "",
+        }, actor="evolution")
+        if self.store is not None:
+            self.store.save_snapshot(h.harness_id, h.to_dict(),
+                                     accepted=True, round_no=0)
 
     # ── 评估 ──────────────────────────────────────────────────────
     def evaluate_dev(self, h: Harness, tag: str = "") -> Tuple[float, List[Verdict]]:
@@ -239,8 +264,12 @@ class EvolutionLoop:
                 from .verifier import error_verdict
                 v = error_verdict(f"dev/{t.task_id}", e)
             vs.append(v)
+            #: ⛔ run_id 必须唯一（见 `next_run_id`），且**同一份**写进账本
+            #:    —— 两处不同一个 id ⇒ 投影无法从账本重建 ⇒ "库只是视图"
+            #:    就成了无法验证的声明（2026-10-13 实测）。
+            run_id = self.next_run_id(h, t.task_id, tag)
             row = RunRow(
-                    run_id=f"{tag}{h.harness_id[:8]}:{t.task_id}",
+                    run_id=run_id,
                     harness_id=h.harness_id, task_id=t.task_id,
                     reward=v.reward, passed=v.passed, gate_ok=False,
                     payload={
@@ -256,6 +285,7 @@ class EvolutionLoop:
             if self.store is not None:
                 self.store.save_run(row, caliber=self.caliber)
             self.ledger.append("eval.verdict", {
+                "run_id": run_id,
                 "harness_id": h.harness_id, "task_id": t.task_id,
                 "reward": v.reward, "passed": v.passed,
                 "split": "dev", "tag": tag,

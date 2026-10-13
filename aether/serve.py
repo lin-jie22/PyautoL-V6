@@ -98,16 +98,22 @@ def _collect(root: Path, limit: int = 200) -> Dict[str, Any]:
     store_stats: Dict[str, Any] = {}
     runs: list = []
     snaps: list = []
+    consistency: Dict[str, Any] = {}
     if db.exists():
         s = Store(db)
         store_stats = s.stats()
         runs = [r.to_dict() for r in s.runs(limit=limit)]
         snaps = s.snapshots()
+        #: ⛔ 账本 vs 投影：与 CLI `status` / `rebuild` **同一个**判据函数。
+        #:    控制台不能只报"运行记录 51 条"而不说账本里有 495 条 ——
+        #:    那等于把丢历史这件事藏起来（2026-10-13 实测）。
+        consistency = s.consistency_report(led.events())
         s.close()
     return {
         "ledger": st,
         "events": events,
         "store": store_stats,
+        "consistency": consistency,
         "runs": runs,
         "snapshots": snaps,
         "memory": memory_report(root / "data" / "memory.json"),

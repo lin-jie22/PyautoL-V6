@@ -173,14 +173,27 @@ def main():
         env = Environment.from_dir(ROOT / "tasks" / "textscore")
         rep = synthesize_tasks(env, max_n=6)
         ck("F1 合成出有效任务（yield > 0）", rep.valid > 0, str(rep.to_dict()))
-        rnr = _default_runner(env)
+        # ⛔ 多环境化之后 runner 吃的是 {env_id: Environment} 字典，且 spec
+        #    必须带 env_id（它是寻址键）。本组曾经用老的单环境调用方式 ⇒
+        #    一直 AttributeError，而因为 e2e 默认跳过，**没人发现它坏了**
+        #    （与恒真断言同族：判据假 vs 判据根本没跑）。
+        rnr = _default_runner({env.env_id: env})
         dev2 = [FrozenTask(task_id=t.task_id,
-                           spec={"broken_source": t.broken_source,
-                                 "topic": env.env_id}) for t in rep.tasks]
+                           spec={"env_id": env.env_id,
+                                 "broken_source": t.broken_source,
+                                 "topic": env.env_id,
+                                 "task_class": "repair"}) for t in rep.tasks]
         v_bad = rnr(Harness(), dev2[0].spec)
         ck("F2 无技能 ⇒ 修不好（reward 0）", v_bad.reward == 0.0)
-        v_good = rnr(Harness(skills={"restore_from_baseline": "x"}),
+        # ⛔ 5 层都要到位才修得好：L2 没有工具 ⇒ 直接失败；L1 没有路由 ⇒
+        #    技能不可达（"有技能"不等于"用得上"，这是 §7 那条纪律）。
+        v_good = rnr(Harness(tools=("read_file", "write_file", "python_exec"),
+                             routing={"repair": "fix_control_flow"},
+                             skills={"fix_control_flow": "x"}),
                      dev2[0].spec)
+        ck("F3b 修法名进证据（可观测：到底用了哪条路）",
+           v_good.evidence.get("strategy") == "fix_control_flow",
+           str(v_good.evidence))
         ck("F3 有技能 ⇒ 修好（reward 1，来自真执行）", v_good.reward == 1.0)
         ck("F4 判定带真实证据", "n_passed" in v_good.evidence)
 

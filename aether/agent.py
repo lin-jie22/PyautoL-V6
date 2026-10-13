@@ -111,6 +111,13 @@ class HarnessAgent:
 
     def __init__(self, envs: Dict[str, Environment],
                  memory: Optional[MemoryOS] = None, timeout: float = 10.0):
+        #: ⛔ 明确拒绝非 dict：多环境化之后 env_id 是任务的寻址键，传单个
+        #:    Environment 会在 run() 里炸成 `'Environment' object has no
+        #:    attribute 'get'` —— 一个看不出根因的 AttributeError。
+        if not isinstance(envs, dict):
+            raise TypeError(
+                f"envs 必须是 {{env_id: Environment}} 字典，收到 "
+                f"{type(envs).__name__}（单环境时代的老调用方式）")
         self.envs = envs
         self.memory = memory
         self.timeout = timeout

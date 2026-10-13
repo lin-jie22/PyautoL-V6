@@ -129,8 +129,6 @@ export function detect(events: Event[], cfg: AnomalyConfig = DEFAULT_CONFIG): Fi
     const blast = (p.blast ?? {}) as Record<string, number>;
     const before = Number(blast.size_delta ?? 0);
     const gain = Number(p.gain ?? 0);
-    const sizeBefore = Number(p.baseline_reward ?? 0); // 占位，见下
-    void sizeBefore;
     if (before > 0 && gain < cfg.minGainForGrowth) {
       out.push({ code: "ARTIFACT_PROLIFERATION", severity: "warn",
                  detail: `@${ev.seq} 提交使体积 +${before} 字节但增益仅 ${gain}（产物只增不减会让系统退化）`,

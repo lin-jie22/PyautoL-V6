@@ -216,6 +216,16 @@ class Ledger:
     def head_hash(self) -> str:
         return self._last_hash
 
+    @property
+    def seq(self) -> int:
+        """当前最新 seq（0 = 空账本）。
+
+        ⛔ 给"需要全局单调锚"的调用方用（例如 run_id 编号）：账本 seq 是
+        唯一既单调、又跨运行不重置的东西 —— 用进程内计数器会在第二次
+        运行时从头开始 ⇒ 撞键 ⇒ 投影静默覆盖（2026-10-13 实测事故）。
+        """
+        return self._seq
+
     # ── 校验 ──────────────────────────────────────────────────────
     def verify_chain(self) -> Tuple[bool, Optional[int], str]:
         """校验整条哈希链。

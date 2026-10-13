@@ -113,15 +113,112 @@ def main():
     ck("D3 seq 严格递增无重复",
        [e.seq for e in led3.events()] == list(range(1, n_proc * n_each + 1)))
 
-    # ── E 组：投影可重建（库只是视图）────────────────────────────
-    print("E 组：账本 → 投影")
-    from aether.store import Store
-    db = tmp / "v.db"
-    st = Store(db)
-    n = st.rebuild_from_ledger(Ledger(p).events())
-    ck("E1 从账本重建成功", n >= 0)
-    ck("E2 重建后投影可读", st.stats()["n_runs"] >= 0)
-    st.close()
+    # ── E 组：投影可由账本重建（**双向比对**，不是"跑通就行"）────
+    #    ⛔⛔ 2026-10-13 实测：这一组原本是 `n >= 0` / `n_runs >= 0` ——
+    #    两个**恒真**断言。它们绿了很久，而"库只是视图"其实从来没被验证：
+    #    真跑一遍就发现账本 495 条执行、投影只剩 51 条，且键空间完全不同。
+    #    ⇒ 判据必须双向（键集合 + 字段 + 条数），并且配反证组（F）。
+    print("E 组：账本 → 投影（双向比对）")
+    from aether.store import Store, RunRow
+
+    p3 = tmp / "proj.jsonl"
+    L3 = Ledger(p3)
+    st1 = Store(tmp / "v1.db")
+    L3.append("harness.init", {"harness_id": "h_root", "round_no": 0,
+                               "payload": {"meta_rules": "x"}, "parent_id": ""})
+    st1.save_snapshot("h_root", {"meta_rules": "x"}, accepted=True, round_no=0)
+    for i in range(6):
+        rid = f"base:h_root:t{i}#{i + 1}"      # ⛔ 唯一 run_id（模拟修好之后）
+        rew = 1.0 if i % 2 == 0 else 0.0
+        L3.append("eval.verdict", {
+            "run_id": rid, "harness_id": "h_root", "task_id": f"t{i}",
+            "reward": rew, "passed": bool(rew), "split": "dev", "tag": "base:",
+            "verdict": {}, "caliber": {}})
+        st1.save_run(RunRow(run_id=rid, harness_id="h_root", task_id=f"t{i}",
+                            reward=rew, passed=bool(rew), gate_ok=False,
+                            payload={"i": i}))
+    L3.append("harness.commit", {"harness_id": "h_child", "round_no": 1,
+                                 "payload": {"meta_rules": "y"},
+                                 "parent_id": "h_root"})
+    st1.save_snapshot("h_child", {"meta_rules": "y"}, parent_id="h_root",
+                      accepted=True, round_no=1)
+
+    cons1 = st1.consistency_report(L3.events())
+    ck("E1 正常写入后 投影 == 账本（一致性判据为 ok）", cons1["ok"],
+       json.dumps(cons1, ensure_ascii=False))
+
+    st2 = Store(tmp / "v2.db")
+    counts = st2.rebuild_from_ledger(L3.events())
+    ck("E2 重建条数=账本事件数（6 run + 2 快照，无派生键）",
+       counts == {"snapshots": 2, "runs": 6, "derived": 0}, str(counts))
+    ck("E3 重建后 run_id 集合与现状**完全相同**（不是「都能读」就算）",
+       set(st2.run_ids()) == set(st1.run_ids()),
+       f"{sorted(set(st1.run_ids()) - set(st2.run_ids()))[:3]} / "
+       f"{sorted(set(st2.run_ids()) - set(st1.run_ids()))[:3]}")
+    a = {r.run_id: (r.reward, r.passed, r.harness_id, r.task_id)
+         for r in st1.runs(limit=1000)}
+    b = {r.run_id: (r.reward, r.passed, r.harness_id, r.task_id)
+         for r in st2.runs(limit=1000)}
+    ck("E4 重建后字段逐条一致（reward/passed/harness_id/task_id）", a == b,
+       str([k for k in a if a[k] != b.get(k)])[:200])
+    ck("E5 重建后快照集合一致（**含 harness.init 的初始 harness**）",
+       set(st2.snapshot_ids()) == set(st1.snapshot_ids()) == {"h_root", "h_child"},
+       f"{st2.snapshot_ids()} vs {st1.snapshot_ids()}")
+    ck("E6 重建出来的库与账本一致（ok=True）",
+       st2.consistency_report(L3.events())["ok"])
+    st1.close()
+    st2.close()
+
+    # ── F 组：反证 —— 判据必须能在事故版上转红 ───────────────────
+    #    ⛔ 没有反证的判据 = 恒亮绿灯。这里逐条注入 2026-10-13 真实事故。
+    print("F 组：反证（事故必须被看见）")
+    st3 = Store(tmp / "v3.db")
+    L4 = Ledger(tmp / "f.jsonl")
+    for i in range(4):
+        rid = f"r{i}"
+        rew = float(i)
+        L4.append("eval.verdict", {"run_id": rid, "harness_id": "h",
+                                   "task_id": f"t{i}", "reward": rew,
+                                   "passed": rew > 0, "split": "dev"})
+        st3.save_run(RunRow(run_id=rid, harness_id="h", task_id=f"t{i}",
+                            reward=rew, passed=rew > 0, gate_ok=False,
+                            payload={}))
+    # F1：同键不同内容 ⇒ 覆盖事故必须被记下来
+    overwrote = st3.save_run(RunRow(run_id="r0", harness_id="h", task_id="t0",
+                                    reward=9.0, passed=True, gate_ok=False,
+                                    payload={"dup": True}))
+    ck("F1 同键写入不同内容 ⇒ save_run 报覆盖", overwrote is True)
+    ck("F2 覆盖次数进 stats（事故可见，不是静默正确）",
+       st3.stats()["overwrite_count"] >= 1, str(st3.stats()))
+    # F3：run_id 不唯一 ⇒ 两条不同的执行映射到同一个键 ⇒ 投影**丢历史**
+    #     （2026-10-13 真实事故：495 条执行只剩 51 条，就是这么没的）
+    L4.append("eval.verdict", {"run_id": "r0", "harness_id": "h",
+                               "task_id": "t0", "reward": 5.0,
+                               "passed": True, "split": "dev"})
+    st3.save_run(RunRow(run_id="r0", harness_id="h", task_id="t0",
+                        reward=5.0, passed=True, gate_ok=False, payload={}))
+    c3 = st3.consistency_report(L4.events())
+    ck("F3 run_id 撞键 ⇒ 投影条数 < 账本条数（丢历史被抓到）",
+       c3["count_ok"] is False and c3["projection_runs"] < c3["ledger_verdicts"],
+       json.dumps({k: c3[k] for k in ("count_ok", "projection_runs",
+                                      "ledger_verdicts")}))
+    ck("F4 撞键后 ok=False（闸真的会响，不是恒绿）", c3["ok"] is False)
+
+    # F5：字段漂移（投影被别的东西改过）⇒ 必须检出
+    st3.save_run(RunRow(run_id="r1", harness_id="h", task_id="t1",
+                        reward=0.0, passed=False, gate_ok=False, payload={}))
+    c4 = st3.consistency_report(L4.events())
+    ck("F5 同键内容被改 ⇒ drift 被检出", c4["drift_count"] >= 1,
+       json.dumps({k: c4[k] for k in ("drift_count", "drifted")}))
+
+    # F6：快照缺失 ⇒ 必须检出（这正是 h0 绕过账本时的症状）
+    L4.append("harness.commit", {"harness_id": "h_missing", "round_no": 2,
+                                 "payload": {}, "parent_id": "h"})
+    c5 = st3.consistency_report(L4.events())
+    ck("F6 账本有快照而投影没有 ⇒ snapshot_missing 被检出",
+       c5["snapshot_missing"] == ["h_missing"] and c5["ok"] is False,
+       json.dumps({k: c5[k] for k in ("snapshot_missing", "ok")}))
+    st3.close()
 
     print("\n" + "=" * 60)
     if FAILS:

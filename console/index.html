@@ -64,6 +64,14 @@
 </header>
 
 <main>
+  <!-- ⛔ 告警区：账本（事实源）与投影（视图）对不上时必须**在控制台上**可见。
+       2026-10-13 实测：投影丢掉 89.7% 的执行历史，而控制台只显示"运行记录 51"
+       —— 事故在账本里可见、在观测侧不可见，等于没被看见。 -->
+  <section class="card" id="alert-card" style="display:none;border-color:var(--bad)">
+    <h2 style="color:var(--bad)">⚠️ 读数不可信</h2>
+    <div id="alert-body" class="sub"></div>
+  </section>
+
   <section class="card">
     <h2>系统状态</h2>
     <div id="stats"></div>
@@ -87,8 +95,16 @@
   </section>
 
   <section class="card">
-    <h2>闸门裁决</h2>
-    <table id="gates"><thead><tr><th>capsule</th><th>闸</th><th>reward</th><th>优势</th><th>结论</th></tr></thead>
+    <h2>闸门裁决（非回归闸）</h2>
+    <table id="gates"><thead><tr><th>capsule</th><th>闸</th><th>冻结任务</th><th>回归</th><th>结论</th></tr></thead>
+      <tbody></tbody></table>
+  </section>
+
+  <!-- ⛔ 泛化闸是 V6 的核心判据：发展集涨了但 held-out 没涨 ⇒ 判 overfit。
+       控制台原先根本没有这张表，只有一张"优势"列恒为 — 的空壳。 -->
+  <section class="card">
+    <h2>泛化闸（发展集涨 ≠ 变强）</h2>
+    <table id="gen"><thead><tr><th>capsule</th><th>dev 增益</th><th>held-out 增益</th><th>裁决</th></tr></thead>
       <tbody></tbody></table>
   </section>
 </main>
@@ -127,18 +143,43 @@ async function load() {
 
   // ── 状态 ────────────────────────────────────────────────────
   const st = data.store ?? {};
+  const cons = data.consistency ?? {};
   const kinds = led.by_kind ?? {};
   el("stats").innerHTML = [
     ["事件总数", led.count ?? 0],
     ["账本头 hash", (led.head ?? "—").slice(0, 12)],
     ["harness 快照", st.n_snapshots ?? 0],
-    ["运行记录", st.n_runs ?? 0],
+    // ⛔ 不再单独显示"运行记录"：脱离账本条数它会变成假读数
+    //    （实测 51 条 vs 账本 495 条）。两个数必须**并排**出现。
+    ["账本判定 / 投影记录",
+      `${cons.ledger_verdicts ?? "?"} / ${cons.projection_runs ?? st.n_runs ?? 0}`],
+    ["投影一致性", cons.ok === undefined ? "—" : (cons.ok ? "✅ 一致" : "❌ 不一致")],
+    ["同键覆盖次数", cons.overwrite_count ?? 0],
     ["平均 reward", st.avg_reward ?? 0],
     ["harness.commit", kinds["harness.commit"] ?? 0],
     ["harness.revert", kinds["harness.revert"] ?? 0],
     ["gate.result", kinds["gate.result"] ?? 0],
     ["evolve.noop", kinds["evolve.noop"] ?? 0],
   ].map(([k, v]) => `<div class="kv"><span>${k}</span><span>${esc(v)}</span></div>`).join("");
+
+  // ── 告警：投影与账本对不上 ⇒ 上面的读数全都不可信 ──────────────
+  const alerts = [];
+  if (cons.ok === false) {
+    alerts.push(`投影与账本不一致：账本 ${cons.ledger_verdicts} 条判定 / 投影只有 `
+      + `${cons.projection_runs} 条（缺 ${cons.missing_count}，漂移 ${cons.drift_count}，`
+      + `快照缺 ${(cons.snapshot_missing ?? []).length}）`
+      + ` ⇒ 修复：python -m aether.cli rebuild`);
+  }
+  if ((cons.overwrite_count ?? 0) > 0) {
+    alerts.push(`投影发生过 ${cons.overwrite_count} 次同键覆盖 ⇒ 执行历史被抹掉过`);
+  }
+  const mem = data.memory ?? {};
+  if (mem.present && mem.integrity_ok === false) {
+    alerts.push(`记忆库不完整：异 embedder ${mem.foreign_embedder} / 维度不符 `
+      + `${mem.wrong_dim} / 空向量 ${mem.no_embedding} / 未验证 ${mem.unverified}`);
+  }
+  el("alert-card").style.display = alerts.length ? "" : "none";
+  el("alert-body").innerHTML = alerts.map((a) => `<div>· ${esc(a)}</div>`).join("");
 
   const evs = data.events ?? [];
 
@@ -165,14 +206,16 @@ async function load() {
     byH.get(k).push(Number(p.reward ?? 0));
   }
   const rows = [...byH.entries()];
-  const max = Math.max(1, ...rows.map(([, v]) => v.length));
+  // ⛔ 标题写的是"平均 reward"，高度就必须是 reward —— 上一版高度用的是
+  //    **判定条数**：reward 恒 0 的一堆判定会把柱子撑到最高，看起来"很活跃"。
+  //    这就是假仪表最典型的形态：读数真实，含义是假的。
   el("bars").innerHTML = rows.map(([k, v]) => {
     const avg = v.reduce((a, b) => a + b, 0) / v.length;
     return `<div class="bar ${avg === 0 ? "zero" : ""}"
-              style="height:${Math.max(3, (v.length / max) * 100)}%"
+              style="height:${Math.max(3, avg * 100)}%"
               title="${k}: ${v.length} 条, 均值 ${avg.toFixed(2)}"></div>`;
   }).join("") || '<div class="sub">暂无 dev 判定</div>';
-  el("bars-note").textContent = `${rows.length} 个 harness 变体 · 高度=判定条数 · 红=均值 0`;
+  el("bars-note").textContent = `${rows.length} 个 harness 变体 · 高度=平均 reward · 红=均值 0`;
 
   // ── 进化树 ──────────────────────────────────────────────────
   const byId = new Map();
@@ -194,16 +237,29 @@ async function load() {
   walk("#root", 0);
   el("tree").innerHTML = lines.join("\n") || "（无快照：先跑 python -m aether.cli evolve）";
 
-  // ── 闸门裁决 ────────────────────────────────────────────────
+  // ── 非回归闸裁决 ────────────────────────────────────────────
+  //    ⛔ 上一版有一列"优势"恒为 `—`（账本里根本没有这个值）⇒ 假列。
+  //    改成账本里真有的字段：冻结任务数 / 回归数 / 口径原因。
   const gates = evs.filter((e) => e.kind === "gate.result").map((e) => e.payload);
   el("gates").querySelector("tbody").innerHTML = gates.slice(-12).map((g) => {
     const ok = !!g.passed;
     const reg = (g.regressions ?? []).length;
+    const why = ok ? "无回归" : ((g.regressions ?? []).join(";") || g.caliber_reason || "—");
     return `<tr><td>${esc(g.capsule)}</td>
       <td><span class="badge ${ok ? "ok" : "bad"}">${ok ? "过" : "拦" + (reg ? "(" + reg + ")" : "")}</span></td>
-      <td>${esc(g.n_tasks ?? "—")}</td><td>—</td>
-      <td class="sub">${esc((g.regressions ?? []).join(";")).slice(0, 40) || "—"}</td></tr>`;
+      <td>${esc(g.n_tasks ?? "—")}</td><td>${reg}</td>
+      <td class="sub">${esc(why).slice(0, 40)}</td></tr>`;
   }).join("") || '<tr><td colspan="5" class="sub">暂无闸门记录</td></tr>';
+
+  // ── 泛化闸裁决（V6 的核心判据，控制台必须有它）───────────────
+  const gen = evs.filter((e) => e.kind === "gen.probe").map((e) => e.payload);
+  const vcls = (v) => v === "generalize" ? "ok" : (v === "overfit" ? "bad" : "warn");
+  el("gen").querySelector("tbody").innerHTML = gen.slice(-12).map((g) => {
+    const v = String(g.verdict ?? "—");
+    return `<tr><td>${esc(g.capsule)}</td>
+      <td>${esc(g.dev_gain ?? "—")}</td><td>${esc(g.heldout_gain ?? "—")}</td>
+      <td><span class="badge ${vcls(v)}">${esc(v)}</span></td></tr>`;
+  }).join("") || '<tr><td colspan="4" class="sub">暂无泛化闸记录</td></tr>';
 }
 
 load();
