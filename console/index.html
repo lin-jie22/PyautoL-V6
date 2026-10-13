@@ -178,6 +178,17 @@ async function load() {
          mem0.ledger_trace === "partial" ? " ❌对不上" : "")],
     ["层归因（成功/失败）",
       `${kinds["attribution.layer"] ?? 0} / ${kinds["attribution.unavailable"] ?? 0}`],
+    // ⛔ 判定的**可信度**取决于它是在哪一层隔离下产出的：
+    //    process = 只到进程层（env 已净化/资源受限），文件系统**未隔离**。
+    //    只看 reward 会把"通过"当成绝对的，而它可能来自未被隔离的执行。
+    ["执行沙箱", (() => {
+      const v = [...evs].reverse().find(
+        (e) => e.kind === "eval.verdict"
+               && (e.payload?.evidence?.sandbox?.tier));
+      const s = v?.payload?.evidence?.sandbox;
+      if (!s) return "—";
+      return `${s.tier}${s.fs_isolated ? " · fs已隔离" : " · ⚠️fs未隔离"}`;
+    })()],
     ["平均 reward", st.avg_reward ?? 0],
     ["harness.commit", kinds["harness.commit"] ?? 0],
     ["harness.revert", kinds["harness.revert"] ?? 0],
@@ -211,6 +222,19 @@ async function load() {
   if ((kinds["attribution.unavailable"] ?? 0) > 0) {
     alerts.push(`层归因失败 ${kinds["attribution.unavailable"]} 次 ⇒ `
       + `"这次提升来自哪一层"没有证据（已记账，不再静默）`);
+  }
+  // ⛔ 沙箱只到进程层是**环境级**事实：被执行代码仍可能越界读写/fork。
+  //    不写进告警的话，"沙箱"这个词会让人以为已经隔离了。
+  {
+    const sv = [...evs].reverse().find(
+      (e) => e.kind === "eval.verdict" && e.payload?.evidence?.sandbox?.tier);
+    const s = sv?.payload?.evidence?.sandbox;
+    if (s && s.fs_isolated === false) {
+      alerts.push(`执行沙箱只到**进程层**（tier=${s.tier}）：env 已净化、资源受限、`
+        + `输出封顶，但文件系统**未隔离** ⇒ 被执行代码仍可能越界读写或 fork。`
+        + ` OS 层沙箱在本环境不可用（实测 macOS sandbox-exec 的 deny-default `
+        + `一律 Operation not permitted）⇒ 这是已知边界，不是"已隔离"`);
+    }
   }
   const renderAlerts = () => {
     el("alert-card").style.display = alerts.length ? "" : "none";

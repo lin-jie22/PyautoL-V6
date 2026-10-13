@@ -51,7 +51,8 @@ $PY scripts/llm_e2e.py --no-llm    # 离线对照组（模板提议器）
 for t in tests/contract_*_test.py; do $PY $t; $PY $t --e2e; done
 
 # 反证探针：单独挖某一类缺口的**对拍脚本**（不是契约测试，是取证工具）
-$PY scripts/probe_spread_audit.py  # held-out 没判别力时闸会不会假放行
+$PY scripts/probe_spread_audit.py   # held-out 没判别力时闸会不会假放行
+$PY scripts/probe_sandbox_audit.py  # 沙箱是"真隔离"还是"只是 subprocess"
 
 # TypeScript 监督器（Node ≥22 原生跑 TS，无需 npm install）
 cd supervisor && node src/selfcheck.ts                     # 含跨语言一致性验证
@@ -95,7 +96,7 @@ V6/
 │   ├── eventflow/          事件流聚合（会话切分 / 滑动窗口 / 分位数）
 │   ├── stateflow/          状态机（转移 / 合法性 / 可达性 / 路径计数）
 │   └── scheduler/          区间调度（冲突 / 最大并发 / 贪心 / 区间合并）
-├── tests/                  13 个契约测试（RED→GREEN + 反证组）
+├── tests/                  14 个契约测试（RED→GREEN + 反证组）
 ├── supervisor/             TypeScript 外部监督器（只读账本 + 异常检测）
 ├── console/                零构建的只读可视化控制台
 ├── scripts/demo_evolve.py  端到端 demo + 报告
@@ -124,7 +125,7 @@ V6/
 
 ## 5. 系统如何自证（判据清单）
 
-这二十七条是 V6 的"宪法"。每条都有对应的契约测试守着：
+这二十八条是 V6 的"宪法"。每条都有对应的契约测试守着：
 
 1. **事实只有一份**：账本（hash 链）。SQLite 是投影，`rebuild_from_ledger()` 可重建。
    ⛔⛔ 实测（2026-10-13）：投影曾**丢掉 89.7% 的执行历史** —— 账本 495 条
@@ -233,6 +234,17 @@ V6/
     ⛔ 三态不能合并：`False`（只有一层，有证据的判别力不足，拦）/
     `True`（有跨度）/`None`（没打标签 = 没测过，**不拦** —— 不可判别 ≠ 有罪）。
     ⛔ 兜底只降级"放行"，**不许**盖掉 `overfit` 这类有硬证据的拦截。
+28. **沙箱必须是实测过的隔离，不是"用了 subprocess 就叫沙箱"**：实测原实现
+    7 项里 5 项没拦住 —— 宿主 **181 个环境变量全被继承**（含 `PYAUTOL_VAULT_KEY`、
+    `TAVILY_API_KEY` 等真密钥）、能读 `/etc/hosts`、能写 `/tmp`、能 fork、
+    20 MB 输出全量进内存。这里执行的是**不可信代码**。⛔ env 用**白名单**不用
+    黑名单（黑名单拦不住没见过的名字）。⛔ **声明了意图 ≠ 生效了**：
+    `RLIMIT_AS`/`DATA`/`RSS` 在本机全部 `ValueError` 却被 except 吞掉，
+    结果里却写着"1 GB" ⇒ 必须把 `rlimits`（意图）与 `rlimits_applied`（实测）
+    分开显示。⛔ OS 层（macOS `sandbox-exec`）**探测式**接入：实测 deny-default
+    一律 `Operation not permitted` ⇒ 用不了就降级到 `process`，但
+    `fs_isolated=false` 必须落进每个 Verdict 与控制台。⛔ **审计探针自己不许
+    成为 DoS**（第一版把机器内存吃光，load 打到 9.3）。
 
 ---
 

@@ -848,3 +848,70 @@ grep 确认：`spread` 只被**测试**（E1/E2）读到。
   集体转红，反证探针重新报缺口。确认测试不是恒真的之后已还原。
 - `supervisor/src/selfcheck.ts` C14/C15/C15b：`discriminative=false` 却
   `generalize` ⇒ critical；`true` 与 `null` 都不许报。
+
+
+## 14. 沙箱必须是**实测过的隔离**，不是"用了 subprocess 就叫沙箱"
+
+`run_in_sandbox` 一直自称"沙箱隔离"，实际是
+`subprocess.run(timeout=, cwd=临时目录)`。2026-10-13 用
+`scripts/probe_sandbox_audit.py` 逐条实测，7 项里 **5 项没拦住**：
+
+| 项 | 实测结果 |
+|---|---|
+| 读宿主环境变量 | ❌ **181 个变量全被继承**，含 `PYAUTOL_VAULT_KEY`、`TAVILY_API_KEY`、`WORKBUDDY_PAC_RPC_TOKEN` |
+| 写工作目录之外 | ❌ 能写 `/tmp` |
+| 读工作目录之外 | ❌ 能读 `/etc/hosts` |
+| 输出大小 | ❌ 20 MB 被 `capture_output` **全量读进内存** |
+| fork 子进程 | ❌ 能再起进程 |
+| 无限循环（CPU） | ✅ 靠 timeout 兜住 |
+| 无限吃内存 | ❌ 靠 timeout 兜住（内存限制根本没生效） |
+
+⛔ 这里执行的是**合成器与模型产出的不可信代码**。最严重的一条是密钥：
+env 白名单必须是**白名单**而不是黑名单 —— 黑名单拦不住没见过的名字，
+`WORKBUDDY_PAC_RPC_TOKEN` 这种前缀根本猜不到。
+
+### 修法：进程层（总是生效）+ OS 层（探测式接入）
+
+- **进程层**（跨平台、零依赖）：env 净化（白名单 + 掐掉 `PYTHONPATH`）、
+  rlimit、输出按字节封顶（写文件 + 上限读取，不用 `capture_output`）。
+- **OS 层**：macOS `sandbox-exec` / Linux `bwrap`。⛔ **探测式**接入：
+  本函数会先真跑一次自探测，失败就**不启用**。
+  实测 macOS 上 **任何 `(deny default)` 的 Seatbelt profile 都
+  `sandbox_apply: Operation not permitted`**（`allow default` 却能跑）
+  ⇒ 不是"没有这个工具"，是"这个环境收紧不了"。硬依赖它会让执行层
+  在部分环境直接不可用。
+
+### ⛔ 假仪表：声明了意图 ≠ 生效了
+
+第一版把 `rlimits` 直接写进结果，看着像"内存 1 GB 已限制"。实测
+`resource.setrlimit(RLIMIT_AS, ...)` 抛
+`ValueError: current limit exceeds maximum limit`，而异常被 `except` 吞掉
+⇒ **内存限制根本没生效，结果里却写着 1 GB**。`RLIMIT_DATA` / `RLIMIT_RSS`
+同样三个全失败。
+
+所以现在分两个字段：`rlimits`（意图）与 `rlimits_applied`（**实测**，由
+子进程在 `preexec_fn` 里写回文件）。两者不一致时一眼可见。
+
+### ⛔ 审计探针自己不许成为 DoS
+
+第一版探针写的是 `while True` 无限吃内存 —— 在内存限制失效的环境里它
+**真的把系统内存吃光**（load 打到 9.3，后续命令全部 SIGTERM）。
+现在探针自限到 512 MB，且**解析失败一律 fail-closed 判"未隔离"**
+（第一版因 `repr()` 输出单引号导致 `json.loads` 失败 ⇒ payload 为空 ⇒
+"吃到 0 MB" 被误判成"已拦住"，是个假绿灯）。
+
+### 仍保留的边界（如实）
+
+- **文件系统未隔离**：越界读/写、fork 子进程仍可能。堵住它必须靠 OS 层，
+  而 OS 层在部分环境不可用 ⇒ `fs_isolated=false` 会写进每个 Verdict 的
+  evidence，并在控制台与 CLI 各提示一次（环境级属性，不每次刷屏）。
+- **内存没有有效限制**：只剩 timeout 兜底。
+
+### 反证组（`tests/contract_sandbox_test.py`）
+
+A（env 净化，含"恢复成继承 ⇒ 密钥泄漏"反证）/ B（意图 vs 实测，含
+"setrlimit 全失败 ⇒ applied 不许出现 True"反证）/ C（输出封顶，含
+"上限放大 ⇒ truncated 翻 False"反证）/ D（OS 层降级，含"伪造 ⇒ tier 翻转"
+反证）/ E（Verdict evidence 带 sandbox）/ F（告警只一次）。
+**事故版注入**：把 `build_child_env` 退回 `dict(os.environ)` ⇒ A1–A6
+集体转红、探针重新报出 181 个变量与真密钥 ⇒ 确认非恒真后还原。
