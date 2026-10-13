@@ -36,7 +36,7 @@ import time
 import uuid
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
 #: 冷启动只读尾部多少字节来找"最后一条事件"。
 #: ⛔ 必须 ≥ 单条事件的最大行长，否则缓冲区里可能一个完整行都没有 ⇒
@@ -259,20 +259,32 @@ class Ledger:
             fh.close()
 
     # ── 读 ────────────────────────────────────────────────────────
-    def events(self) -> List[Event]:
+    def iter_events(self) -> Iterator[Event]:
+        """**流式**遍历：一次只在内存里留一条事件。
+
+        ⛔ `events()` 物化整份账本 —— 4000 条 / 5 MB 的账本实测峰值
+        **8.18 MB**，占一次 `/api/status` 响应的 **99%**。而所有消费者
+        （统计 / 链校验 / 一致性 / 记忆对账）**都只是遍历一遍** ⇒ 物化
+        出来的那份列表除了占内存没有任何用处。
+
+        ⛔ 与 `events()` **逐条同源**：`events()` 就是 `list(iter_events())`。
+        绝不写第二份解析逻辑 —— 两份逻辑会在坏行/编码上漂移，漂移后
+        "流式读数"与"全量读数"不一致，而没人会发现。
+        """
         if not self.path.exists():
-            return []
-        out = []
+            return
         with self.path.open("r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
                 try:
-                    out.append(Event.from_dict(json.loads(line)))
+                    yield Event.from_dict(json.loads(line))
                 except Exception:  # noqa: BLE001
                     continue
-        return out
+
+    def events(self) -> List[Event]:
+        return list(self.iter_events())
 
     def iter_lines(self) -> Iterator[str]:
         """给跨语言消费者用：直接吐原始行（TS 侧自己解析）。"""
@@ -300,7 +312,7 @@ class Ledger:
         return self._seq
 
     # ── 校验 ──────────────────────────────────────────────────────
-    def verify_chain(self, events: Optional[List[Event]] = None
+    def verify_chain(self, events: Optional[Iterable[Event]] = None
                      ) -> Tuple[bool, Optional[int], str]:
         """校验整条哈希链。
 
@@ -314,16 +326,17 @@ class Ledger:
         `_collect` 自己一次）。这不只是浪费 —— 三遍读的是三个不同时刻的
         快照，**同一份响应里三个读数可能互相矛盾**。读完一次喂给所有消费
         者，既省两遍，也消除了这个窗口。
+
+        ⛔ 链推进逻辑在 `_chain_feed`（唯一事实源）。这里保留**提前
+        break**（断链后不再校验后续）—— 与改造前逐字同行为；`stats()`
+        不 break 是为了把 `by_kind` 数全，**不是**另一套判据。
         """
-        prev = self.GENESIS_HASH
-        for ev in (self.events() if events is None else events):
-            if ev.prev_hash != prev:
-                return False, ev.seq, f"prev_hash 不连续（期望 {prev[:12]}… 实得 {ev.prev_hash[:12]}…）"
-            want = content_hash(ev.identity())
-            if ev.hash != want:
-                return False, ev.seq, f"hash 不匹配（payload 被改过？实得 {ev.hash[:12]}… 应为 {want[:12]}…）"
-            prev = ev.hash
-        return True, None, ""
+        state = _new_chain_state()
+        for ev in (self.iter_events() if events is None else events):
+            _chain_feed(state, ev)
+            if state["bad"] is not None:
+                break
+        return state["bad"] is None, state["bad"], state["reason"]
 
     # ── 回放 ──────────────────────────────────────────────────────
     def replay(self, kinds: Optional[List[str]] = None,
@@ -332,25 +345,99 @@ class Ledger:
         return [e for e in self.events()
                 if e.seq >= since_seq and (ks is None or e.kind in ks)]
 
-    def stats(self, events: Optional[List[Event]] = None
+    def stats_agg(self) -> "LedgerStatsAgg":
+        """拿一个**流式**统计聚合器（给一次遍历喂多消费者的调用方）。"""
+        return LedgerStatsAgg(path=str(self.path), head=self._last_hash[:16])
+
+    def stats(self, events: Optional[Iterable[Event]] = None
               ) -> Dict[str, Any]:
         """账本概览 + **当场**的链校验结果。
 
         `events` 语义同 `verify_chain()`：传进来已读好的事件 ⇒ 不再重读
         文件。⛔ 不传时的默认行为与改动前**完全相同**，改动只发生在
         "调用方手头已经有一份快照"这条路上。
+
+        ⛔ 与 `stats_agg()` **同一份**逻辑（本函数就是建 agg → feed →
+        result）。调用方要么用这个、要么用 agg，**绝不许再写第三份**
+        —— 三份读数里只要有一份漂移，"控制台说没事"就是假没事。
         """
-        evs = self.events() if events is None else events
-        by_kind: Dict[str, int] = {}
-        for e in evs:
-            by_kind[e.kind] = by_kind.get(e.kind, 0) + 1
-        ok, bad, reason = self.verify_chain(evs)
+        agg = self.stats_agg()
+        for ev in (self.iter_events() if events is None else events):
+            agg.feed(ev)
+        return agg.result()
+
+
+def _new_chain_state() -> Dict[str, Any]:
+    """链校验游标。"""
+    return {"prev": Ledger.GENESIS_HASH, "bad": None, "reason": ""}
+
+
+def _chain_feed(state: Dict[str, Any], ev: Event) -> None:
+    """推进一条事件的链校验 —— **链语义的唯一事实源**。
+
+    `verify_chain()` 与 `LedgerStatsAgg.feed()` 都走这里，绝不各写一份：
+    两份实现只要在"断链后是否继续推进 prev"上分歧，同一份账本就会在
+    控制台和监督器上给出不同结论，而两边都能自称"链是好的"。
+
+    ⛔ 断链后**不再推进** prev（与改造前 `verify_chain` 的 `return`
+    逐字同源）。`stats()` 不 break 只是要把 `by_kind` 数全 —— 断链后
+    继续 feed 不会改变 `first_bad_seq`，因为已断就不再改写。
+    """
+    if state["bad"] is not None:
+        return
+    if ev.prev_hash != state["prev"]:
+        state["bad"] = ev.seq
+        state["reason"] = (f"prev_hash 不连续（期望 {state['prev'][:12]}… "
+                           f"实得 {ev.prev_hash[:12]}…）")
+        return
+    want = content_hash(ev.identity())
+    if ev.hash != want:
+        state["bad"] = ev.seq
+        state["reason"] = (f"hash 不匹配（payload 被改过？实得 {ev.hash[:12]}… "
+                           f"应为 {want[:12]}…）")
+        return
+    state["prev"] = ev.hash
+
+
+class LedgerStatsAgg:
+    """`stats()` 的**流式**形态：逐条 `feed()`，最后 `result()`。
+
+    存在的理由：一次 `/api/status` 要同时产出统计 / 链校验 / 一致性 /
+    记忆对账 / 尾部窗口五份读数。改造前它们各自要一份**全量事件列表**
+    ⇒ 4000 条账本实测峰值 8.27 MB，其中 99% 花在"持有"上。改成一次
+    磁盘遍历、五个聚合器**共享同一条流**，峰值只取决于各自要留的
+    那点派生量。
+
+    ⛔ 如实：这不等于 O(1)。`by_kind` 随 kind 种类数增长（有界），
+    链校验只留 prev + 首个坏点。真正随事件数增长的是别的聚合器
+    （一致性要留 run_id 键、记忆对账要留 note_id 键）—— 那些是**短
+    字符串**，不再是 Event 对象 + payload 全量。
+    """
+
+    def __init__(self, path: str = "", head: str = ""):
+        self.path = path
+        #: ⛔ `head` 由调用方给（`Ledger._last_hash`），**不在这里重读文件**：
+        #:    重读就意味着又开一遍文件、又可能读到不同时刻的末尾。
+        self.head = head
+        self.n = 0
+        self.by_kind: Dict[str, int] = {}
+        self._chain = _new_chain_state()
+
+    def feed(self, ev: Event) -> None:
+        self.n += 1
+        k = ev.kind
+        self.by_kind[k] = self.by_kind.get(k, 0) + 1
+        #: ⛔ 与 `verify_chain` **同一份**推进逻辑
+        _chain_feed(self._chain, ev)
+
+    def result(self) -> Dict[str, Any]:
+        bad = self._chain["bad"]
         return {
-            "path": str(self.path),
-            "count": len(evs),
-            "head": self._last_hash[:16],
-            "by_kind": by_kind,
-            "chain_ok": ok,
+            "path": self.path,
+            "count": self.n,
+            "head": self.head,
+            "by_kind": self.by_kind,
+            "chain_ok": bad is None,
             "first_bad_seq": bad,
-            "reason": reason,
+            "reason": self._chain["reason"],
         }

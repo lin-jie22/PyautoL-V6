@@ -362,13 +362,20 @@ def main():
         ck(f"H1 一次 _collect 的 JSON 解析量 < 2 遍全量"
            f"（共 {got} 次 / {n_lines} 行 = {passes:.2f} 遍）",
            passes < 2.0, f"{passes:.2f} 遍")
-        #: 反证：恢复旧写法（stats 不带 events）⇒ 遍数必须**上升**
-        from aether.serve import _collect as _orig_collect
-        old_stats = _LG.Ledger.stats
+        #: ⛔⛔ 反证项**随实现翻转**，必须跟着改注入点：
+        #:    最初的 H2 注入 `Ledger.stats`（"忽略传入的 events，强制重读"）。
+        #:    但流式化之后 `_collect` **根本不调 `stats()`** 了（它用
+        #:    `stats_agg()` + 一次 `iter_events()`）⇒ 那个注入点变成死点，
+        #:    H2 恒红却查不出任何真问题 —— 典型的"反证没跟上实现"。
+        #:    现在的咽喉是 `iter_events`：**多扫一遍**就是"重复读"。
+        #:    注入它，断言 H1 的阈值（< 2 遍）会被打破 ⇒ 证明 H1 不是恒真。
+        old_iter = _LG.Ledger.iter_events
 
-        def _old_stats(self, events=None):
-            return old_stats(self)          # 忽略已给的 events，强制重读
-        _LG.Ledger.stats = _old_stats
+        def _double_read(self):
+            for _ in old_iter(self):        # 白扫一遍：模拟某个消费者自己又读
+                pass
+            yield from old_iter(self)
+        _LG.Ledger.iter_events = _double_read
         try:
             real2 = _json.loads
             cnt2 = {"n": 0}
@@ -381,10 +388,12 @@ def main():
             finally:
                 _LG.json.loads = real2
         finally:
-            _LG.Ledger.stats = old_stats
-        ck("H2 反证：还原旧写法（stats 忽略传入的 events）⇒ 解析量上升"
+            _LG.Ledger.iter_events = old_iter
+        passes2 = got2 / max(1, n_lines)
+        ck("H2 反证：多扫一遍 ⇒ H1 的阈值被打破"
            "（否则 H1 是恒真断言）",
-           got2 > got, f"旧={got2} 新={got}")
+           passes2 >= 2.0,
+           f"事故版 {got2} 次 = {passes2:.2f} 遍（正常 {passes:.2f} 遍）")
     except Exception as e:  # noqa: BLE001
         ck("H 组可执行（data/ledger.jsonl 可读且 _collect 能跑）",
            False, f"{type(e).__name__}: {e}")

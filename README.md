@@ -53,6 +53,7 @@ for t in tests/contract_*_test.py; do $PY $t; $PY $t --e2e; done
 # 反证探针：单独挖某一类缺口的**对拍脚本**（不是契约测试，是取证工具）
 $PY scripts/probe_spread_audit.py   # held-out 没判别力时闸会不会假放行
 $PY scripts/probe_sandbox_audit.py  # 沙箱是"真隔离"还是"只是 subprocess"
+$PY scripts/probe_memory_audit.py   # 一次 _collect 的内存峰值花在哪（含投影库场景）
 
 # TypeScript 监督器（Node ≥22 原生跑 TS，无需 npm install）
 cd supervisor && node src/selfcheck.ts                     # 含跨语言一致性验证
@@ -96,7 +97,7 @@ V6/
 │   ├── eventflow/          事件流聚合（会话切分 / 滑动窗口 / 分位数）
 │   ├── stateflow/          状态机（转移 / 合法性 / 可达性 / 路径计数）
 │   └── scheduler/          区间调度（冲突 / 最大并发 / 贪心 / 区间合并）
-├── tests/                  15 个契约测试（RED→GREEN + 反证组）
+├── tests/                  16 个契约测试（RED→GREEN + 反证组）
 ├── supervisor/             TypeScript 外部监督器（只读账本 + 异常检测）
 ├── console/                零构建的只读可视化控制台
 ├── scripts/demo_evolve.py  端到端 demo + 报告
@@ -125,7 +126,7 @@ V6/
 
 ## 5. 系统如何自证（判据清单）
 
-这三十条是 V6 的"宪法"。每条都有对应的契约测试守着：
+这三十一条是 V6 的"宪法"。每条都有对应的契约测试守着：
 
 1. **事实只有一份**：账本（hash 链）。SQLite 是投影，`rebuild_from_ledger()` 可重建。
    ⛔⛔ 实测（2026-10-13）：投影曾**丢掉 89.7% 的执行历史** —— 账本 495 条
@@ -264,6 +265,22 @@ V6/
     全扫"的保底）。⛔ 本机 load 常年在 10 以上 ⇒ 单次 wall time 会被噪声
     淹没 10 倍（同一函数实测 0.37 / 2.57 / 1.62 / 0.70s），必须换成
     "数 `json.loads` 次数"这类**与负载无关**的计数来决策。
+30. **观测不得改变被观测对象的成本结构：读数只能来自一次遍历，且不
+    许把整份事实源放进内存**。
+    一次 `/api/status` 要同时给出统计 / 链校验 / 一致性 / 记忆对账 /
+    尾部窗口五份读数 —— 它们**全都只是遍历一遍**，那就只准遍历一遍，
+    且遍历时不许持有整份账本。
+    ⛔ **只修一半等于没修**：账本侧流式化后峰值 8.27 → 0.65 MB，但生产
+    （带投影库）实测仍有 **7.72 MB**，其中 **5.83 MB（76%）来自
+    `runs()` 把每行的 payload 全量 `json.loads`** —— 而一致性判据只比
+    `reward/passed/harness_id` 三个字段。改成 `run_digests()` 只取三列
+    ⇒ 同口径（4000 条账本 + 1334 runs）**14.24 MB → 2.70 MB（5.3×）**。
+    ⛔ **反证项会随实现翻转**：上一轮的反证注入在 `Ledger.stats`（"忽略
+    传入的 events"），流式化后 `_collect` 根本不调 `stats()` ⇒ 注入点变
+    成死点、H2 恒红却查不出任何问题。反证必须打在**当前咽喉**上。
+    ⛔ **哪些断言是战果、哪些是护栏要明说**：把 `_collect` 退回物化实现
+    后，29 项里只有 D 组（内存峰值）三条转红，A/B/C/E/F/G 全绿 ⇒ 等价性
+    断言是护栏（防改坏），不是战果（证明改好了）。
 
 ---
 

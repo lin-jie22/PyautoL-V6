@@ -210,6 +210,26 @@ class Store:
         return [r["run_id"] for r in self.conn.execute(
             "SELECT run_id FROM runs LIMIT ?", (limit,)).fetchall()]
 
+    def run_digests(self, limit: int = 100000
+                    ) -> Dict[str, Tuple[float, bool, Any]]:
+        """一致性判定要的**三列**（reward / passed / harness_id）。
+
+        ⛔⛔ 为什么不用 `runs()`：`runs()` 会把每行的 `payload` 也
+        `json.loads` 出来，而一致性判据**只比三个字段** —— payload 里
+        带源码片段与失败轨迹（2026-10-13 实测：810 行 ⇒ **5.83 MB**，
+        占一次 `/api/status` 峰值的 **76%**）。账本侧流式省下来的内存，
+        会被这一行全部吃掉。
+
+        ⛔ 字段取值必须与 `RunRow` **逐字一致**（`float(reward or 0)` /
+        `bool(passed)` / harness_id 原样，可能是 None）—— 不一致就会让
+        drift 判据在"db 里是 NULL"这种边界上给出不同结论。
+        """
+        rows = self.conn.execute(
+            "SELECT run_id, reward, passed, harness_id FROM runs LIMIT ?",
+            (limit,)).fetchall()
+        return {r["run_id"]: (float(r["reward"] or 0), bool(r["passed"]),
+                              r["harness_id"]) for r in rows}
+
     def rebuild_from_ledger(self, events: Iterable[Any]) -> Dict[str, int]:
         """从账本事件重建投影（证明"库只是视图"）。
 
@@ -258,6 +278,10 @@ class Store:
         return {"snapshots": n_snap, "runs": n_run, "derived": n_derived}
 
     # ── 一致性：账本（事实源） vs 投影（视图）─────────────────────
+    def consistency_agg(self) -> "ConsistencyAgg":
+        """拿一个**流式**一致性聚合器（一次遍历喂多消费者的入口）。"""
+        return ConsistencyAgg(self)
+
     def consistency_report(self, events: Iterable[Any]) -> Dict[str, Any]:
         """账本与投影是否对得上 —— **可被证伪**的那种对得上。
 
@@ -267,69 +291,109 @@ class Store:
         ⛔ 只拿**账本里有 run_id** 的事件做键比对；缺 run_id 的历史事件单独
         记 `unalignable`，绝不参与 `ok` 的判定 —— 否则"历史遗留"会被算成
         "一致"，这正是上一版静默失败的同形态错误。
+
+        ⛔ 与 `consistency_agg()` **同一份**逻辑（本函数就是建 agg → feed →
+        result）。两处判据一旦漂移，"控制台说一致"就是假一致。
         """
-        ledger_runs: Dict[str, Dict[str, Any]] = {}
-        n_unkeyed = 0
-        ledger_snaps: List[str] = []
-        n_verdicts = 0
+        agg = self.consistency_agg()
         for ev in events:
-            p = ev.payload or {}
-            if ev.kind == "eval.verdict":
-                n_verdicts += 1
-                rid = p.get("run_id")
-                if rid:
-                    ledger_runs[str(rid)] = p
-                else:
-                    n_unkeyed += 1
-            elif ev.kind in ("harness.init", "harness.commit"):
-                hid = p.get("harness_id", "")
-                if hid:
-                    ledger_snaps.append(hid)
+            agg.feed(ev)
+        return agg.result()
 
-        proj_runs = set(self.run_ids())
-        proj_snaps = set(self.snapshot_ids())
+    def close(self) -> None:
+        self.conn.close()
 
-        missing = sorted(set(ledger_runs) - proj_runs)      # 账本有、投影没
+
+class ConsistencyAgg:
+    """一致性判据的**流式**形态：账本侧逐条 `feed()`，`result()` 出结论。
+
+    ⛔ 改造前 `consistency_report` 把每条 `eval.verdict` 的**整个 payload**
+    存进 `ledger_runs[rid] = p`，只为最后比一次字段 —— payload 里带源码
+    片段与失败轨迹，这是"一次 `/api/status` 峰值 8 MB"的大头。现在
+    drift **当场比**（投影行本来就在内存里），账本侧只留 rid 短串。
+
+    ⛔ 如实：账本侧不是 O(1)。`rids` 仍随事件数增长，但存的是 **run_id
+    短字符串**（~60 B/条），不再是 Event + payload（~2 KB/条）。剩下真正
+    随规模增长的是**投影侧**（`proj_rows`）—— 那是 SQLite 里的数据，
+    旧实现同样要全量加载，不是这次引入的。
+    """
+
+    #: 报告里列表的展示上限（超出只给条数，避免响应体随事故变长）
+    SAMPLE = 20
+
+    def __init__(self, store: "Store"):
+        self._store = store
+        self.n_verdicts = 0
+        self.n_unkeyed = 0
+        self.n_dup = 0
+        self.rids: set = set()
+        self.missing: set = set()          # 账本有、投影没
+        self.drifted: List[str] = []
+        self.snap_missing: set = set()
+        #: ⛔ 投影侧**一次性**加载：feed 时要拿它当场判定。这本来就是
+        #:    `consistency_report` 的既有成本（不是流式引入的）。
+        self._proj_runs = set(store.run_ids())
+        self._proj_rows = store.run_digests()
+        self._proj_snaps = set(store.snapshot_ids())
+
+    def feed(self, ev: Any) -> None:
+        p = ev.payload or {}
+        if ev.kind == "eval.verdict":
+            self.n_verdicts += 1
+            rid = p.get("run_id")
+            if not rid:
+                self.n_unkeyed += 1
+                return
+            rid = str(rid)
+            if rid in self.rids:
+                #: ⛔ 撞键（同一 run_id 出现两次）：旧实现用 dict 静默覆盖。
+                #:    这里**不覆盖**，改为只比第一次 + 如实计数 —— 撞键是
+                #:    事故（run_id 由账本 seq 派生，本应单调唯一）。
+                self.n_dup += 1
+                return
+            self.rids.add(rid)
+            if rid not in self._proj_runs:
+                self.missing.add(rid)
+                return
+            row = self._proj_rows.get(rid)
+            if row is not None and (
+                    abs(float(p.get("reward", 0.0)) - row[0]) > 1e-9
+                    or bool(p.get("passed", False)) != row[1]
+                    or str(p.get("harness_id", "")) != row[2]):
+                self.drifted.append(rid)
+        elif ev.kind in ("harness.init", "harness.commit"):
+            hid = p.get("harness_id", "")
+            if hid and str(hid) not in self._proj_snaps:
+                self.snap_missing.add(str(hid))
+
+    def result(self) -> Dict[str, Any]:
         #: ⛔ 派生键（历史事件重建出来的 `rebuilt:{seq}`）不是异常：
         #:    把它们算进 extra 会让"补齐历史"看起来像"多出脏数据"。
-        extra = sorted(r for r in proj_runs - set(ledger_runs)
+        extra = sorted(r for r in self._proj_runs - self.rids
                        if not r.startswith("rebuilt:"))
-        #: 字段级差异（同键内容不同 ⇒ 投影被别的东西改过）
-        drifted: List[str] = []
-        proj_rows = {r.run_id: r for r in self.runs(limit=100000)}
-        for rid, p in ledger_runs.items():
-            row = proj_rows.get(rid)
-            if row is None:
-                continue
-            if (abs(float(p.get("reward", 0.0)) - row.reward) > 1e-9
-                    or bool(p.get("passed", False)) != row.passed
-                    or str(p.get("harness_id", "")) != row.harness_id):
-                drifted.append(rid)
-
-        snap_missing = sorted(set(ledger_snaps) - proj_snaps)
+        missing = sorted(self.missing)
+        snaps = sorted(self.snap_missing)
         #: ⛔ 条数比对是**丢历史**的唯一抓法：键比对只能发现"对不上"，
         #:    发现不了"压根没写进来"。实测就是靠这一条抓到 495 → 51。
-        count_ok = (len(proj_runs) == n_verdicts)
-        ok = (not missing) and (not drifted) and (not snap_missing) and count_ok
+        count_ok = (len(self._proj_runs) == self.n_verdicts)
+        ok = (not missing) and (not self.drifted) and (not snaps) and count_ok
         return {
             "ok": ok,
-            "ledger_verdicts": n_verdicts,
-            "ledger_runs_keyed": len(ledger_runs),
-            "unkeyed_events": n_unkeyed,
-            "projection_runs": len(proj_runs),
+            "ledger_verdicts": self.n_verdicts,
+            "ledger_runs_keyed": len(self.rids),
+            "unkeyed_events": self.n_unkeyed,
+            "duplicate_run_ids": self.n_dup,
+            "projection_runs": len(self._proj_runs),
             "count_ok": count_ok,
-            "missing_in_projection": missing[:20],
+            "missing_in_projection": missing[:self.SAMPLE],
             "missing_count": len(missing),
-            "extra_in_projection": extra[:20],
+            "extra_in_projection": extra[:self.SAMPLE],
             "extra_count": len(extra),
-            "drifted": drifted[:20],
-            "drift_count": len(drifted),
-            "snapshot_missing": snap_missing,
-            "overwrite_count": self.overwrite_count,
+            "drifted": self.drifted[:self.SAMPLE],
+            "drift_count": len(self.drifted),
+            "snapshot_missing": snaps,
+            "overwrite_count": self._store.overwrite_count,
             "note": ("" if ok else
                      "投影与账本不一致 ⇒ 基于投影的读数不可信"
                      "（修法：`python -m aether.cli rebuild`）"),
         }
-
-    def close(self) -> None:
-        self.conn.close()

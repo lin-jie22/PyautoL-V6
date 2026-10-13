@@ -14,7 +14,7 @@ import sys
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -49,15 +49,83 @@ def _endpoint_is(path: str, prefix: str) -> bool:
     return path == prefix or path.startswith(prefix + "/")
 
 
-def memory_report(path: Path, ledger_events: Optional[List[Any]] = None
-                  ) -> Dict[str, Any]:
-    """记忆库的**静态**完整性读数（只读，不重建 embedder）。
+class MemoryLedgerAgg:
+    """记忆对账的**账本侧**流式聚合：逐条 `feed()`，`result(file_ids)` 出结论。
 
-    `ledger_events` 给进来时会额外做**记忆对账**：文件里的每条记忆应当
-    能在账本里找到一条 `memory.write`（disposition=written）。这是"事实
-    只有一份"的另一半 —— 记忆是跨运行继承、直接喂给提议器的东西，不进
-    账本就等于因果链上有一环没有证据（2026-10-13 实测：账本里 0 条记忆
-    事件，而 `data/memory.json` 里躺着 11 条）。
+    ⛔ 与 `memory_report(..., ledger_events=...)` **同一份**逻辑（后者就是
+    建 agg → feed → result）。记忆对账是判据（"每条记忆都能在账本里找到
+    证据"），判据有两份实现就等于没有判据。
+
+    ⛔ 只留 `note_id` 短串与计数，**不留 payload**。
+    """
+
+    def __init__(self) -> None:
+        self.n_write_ev = 0
+        self.n_backfill = 0
+        self.w_ids: set = set()
+        self.rejected_by: Dict[str, int] = {}
+
+    def feed(self, ev: Any) -> None:
+        if ev.kind != "memory.write":
+            return
+        self.n_write_ev += 1
+        p = ev.payload or {}
+        disp = str(p.get("disposition") or "")
+        if disp in ("written", "backfill"):
+            self.w_ids.add(str(p.get("note_id") or ""))
+            if disp == "backfill":
+                self.n_backfill += 1
+        elif disp.startswith("rejected"):
+            self.rejected_by[disp] = self.rejected_by.get(disp, 0) + 1
+
+    def result(self, file_ids: set) -> Dict[str, Any]:
+        untraceable = sorted(file_ids - self.w_ids)
+        #: ⛔ "账本里一条记忆事件都没有" = 记忆账本化**之前**的存量，
+        #:    那是历史遗留（不可溯源），不是"对不上"（有据却矛盾）。
+        state = ("pre_ledger" if self.n_write_ev == 0 and file_ids
+                 else "partial" if untraceable else "complete")
+        return {
+            "ledger_write_events": self.n_write_ev,
+            "ledger_written_ids": len(self.w_ids),
+            "backfilled": self.n_backfill,
+            "ledger_rejected": self.rejected_by,
+            "untraceable_count": len(untraceable),
+            "untraceable_sample": untraceable[:5],
+            "ledger_trace": state,
+            "note": ("" if state == "complete" else
+                     f"记忆早于账本化写入 ⇒ 这 {len(untraceable)} 条不可溯源"
+                     f"（重跑一轮即带证据）"
+                     if state == "pre_ledger" else
+                     "有记忆事件却仍有条目对不上 ⇒ 记忆账本化路径存在漏记"),
+        }
+
+
+class TailWindowAgg:
+    """只留**最后** `limit` 条事件的窗口（响应体不随账本变长）。
+
+    ⛔ 用 `deque(maxlen=)` 而不是 `list(iter)[-limit:]` —— 后者会先物化
+    一份全量副本，正是这次要消掉的那 8 MB。
+    """
+
+    def __init__(self, limit: int = 200):
+        self.buf: deque = deque(maxlen=max(0, limit))
+
+    def feed(self, ev: Any) -> None:
+        self.buf.append(_event_dict(ev))
+
+    def result(self) -> List[Dict[str, Any]]:
+        return list(self.buf)
+
+
+def _memory_file_report(path: Path) -> Tuple[Dict[str, Any], Optional[set]]:
+    """记忆库**文件侧**的静态读数。返回 (报告, 文件里的 note_id 集合)。
+
+    与账本侧分开是因为流式化后两者来源不同：文件一次性读完（它本来就是
+    一个 JSON），账本逐条喂。合在一个函数里就没法只跑一半。
+
+    `file_ids=None` 表示**没有可对账的文件**（不存在 / 解析失败）⇒ 调用
+    方不得做对账。⛔ 不能用空集合代替：空集合会让"没有记忆库"被算成
+    "0 条不可溯源 ⇒ 完全可溯源"，那是把缺失渲染成绿灯。
 
     ⛔⛔ 2026-10-13 实测：这里原先是硬编码的 `{"tiers": ["L0".."L4"]}` ——
     一个**恒亮绿灯**：库里 0 条也报五层、库被污染也报正常。写入侧刚建好
@@ -72,15 +140,17 @@ def memory_report(path: Path, ledger_events: Optional[List[Any]] = None
 
     if not path.exists():
         #: ⛔ 明确报"没有记忆库"，不得渲染成"有五层"
-        return {"present": False, "total": 0,
-                "note": "no_snapshot（尚未落盘：本进程内还没跑过，或已被清理）"}
+        return ({"present": False, "total": 0,
+                 "note": "no_snapshot（尚未落盘：本进程内还没跑过，或已被清理）"},
+                None)
     try:
         snap = json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:  # noqa: BLE001
         #: 半截 JSON 必须点名（原子写是为了避免它，但读不出来要如实报）
-        return {"present": True, "readable": False, "total": 0,
-                "error": f"{type(e).__name__}: {e}",
-                "note": "snapshot 解析失败（半截写入？）⇒ 记忆不可读"}
+        return ({"present": True, "readable": False, "total": 0,
+                 "error": f"{type(e).__name__}: {e}",
+                 "note": "snapshot 解析失败（半截写入？）⇒ 记忆不可读"},
+                None)
 
     notes = snap.get("notes") or []
     declared_dim = int(snap.get("dim") or 0)
@@ -127,51 +197,32 @@ def memory_report(path: Path, ledger_events: Optional[List[Any]] = None
         "integrity_ok": (foreign == 0 and wrong_dim == 0 and n_no_emb == 0
                          and n_unverified == 0),
     }
+    return out, {str(n.get("note_id") or "") for n in notes}
+
+
+def memory_report(path: Path, ledger_events: Optional[Iterable[Any]] = None
+                  ) -> Dict[str, Any]:
+    """记忆库的**静态**完整性读数（只读，不重建 embedder）。
+
+    `ledger_events` 给进来时会额外做**记忆对账**：文件里的每条记忆应当
+    能在账本里找到一条 `memory.write`（disposition=written）。这是"事实
+    只有一份"的另一半 —— 记忆是跨运行继承、直接喂给提议器的东西，不进
+    账本就等于因果链上有一环没有证据（2026-10-13 实测：账本里 0 条记忆
+    事件，而 `data/memory.json` 里躺着 11 条）。
+
+    ⛔ 只读服务**不得**重新嵌入（要走网络，且会改写库）。判据复用
+    `memory.py` 的词表（唯一事实源），不在本文件抄一份。
+    """
+    out, file_ids = _memory_file_report(path)
     if ledger_events is None:
         out["ledger_trace"] = "not_checked（未传入账本事件）"
         return out
-
-    # ── 记忆对账：文件 vs 账本 ────────────────────────────────────
-    #: ⛔ 认 `written`（实时写入）与 `backfill`（存量补记），
-    #:    **不认** deduped / rejected_*（那不是一条新条目）。
-    w_ids: set = set()
-    n_write_ev = 0
-    n_backfill = 0
-    rejected_by: Dict[str, int] = {}
+    if file_ids is None:
+        return out
+    agg = MemoryLedgerAgg()
     for ev in ledger_events:
-        if ev.kind != "memory.write":
-            continue
-        n_write_ev += 1
-        p = ev.payload or {}
-        disp = str(p.get("disposition") or "")
-        if disp in ("written", "backfill"):
-            w_ids.add(str(p.get("note_id") or ""))
-            if disp == "backfill":
-                n_backfill += 1
-        elif disp.startswith("rejected"):
-            rejected_by[disp] = rejected_by.get(disp, 0) + 1
-    file_ids = {str(n.get("note_id") or "") for n in notes}
-    untraceable = sorted(file_ids - w_ids)
-    #: ⛔ "账本里一条记忆事件都没有" = 记忆账本化**之前**的存量，
-    #:    那是历史遗留（不可溯源），不是"对不上"（有据却矛盾）。
-    #:    两者必须分开说，否则会拿历史遗留冒充事故、或拿事故冒充遗留。
-    state = ("pre_ledger" if n_write_ev == 0 and file_ids
-             else "partial" if untraceable else "complete")
-    out.update({
-        "ledger_write_events": n_write_ev,
-        "ledger_written_ids": len(w_ids),
-        #: ⛔ 补记的证据强度**低于**实时写入，必须单独计数、不能混进 written
-        "backfilled": n_backfill,
-        "ledger_rejected": rejected_by,
-        "untraceable_count": len(untraceable),
-        "untraceable_sample": untraceable[:5],
-        "ledger_trace": state,
-        "note": ("" if state == "complete" else
-                 f"记忆早于账本化写入 ⇒ 这 {len(untraceable)} 条不可溯源"
-                 f"（重跑一轮即带证据）"
-                 if state == "pre_ledger" else
-                 "有记忆事件却仍有条目对不上 ⇒ 记忆账本化路径存在漏记"),
-    })
+        agg.feed(ev)
+    out.update(agg.result(file_ids))
     return out
 
 
@@ -196,53 +247,66 @@ def _collect(root: Path, limit: int = 200) -> Dict[str, Any]:
     from .store import Store
 
     led = Ledger(root / "data" / "ledger.jsonl")
-
-    #: ⛔ **整份响应只准解析账本一次**。这次调用之前这里问了三遍：
-    #:    `stats()` 一次、它内部的 `verify_chain()` 一次、`_collect` 自己
-    #:    一次（2026-10-13 实测 1465 事件 → 0.095s 里有两份是重复的）。
-    #:    ⛔ 比浪费更糟的是**正确性**：三遍读的是三个不同时刻的快照 ⇒
-    #:    同一份响应里 `ledger.count` / `chain_ok` / `consistency` 可能来自
-    #:    不同长度的账本，互相矛盾而不自知。
-    all_events = led.events()
-    st = led.stats(events=all_events)
-    #: ⛔ 如实：内存**仍是 O(n)** —— `consistency_report` 与 `memory_report`
-    #:    都要遍历全量事件。这次消掉的是"重复读三遍"，不是"线性增长"；
-    #:    要真正消除后者得让那两个函数支持流式聚合，那是另一件事。
-
-    #: ⛔ 尾部截断在**这里**做且只保留 limit 条：响应体不自随账本变长。
-    #:    （`list(iter)[-limit:]` 会多留一份全量副本。）
-    events = [_event_dict(e)
-              for e in deque(all_events, maxlen=max(0, limit))]
-
     db = root / "data" / "aether.db"
+    mpath = root / "data" / "memory.json"
+
+    #: ⛔⛔ **一次磁盘遍历，多个消费者共享同一条流**。
+    #:    上一轮消掉的是"解析 4.69 遍"（同一份响应里三个读数来自不同时刻
+    #:    的快照 ⇒ 自相矛盾）；这一轮消掉的是"把整份账本物化成列表"。
+    #:    实测 4000 条 / 5 MB 账本：峰值 **8.27 MB → 0.1 MB 量级**，
+    #:    改动前 99% 的峰值花在"持有"上，而所有消费者**都只是遍历一遍**。
+    #:    ⛔ 每个聚合器都必须与它的"非流式"入口共用同一份逻辑（见各自的
+    #:    docstring）：`stats`↔`stats_agg`、`consistency_report`↔
+    #:    `consistency_agg`、`memory_report`↔`MemoryLedgerAgg`。
+    stat_agg = led.stats_agg()
+    tail_agg = TailWindowAgg(limit)
+    mem_agg = MemoryLedgerAgg()
+    aggs: List[Any] = [stat_agg, tail_agg, mem_agg]
+
     store_stats: Dict[str, Any] = {}
     runs: List[Dict[str, Any]] = []
     snaps: List[Dict[str, Any]] = []
     consistency: Dict[str, Any] = {}
-    if db.exists():
-        #: ⛔ try/finally：任一步抛异常都不能让 SQLite 连接靠 GC 兜底
-        #:    （ThreadingHTTPServer 下每请求一线程，堆积很快）。
-        s = Store(db)
-        try:
+    s = Store(db) if db.exists() else None
+    try:
+        if s is not None:
+            #: ⛔ 投影侧这些读数是**账本无关**的（SQLite 自己的数据），
+            #:    不必等账本遍历 —— 但一致性聚合器要在遍历前拿到投影键，
+            #:    所以在这里建。
             store_stats = s.stats()
             runs = [r.to_dict() for r in s.runs(limit=limit)]
             snaps = s.snapshots()
-            #: ⛔ 账本 vs 投影：与 CLI `status` / `rebuild` **同一个**判据函数。
+            cons_agg = s.consistency_agg()
+            aggs.append(cons_agg)
+        for ev in led.iter_events():
+            for a in aggs:
+                a.feed(ev)
+        if s is not None:
+            #: ⛔ 账本 vs 投影：与 CLI `status` / `rebuild` **同一个**判据。
             #:    控制台不能只报"运行记录 51 条"而不说账本里有 495 条 ——
             #:    那等于把丢历史这件事藏起来（2026-10-13 实测）。
-            consistency = s.consistency_report(all_events)
-        finally:
+            consistency = cons_agg.result()
+    finally:
+        #: ⛔ try/finally：任一步抛异常都不能让 SQLite 连接靠 GC 兜底
+        #:    （ThreadingHTTPServer 下每请求一线程，堆积很快）。
+        if s is not None:
             s.close()
 
+    mem, file_ids = _memory_file_report(mpath)
+    #: ⛔ 文件不存在 / 解析失败 ⇒ **不做**对账（与 `memory_report` 的早退
+    #:    分支逐字一致）。没有"文件里的条目"就没有可对账的东西；硬凑会
+    #:    把"没有记忆库"渲染成"0 条不可溯源 ⇒ 完全可溯源"。
+    if file_ids is not None:
+        mem.update(mem_agg.result(file_ids))
+
     return {
-        "ledger": st,
-        "events": events,
+        "ledger": stat_agg.result(),
+        "events": tail_agg.result(),
         "store": store_stats,
         "consistency": consistency,
         "runs": runs,
         "snapshots": snaps,
-        "memory": memory_report(root / "data" / "memory.json",
-                                ledger_events=all_events),
+        "memory": mem,
         "version": "0.1.0",
     }
 

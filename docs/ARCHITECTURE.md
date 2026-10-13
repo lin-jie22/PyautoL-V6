@@ -1038,3 +1038,106 @@ G 组第一轮写完就全绿。把 `ledger.py` 退回 HEAD 再跑 ⇒ **G1–G5
 
 ⛔ 判据小结：**对着旧代码跑一遍，并把"两边都绿"与"事故版不红"都标出来**。
 这条纪律在 §15 已经立过，这里第二次救场。
+
+---
+
+## §17 一次遍历：读数不得靠"把整份事实源放进内存"换来
+
+（2026-10-13 实测，对应宪法第 30 条）
+
+### 起点：一次只读请求要五份读数
+
+`/api/status` 一次要给出：**统计** / **链校验** / **一致性（账本 vs 投影）** /
+**记忆对账** / **尾部事件窗口**。上一轮（§16）已经把"解析 4.69 遍"消到 1 遍，
+但那 1 遍是**先把整份账本物化成 `List[Event]`** 再给五个消费者传阅。
+
+实测（4000 条 / 5.14 MB 账本）：
+
+| 读数 | 峰值 |
+|---|---|
+| 仅 `events()` 全量持有 | 8.18 MB |
+| `_collect` 总计 | **8.27 MB** |
+
+⇒ **99% 的峰值花在"持有"上**，而五个消费者**没有一个需要随机访问**。
+
+### 改法：一次磁盘遍历，五个聚合器共享同一条流
+
+```
+led.iter_events() ─┬─ LedgerStatsAgg     (by_kind + 链校验)
+                   ├─ ConsistencyAgg     (账本 vs 投影)
+                   ├─ MemoryLedgerAgg    (记忆对账)
+                   └─ TailWindowAgg      (deque(maxlen=limit))
+```
+
+⛔ **每个聚合器都必须与它的"非流式"入口共用同一份逻辑**：
+
+| 流式入口 | 非流式入口 | 共用点 |
+|---|---|---|
+| `LedgerStatsAgg` | `stats(events=)` | 都是建 agg → feed → result |
+| `ConsistencyAgg` | `consistency_report(events)` | 同上 |
+| `MemoryLedgerAgg` | `memory_report(ledger_events=)` | 同上 |
+| `Ledger.iter_events` | `events()` | `events()` = `list(iter_events())` |
+| `_chain_feed` | `verify_chain` | 唯一的链推进逻辑 |
+
+两处判据一旦漂移，"控制台说一致"就是假一致 —— 这是 §13 那条纪律的又一次应用。
+
+### ⛔ 第三次：只修一半等于没修
+
+账本侧改完，探针（当时只造账本、不造投影库）报 8.27 → 0.65 MB。但**生产配置
+下有投影库**，实测：
+
+```
+_collect(生产) 峰值 7.72 MB
+  其中 runs() 全量加载 5.83 MB（810 行）
+```
+
+**76% 的峰值来自 `runs()` 把每行的 `payload` 全量 `json.loads`** —— 而一致性
+判据只比 `reward / passed / harness_id` 三个字段。
+
+⇒ 加 `Store.run_digests()`：`SELECT run_id, reward, passed, harness_id`，
+不碰 payload。⛔ 取值必须与 `RunRow` 逐字一致（`float(reward or 0)` /
+`bool(passed)` / harness_id 原样可为 None）—— 不一致就会让 drift 判据在
+"db 里是 NULL"这种边界上给出不同结论。
+
+**同口径对照**（4000 条账本 + 1334 runs，`scripts/probe_memory_audit.py`）：
+
+| 场景 | 改造前 | 改造后 |
+|---|---|---|
+| 无投影库 | 8.27 MB | **0.65 MB** |
+| 有投影库（真实部署形态） | 14.24 MB | **2.70 MB** |
+
+剩下的 2.70 MB 里，1.5 MB 是 `runs(limit=200)` —— 那是**响应体本身要吐出去
+的数据**，是观测的内存下界，不是浪费。
+
+### ⛔ 又一次：反证项会随实现翻转
+
+上一轮 H2 的反证注入在 `Ledger.stats`（"忽略传入的 events，强制重读"）。
+流式化后 `_collect` **根本不调 `stats()`**（它用 `stats_agg()`）⇒ 注入点变成
+死点，**H2 恒红却查不出任何真问题**。
+
+⇒ 反证必须打在**当前咽喉**上：现在改成给 `iter_events` 注入"多扫一遍"，
+断言 H1 的阈值（< 2 遍）会被打破。
+
+### ⛔ 又一次：战果 vs 护栏要分开标
+
+把 `_collect` 退回物化实现（`for ev in list(led.iter_events())`）后重跑
+`tests/contract_streaming_test.py`：
+
+```
+26/29 通过
+FAIL D1 _collect 峰值 < 物化持有的 60%   比值=1.02
+FAIL D2 _collect 峰值 < 账本字节数        6.25MB vs 3.86MB
+FAIL D3 规模翻倍时峰值增长 < 2×           6.25 → 12.52 MB
+```
+
+⇒ **A/B/C/E/F/G 组 26 项是护栏**（防改坏语义），它们对旧代码也全绿；
+**只有 D 组三条是真判据**。这与 §15、§16 的教训同形：绿不等于有判别力。
+
+### ⛔ 顺带：合并遍历不得改变断链时的读数
+
+旧 `stats()` 是**两遍**（`by_kind` 一遍 + `verify_chain` 一遍），合并成一遍后
+最容易犯的错是"断链就跟着 break" ⇒ `count` / `by_kind` 只统计到断点，而断链
+恰恰是最需要完整读数的时刻。
+
+`_chain_feed` 断链后**不再推进 prev**（与旧 `verify_chain` 的 `return` 同源），
+但 `stats` 不 break ⇒ `count` 仍是全量（C1/C2 守着）。
