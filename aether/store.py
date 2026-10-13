@@ -159,6 +159,11 @@ class Store:
     # ── 读 ────────────────────────────────────────────────────────
     def runs(self, harness_id: Optional[str] = None,
              limit: int = 500) -> List[RunRow]:
+        #: ⛔⛔ 负 limit 必须在这里就夹住：SQLite 的 `LIMIT -1` == **无限制**
+        #:    （实测：`runs(limit=-1)` 返回全表 810 行）。不能指望调用方
+        #:    永远记得校验 —— `/api/status` 的 `limit` 参数此前就是裸传进
+        #:    来的。深层防御：闸在**数据层**也要有一道。
+        limit = max(0, int(limit))
         if harness_id:
             rows = self.conn.execute(
                 "SELECT * FROM runs WHERE harness_id=? ORDER BY created_at DESC LIMIT ?",
@@ -178,9 +183,25 @@ class Store:
                               payload=payload))
         return out
 
-    def snapshots(self) -> List[Dict[str, Any]]:
-        rows = self.conn.execute(
-            "SELECT * FROM harness_snapshots ORDER BY created_at").fetchall()
+    def snapshots(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """按 `created_at` 升序返回快照。
+
+        `limit` 给定时返回**最后** `limit` 条（与 `/api/events` 的尾部语义
+        一致）。⛔ 不传 = 全量，那是给**判据**用的；对外响应必须传 limit ——
+        append-only 的谱系是**无界**的，不设上限就会让响应体与内存随历史
+        线性增长（与 `/api/ledger/raw` 曾是同一个洞）。
+
+        ⛔ 一致性判据走 `snapshot_ids()`（全量），**不受**这里截断的影响 ——
+        响应截断只影响"给人看的列表"，绝不能影响判据。
+        """
+        if limit is None:
+            rows = self.conn.execute(
+                "SELECT * FROM harness_snapshots ORDER BY created_at"
+            ).fetchall()
+        else:
+            rows = list(reversed(self.conn.execute(
+                "SELECT * FROM harness_snapshots ORDER BY created_at DESC "
+                "LIMIT ?", (max(0, int(limit)),)).fetchall()))
         out = []
         for r in rows:
             try:
@@ -207,8 +228,10 @@ class Store:
             "SELECT harness_id FROM harness_snapshots").fetchall()]
 
     def run_ids(self, limit: int = 100000) -> List[str]:
+        #: ⛔ 同上：`LIMIT -1` == 无限制。判据调用方**不传** limit 即可全量。
         return [r["run_id"] for r in self.conn.execute(
-            "SELECT run_id FROM runs LIMIT ?", (limit,)).fetchall()]
+            "SELECT run_id FROM runs LIMIT ?",
+            (max(0, int(limit)),)).fetchall()]
 
     def run_digests(self, limit: int = 100000
                     ) -> Dict[str, Tuple[float, bool, Any]]:
@@ -226,7 +249,7 @@ class Store:
         """
         rows = self.conn.execute(
             "SELECT run_id, reward, passed, harness_id FROM runs LIMIT ?",
-            (limit,)).fetchall()
+            (max(0, int(limit)),)).fetchall()
         return {r["run_id"]: (float(r["reward"] or 0), bool(r["passed"]),
                               r["harness_id"]) for r in rows}
 

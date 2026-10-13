@@ -86,6 +86,7 @@
   <section class="card">
     <h2>进化树（harness 血缘）</h2>
     <div class="tree" id="tree">…</div>
+    <div class="sub" id="tree-note"></div>
   </section>
 
   <section class="card">
@@ -297,6 +298,13 @@ async function load() {
   };
   walk("#root", 0);
   el("tree").innerHTML = lines.join("\n") || "（无快照：先跑 python -m aether.cli evolve）";
+  // ⛔ 谱系被截断时必须说出来：否则"只看到 7 个节点"会被当成全部。
+  const snapTotal = data.snapshots_total ?? data.snapshots?.length ?? 0;
+  const snapCut = data.snapshots_truncated === true;
+  el("tree-note").innerHTML = snapCut
+    ? `<span class="warn">⚠ 谱系被截断：共 ${snapTotal} 个快照，这里只画最后 `
+      + `${(data.snapshots ?? []).length} 个（调大 ?limit= 可看更早的）</span>`
+    : (snapTotal ? `共 ${snapTotal} 个快照（完整）` : "");
 
   // ── 非回归闸裁决 ────────────────────────────────────────────
   //    ⛔ 上一版有一列"优势"恒为 `—`（账本里根本没有这个值）⇒ 假列。

@@ -339,11 +339,25 @@ class Ledger:
         return state["bad"] is None, state["bad"], state["reason"]
 
     # ── 回放 ──────────────────────────────────────────────────────
+    def iter_replay(self, kinds: Optional[List[str]] = None,
+                    since_seq: int = 0) -> Iterator[Event]:
+        """**流式**重放：一次只在内存里留一条事件。
+
+        ⛔ `replay()` 是"全量物化 + 过滤 + 再建一份列表" —— 而 `/api/events`
+        只想要**最后 limit 条**。2026-10-13 实测：生产账本 1533 条，为了
+        取尾部 200 条，`replay()` 峰值 **6.50 MB**。上一轮把 `/api/status`
+        流式化了，这里却是同形态的问题原封不动 —— **只修一半等于没修**。
+
+        ⛔ 与 `replay()` **逐条同源**（`replay()` = `list(iter_replay(...))`）。
+        """
+        ks = set(kinds) if kinds else None
+        for e in self.iter_events():
+            if e.seq >= since_seq and (ks is None or e.kind in ks):
+                yield e
+
     def replay(self, kinds: Optional[List[str]] = None,
                since_seq: int = 0) -> List[Event]:
-        ks = set(kinds) if kinds else None
-        return [e for e in self.events()
-                if e.seq >= since_seq and (ks is None or e.kind in ks)]
+        return list(self.iter_replay(kinds, since_seq))
 
     def stats_agg(self) -> "LedgerStatsAgg":
         """拿一个**流式**统计聚合器（给一次遍历喂多消费者的调用方）。"""

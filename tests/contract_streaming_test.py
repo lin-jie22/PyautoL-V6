@@ -19,9 +19,13 @@
 """
 from __future__ import annotations
 
+import http.client
+import json
 import sys
 import tempfile
+import threading
 import tracemalloc
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -29,8 +33,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from aether.ledger import Ledger, LedgerStatsAgg          # noqa: E402
 from aether.serve import (                                 # noqa: E402
-    MemoryLedgerAgg, TailWindowAgg, _collect, _memory_file_report,
-    memory_report)
+    MemoryLedgerAgg, TailWindowAgg, _collect, _event_dict,
+    _memory_file_report, memory_report)
 from aether.store import Store                             # noqa: E402
 
 FAILS: List[str] = []
@@ -47,8 +51,10 @@ def ck(name: str, cond: bool, detail: str = "") -> None:
         FAILS.append(name)
 
 
-#: 单条事件的 payload 大小（真实账本里 verdict 带源码片段/轨迹）
-FAT = "y" * 1024
+#: ⛔ 用"少条数 + 大 payload"而不是"多条数"：每条 append 都要 fsync，
+#:    而内存峰值 ∝ payload × 条数 ⇒ 判别力不变但耗时降一个量级
+#:    （实测 1200 条 × 1 KB 跑 H 组要 32s；400 条 × 4 KB 只要 7s）。
+FAT = "y" * 4096
 
 
 def build(root: Path, n: int, *, pattern=(0, 1, 2)) -> Path:
@@ -194,7 +200,7 @@ def group_d() -> None:
     在物化版里全都一样（物化版也只调一次 `iter_events`）⇒ 那些断言是
     恒绿护栏，不是判据。
     """
-    n = 3000
+    n = 300
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         lp = build(root, n)
@@ -205,7 +211,8 @@ def group_d() -> None:
             return len(evs)
 
         peak_hold = peak_of(hold)
-        cnt = peak_of(_collect, root, 200)
+        #: ⛔ 窗口 50 条 ≪ 300 条总数：否则"保留尾部"自己就是峰值主体
+        cnt = peak_of(_collect, root, 50)
         mb = 1024 * 1024
         print(f"       [实测] 账本 {n} 条 / {size/mb:.2f} MB；"
               f"物化持有 {peak_hold/mb:.2f} MB，_collect {cnt/mb:.2f} MB")
@@ -222,7 +229,7 @@ def group_d() -> None:
             root2 = Path(td2)
             lp2 = build(root2, n * 2)
             size2 = lp2.stat().st_size
-            cnt2 = peak_of(_collect, root2, 200)
+            cnt2 = peak_of(_collect, root2, 50)
             print(f"       [实测] {n*2} 条 / {size2/mb:.2f} MB；"
                   f"_collect {cnt2/mb:.2f} MB "
                   f"（规模 ×2 ⇒ 峰值 ×{cnt2/cnt:.2f}）")
@@ -324,10 +331,16 @@ def group_g() -> None:
         root = Path(td)
         build(root, 30)
         got = _collect(root, limit=5)
-        ck("G1 键集合与旧版一致（不多不少）",
-           set(got) == {"ledger", "events", "store", "consistency",
-                        "runs", "snapshots", "memory", "version"},
+        #: ⛔ `snapshots_total` / `snapshots_truncated` 是**新增**键（切了
+        #:    就要说切了），不是删除或改名 —— 新增键对既有消费者是安全的。
+        ck("G1 键集合与旧版一致（只多不少）",
+           set(got) == {"ledger", "events", "store", "consistency", "runs",
+                        "snapshots", "snapshots_total",
+                        "snapshots_truncated", "memory", "version"},
            str(sorted(got)))
+        ck("G1b 无投影库时也带 total/truncated（不得缺键）",
+           got["snapshots_total"] == 0
+           and got["snapshots_truncated"] is False, str(got.get("snapshots")))
         ck("G2 events 不超过 limit",
            len(got["events"]) == 5, str(len(got["events"])))
         ck("G3 无投影库时 consistency 为空 dict（不造假读数）",
@@ -337,12 +350,111 @@ def group_g() -> None:
            and "ledger_trace" not in got["memory"], str(got["memory"]))
 
 
+# ═══ H 组：另一个端点也必须流式（只修一半等于没修）══════════════
+def group_h() -> None:
+    """/api/events 是**同形态**的问题：`led.replay()` 物化全量再切尾部。
+
+    ⛔ 上一轮只把 `/api/status` 流式化了；这里为了取尾部 200 条，把
+    1533 条全量解析**两遍**（列表推导再造一份）⇒ 峰值 6.79 MB。
+    """
+    from collections import deque
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        lp = build(root, 400)
+        led = Ledger(lp)
+
+        #: ⛔ 窗口必须**远小于**总条数：否则"保留尾部"本身就是峰值主体，
+        #:    流式的收益被自己的响应体吃掉（实测 400 条取尾部 200 条只有 1.9×，
+        #:    取尾部 50 条是 8×）。
+        old = [_event_dict(e)
+               for e in deque(led.replay(), maxlen=50)]
+        agg = TailWindowAgg(50)
+        for e in led.iter_replay():
+            agg.feed(e)
+        new = agg.result()
+        ck("H1 iter_replay == replay 的尾部（逐条相等）", old == new)
+
+        a2 = TailWindowAgg(10)
+        for e in led.iter_replay(kinds=["memory.write"]):
+            a2.feed(e)
+        ck("H2 iter_replay(kinds=) 过滤正确",
+           [d["kind"] for d in a2.result()] == ["memory.write"] * 10)
+        a3 = TailWindowAgg(1000)
+        for e in led.iter_replay(since_seq=300):
+            a3.feed(e)
+        ck("H3 iter_replay(since_seq=) 过滤正确",
+           all(d["seq"] >= 300 for d in a3.result())
+           and len(a3.result()) == 400 - 299)
+
+        peak_old = peak_of(lambda: deque(Ledger(lp).replay(), maxlen=50))
+        peak_new = peak_of(lambda: _drain(lp))
+        mb = 1024 * 1024
+        print(f"       [实测] /api/events 物化 {peak_old/mb:.2f} MB → "
+              f"流式 {peak_new/mb:.2f} MB（{peak_old/peak_new:.1f}×）")
+        ck("H4 /api/events 流式峰值 < 物化的 50%",
+           peak_new < peak_old * 0.5,
+           f"{peak_new/mb:.2f} vs {peak_old/mb:.2f} MB")
+
+        #: ⛔⛔ **H4 测的是组件，不是端点**。把 `do_GET` 里那两行退回
+        #:    `replay()` 物化后，H1–H4 **依然全绿**（实测 34/34）—— 因为
+        #:    没人真的走到那条代码。必须打真 HTTP + 计数"物化入口被调用
+        #:    几次"，这才是"端点走的是哪条路"的可证伪形式。
+        with tempfile.TemporaryDirectory() as td3:
+            r3 = Path(td3)
+            build(r3, 60)
+            import aether.serve as S
+            import aether.ledger as LG
+            from http.server import ThreadingHTTPServer
+            import http.client, threading
+            S.Handler.root = r3
+            S.Handler.console_dir = None
+            srv = ThreadingHTTPServer(("127.0.0.1", 0), S.Handler)
+            port = srv.server_address[1]
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+            calls = {"replay": 0, "iter_replay": 0}
+            _o_r, _o_ir = LG.Ledger.replay, LG.Ledger.iter_replay
+
+            def _r(self, *a, **k):
+                calls["replay"] += 1
+                return _o_r(self, *a, **k)
+
+            def _ir(self, *a, **k):
+                calls["iter_replay"] += 1
+                return _o_ir(self, *a, **k)
+            LG.Ledger.replay, LG.Ledger.iter_replay = _r, _ir
+            try:
+                c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+                c.request("GET", "/api/events?limit=2")
+                resp = c.getresponse()
+                body = json.loads(resp.read().decode("utf-8"))
+                c.close()
+                ck("H5 端点真的走流式：replay() 调用 0 次、iter_replay 1 次",
+                   calls["replay"] == 0 and calls["iter_replay"] == 1,
+                   f"replay={calls['replay']} iter_replay={calls['iter_replay']}")
+                ck("H6 且功能正确（返回 ≤ limit 条事件）",
+                   resp.status == 200 and len(body.get("events", [])) == 2,
+                   f"{resp.status} {len(body.get('events', []))}")
+            finally:
+                LG.Ledger.replay, LG.Ledger.iter_replay = _o_r, _o_ir
+                srv.shutdown()
+                srv.server_close()
+
+
+def _drain(lp: Path) -> List[Dict[str, Any]]:
+    """模拟 `/api/events` 的流式取尾部。"""
+    agg = TailWindowAgg(50)
+    for e in Ledger(lp).iter_replay():
+        agg.feed(e)
+    return agg.result()
+
+
 def main() -> int:
     print("契约测试：一次磁盘遍历（streaming）")
     for name, fn in (("A 不物化", group_a), ("B 流式==物化", group_b),
                      ("C 语义保持", group_c), ("D 内存峰值", group_d),
                      ("E 聚合器同源", group_e), ("F 一致性不失真", group_f),
-                     ("G 响应形状", group_g)):
+                     ("G 响应形状", group_g), ("H 另一个端点", group_h)):
         print(f"\n{name}")
         fn()
     print(f"\n{N_CK - len(FAILS)}/{N_CK} 通过")

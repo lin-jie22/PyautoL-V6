@@ -170,8 +170,14 @@ ck("B1 limit=abc ⇒ 400（不是 500）", code == 400, f"实际 {code} {body}")
 code, _, body = srv.get("/api/events?limit=abc")
 ck("B2 /api/events?limit=abc ⇒ 400（不是 500）", code == 400, f"实际 {code}")
 code, _, body = srv.get("/api/events?limit=-1")
-ck("B3 limit=-1 ⇒ 空列表（负数不得变成不封顶）",
-   code == 200 and body.get("events") == [], f"{code} {body}")
+#: ⛔⛔ 期望已改（原为"200 + 空列表"）：静默返回空列表是**把危险输入伪装
+#:    成正常响应**。实测 `LIMIT -1` 在 SQLite 里是**无限制**（H6 反证），
+#:    于是同一份响应里 `events=[]`（deque maxlen=0）而 `runs` 却是**全表**
+#:    —— 两个列表语义相反，正是"同一份响应自相矛盾"的同形态问题。
+#:    明确 400 才是对的：既拒绝，也说清为什么拒绝。
+ck("B3 limit=-1 ⇒ 400 并说明原因（不是静默空列表）",
+   code == 400 and "无限制" in json.dumps(body, ensure_ascii=False),
+   f"{code} {body}")
 srv.close()
 
 print()
@@ -364,6 +370,83 @@ with tempfile.TemporaryDirectory() as td:
     ck("G3 反证：非对称写法会把这条算成外来"
        "（证明 G1 拦住的是一个真会触发的分支）",
        asym == 1, f"非对称计数={asym}")
+
+print("=" * 68)
+print("H 组 · 列表端点不得有第二种无上限读取（limit 是第二个人口）")
+
+#: ⛔ 自带实例：G 组末尾已经 `srv.close()`，复用会 ConnectionRefused
+srv = _Server()
+
+#: ⛔ E 组修的是 `/api/ledger/raw` 无上限。但**同一个洞换个入口还开着两次**：
+#:    `/api/status?limit=N` 与 `/api/events?limit=N` 的 `N` 此前完全没有
+#:    校验。更需要命中的是**负数**：SQLite 里 `LIMIT -1` == 无限制，
+#:    所以 `limit=-1` 不是"取 0 条"，是"把整张表吐出来"（H6 实测反证）。
+for ep in ("/api/status", "/api/events"):
+    code, _, b = srv.get(f"{ep}?limit=-1")
+    ck(f"H1 {ep}?limit=-1 ⇒ 400（负 limit 在 SQLite 里是**无限制**）",
+       code == 400, f"{code} {b}")
+    code, _, b = srv.get(f"{ep}?limit=99999")
+    ck(f"H2 {ep}?limit=99999 ⇒ 400（超过 MAX_LIST_LIMIT="
+       f"{S.MAX_LIST_LIMIT}）", code == 400, f"{code} {b}")
+    code, _, b = srv.get(f"{ep}?limit=abc")
+    ck(f"H3 {ep}?limit=abc ⇒ 400（不是 500）", code == 400, f"{code} {b}")
+
+code, _, b = srv.get("/api/status?limit=2")
+ck("H4 /api/status?limit=2 ⇒ 200 且 events ≤ 2",
+   code == 200 and len(b.get("events", [])) <= 2,
+   f"{code} {len(b.get('events', []))}")
+code, _, b = srv.get("/api/events?limit=2")
+ck("H5 /api/events?limit=2 ⇒ 200 且 events ≤ 2",
+   code == 200 and len(b.get("events", [])) <= 2,
+   f"{code} {len(b.get('events', []))}")
+
+#: 反证：负 limit 在 SQLite 里真的是"全表"而不是"0 条" —— 否则 H1 是恒真
+from aether.store import Store  # noqa: E402
+with tempfile.TemporaryDirectory() as td2:
+    st = Store(Path(td2) / "x.db")
+    try:
+        for i in range(3):
+            st.save_snapshot(f"h{i}", {"i": i}, accepted=True, round_no=i)
+        #: ⛔ 直接打原生 SQL：证明这个危险**真实存在**（不是想象出来的），
+        #:    这也是"数据层必须也夹一道"的理由 —— HTTP 层的闸可以被绕过，
+        #:    `LIMIT -1` 的语义不会。
+        n_neg = len(st.conn.execute(
+            "SELECT harness_id FROM harness_snapshots LIMIT -1").fetchall())
+        ck("H6 反证：SQLite 原生 `LIMIT -1` 返回**全表**"
+           "（证明 H1 拦的是真会触发的分支，不是恒真）",
+           n_neg == 3 and len(st.snapshots(limit=1)) == 1,
+           f"LIMIT -1 → {n_neg} 条, limit=1 → "
+           f"{len(st.snapshots(limit=1))} 条")
+        #: 深层防御：数据层入口自己也不许把负数传下去
+        ck("H6b 深层防御：Store 的每个 limit 入口都夹住负数",
+           len(st.snapshots(limit=-1)) == 0
+           and len(st.runs(limit=-1)) == 0
+           and len(st.run_ids(limit=-1)) == 0
+           and len(st.run_digests(limit=-1)) == 0,
+           f"snapshots={len(st.snapshots(limit=-1))} "
+           f"runs={len(st.runs(limit=-1))} "
+           f"ids={len(st.run_ids(limit=-1))} "
+           f"digests={len(st.run_digests(limit=-1))}")
+        #: 截断必须是"最后 N 条"，且**总数/是否截断**要如实报出去
+        for i in range(3, 12):
+            st.save_snapshot(f"h{i}", {"i": i}, accepted=True, round_no=i)
+        got = st.snapshots(limit=3)
+        ck("H7 snapshots(limit=3) 取**最后** 3 条",
+           [g["harness_id"] for g in got] == ["h9", "h10", "h11"],
+           str([g["harness_id"] for g in got]))
+        ck("H8 判据不受响应截断影响：snapshot_ids() 仍是**全量**",
+           len(st.snapshot_ids()) == 12, str(len(st.snapshot_ids())))
+    finally:
+        st.close()
+
+#: 响应里必须带"截断了吗"，否则"谱系只有 7 个"会被当成全部
+code, _, b = srv.get("/api/status?limit=200")
+ck("H9 /api/status 带 snapshots_total 与 snapshots_truncated"
+   "（切了就要说切了）",
+   code == 200 and "snapshots_total" in b and "snapshots_truncated" in b,
+   f"{code} {sorted(b)[:4]}")
+
+srv.close()
 
 print("=" * 68)
 if FAILS:

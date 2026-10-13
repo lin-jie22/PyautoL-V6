@@ -26,6 +26,14 @@ MAX_RAW_BYTES = 64 * 1024 * 1024
 #: `/api/events` 默认返回条数。
 DEFAULT_EVENT_TAIL = 500
 
+#: 列表类响应的**硬上限**。
+#: ⛔ 为什么必须有：`/api/status?limit=N` 与 `/api/events?limit=N` 的 `N`
+#:    此前**完全没有校验**，而 `/api/ledger/raw` 的无上限读取已经修过了 ——
+#:    同一个洞换个入口还开着两次。更需要命中的是**负数**：SQLite 里
+#:    `LIMIT -1` 就是**无限制**（实测：`runs(limit=-1)` 返回全表 810 行），
+#:    所以 `limit=-1` 不是"取 0 条"，是"全部吐出来"。
+MAX_LIST_LIMIT = 5000
+
 
 def _is_within(child: Path, parent: Path) -> bool:
     """按**路径分量**判断 child 是否在 parent 之下。
@@ -226,6 +234,34 @@ def memory_report(path: Path, ledger_events: Optional[Iterable[Any]] = None
     return out
 
 
+def _parse_limit(q: Dict[str, List[str]], default: int
+                 ) -> Tuple[bool, int, str]:
+    """解析并校验 `limit`：**两个列表端点共用**，不许各写一份。
+
+    返回 (ok, value, error_message)。
+
+    ⛔ 为什么**拒绝**负数而不是 clamp：`LIMIT -1` 在 SQLite 里是"无限制"，
+    clamp 成 0 会把"全部吐出"悄悄变成"一条不给"，而调用方以为自己拿到了
+    想要的东西 —— 两头都是把缺失/溢出伪装成正常。明确 400 + 说清原因。
+    ⛔ 为什么**拒绝**超限而不是静默截断：静默截断会让"第 3000 条之后还有
+    没有"这个问题失去答案。要全量就走同机直读（那是另一条有出路的路径）。
+    """
+    raw = q.get("limit", [None])[0]
+    if raw is None:
+        return True, default, ""
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return False, 0, f"limit 必须是整数（实得 {raw!r}）"
+    if n < 0:
+        return False, 0, (f"limit 不得为负（实得 {n}）："
+                          "SQLite 的 LIMIT -1 == 无限制，那会把整张表吐出来")
+    if n > MAX_LIST_LIMIT:
+        return False, 0, (f"limit 过大（{n} > {MAX_LIST_LIMIT}）："
+                          "需要全量请同机直读文件，不要打穿这个端点")
+    return True, n, ""
+
+
 def _event_dict(ev: Any) -> Dict[str, Any]:
     """账本事件 → JSON 友好的 dict。**所有端点共用**，避免两套结构。
 
@@ -266,6 +302,10 @@ def _collect(root: Path, limit: int = 200) -> Dict[str, Any]:
     store_stats: Dict[str, Any] = {}
     runs: List[Dict[str, Any]] = []
     snaps: List[Dict[str, Any]] = []
+    #: ⛔ 无投影库时这两个也得有值（"0 条、没截断"，不是"没这个键"）——
+    #:    缺键会让 TS 侧 `?? 0` 兜底，把"没有库"和"有库但 0 条"混成一种。
+    snaps_total = 0
+    snaps_truncated = False
     consistency: Dict[str, Any] = {}
     s = Store(db) if db.exists() else None
     try:
@@ -275,7 +315,12 @@ def _collect(root: Path, limit: int = 200) -> Dict[str, Any]:
             #:    所以在这里建。
             store_stats = s.stats()
             runs = [r.to_dict() for r in s.runs(limit=limit)]
-            snaps = s.snapshots()
+            #: ⛔ 谱系是 append-only 的 ⇒ **无界**。必须按 limit 取，并把
+            #:    "截断过"如实报出去（控制台才知道自己看到的是不完整的谱系）。
+            #:    ⛔ 判据不受影响：一致性走 `snapshot_ids()`（全量）。
+            snaps = s.snapshots(limit=max(0, limit))
+            snaps_total = int(store_stats.get("n_snapshots", 0))
+            snaps_truncated = snaps_total > len(snaps)
             cons_agg = s.consistency_agg()
             aggs.append(cons_agg)
         for ev in led.iter_events():
@@ -306,6 +351,9 @@ def _collect(root: Path, limit: int = 200) -> Dict[str, Any]:
         "consistency": consistency,
         "runs": runs,
         "snapshots": snaps,
+        #: ⛔ 切了就要说切了：不报的话"谱系只有 7 个"会被当成全部
+        "snapshots_total": snaps_total,
+        "snapshots_truncated": snaps_truncated,
         "memory": mem,
         "version": "0.1.0",
     }
@@ -363,27 +411,28 @@ class Handler(BaseHTTPRequestHandler):
         q = parse_qs(u.query)
         try:
             if _endpoint_is(u.path, "/api/status"):
-                try:
-                    limit = int(q.get("limit", ["200"])[0])
-                except ValueError:
-                    self._json({"error": "limit 必须是整数"}, 400)
+                ok, limit, err = _parse_limit(q, 200)
+                if not ok:
+                    self._json({"error": err}, 400)
                     return
                 self._json(_collect(self.root, limit=limit))
             elif _endpoint_is(u.path, "/api/events"):
                 from .ledger import Ledger
-                try:
-                    limit = int(
-                        q.get("limit", [str(DEFAULT_EVENT_TAIL)])[0])
-                except ValueError:
-                    self._json({"error": "limit 必须是整数"}, 400)
+                ok, limit, err = _parse_limit(q, DEFAULT_EVENT_TAIL)
+                if not ok:
+                    self._json({"error": err}, 400)
                     return
                 kind = q.get("kind", [None])[0]
                 led = Ledger(self.root / "data" / "ledger.jsonl")
-                evs = led.replay(kinds=[kind] if kind else None)
-                tail = deque(evs, maxlen=max(0, limit))
+                #: ⛔ 流式：只留最后 limit 条，**不物化整份账本**。
+                #:    `led.replay()` 曾为了取尾部 200 条而把 1533 条全量解析
+                #:    两遍（列表推导再造一份）⇒ 峰值 6.50 MB（实测）。
+                tail = TailWindowAgg(limit)
+                for e in led.iter_replay(kinds=[kind] if kind else None):
+                    tail.feed(e)
                 #: ⛔ 与 /api/status.events **同一结构**（都走 _event_dict），
                 #:    否则 TS 侧两个端点各拿一套字段，契约两头不对账。
-                self._json({"events": [_event_dict(e) for e in tail]})
+                self._json({"events": tail.result()})
             elif _endpoint_is(u.path, "/api/ledger/raw"):
                 path = self.root / "data" / "ledger.jsonl"
                 if not path.exists():
