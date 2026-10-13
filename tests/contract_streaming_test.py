@@ -449,12 +449,256 @@ def _drain(lp: Path) -> List[Dict[str, Any]]:
     return agg.result()
 
 
+# ── I 组：CLI 也是"读数入口"，而且它从未被数过遍数 ─────────────────
+def _old_deadend(ledger: Any) -> Dict[str, int]:
+    """`_deadend_map` 的**改造前实现** —— 当 oracle 用，不参与生产。
+
+    ⛔ 逐字照抄 `git show 4cd3054:aether/evolution.py` 的版本（倒序 +
+    `done` 集合），不许"顺手改成更好懂的写法" —— oracle 一旦被美化，
+    它就不再证明"新旧同值"，只证明"新旧都好看"。
+    """
+    out: Dict[str, int] = {}
+    done: set = set()
+    for ev in reversed(ledger.events()):
+        if ev.kind != "gen.probe":
+            continue
+        p = ev.payload or {}
+        key = f"{p.get('capsule', '')}|{p.get('env_pair', 'unknown')}"
+        if key in done:
+            continue
+        if str(p.get("verdict")) == "generalize":
+            out[key] = 0
+            done.add(key)
+        else:
+            out[key] = out.get(key, 0) + 1
+    return out
+
+
+def group_i() -> None:
+    print("  （I 组：CLI `status` 不得把账本问三遍）")
+    import argparse
+    import contextlib
+    import io
+    import random
+
+    from aether import cli as _cli
+    from aether import ledger as _LG
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        lp = build(root, 200)
+
+        # I1. 遍数：一次 cmd_status 只准解析账本一遍
+        real_loads = _LG.json.loads
+        cnt = {"n": 0}
+
+        def _counting_loads(s, *a, **k):
+            cnt["n"] += 1
+            return real_loads(s, *a, **k)
+
+        _LG.json.loads = _counting_loads
+        try:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                rc = _cli.cmd_status(argparse.Namespace(root=str(root)))
+        finally:
+            _LG.json.loads = real_loads
+        n_ev = len(Ledger(lp).events())
+        ck("I1 cmd_status 只解析账本一遍（旧实现实测 3.01 遍）",
+           cnt["n"] <= n_ev * 1.05,
+           f"解析 {cnt['n']} 次 / 账本 {n_ev} 条 = {cnt['n']/n_ev:.2f} 遍")
+
+        # I2. 端点/命令走的是哪条路：物化入口 `events()` 必须 0 次
+        old_events = Ledger.events
+        n_events = {"n": 0}
+        old_iter = Ledger.iter_events
+        n_iter = {"n": 0}
+
+        def _spy_events(self):
+            n_events["n"] += 1
+            return old_events(self)
+
+        def _spy_iter(self):
+            n_iter["n"] += 1
+            return old_iter(self)
+
+        Ledger.events = _spy_events
+        Ledger.iter_events = _spy_iter
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                _cli.cmd_status(argparse.Namespace(root=str(root)))
+        finally:
+            Ledger.events = old_events
+            Ledger.iter_events = old_iter
+        #: ⛔ 与 H5 同形：断言的是"走了哪条路"，不是"组件对不对"。
+        #:    没有这条，I 组全是"测组件"—— 把 cmd_status 退回物化也全绿。
+        ck("I2 cmd_status 走 iter_events（物化入口 events() 调用 0 次）",
+           n_events["n"] == 0 and n_iter["n"] >= 1,
+           f"events()={n_events['n']} iter_events()={n_iter['n']}")
+
+        # I3. 三条判据同源：cmd_status 的读数 == _collect 的读数
+        #: ⛔ CLI 与 HTTP 是**两个入口**，各自算一套就是两套判据 ——
+        #:    "控制台说一致、接口说不一致"这种事必须不可能发生。
+        #:    ⛔ 投影库要先存在，否则 CLI 会跳过 consistency 分支。
+        _d = Store(root / "data" / "aether.db")
+        try:
+            _d.rebuild_from_ledger(Ledger(lp).events())
+        finally:
+            _d.close()
+        got = _collect(root, limit=200)
+        with contextlib.redirect_stdout(io.StringIO()) as b2, \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = _cli.cmd_status(argparse.Namespace(root=str(root)))
+        #: 从 CLI 的 stdout 里取回它打印的各个 JSON 段（`indent=2` 逐段输出）
+        dec = json.JSONDecoder()
+        parsed: List[Any] = []
+        s, i = b2.getvalue(), 0
+        while i < len(s):
+            while i < len(s) and s[i] in " \n\t\r":
+                i += 1
+            if i >= len(s) or s[i] != "{":
+                break
+            try:
+                obj, j = dec.raw_decode(s, i)
+            except ValueError:
+                break
+            parsed.append(obj)
+            i = j
+        cli_led = next((p["ledger"] for p in parsed if "ledger" in p), None)
+        cli_con = next((p["consistency"] for p in parsed
+                        if "consistency" in p), None)
+        ck("I3 CLI 与 _collect 的账本读数逐字段相同（判据只有一份）",
+           cli_led is not None and
+           cli_led["count"] == got["ledger"]["count"] and
+           cli_led["chain_ok"] == got["ledger"]["chain_ok"] and
+           cli_led["by_kind"] == got["ledger"]["by_kind"],
+           f"cli={cli_led} vs collect={got['ledger']}")
+        ck("I4 CLI 与 _collect 的一致性读数逐字段相同",
+           cli_con is not None and cli_con.get("ok") == got["consistency"].get("ok")
+           and cli_con.get("missing_count") == got["consistency"].get("missing_count")
+           and cli_con.get("drift_count") == got["consistency"].get("drift_count"),
+           f"cli ok={cli_con and cli_con.get('ok')} vs "
+           f"collect ok={got['consistency'].get('ok')}")
+
+    # ── J 组：热路径 `_deadend_map` 每轮物化整份账本 ────────────────
+    print("  （J 组：_deadend_map 不得为算 7 个 key 而物化整份账本）")
+    from aether.evolution import EvolutionLoop
+
+    def new_deadend(ledger: Any) -> Dict[str, int]:
+        loop = EvolutionLoop.__new__(EvolutionLoop)
+        loop.ledger = ledger
+        return EvolutionLoop._deadend_map(loop)
+
+    random.seed(7)
+    verdicts = ["generalize", "overfit", "inconclusive", None, "GENERALIZE"]
+    bad = 0
+    #: ⛔ 对拍看的是**语义**不是内存 ⇒ 用小账本（每条 append 都 fsync）
+    for _ in range(40):
+        with tempfile.TemporaryDirectory() as td:
+            led = Ledger(Path(td) / "l.jsonl")
+            for i in range(random.randint(0, 24)):
+                led.append("gen.probe", {
+                    "capsule": random.choice(["a", "b", "c", ""]),
+                    "env_pair": random.choice(["p1", "p2", "unknown"]),
+                    "verdict": random.choice(verdicts)})
+                if random.random() < 0.3:
+                    led.append("other.kind", {"x": i})
+            if _old_deadend(led) != new_deadend(led):
+                bad += 1
+    ck("J1 随机对拍 40 组：与改造前实现**逐 key 相等**（只换实现不动语义）",
+       bad == 0, f"{bad} 组不一致")
+
+    #: ⛔ 这条把**当前语义钉死**。旧实现是二元的（曾否成功 ⇒ 0 或全部），
+    #:    与 docstring 声称的"连续"不符 ⇒ 「成功过、之后又连续被拦两次」
+    #:    给 0 而不是 2 ⇒ 这类候选永远不会进冷却。
+    #:    ⛔ 这是**已知判据 bug**，本次故意不改（改它要先做交叉表）。
+    #:    哪天要修成"连续"语义，这条会先红 —— 红的人必须先看交叉表。
+    with tempfile.TemporaryDirectory() as td:
+        led = Ledger(Path(td) / "l.jsonl")
+        for v in ("generalize", "blocked", "blocked"):
+            led.append("gen.probe", {"capsule": "c", "env_pair": "p",
+                                     "verdict": v})
+        got = new_deadend(led).get("c|p")
+        ck("J2 【已知语义 bug，故意保留】[G,拦,拦] ⇒ 0 而非 2"
+           "（旧实现是二元值 ⇒ 成功过的候选永不冷却；改前先做交叉表）",
+           got == 0, f"实得 {got}")
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        led = Ledger(root / "data" / "l.jsonl")
+        #: ⛔ 每条 append 都 fsync ⇒ 条数控制在"峰值信号够用"的下限
+        for i in range(80):
+            led.append("gen.probe", {"capsule": f"c{i % 5}", "env_pair": "p",
+                                     "verdict": "blocked", "pad": FAT[:512]})
+            led.append("eval.verdict", {"run_id": f"r{i}", "reward": 0.1,
+                                        "passed": False, "pad": FAT})
+
+        def peak_of(fn):
+            tracemalloc.start()
+            tracemalloc.reset_peak()
+            r = fn()
+            p = tracemalloc.get_traced_memory()[1]
+            tracemalloc.stop()
+            return p, r
+
+        p_old, m_old = peak_of(lambda: _old_deadend(led))
+        p_new, m_new = peak_of(lambda: new_deadend(led))
+        mb = 1024 * 1024
+        ck("J3 流式版峰值 < 物化版的 10%（只换实现，值仍逐 key 相等）",
+           m_old == m_new and p_new < p_old * 0.10,
+           f"值相等={m_old == m_new} 峰值 {p_new/mb:.2f} vs {p_old/mb:.2f} MB")
+
+        #: ⛔ 与 I2/H5 同形：断言"走的是 iter_events 而不是 events()"
+        oe, oi = Ledger.events, Ledger.iter_events
+        ne, ni = {"n": 0}, {"n": 0}
+        Ledger.events = lambda self: (ne.__setitem__("n", ne["n"] + 1), oe(self))[1]
+        Ledger.iter_events = lambda self: (ni.__setitem__("n", ni["n"] + 1),
+                                           oi(self))[1]
+        try:
+            new_deadend(Ledger(root / "data" / "l.jsonl"))
+        finally:
+            Ledger.events, Ledger.iter_events = oe, oi
+        ck("J4 _deadend_map 走 iter_events（物化入口 events() 调用 0 次）",
+           ne["n"] == 0 and ni["n"] == 1,
+           f"events()={ne['n']} iter_events()={ni['n']}")
+
+    # ── K 组：`Ledger.tail(n)` 不得为取尾部 n 条而物化整份账本 ────────
+    print("  （K 组：tail(n) 只留窗口，不物化全量）")
+    with tempfile.TemporaryDirectory() as td:
+        led = Ledger(Path(td) / "l.jsonl")
+        for i in range(60):
+            led.append("eval.verdict", {"run_id": f"r{i}", "pad": FAT})
+        tracemalloc.start()
+        tracemalloc.reset_peak()
+        t = led.tail(5)
+        p_tail = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+        tracemalloc.start()
+        tracemalloc.reset_peak()
+        evs = led.events()          #: 物化全量（对照基准）
+        p_hold = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+        ck("K1 tail(5) 结果与 events()[-5:] 相同",
+           t == evs[-5:], f"{len(t)} 条")
+        #: ⛔ 窗口必须**远小于**总条数：60 条取 10 条时比值 27.6%，取 5 条时
+        #:    ~17% ⇒ 判别力来自"窗口/总量"这个比值，不是条数本身。
+        ck("K2 tail(5) 峰值 < 物化全量的 25%",
+           p_tail < p_hold * 0.25,
+           f"{p_tail/mb:.2f} vs {p_hold/mb:.2f} MB")
+        ck("K3 tail(0) / 负 n ⇒ 空列表（绝不退化成不封顶）",
+           led.tail(0) == [] and led.tail(-5) == [],
+           f"tail(0)={len(led.tail(0))} tail(-5)={len(led.tail(-5))}")
+
+
 def main() -> int:
     print("契约测试：一次磁盘遍历（streaming）")
     for name, fn in (("A 不物化", group_a), ("B 流式==物化", group_b),
                      ("C 语义保持", group_c), ("D 内存峰值", group_d),
                      ("E 聚合器同源", group_e), ("F 一致性不失真", group_f),
-                     ("G 响应形状", group_g), ("H 另一个端点", group_h)):
+                     ("G 响应形状", group_g), ("H 另一个端点", group_h),
+                     ("I/J/K CLI+热路径", group_i)):
         print(f"\n{name}")
         fn()
     print(f"\n{N_CK - len(FAILS)}/{N_CK} 通过")

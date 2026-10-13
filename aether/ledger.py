@@ -34,6 +34,7 @@ import json
 import os
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
@@ -296,7 +297,16 @@ class Ledger:
                     yield line
 
     def tail(self, n: int = 20) -> List[Event]:
-        return self.events()[-n:]
+        """最后 `n` 条事件（正序）。
+
+        ⛔ 不得写成 `self.events()[-n:]` —— 那会**物化整份账本**只为丢掉
+        前面全部（与 `/api/events` 曾踩的同一个洞：为取尾部 200 条而解析
+        1533 条）。`deque(maxlen=n)` 只留窗口 ⇒ 内存 O(n) 而非 O(全量)。
+
+        ⛔ `n <= 0` ⇒ 空列表（与 `deque(maxlen=0)` 一致，绝不退化成
+        "不封顶" —— 见 §18：`limit` 的负数语义必须是"0 条"）。
+        """
+        return list(deque(self.iter_events(), maxlen=max(0, int(n))))
 
     def head_hash(self) -> str:
         return self._last_hash

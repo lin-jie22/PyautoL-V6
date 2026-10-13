@@ -208,7 +208,8 @@ def _memory_file_report(path: Path) -> Tuple[Dict[str, Any], Optional[set]]:
     return out, {str(n.get("note_id") or "") for n in notes}
 
 
-def memory_report(path: Path, ledger_events: Optional[Iterable[Any]] = None
+def memory_report(path: Path, ledger_events: Optional[Iterable[Any]] = None,
+                  ledger_agg: Optional["MemoryLedgerAgg"] = None
                   ) -> Dict[str, Any]:
     """记忆库的**静态**完整性读数（只读，不重建 embedder）。
 
@@ -218,10 +219,19 @@ def memory_report(path: Path, ledger_events: Optional[Iterable[Any]] = None
     账本就等于因果链上有一环没有证据（2026-10-13 实测：账本里 0 条记忆
     事件，而 `data/memory.json` 里躺着 11 条）。
 
+    `ledger_agg` 是**流式**入口：调用方已经在自己的那一次遍历里喂过
+    聚合器了，传进来直接出结果，不再消费第二遍账本（2026-10-13：`cli
+    status` 曾问账本三遍 —— 三条判据来自三个不同时刻的快照）。
+    两个入口走**同一个** `MemoryLedgerAgg` ⇒ 判据只有一份。
+
     ⛔ 只读服务**不得**重新嵌入（要走网络，且会改写库）。判据复用
     `memory.py` 的词表（唯一事实源），不在本文件抄一份。
     """
     out, file_ids = _memory_file_report(path)
+    if ledger_agg is not None:
+        if file_ids is not None:
+            out.update(ledger_agg.result(file_ids))
+        return out
     if ledger_events is None:
         out["ledger_trace"] = "not_checked（未传入账本事件）"
         return out

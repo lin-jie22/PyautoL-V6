@@ -44,42 +44,63 @@ def _paths(root: Path) -> Dict[str, Path]:
 # ──────────────────────────────────────────────────────────────────
 def cmd_status(args: argparse.Namespace) -> int:
     from .ledger import Ledger
+    from .serve import MemoryLedgerAgg, memory_report
     from .store import Store
     p = _paths(Path(args.root))
     led = Ledger(p["ledger"])
-    st = led.stats()
-    print(json.dumps({"ledger": st}, ensure_ascii=False, indent=2))
-    chain_ok = st["chain_ok"]
-    cons_ok = True
-    if p["db"].exists():
-        s = Store(p["db"])
-        print(json.dumps({"store": s.stats()}, ensure_ascii=False, indent=2))
-        #: ⛔ 账本（事实源）与投影（视图）是否对得上 —— 这是**判据**，不是
-        #:    附带信息：对不上 ⇒ 控制台/监督器基于投影的读数都不可信。
-        cons = s.consistency_report(led.events())
-        print(json.dumps({"consistency": cons}, ensure_ascii=False, indent=2))
-        s.close()
-        if not cons["ok"]:
-            print(f"⚠️ 投影与账本不一致（缺 {cons['missing_count']} / "
-                  f"漂移 {cons['drift_count']} / 快照缺 "
-                  f"{len(cons['snapshot_missing'])} / "
-                  f"账本 {cons['ledger_verdicts']} 条 vs 投影 "
-                  f"{cons['projection_runs']} 条）⇒ 基于投影的读数不可信"
-                  f"（修法：python -m aether.cli rebuild）", file=sys.stderr)
-            cons_ok = False
-        if cons["overwrite_count"]:
-            print(f"⚠️ 投影发生过 {cons['overwrite_count']} 次同键覆盖"
-                  f" ⇒ 执行历史被抹掉过", file=sys.stderr)
-            cons_ok = False
-    #: ⛔ 两条判据**分开报**：合成一个 ok 再用链的文案输出，等于把"投影
-    #:    不一致"报成"账本链断裂" —— 那是另一种假仪表（文案与判据不对应）。
-    print("账本链：" + ("✅ 完整" if chain_ok
-                    else f"❌ 断裂 @seq={st['first_bad_seq']} {st['reason']}"))
-    print("投影一致性：" + ("✅ 与账本一致" if cons_ok else "❌ 与账本不一致"))
-    #: 记忆完整性也进 status（与 serve 用**同一个**读数函数，不抄第二份）
-    from .serve import memory_report
-    mr = memory_report(p["memory"], ledger_events=led.events())
-    print(json.dumps({"memory": mr}, ensure_ascii=False, indent=2))
+    s = Store(p["db"]) if p["db"].exists() else None
+
+    #: ⛔⛔ 一次 `status` 只准**遍历账本一遍**。2026-10-13 实测：旧写法问了
+    #:    **3.01 遍**（`stats()` 一遍 + `consistency_report(led.events())`
+    #:    一遍 + `memory_report(ledger_events=led.events())` 一遍）。
+    #:    ⛔ 比浪费更糟的是正确性：三遍读的是三个**不同时刻**的快照 ⇒ 同一
+    #:    份输出里 `chain_ok` / `missing_count` / `untraceable_count` 可能
+    #:    互相矛盾而不自知 —— 与 serve 侧 §16 是同一个洞，只是这边从没人
+    #:    来数过遍数。三条判据必须来自**同一个**快照。
+    #:    ⛔ 三个聚合器与 serve 侧 `_collect` **共用同一份逻辑**，不抄第二套。
+    stat_agg = led.stats_agg()
+    mem_agg = MemoryLedgerAgg()
+    cons_agg = s.consistency_agg() if s is not None else None
+    try:
+        for ev in led.iter_events():
+            stat_agg.feed(ev)
+            mem_agg.feed(ev)
+            if cons_agg is not None:
+                cons_agg.feed(ev)
+        st = stat_agg.result()
+        cons = cons_agg.result() if cons_agg is not None else None
+        print(json.dumps({"ledger": st}, ensure_ascii=False, indent=2))
+        chain_ok = st["chain_ok"]
+        cons_ok = True
+        if s is not None:
+            print(json.dumps({"store": s.stats()}, ensure_ascii=False, indent=2))
+            #: ⛔ 账本（事实源）与投影（视图）是否对得上 —— 这是**判据**，
+            #:    不是附带信息：对不上 ⇒ 控制台/监督器基于投影的读数都不可信。
+            print(json.dumps({"consistency": cons}, ensure_ascii=False, indent=2))
+            if not cons["ok"]:
+                print(f"⚠️ 投影与账本不一致（缺 {cons['missing_count']} / "
+                      f"漂移 {cons['drift_count']} / 快照缺 "
+                      f"{len(cons['snapshot_missing'])} / "
+                      f"账本 {cons['ledger_verdicts']} 条 vs 投影 "
+                      f"{cons['projection_runs']} 条）⇒ 基于投影的读数不可信"
+                      f"（修法：python -m aether.cli rebuild）", file=sys.stderr)
+                cons_ok = False
+            if cons["overwrite_count"]:
+                print(f"⚠️ 投影发生过 {cons['overwrite_count']} 次同键覆盖"
+                      f" ⇒ 执行历史被抹掉过", file=sys.stderr)
+                cons_ok = False
+        #: ⛔ 两条判据**分开报**：合成一个 ok 再用链的文案输出，等于把"投影
+        #:    不一致"报成"账本链断裂" —— 那是另一种假仪表（文案与判据不对应）。
+        print("账本链：" + ("✅ 完整" if chain_ok
+                        else f"❌ 断裂 @seq={st['first_bad_seq']} {st['reason']}"))
+        print("投影一致性：" + ("✅ 与账本一致" if cons_ok else "❌ 与账本不一致"))
+        #: 记忆完整性也进 status（与 serve 用**同一个**读数函数，不抄第二份）
+        mr = memory_report(p["memory"], ledger_agg=mem_agg)
+        print(json.dumps({"memory": mr}, ensure_ascii=False, indent=2))
+    finally:
+        #: ⛔ try/finally：中途抛异常也不能让 SQLite 连接靠 GC 兜底
+        if s is not None:
+            s.close()
     if mr.get("present") and not mr.get("integrity_ok"):
         print(f"⚠️ 记忆库不完整：{ {k: v for k, v in mr.items() if k.startswith(('foreign', 'wrong', 'no_embedding', 'unverified')) } }",
               file=sys.stderr)
@@ -214,7 +235,10 @@ def cmd_rebuild(args: argparse.Namespace) -> int:
         print("✅ 投影与账本一致" if rep["ok"] else "❌ 投影与账本不一致 ⇒ 需重建")
         return 0 if rep["ok"] else 1
 
-    ok, seq, why = led.verify_chain()
+    #: ⛔ 复用上面已读的 `evs`：不传 events 会让 `verify_chain()` 再扫一遍
+    #:    文件 ⇒ 两遍读的是两个不同时刻的快照，"链完整"可能是**上一遍**的
+    #:    结论而这一遍已经断了（与 `cmd_status` 同一个洞，见上面）。
+    ok, seq, why = led.verify_chain(evs)
     if not ok:
         print(f"❌ 账本链已断裂 @seq={seq}: {why} ⇒ 拒绝重建"
               f"（事实源本身不可信，重建只会把错误固化）", file=sys.stderr)

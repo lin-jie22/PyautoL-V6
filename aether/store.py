@@ -183,7 +183,8 @@ class Store:
                               payload=payload))
         return out
 
-    def snapshots(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def snapshots(self, limit: Optional[int] = None,
+                  harness_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """按 `created_at` 升序返回快照。
 
         `limit` 给定时返回**最后** `limit` 条（与 `/api/events` 的尾部语义
@@ -193,15 +194,22 @@ class Store:
 
         ⛔ 一致性判据走 `snapshot_ids()`（全量），**不受**这里截断的影响 ——
         响应截断只影响"给人看的列表"，绝不能影响判据。
+
+        ⛔ `harness_id` 走 **SQL WHERE**，不是"全量拉回来再过滤" —— 后者要
+        把每行 payload 都 `json.loads` 一遍（2026-10-13 实测：`evolution.py`
+        为取**一条**快照而解析了整张表）。只想拿某一条 ⇒ `limit=1`。
         """
+        where = " WHERE harness_id=?" if harness_id else ""
+        args: Tuple[Any, ...] = (harness_id,) if harness_id else ()
         if limit is None:
             rows = self.conn.execute(
-                "SELECT * FROM harness_snapshots ORDER BY created_at"
-            ).fetchall()
+                "SELECT * FROM harness_snapshots" + where
+                + " ORDER BY created_at", args).fetchall()
         else:
             rows = list(reversed(self.conn.execute(
-                "SELECT * FROM harness_snapshots ORDER BY created_at DESC "
-                "LIMIT ?", (max(0, int(limit)),)).fetchall()))
+                "SELECT * FROM harness_snapshots" + where
+                + " ORDER BY created_at DESC LIMIT ?",
+                args + (max(0, int(limit)),)).fetchall()))
         out = []
         for r in rows:
             try:

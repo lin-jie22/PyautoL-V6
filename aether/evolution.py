@@ -369,22 +369,38 @@ class EvolutionLoop:
         失败过、后来成了」的候选也算成死路 ⇒ 永久封死（与难度分层那个
         自指死锁同形态）。
         ⛔ 数据源是**账本**不是内存：换一次运行就忘掉死路 ⇒ 冷却白做。
+
+        ⛔⛔ 2026-10-13：原写法是 `reversed(self.ledger.events())` —— 为了
+        算 **7 个** key 的计数而**物化整份账本**（实测峰值 **6.49 MB**），
+        而这个函数在 `run_round` 里**每轮调一次** ⇒ 每轮峰值与耗时随账本
+        线性增长（自演化跑久了必然变慢）。改：正序一次遍历，流式。
+
+        ⛔⛔ **语义必须逐字对齐旧实现，不许"顺手修"**：旧实现倒序遍历、
+        遇 generalize 就 `out[key]=0` 并 `done.add(key)` —— 由于 `done` 之后
+        不再累加，而 `out[key]=0` 又**覆盖**了此前累加的值，它的真实语义是
+        **二元的**：「这个 key 曾经 generalize 过 ⇒ 0；否则 ⇒ 全部条数」。
+
+        这与上面 docstring 说的"连续"**不是一回事**：序列
+        `[G, 拦, 拦]`（成功过、之后又连续被拦两次）旧实现给 **0**，
+        "连续"语义应给 **2** ⇒ **只要一个候选曾经成功过，它就永远不会进
+        冷却**。这是判据层的 bug，不是性能问题；改它会改变冷却的触发面，
+        必须先做「成败 × 是否命中冷却」交叉表再拍板。
+
+        ⇒ 本次**只换实现、不动语义**，保持二元值；I 组测试用旧实现当
+        oracle 做随机对拍（含 `[G, 拦, 拦]` 这个边界），把当前语义钉死 ——
+        哪天要修成"连续"，那条测试会先红，改的人必须先看交叉表。
         """
-        out: Dict[str, int] = {}
-        done: set = set()
-        for ev in reversed(self.ledger.events()):
+        total: Dict[str, int] = {}
+        ever_gen: set = set()
+        for ev in self.ledger.iter_events():
             if ev.kind != "gen.probe":
                 continue
             p = ev.payload or {}
             key = f"{p.get('capsule', '')}|{p.get('env_pair', 'unknown')}"
-            if key in done:
-                continue
+            total[key] = total.get(key, 0) + 1
             if str(p.get("verdict")) == "generalize":
-                out[key] = 0
-                done.add(key)
-            else:
-                out[key] = out.get(key, 0) + 1
-        return out
+                ever_gen.add(key)
+        return {k: (0 if k in ever_gen else total[k]) for k in total}
 
     def _in_cooldown(self, cap_name: str, env_pair: str,
                      deadend: Dict[str, int], round_no: int
@@ -777,8 +793,10 @@ class EvolutionLoop:
                 except Exception:  # noqa: BLE001 —— 回调失败不得中断进化
                     pass
             if rep.committed and self.store is not None:
-                snap = [s for s in self.store.snapshots()
-                        if s["harness_id"] == rep.committed]
+                #: ⛔ 走 SQL WHERE，**不要** "全量拉回再过滤" —— 后者为取
+                #:    一条快照而把整张表的 payload 全 `json.loads` 一遍
+                #:    （每轮提交都来一次 ⇒ 轮数越多越慢）。
+                snap = self.store.snapshots(harness_id=rep.committed, limit=1)
                 if snap:
                     from .genome import Harness as _H
                     cur = _H.from_dict(snap[-1]["payload"])
