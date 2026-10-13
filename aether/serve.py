@@ -196,15 +196,18 @@ def _collect(root: Path, limit: int = 200) -> Dict[str, Any]:
     from .store import Store
 
     led = Ledger(root / "data" / "ledger.jsonl")
-    st = led.stats()
 
-    #: ⛔ **只读一次全量事件**：同一份快照喂给 events / consistency /
-    #:    memory_report。读三次 ⇒ 三次之间账本可能被追加 ⇒ 对账结果
-    #:    在同一份响应里自相矛盾（也会把 JSONL 解析三遍）。
-    #:    ⛔ 如实：`consistency_report` 与 `memory_report` 都要过全量，
-    #:    所以这里的内存仍是 O(n) —— 修掉的是"3n 且彼此可能不一致"，
-    #:    不是"线性增长"。真要消除上限得让那两个函数支持流式聚合。
+    #: ⛔ **整份响应只准解析账本一次**。这次调用之前这里问了三遍：
+    #:    `stats()` 一次、它内部的 `verify_chain()` 一次、`_collect` 自己
+    #:    一次（2026-10-13 实测 1465 事件 → 0.095s 里有两份是重复的）。
+    #:    ⛔ 比浪费更糟的是**正确性**：三遍读的是三个不同时刻的快照 ⇒
+    #:    同一份响应里 `ledger.count` / `chain_ok` / `consistency` 可能来自
+    #:    不同长度的账本，互相矛盾而不自知。
     all_events = led.events()
+    st = led.stats(events=all_events)
+    #: ⛔ 如实：内存**仍是 O(n)** —— `consistency_report` 与 `memory_report`
+    #:    都要遍历全量事件。这次消掉的是"重复读三遍"，不是"线性增长"；
+    #:    要真正消除后者得让那两个函数支持流式聚合，那是另一件事。
 
     #: ⛔ 尾部截断在**这里**做且只保留 limit 条：响应体不自随账本变长。
     #:    （`list(iter)[-limit:]` 会多留一份全量副本。）

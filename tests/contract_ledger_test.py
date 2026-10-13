@@ -220,6 +220,175 @@ def main():
        json.dumps({k: c5[k] for k in ("snapshot_missing", "ok")}))
     st3.close()
 
+    print("\nG 组 · 冷启动只读尾部（tail hydrate）必须与全扫**完全等价**")
+    print("  ⛔ append-only + 写入串行 ⇒ 最新事件必在末尾；为了 seq/hash 两个")
+    print("     字段全扫一遍，会让每个 /api/status 白付一整遍 O(n)")
+
+    import os
+
+    #: ⛔ 防御式取值：对着"还没加尾读"的旧版跑时要报**干净的红灯**，
+    #:    不能崩在 import 上（崩了就看不到到底哪几条是恒真的）。
+    import aether.ledger as _LGM
+    HYDRATE_TAIL_BYTES = getattr(_LGM, "HYDRATE_TAIL_BYTES", 0)
+    _has_tail = hasattr(_LGM.Ledger, "_read_tail_event")
+
+    def _tail_and_full(p):
+        """同一份文件的两种 hydrate 结果。
+
+        ⛔ 基准用 getattr 兼容两个版本：旧版没有 `_hydrate_full`（那时全扫
+        逻辑就叫 `_hydrate`）。这样对着旧版跑会报**干净的红灯**而不是崩在
+        AttributeError 上 —— 崩了就看不见哪几条其实是恒真的。
+        """
+        a = Ledger(p)
+        tail = (a._seq, a._last_hash)      # 被测路径：可能走尾读
+        scan = getattr(a, "_hydrate_full", None) or a._hydrate
+        scan()                             # 基准：全扫
+        return tail, (a._seq, a._last_hash)
+
+    prod = ROOT / "data" / "ledger.jsonl"
+
+    #: ⛔⛔ G0 是本组**唯一在旧版会转红**的断言，必须放在最前面。
+    #:     实测：把 ledger.py 退回 HEAD 跑一遍，G1–G5 **全都绿**（那时两条
+    #:     路径都是全扫，自然相等）⇒ 它们是"等价性护栏"，不是"尾读已生效"
+    #:     的证据。真正证明尾读存在的是 G0 + H1。
+    ck("G0 账本确实走了尾读路径（存在 `_read_tail_event`）"
+       " —— 2026-10-13 实测：这是 G 组唯一能证伪的断言",
+       _has_tail, "缺少 _read_tail_event ⇒ 冷启动回到全扫")
+
+    # G1 生产账本（1465 条）—— 真实数据上的等价性
+    if prod.exists():
+        t, f = _tail_and_full(prod)
+        ck("G1 生产账本：尾读 = 全扫", t == f, f"tail={t} full={f}")
+    else:
+        print("  （跳过 G1：data/ledger.jsonl 不存在）")
+
+    # G2 空文件 / 不存在
+    (tmp / "empty.jsonl").write_text("", encoding="utf-8")
+    t, f = _tail_and_full(tmp / "empty.jsonl")
+    ck("G2a 空文件：尾读 = 全扫", t == f, f"tail={t} full={f}")
+    t, f = _tail_and_full(tmp / "nope.jsonl")
+    ck("G2b 文件不存在：尾读 = 全扫", t == f, f"tail={t} full={f}")
+
+    # G3 末尾坏行（崩出来的半截写入）⇒ 必须回退到上一条好事件
+    lg = Ledger(tmp / "badtail.jsonl")
+    for i in range(5):
+        lg.append("c.d", {"i": i})
+    good = (lg._seq, lg._last_hash)
+    with (tmp / "badtail.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write('{"seq": 999, "ts": 1.0, "kind": "x"   ← 半截损坏\n\n')
+    lg2 = Ledger(tmp / "badtail.jsonl")
+    ck("G3 末尾坏行 ⇒ 回退到上一条好事件（不许造出 seq=999）",
+       (lg2._seq, lg2._last_hash) == good,
+       f"got=({lg2._seq}, {lg2._last_hash[:8]}) want=({good[0]}, {good[1][:8]})")
+
+    # G4 整个尾缓冲全是坏行 ⇒ 必须退回全扫，不许把缺失假装成 genesis
+    lh = Ledger(tmp / "allbad.jsonl")
+    for i in range(3):
+        lh.append("e.f", {"i": i})
+    want3 = (lh._seq, lh._last_hash)
+    with (tmp / "allbad.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write("X" * (HYDRATE_TAIL_BYTES + 100) + "\n")
+    lh2 = Ledger(tmp / "allbad.jsonl")
+    ck("G4 尾缓冲全坏 ⇒ 退回全扫且不伪报",
+       (lh2._seq, lh2._last_hash) == want3,
+       f"got=({lh2._seq}, {lh2._last_hash[:8]}) want=({want3[0]}, {want3[1][:8]})")
+
+    # G5 超长单行之后：允许退化全扫，但结果必须正确
+    li = Ledger(tmp / "hugeline.jsonl")
+    li.append("g.h", {"blob": "y" * (HYDRATE_TAIL_BYTES * 2)})
+    li.append("g.h", {"after": 1})
+    want4 = (li._seq, li._last_hash)
+    li2 = Ledger(tmp / "hugeline.jsonl")
+    ck("G5 超长行（>尾缓冲）之后仍拿到正确 head",
+       (li2._seq, li2._last_hash) == want4,
+       f"got=({li2._seq}, {li2._last_hash[:8]}) want=({want4[0]}, {want4[1][:8]})")
+
+    #: ⛔ 反证要能真正证伪：模拟一个"取了第一条而不是最后一条"的实现 bug。
+    #:   （早先我写成"强制 `_read_tail_event` 返回 None ⇒ 走全扫退路"，那是
+    #:    恒真的 —— 它去调的就是全扫，结果当然相同。改成错过最后一条。）
+    _read_tail = Ledger._read_tail_event
+
+    def _wrong_tail(self):
+        if not self.path.exists():
+            return None
+        with self.path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    return Event.from_dict(__import__("json").loads(line))
+                except Exception:  # noqa: BLE001
+                    continue
+        return None
+
+    for _tag, _p in (("生产账本", prod), ("多行账本", tmp / "badtail.jsonl")):
+        if not _p.exists():
+            continue
+        Ledger._read_tail_event = _wrong_tail
+        try:
+            tw, fw = _tail_and_full(_p)
+            ck(f"G6 反证（{_tag}）：尾读取错成第一条 ⇒ 等价性必须破"
+               "（否则 G1–G5 是恒真断言）",
+               tw != fw, f"事故版 tail={tw} full={fw}")
+        finally:
+            Ledger._read_tail_event = _read_tail
+
+    t3, f3 = _tail_and_full(prod)
+    ck("G7 反证已还原 ⇒ 恢复等价", t3 == f3, f"tail={t3} full={f3}")
+
+    print("\nH 组 · 一次只读请求不许把账本解析多遍")
+
+    #: ⛔ 用"全量行数 / json.loads 次数"来量，而不是靠时间（本机 load 常在
+    #:    10 以上，单次 wall time 抖动 0.37s~2.57s，不可作为判据）
+    try:
+        import json as _json
+        import aether.ledger as _LG
+        from aether.serve import _collect
+
+        n_lines = sum(1 for _ in _LG.Ledger(prod).iter_lines())
+        real = _json.loads
+        cnt = {"n": 0}
+        _LG.json.loads = (lambda s, *a, **k:
+                          (cnt.__setitem__("n", cnt["n"] + 1),
+                           real(s, *a, **k))[1])
+        try:
+            cnt["n"] = 0
+            _collect(ROOT, limit=200)
+            got = cnt["n"]
+        finally:
+            _LG.json.loads = real
+        passes = got / max(1, n_lines)
+        ck(f"H1 一次 _collect 的 JSON 解析量 < 2 遍全量"
+           f"（共 {got} 次 / {n_lines} 行 = {passes:.2f} 遍）",
+           passes < 2.0, f"{passes:.2f} 遍")
+        #: 反证：恢复旧写法（stats 不带 events）⇒ 遍数必须**上升**
+        from aether.serve import _collect as _orig_collect
+        old_stats = _LG.Ledger.stats
+
+        def _old_stats(self, events=None):
+            return old_stats(self)          # 忽略已给的 events，强制重读
+        _LG.Ledger.stats = _old_stats
+        try:
+            real2 = _json.loads
+            cnt2 = {"n": 0}
+            _LG.json.loads = (lambda s, *a, **k:
+                              (cnt2.__setitem__("n", cnt2["n"] + 1),
+                               real2(s, *a, **k))[1])
+            try:
+                _collect(ROOT, limit=200)
+                got2 = cnt2["n"]
+            finally:
+                _LG.json.loads = real2
+        finally:
+            _LG.Ledger.stats = old_stats
+        ck("H2 反证：还原旧写法（stats 忽略传入的 events）⇒ 解析量上升"
+           "（否则 H1 是恒真断言）",
+           got2 > got, f"旧={got2} 新={got}")
+    except Exception as e:  # noqa: BLE001
+        ck("H 组可执行（data/ledger.jsonl 可读且 _collect 能跑）",
+           False, f"{type(e).__name__}: {e}")
+
     print("\n" + "=" * 60)
     if FAILS:
         print(f"❌ {len(FAILS)} 项未通过：")

@@ -38,6 +38,12 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
+#: 冷启动只读尾部多少字节来找"最后一条事件"。
+#: ⛔ 必须 ≥ 单条事件的最大行长，否则缓冲区里可能一个完整行都没有 ⇒
+#:    退回全扫（慢但不出错）。64 KB 对 payload 里带源码片段的事件够了；
+#:    真正超长时也不会算错，只是退化到全扫。
+HYDRATE_TAIL_BYTES = 64 * 1024
+
 LEDGER_VERSION = 1
 
 
@@ -144,7 +150,59 @@ class Ledger:
 
     # ── 内部 ──────────────────────────────────────────────────────
     def _hydrate(self) -> None:
-        """冷启动：扫一遍拿到最新 seq 与 hash。空文件不算错。"""
+        """冷启动：拿到最新 seq 与 hash。空文件不算错。
+
+        ⛔⛔ 只读**尾部**，不全扫。账本 append-only 且写入在独占锁内串行
+        ⇒ 最新事件必然在文件末尾；为了两个字段去全量解析一遍，在
+        `/api/status` 上就是每个请求多付一遍 O(n)（2026-10-13 实测：
+        一次请求要解析全量 **4.7 遍**，`_hydrate` 是其中一整遍）。
+
+        ⛔ 与全扫**等价**的边界（靠 covered by 测试，不靠信心）：
+        · 末尾有坏行（崩出来的半截写入）⇒ 回退到上一个可解析的事件，
+          与全扫的 `except: continue` 同果；
+        · 缓冲区里一个可解析的都没有 ⇒ **退回全扫**，绝不返回"看起来正常
+          的旧 hash"（那是把缺失伪装成存在）；
+        · 跨边界截断：偏移非 0 时丢掉第一段（它可能是半截行）。
+        """
+        last = self._read_tail_event()
+        if last is not None:
+            self._seq = last.seq
+            self._last_hash = last.hash
+        elif self.path.exists() and self.path.stat().st_size > 0:
+            #: 尾部一个可解析的都没有（整个缓冲区全是坏行）⇒ 退全扫。
+            #: 绝不落到"什么都不设" —— 那会把缺失伪装成 genesis。
+            self._hydrate_full()
+
+    def _read_tail_event(self) -> Optional[Event]:
+        """读**最后一条**可解析事件。读不到 ⇒ None（调用方退回全扫）。"""
+        if not self.path.exists():
+            return None
+        size = self.path.stat().st_size
+        if size == 0:
+            return None
+        offset = max(0, size - HYDRATE_TAIL_BYTES)
+        with self.path.open("rb") as f:
+            f.seek(offset)
+            chunk = f.read(HYDRATE_TAIL_BYTES + (1 if offset else 0))
+        try:
+            text = chunk.decode("utf-8")
+        except UnicodeDecodeError:      # 尾巴正好切断多字节字符
+            text = chunk.decode("utf-8", errors="ignore")
+        lines = text.splitlines()
+        if offset:
+            lines = lines[1:]           # 第一段可能是半截行
+        for line in reversed(lines):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                return Event.from_dict(json.loads(line))  # type: ignore[return-value]
+            except Exception:  # noqa: BLE001 —— 坏行就往回退
+                continue
+        return None
+
+    def _hydrate_full(self) -> None:
+        """全扫版（保底路径）。语义与改造前的 `_hydrate` 逐字相同。"""
         if not self.path.exists():
             return
         last = None
@@ -242,15 +300,23 @@ class Ledger:
         return self._seq
 
     # ── 校验 ──────────────────────────────────────────────────────
-    def verify_chain(self) -> Tuple[bool, Optional[int], str]:
+    def verify_chain(self, events: Optional[List[Event]] = None
+                     ) -> Tuple[bool, Optional[int], str]:
         """校验整条哈希链。
 
         返回 (ok, first_bad_seq, reason)。
         ⛔ 这是**判据**，不是日志：任何消费者（含 TS 监督器）都应该在
         启动与每次快照时跑它，断了就告警而不是继续读。
+
+        ⛔ `events` 用来复用**已经读过**的事件（不传则自行读一遍）。
+        2026-10-13 实测：一次 `/api/status` 会走到 **3 遍全量 JSONL 解析**
+        （`stats()` 一次 + `stats()` 里的 `verify_chain()` 一次 +
+        `_collect` 自己一次）。这不只是浪费 —— 三遍读的是三个不同时刻的
+        快照，**同一份响应里三个读数可能互相矛盾**。读完一次喂给所有消费
+        者，既省两遍，也消除了这个窗口。
         """
         prev = self.GENESIS_HASH
-        for ev in self.events():
+        for ev in (self.events() if events is None else events):
             if ev.prev_hash != prev:
                 return False, ev.seq, f"prev_hash 不连续（期望 {prev[:12]}… 实得 {ev.prev_hash[:12]}…）"
             want = content_hash(ev.identity())
@@ -266,12 +332,19 @@ class Ledger:
         return [e for e in self.events()
                 if e.seq >= since_seq and (ks is None or e.kind in ks)]
 
-    def stats(self) -> Dict[str, Any]:
-        evs = self.events()
+    def stats(self, events: Optional[List[Event]] = None
+              ) -> Dict[str, Any]:
+        """账本概览 + **当场**的链校验结果。
+
+        `events` 语义同 `verify_chain()`：传进来已读好的事件 ⇒ 不再重读
+        文件。⛔ 不传时的默认行为与改动前**完全相同**，改动只发生在
+        "调用方手头已经有一份快照"这条路上。
+        """
+        evs = self.events() if events is None else events
         by_kind: Dict[str, int] = {}
         for e in evs:
             by_kind[e.kind] = by_kind.get(e.kind, 0) + 1
-        ok, bad, reason = self.verify_chain()
+        ok, bad, reason = self.verify_chain(evs)
         return {
             "path": str(self.path),
             "count": len(evs),
