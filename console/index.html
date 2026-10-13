@@ -156,6 +156,18 @@ async function load() {
       `${cons.ledger_verdicts ?? "?"} / ${cons.projection_runs ?? st.n_runs ?? 0}`],
     ["投影一致性", cons.ok === undefined ? "—" : (cons.ok ? "✅ 一致" : "❌ 不一致")],
     ["同键覆盖次数", cons.overwrite_count ?? 0],
+    // ⛔ 提前终止必须看得见：否则"只跑了 3 轮"会被当成崩了，而它其实是
+    //    "连续无事可做 ⇒ 正常收敛"（实测 10 轮里后 9 轮是同一轮重复）。
+    ["演化状态", (() => {
+      const stop = [...evs].reverse().find((e) => e.kind === "evolution.stopped");
+      if (stop) {
+        const p = stop.payload ?? {};
+        return `⏹ 已停 @r${p.round_no ?? "?"}/${p.rounds_requested ?? "?"} · `
+          + `${String(p.reason ?? "").split("（")[0] || "无事可做"}`;
+      }
+      const cm = [...evs].reverse().find((e) => e.kind === "harness.commit");
+      return cm ? "▶ 运行中" : "—";
+    })()],
     // ⛔ 记忆也是因果链的一环（跨运行继承、直接喂给提议器）：库里有几条、
     //    其中几条在账本里查得到写入记录，必须并排显示 —— 只显示"有 11 条"
     //    会把"这 11 条是谁写的、完全没有证据"藏起来（2026-10-13 实测）。

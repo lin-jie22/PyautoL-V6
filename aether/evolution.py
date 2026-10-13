@@ -156,6 +156,12 @@ class RoundReport:
     generalization: Optional[Dict[str, Any]] = None
     #: 提交后的**反事实层归因**（None = 没提交 / 未启用）
     layer_credit: Optional[Dict[str, Any]] = None
+    #: 本轮是否判定为「发展集已到顶」（best 为空的唯一可接受解释之一）
+    saturated: bool = False
+    #: 本轮是否"无事可做"（无失败证据 / 到顶）。连续发生 ⇒ 停止循环。
+    idle: bool = False
+    #: 饱和读数：dev 通过数 / 总数，以及 held-out 基线分（None = 未测）
+    saturation: Optional[Dict[str, Any]] = None
 
     @property
     def improved(self) -> bool:
@@ -169,7 +175,9 @@ class RoundReport:
                 "committed": self.committed, "revert_reason": self.revert_reason,
                 "ledger_seqs": self.ledger_seqs,
                 "generalization": self.generalization,
-                "layer_credit": self.layer_credit}
+                "layer_credit": self.layer_credit,
+                "saturated": self.saturated, "saturation": self.saturation,
+                "idle": self.idle}
 
 
 @dataclass
@@ -185,6 +193,18 @@ class EvolutionConfig:
     attribute_layers: bool = True
     #: 归因只用前 N 个发展任务（消融要跑 5 层 × N 次，成本要可控）
     attribution_tasks: int = 3
+    #: 死路冷却：同一 (候选, 环境对) **连续**被泛化闸拦下这么多次后，
+    #: 本轮不再为它花探测预算（实测：某候选 15 次探测 / 15 次 overfit /
+    #: 0 次通过，占掉 55% 预算）。⛔ 不是永久封死 —— 见下。
+    deadend_streak: int = 3
+    #: 出口：冷却后每逢这个轮次**允许试探一次**（否则环境换了、能力涨了
+    #: 也永远不再试 ⇒ 与「难度分层自指死锁」同形态的永久封死）。
+    deadend_probation_every: int = 5
+    #: 无事可做即停（到顶 / 无失败证据 ⇒ 后续轮次是空转，不是尝试）
+    stop_on_saturation: bool = True
+    #: 连续这么多轮"无事可做"就停。⛔ 用**连续**而不是累计：偶尔一轮
+    #: 没事做（比如刚提交完、新 harness 还没暴露失败）是正常的。
+    stop_after_idle_rounds: int = 2
 
 
 class EvolutionLoop:
@@ -319,6 +339,135 @@ class EvolutionLoop:
         return {lv: cand.get(lv, 0.0) - base.get(lv, 0.0)
                 for lv in set(base) | set(cand)}
 
+    @staticmethod
+    def _runs_from_verdicts(vs: List[Verdict], h: Harness) -> List[RunRow]:
+        """把本轮发展集判定包装成 RunRow，供 `mine_weaknesses` 使用。
+
+        ⛔ 为什么不再翻 store：见 `run_round` 第 2 步的说明。这里 Only 用
+        本轮判定 ⇒ "弱点"不可能来自上一次运行。
+        """
+        from .store import RunRow
+        out: List[RunRow] = []
+        for i, v in enumerate(vs):
+            topic = str(v.evidence.get("topic") or
+                        v.evidence.get("env") or "")
+            out.append(RunRow(
+                run_id=f"probe:{h.harness_id}:{i}",
+                harness_id=h.harness_id,
+                task_id=str(v.evidence.get("task_id") or topic or f"t{i}"),
+                reward=(1.0 if v.passed else 0.0), passed=bool(v.passed),
+                gate_ok=True,
+                payload={"error": v.error or "", "topic": topic,
+                         "evidence": v.evidence}))
+        return out
+
+    # ── 死路账：同一候选在同一环境对上被拦了多少次 ──────────────────
+    def _deadend_map(self) -> Dict[str, int]:
+        """从账本统计每个 (候选, 环境对) 的**连续**被拦次数。
+
+        ⛔ 连续（遇到一次 `generalize` 就归零）而不是累计：累计会把「早期
+        失败过、后来成了」的候选也算成死路 ⇒ 永久封死（与难度分层那个
+        自指死锁同形态）。
+        ⛔ 数据源是**账本**不是内存：换一次运行就忘掉死路 ⇒ 冷却白做。
+        """
+        out: Dict[str, int] = {}
+        done: set = set()
+        for ev in reversed(self.ledger.events()):
+            if ev.kind != "gen.probe":
+                continue
+            p = ev.payload or {}
+            key = f"{p.get('capsule', '')}|{p.get('env_pair', 'unknown')}"
+            if key in done:
+                continue
+            if str(p.get("verdict")) == "generalize":
+                out[key] = 0
+                done.add(key)
+            else:
+                out[key] = out.get(key, 0) + 1
+        return out
+
+    def _in_cooldown(self, cap_name: str, env_pair: str,
+                     deadend: Dict[str, int], round_no: int
+                     ) -> Tuple[bool, int]:
+        """(是否冷却, 连续被拦次数)。"""
+        key = f"{cap_name}|{env_pair}"
+        streak = deadend.get(key, 0)
+        if streak < self.cfg.deadend_streak:
+            return False, streak
+        #: 出口：冷却不是永久封死 —— 每逢 probation 轮允许试探一次。
+        if (self.cfg.deadend_probation_every > 0
+                and round_no % self.cfg.deadend_probation_every == 0):
+            return False, streak
+        return True, streak
+
+    def _saturation(self, base_vs: List[Verdict], scored: List[Candidate],
+                    overfit_reason: str, h: Harness,
+                    base_reward_of: Optional[float] = None
+                    ) -> Optional[Dict[str, Any]]:
+        """判定「发展集已到顶」（None = 不是饱和，是其它失败）。
+
+        判据（三条同时成立）：
+          ① 所有过了闸的候选 advantage 都不为正（没人能超过基线）；
+          ② 基线 reward **不低于**任何候选（不是"分数高"，是"没人赢"）；
+          ③ 不是被泛化闸拦下的（那是失败，值得重试，不是到顶）。
+
+        ⛔ 不要求"发展集全绿"：全绿时弱点挖掘根本不会产出弱点，轮次在
+        更早的 `no_weakness_evidence` 就结束了 ⇒ 要求全绿会让这条判定
+        永远不可达（第一版就是这么写的，测试直接把它证伪了）。
+        真正要抓的是**停滞**：有弱点、有候选、但没人能超过基线。
+
+        ⛔ 为什么要在饱和时跑一次 held-out：只剩"没提升"这一个模糊结论时，
+           dev 全绿而 held-out 不绿是**真信号**（任务分布不够 / 已过拟合），
+           必须能读出来。此时 `best` 已经是 None ⇒ 没有候选在拿 held-out
+           互相比较 ⇒ 不存在"拿考试题选答案"的污染。
+        ⛔ 但它记的是 `saturation.probe` 而不是 `gen.probe`：后者是监督器
+           规则读的判定流，混进去会污染"泛化闸被绕过"等判据的样本。
+        """
+        if overfit_reason or not base_vs or not scored:
+            return None
+        n_passed = sum(1 for v in base_vs if v.passed)
+        if any(c.advantage > self.cfg.min_advantage for c in scored):
+            return None
+        if base_reward_of is None or any(c.reward > base_reward_of
+                                         for c in scored):
+            return None
+
+        ho_score: Optional[float] = None
+        ho_passed: Optional[int] = None
+        if self.heldout is not None:
+            try:
+                sc, vs = self.heldout.evaluate(h, self.runner)
+                ho_score = round(float(sc), 4)
+                ho_passed = sum(1 for v in vs if v.passed)
+                self.ledger.append(
+                    "saturation.probe",
+                    {"harness_id": h.harness_id, "heldout_score": ho_score,
+                     "heldout_passed": ho_passed, "heldout_total": len(vs),
+                     "note": "只读读数（best 已为空 ⇒ 不参与任何选择）"},
+                    actor="gate")
+            except Exception as e:  # noqa: BLE001 —— 读数失败不许影响判定
+                self.ledger.append(
+                    "saturation.probe",
+                    {"harness_id": h.harness_id,
+                     "error": f"{type(e).__name__}: {e}"}, actor="gate")
+
+        clean = (n_passed == len(base_vs))
+        head = ("saturated:dev_clean" if clean else "saturated:stagnated")
+        if ho_score is None:
+            reason = (f"{head}（发展集 {n_passed}/{len(base_vs)} 通过，"
+                      f"无候选能超过基线 ⇒ 再跑也是空转；held-out 未配置）")
+        elif ho_passed is not None and ho_passed < (
+                self.heldout.suite.n_tasks if self.heldout else 0):
+            reason = (f"{head}（发展集 {n_passed}/{len(base_vs)} 通过、"
+                      f"无候选能超过它，但 held-out 只过 {ho_passed} ⇒ "
+                      f"任务分布或合成器不够，不是能力到顶）")
+        else:
+            reason = (f"{head}（发展集 {n_passed}/{len(base_vs)} 通过、"
+                      f"无候选能超过它；held-out {ho_score}）")
+        return {"dev_passed": n_passed, "dev_total": len(base_vs),
+                "heldout_score": ho_score, "heldout_passed": ho_passed,
+                "reason": reason}
+
     def _pick_attribution_specs(self, h: Harness) -> List[Dict[str, Any]]:
         """挑"这次提升**真的发生了**"的任务来做归因。
 
@@ -363,16 +512,26 @@ class EvolutionLoop:
         rep.baseline_reward = base_reward
         base_by_level = self.reward_by_difficulty(base_vs)
 
-        # 2) MINE —— 弱点必须由**当前 harness 的**失败证据支撑。
-        #    ⛔ 按 harness_id 过滤：拿旧 harness 的失败当证据 ⇒ 修好后
-        #    还会反复"挖到"同一个弱点，循环永远停不下来。
-        if self.store is not None:
-            runs = self.store.runs(harness_id=h.harness_id, limit=200)
-        else:
-            runs = [r for r in self._runs if r.harness_id == h.harness_id]
+        # 2) MINE —— 弱点必须由**这一轮、这个 harness 的**失败证据支撑。
+        #
+        #    ⛔ 2026-10-13 实测（10 轮压力跑）：原先从 store 按 harness_id
+        #    取历史 run。harness_id 由内容决定 ⇒ 新一次运行的 seed harness
+        #    与上次**同 id**，于是上次运行遗留的失败 run 被当成"当前弱点"
+        #    ⇒ r2–r10 每轮挖出同一个过期弱点、提同一个候选、拿到同一个
+        #    advantage=0.000，空转 9 轮。与监督器那个误报同形态：**缺会话
+        #    归属**。而投影里的 run 恰恰没有 sid（RunRow 无此字段）⇒
+        #    按 sid 过滤在当前 schema 下做不到。
+        #
+        #    ⇒ 直接拿本轮 base 评估的判定当证据：它们天然属于"这一轮 +
+        #      这个 harness + 当前这套发展集"，串味在结构上不可能发生。
+        #      （历史 run 仍然写进 store，供投影/归因/审计使用。）
+        runs = self._runs_from_verdicts(base_vs, h)
         weaknesses = mine_weaknesses(runs)
         if not weaknesses:
             rep.revert_reason = "no_weakness_evidence（无失败证据 ⇒ 不提议）"
+            #: 与"到顶"同族：这一轮**无事可做**。连续发生 ⇒ 停止循环
+            #: （实测：10 轮压力跑里 r2–r10 全是这个，空转 9 轮）。
+            rep.idle = True
             rep.ledger_seqs.append(self.ledger.append(
                 "evolve.noop", {"round_no": round_no, "harness_id": h.harness_id,
                                 "reason": rep.revert_reason},
@@ -386,8 +545,29 @@ class EvolutionLoop:
 
         # 3) PROPOSE + 构造候选
         capsules = self.proposer.propose(w.to_dict(), h, n=self.cfg.group_size)
+        #: 死路账：**从账本读**（事实源），不是进程内状态 —— 否则换一次
+        #:    运行就"忘了"这条死路，冷却形同虚设。
+        deadend = self._deadend_map()
+        env_pair = self.heldout.env_pair if self.heldout is not None else "unknown"
         cands: List[Candidate] = []
         for cap in capsules:
+            #: 死路冷却：已知在这套环境对上会被拦的候选，不再为它花预算。
+            #: ⛔ 冷却只跳过**探测**，不许静默 —— 每条都进账本。
+            cooling, streak = self._in_cooldown(cap.name, env_pair, deadend,
+                                                round_no)
+            if cooling:
+                cands.append(Candidate(
+                    capsule_name=cap.name, harness_id="",
+                    reason=f"deadend_cooldown(连续 {streak} 次被拦 "
+                           f"@ {env_pair})"))
+                self.ledger.append(
+                    "deadend.cooldown",
+                    {"round_no": round_no, "capsule": cap.name,
+                     "env_pair": env_pair, "streak": streak,
+                     "note": "已知死路 ⇒ 本轮不花探测预算（每 "
+                             f"{self.cfg.deadend_probation_every} 轮试探一次）"},
+                    actor="evolution")
+                continue
             try:
                 cand_h = apply_capsule(h, cap)
             except Exception as e:  # noqa: BLE001
@@ -478,6 +658,9 @@ class EvolutionLoop:
             rep.ledger_seqs.append(self.ledger.append(
                 "gen.probe", {"round_no": round_no, "capsule": best.capsule_name,
                               "harness_id": best.harness_id,
+                              #: ⛔ 环境对是死路冷却的维度：缺了它，冷却只能
+                              #:    按候选全局生效 ⇒ 换环境后被误伤。
+                              "env_pair": env_pair,
                               **pr.to_dict()}, actor="gate").seq)
             if pr.blocks:
                 overfit_reason = pr.reason
@@ -500,9 +683,26 @@ class EvolutionLoop:
 
         # 8) 提交 / 回滚 —— 两种结果都进账本
         if best is None:
-            rep.revert_reason = (
-                f"generalization_gate（{overfit_reason}）" if overfit_reason
-                else "no_candidate_passed（闸/地板/增殖 至少一项未过）")
+            #: ⛔ 「没提交」有两种截然不同的含义，不能合并成一句
+            #:    `no_candidate_passed`：被闸拦下（失败，值得重试）与发展集
+            #:    已到顶（正常终止，再跑也是空转）。混在一起 ⇒ 10 轮压力跑
+            #:    里 r2–r10 全部长成同一个样子，看不出系统其实早就没有
+            #:    可提升空间了（实测：base 恒 1.0 / advantage 恒 0.000）。
+            sat = self._saturation(base_vs, scored, overfit_reason, h,
+                                   base_reward)
+            if sat is not None:
+                rep.saturated = True
+                rep.idle = True
+                rep.saturation = sat
+                rep.revert_reason = sat["reason"]
+                self.ledger.append("evolution.saturated",
+                                   {"round_no": round_no,
+                                    "harness_id": h.harness_id, **sat},
+                                   actor="evolution")
+            else:
+                rep.revert_reason = (
+                    f"generalization_gate（{overfit_reason}）" if overfit_reason
+                    else "no_candidate_passed（闸/地板/增殖 至少一项未过）")
             rep.ledger_seqs.append(self.ledger.append(
                 "harness.revert", {"round_no": round_no, "harness_id": h.harness_id,
                                    "reason": rep.revert_reason,
@@ -567,6 +767,7 @@ class EvolutionLoop:
         """
         reports: List[RoundReport] = []
         cur = h
+        idle_streak = 0
         for i in range(rounds):
             rep = self.run_round(cur, round_no=i + 1)
             reports.append(rep)
@@ -581,4 +782,18 @@ class EvolutionLoop:
                 if snap:
                     from .genome import Harness as _H
                     cur = _H.from_dict(snap[-1]["payload"])
+            #: ⛔ 无事可做就停：不是失败，是"再跑也是空转"。实测 10 轮里
+            #:    r2–r10 全在重复同一轮（base 恒 1.0 / advantage 恒 0），
+            #:    继续跑只会把"空转"记成"努力过但没成功"。
+            #:    ⛔ 必须留事件 —— 否则"为什么只跑了 3 轮"无从解释。
+            idle_streak = idle_streak + 1 if rep.idle else 0
+            if (self.cfg.stop_on_saturation and rep.idle
+                    and idle_streak >= self.cfg.stop_after_idle_rounds):
+                self.ledger.append(
+                    "evolution.stopped",
+                    {"round_no": rep.round_no, "rounds_requested": rounds,
+                     "idle_streak": idle_streak, "reason": rep.revert_reason,
+                     "note": "连续无事可做 ⇒ 提前终止（不是失败）"},
+                    actor="evolution")
+                break
         return cur, reports

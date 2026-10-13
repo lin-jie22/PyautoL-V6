@@ -141,6 +141,23 @@ class GeneralizationGate:
         #: held-out 的满分线（reward 上界）。None ⇒ 不做天花板判定。
         self.base_at_ceiling = base_at_ceiling
 
+    @property
+    def env_pair(self) -> str:
+        """「哪套发展集 → 哪套 held-out」的稳定标识。
+
+        ⛔ 存在理由：死路冷却必须能区分「这个候选在这套环境对上是死路」与
+        「换了一套环境，它也许能过」。没有这个字段，冷却只能按 capsule 全局
+        生效 ⇒ 换环境后被永久误伤（实测 `gen.probe` 事件里它一直是 None）。
+        ⛔ 取不到就如实返回 `unknown`，**不许**编一个看似正常的值 ——
+        冷却对 unknown 会退化成全局维度，并在事件里标注（不静默）。
+        """
+        ho = str(getattr(self.suite, "env_id", "") or "")
+        devs = sorted({str(t).split("::", 1)[0]
+                       for t in self.dev_task_ids if "::" in str(t)})
+        if not devs or not ho:
+            return "unknown"
+        return f"{'|'.join(devs)}->{ho}"
+
     # ── 评估 held-out（**不得**用于候选之间比较）─────────────────────
     def evaluate(self, h: Harness, runner: Runner) -> Tuple[float, List[Verdict]]:
         """在 held-out 上跑一遍，返回 (平均 reward, 判定列表)。"""

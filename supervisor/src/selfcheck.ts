@@ -13,7 +13,8 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readLedger, verifyChain, canonicalJson, contentHash } from "./ledger.ts";
+import { readLedger, verifyChain, canonicalJson, contentHash,
+         identity } from "./ledger.ts";
 import { detect, exitCode } from "./anomaly.ts";
 
 const FAILS: string[] = [];
@@ -59,6 +60,37 @@ print(L.head_hash())
     ck("A6 中文不转义", canonicalJson({ k: "判据" }).includes("判据"));
     ck("A7 hash 与 Python 同算法（sha256 of canonical）",
        contentHash({ a: 1 }).length === 64);
+
+    // ── A8/A9：半整数毫秒边界（真实账本撞出来的漂移）──────────────
+    //    ⛔ 合成用例的 ts 都是整数 ⇒ 永远撞不到 `ts*1000` 恰好 .5。
+    //      真实账本 1028 条里命中 1 条（seq=788，ts=1791871960.7365）⇒
+    //      Python 银行家舍入 vs JS half-up ⇒ 两端 hash 不同 ⇒ 监督器把
+    //      完好的链判成"被篡改"。这条必须**用真实值**对拍，不能靠整数。
+    const halfPath = join(dir, "half.jsonl");
+    const halfTs = 1791871960.7365;      // *1000 = 1791871960736.5
+    let pyHalf = "";
+    try {
+      pyHalf = execFileSync(PY, ["-c", `
+import sys; sys.path.insert(0, ${JSON.stringify(ROOT)})
+from aether.ledger import Ledger
+L = Ledger(${JSON.stringify(halfPath)})
+ev = L.append("half.test", {"i": 1}, actor="py", ts=${halfTs})
+print(ev.hash)
+`], { encoding: "utf8", cwd: ROOT }).trim();
+    } catch (e) {
+      ck("A8a Python 端可写半整数 ts", false, String(e).slice(0, 200));
+    }
+    if (pyHalf) {
+      const hev = readLedger(halfPath);
+      ck("A8 半整数毫秒 ⇒ TS 与 Python 算出同一个 hash（不是各算各的）",
+         contentHash(identity(hev[0])) === pyHalf,
+         `TS=${contentHash(identity(hev[0])).slice(0, 16)} PY=${pyHalf.slice(0, 16)}`);
+      ck("A9 半整数毫秒 ⇒ 链仍完整（不误报篡改）",
+         verifyChain(hev).ok, verifyChain(hev).reason);
+      ck("A10 舍入取偶：...736.5 ⇒ ...736（不是 half-up 的 ...737）",
+         identity(hev[0]).ts === 1791871960736,
+         String(identity(hev[0]).ts));
+    }
   }
 
   // ── B 组：篡改检测 ────────────────────────────────────────────

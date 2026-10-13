@@ -671,3 +671,108 @@ except Exception as e:
 逐条查 `round_no` 后确认——归因功能是后来才引入的，**引入之后的 4 次提交
 100% 有归因**。数量差不是缺陷，是时间差；若不看数据就会去"修"一个不存
 在的漏跑。
+
+## 13. 到顶 / 死路：空转必须能被识别并停止
+
+### 实测：10 轮压力跑里 r2–r10 是同一轮，重复了 9 次
+
+```
+improved: True | rounds: 10
+  r1: committed=4efcad1edea76a13 base=0.0
+  r2: committed=None base=1.0  reason=no_advantage(0.000)
+  r3: committed=None base=1.0  reason=no_advantage(0.000)
+  ... r10 同
+```
+
+每轮挖出**同一个**弱点、提**同一个**候选、得到**同一个** `advantage=0.000`。
+而报出来的原因是含糊的 `no_candidate_passed` ⇒ 看上去像"努力了 9 轮没成功"，
+实际是"已经没有可提升空间"。
+
+### 根因：弱点挖到了**上一次运行**的失败
+
+`mine_weaknesses` 从 store 按 `harness_id` 取 run。`harness_id` 由内容决定
+⇒ 新一次运行的 seed harness 与上次**同 id** ⇒ 上次遗留的失败 run 被当成
+"当前弱点"。与监督器那个误报（§10）**同形态：缺会话归属**。
+
+⛔ 而投影里的 run **没有 sid**（`RunRow` 无此字段），按 sid 过滤在当前 schema
+下做不到 ⇒ 不绕路，改数据源：
+
+```python
+runs = self._runs_from_verdicts(base_vs, h)   # 只用本轮 base 评估的判定
+```
+
+本轮判定天然属于"这一轮 + 这个 harness + 当前这套发展集"，串味在结构上
+不可能发生。历史 run 照旧写进 store（供投影/归因/审计）。
+
+### 「没提交」有三种含义，不许合并成一句
+
+| 状态 | 含义 | 处置 |
+|---|---|---|
+| `generalization_gate(...)` | 被泛化闸拦下 | **失败**，值得重试 |
+| `saturated:dev_clean` | 发展集全绿、无候选能超过 | 到顶，停 |
+| `saturated:stagnated` | 有弱点、有候选，但没人赢得过基线 | 停滞，停 |
+| `no_weakness_evidence` | 发展集无失败证据 | 无事可做，停 |
+
+后三种都打 `rep.idle = True`，**连续 2 轮**即终止整个循环（不是累计 ——
+偶尔一轮没事做是正常的，比如刚提交完新 harness 还没暴露失败），并记
+`evolution.stopped`（带 `rounds_requested` ⇒ 能看出被砍了多少轮）。
+
+⛔ 饱和时跑一次 held-out 读数，但记 `saturation.probe` **不是** `gen.probe`：
+后者是监督器规则读的判定流，混进去会污染"闸被绕过"等判据的样本。此时
+`best` 已是 None ⇒ 没有候选在拿 held-out 互相比 ⇒ 不存在"用考试题选答案"。
+
+## 14. 已知死路不许反复探测（带出口）
+
+真实账本上 `add_skill:patch:textscore`：**15 次探测 / 15 次 overfit /
+0 次通过**，占掉 55% 的探测预算，仍被一遍遍提议。
+
+冷却：同一 `(capsule, env_pair)` **连续**被拦 ≥3 次 ⇒ 本轮不再花预算。
+两个关键点：
+
+- ⛔ **连续**（遇到一次 `generalize` 归零），不是累计 —— 累计会把"早期失败
+  过、后来成了"的候选永久封死（与难度分层那个自指死锁同形态）；
+- ⛔ **按环境对**：`gen.probe` 事件原先**没有** `env_pair` 字段（实测 15 条
+  全是 `None`）⇒ 冷却只能按 capsule 全局生效 ⇒ 换环境后被误伤。现在
+  `GeneralizationGate.env_pair` 取 `dev_envs->ho_env`，取不到如实返回
+  `unknown`（不编造）。
+- ⛔ **出口**：冷却后每 5 轮允许试探一次（`deadend_probation_every`）。
+
+数据来自**账本**不是内存 ⇒ 换一次运行不会"忘了"这条死路。
+交叉表：15 条全拦、0 条曾通过 ⇒ 误伤为 0。
+
+## 15. 跨语言 hash 契约：半整数毫秒会漂移
+
+### 实测：监督器把一条完好的账本判成"被篡改"
+
+```
+❌ [LEDGER_CHAIN_BROKEN] hash 不匹配 @788（实得 2848712c2c… 应为 ad847be8e0…）
+```
+
+而 Python 侧 `verify_chain()` 返回 **True**。两端都自称在校验同一条链。
+
+`ts = 1791871960.7365` ⇒ `ts * 1000 = 1791871960736.5`（恰好半整数）：
+
+| 端 | 表达式 | 结果 |
+|---|---|---|
+| Python | `int(round(x))` | `...736`（银行家舍入，取偶） |
+| TypeScript | `Math.round(x)` | `...737`（half-up） |
+
+1028 条里命中 1 条 —— **概率性**漂移。合成对拍用例的 `ts` 全是整数，
+永远撞不到，所以 selfcheck 一直全绿。
+
+### 修法：TS 侧实现 `roundHalfEven` 与 Python 对齐
+
+选"改 TS"而不是"改 Python"：Python 是写入端，改它会让历史 1028 条的
+hash 全部失效（那才是真的破链）。改完后真实账本 `ok: true`。
+
+### 反证：A8/A9/A10 用**真实值**对拍
+
+```
+halfTs = 1791871960.7365
+A8  TS 与 Python 算出同一个 hash
+A9  链仍完整（不误报篡改）
+A10 舍入取偶：...736.5 ⇒ ...736
+```
+
+⛔ 教训与 §10 同源：**反证的构造必须与真实 payload 同源**。合成用例里
+ts 取整数，测的不是真实形态，绿了也是假的。

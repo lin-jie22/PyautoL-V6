@@ -46,6 +46,23 @@ function norm(v: unknown): unknown {
   return v;
 }
 
+/** 银行家舍入（round-half-to-even）—— **必须与 Python `round()` 一致**。
+
+⛔ 2026-10-13 实测：真实账本第 788 条 `ts = 1791871960.7365` ⇒
+   `ts * 1000 = 1791871960736.5`（恰好半整数）。
+   · Python `int(round(x))`   → 1791871960736（取偶）
+   · JS     `Math.round(x)`   → 1791871960737（half-up）
+   ⇒ 同一个事件两端算出**不同的 hash**，监督器把完好的链判成"被篡改"。
+   1028 条里命中 1 条 —— 概率性漂移，合成用例永远撞不到（ts 都是整数）。
+ */
+export function roundHalfEven(x: number): number {
+  const f = Math.floor(x);
+  const r = x - f;
+  if (r > 0.5) return f + 1;
+  if (r < 0.5) return f;
+  return f % 2 === 0 ? f : f + 1;      // 恰好 .5 ⇒ 取偶
+}
+
 /** 与 Python `canonical_json` 对齐。 */
 export function canonicalJson(obj: unknown): string {
   return JSON.stringify(norm(obj));
@@ -62,7 +79,7 @@ export function identity(ev: Event): Record<string, unknown> {
     // ⛔ 必须与 Python `Event.identity()` 一致：账本里存的 ts 是**秒（float）**，
     //    而参与 hash 的是**毫秒整数**。直接用 ev.ts 会算出完全不同的 hash
     //    （本文件的 selfcheck A1 就是守这一条的）。
-    ts: Math.round(ev.ts * 1000),
+    ts: roundHalfEven(ev.ts * 1000),
     kind: ev.kind,
     actor: ev.actor,
     payload: ev.payload ?? {},
