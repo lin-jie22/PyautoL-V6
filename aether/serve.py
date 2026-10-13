@@ -19,8 +19,16 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def memory_report(path: Path) -> Dict[str, Any]:
+def memory_report(path: Path, ledger_events: Optional[List[Any]] = None
+                  ) -> Dict[str, Any]:
     """记忆库的**静态**完整性读数（只读，不重建 embedder）。
+
+    `ledger_events` 给进来时会额外做**记忆对账**：文件里的每条记忆应当
+    能在账本里找到一条 `memory.write`（disposition=written）。这是"事实
+    只有一份"的另一半 —— 记忆是跨运行继承、直接喂给提议器的东西，不进
+    账本就等于因果链上有一环没有证据（2026-10-13 实测：账本里 0 条记忆
+    事件，而 `data/memory.json` 里躺着 11 条）。
+
 
     ⛔⛔ 2026-10-13 实测：这里原先是硬编码的 `{"tiers": ["L0".."L4"]}` ——
     一个**恒亮绿灯**：库里 0 条也报五层、库被污染也报正常。写入侧刚建好
@@ -71,7 +79,7 @@ def memory_report(path: Path) -> Dict[str, Any]:
             n_inherited += 1
     foreign = sum(c for e, c in embs.items() if e != declared_emb)
     wrong_dim = sum(c for d, c in dims.items() if declared_dim and d != declared_dim)
-    return {
+    out = {
         "present": True, "readable": True, "path": str(path),
         "total": len(notes),
         "layer_sizes": layers,
@@ -85,6 +93,51 @@ def memory_report(path: Path) -> Dict[str, Any]:
         "integrity_ok": (foreign == 0 and wrong_dim == 0 and n_no_emb == 0
                          and n_unverified == 0),
     }
+    if ledger_events is None:
+        out["ledger_trace"] = "not_checked（未传入账本事件）"
+        return out
+
+    # ── 记忆对账：文件 vs 账本 ────────────────────────────────────
+    #: ⛔ 认 `written`（实时写入）与 `backfill`（存量补记），
+    #:    **不认** deduped / rejected_*（那不是一条新条目）。
+    w_ids: set = set()
+    n_write_ev = 0
+    n_backfill = 0
+    rejected_by: Dict[str, int] = {}
+    for ev in ledger_events:
+        if ev.kind != "memory.write":
+            continue
+        n_write_ev += 1
+        p = ev.payload or {}
+        disp = str(p.get("disposition") or "")
+        if disp in ("written", "backfill"):
+            w_ids.add(str(p.get("note_id") or ""))
+            if disp == "backfill":
+                n_backfill += 1
+        elif disp.startswith("rejected"):
+            rejected_by[disp] = rejected_by.get(disp, 0) + 1
+    file_ids = {str(n.get("note_id") or "") for n in notes}
+    untraceable = sorted(file_ids - w_ids)
+    #: ⛔ "账本里一条记忆事件都没有" = 记忆账本化**之前**的存量，
+    #:    那是历史遗留（不可溯源），不是"对不上"（有据却矛盾）。
+    #:    两者必须分开说，否则会拿历史遗留冒充事故、或拿事故冒充遗留。
+    state = ("pre_ledger" if n_write_ev == 0 and file_ids
+             else "partial" if untraceable else "complete")
+    out.update({
+        "ledger_write_events": n_write_ev,
+        "ledger_written_ids": len(w_ids),
+        #: ⛔ 补记的证据强度**低于**实时写入，必须单独计数、不能混进 written
+        "backfilled": n_backfill,
+        "ledger_rejected": rejected_by,
+        "untraceable_count": len(untraceable),
+        "untraceable_sample": untraceable[:5],
+        "ledger_trace": state,
+        "note": ("" if state == "complete" else
+                 "记忆早于账本化写入 ⇒ 这 N 条不可溯源（重跑一轮即带证据）"
+                 if state == "pre_ledger" else
+                 "有记忆事件却仍有条目对不上 ⇒ 记忆账本化路径存在漏记"),
+    })
+    return out
 
 
 def _collect(root: Path, limit: int = 200) -> Dict[str, Any]:
@@ -116,7 +169,8 @@ def _collect(root: Path, limit: int = 200) -> Dict[str, Any]:
         "consistency": consistency,
         "runs": runs,
         "snapshots": snaps,
-        "memory": memory_report(root / "data" / "memory.json"),
+        "memory": memory_report(root / "data" / "memory.json",
+                                ledger_events=led.events()),
         "version": "0.1.0",
     }
 

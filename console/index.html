@@ -145,6 +145,7 @@ async function load() {
   const st = data.store ?? {};
   const cons = data.consistency ?? {};
   const kinds = led.by_kind ?? {};
+  const mem0 = data.memory ?? {};
   el("stats").innerHTML = [
     ["事件总数", led.count ?? 0],
     ["账本头 hash", (led.head ?? "—").slice(0, 12)],
@@ -155,6 +156,16 @@ async function load() {
       `${cons.ledger_verdicts ?? "?"} / ${cons.projection_runs ?? st.n_runs ?? 0}`],
     ["投影一致性", cons.ok === undefined ? "—" : (cons.ok ? "✅ 一致" : "❌ 不一致")],
     ["同键覆盖次数", cons.overwrite_count ?? 0],
+    // ⛔ 记忆也是因果链的一环（跨运行继承、直接喂给提议器）：库里有几条、
+    //    其中几条在账本里查得到写入记录，必须并排显示 —— 只显示"有 11 条"
+    //    会把"这 11 条是谁写的、完全没有证据"藏起来（2026-10-13 实测）。
+    ["记忆 / 有账本证据",
+      `${mem0.total ?? 0} / ${mem0.ledger_write_events ?? 0}`
+      + (mem0.ledger_trace === "complete" ? " ✅" :
+         mem0.ledger_trace === "pre_ledger" ? " ⚠️账本化前" :
+         mem0.ledger_trace === "partial" ? " ❌对不上" : "")],
+    ["层归因（成功/失败）",
+      `${kinds["attribution.layer"] ?? 0} / ${kinds["attribution.unavailable"] ?? 0}`],
     ["平均 reward", st.avg_reward ?? 0],
     ["harness.commit", kinds["harness.commit"] ?? 0],
     ["harness.revert", kinds["harness.revert"] ?? 0],
@@ -173,10 +184,21 @@ async function load() {
   if ((cons.overwrite_count ?? 0) > 0) {
     alerts.push(`投影发生过 ${cons.overwrite_count} 次同键覆盖 ⇒ 执行历史被抹掉过`);
   }
-  const mem = data.memory ?? {};
+  const mem = mem0;
   if (mem.present && mem.integrity_ok === false) {
     alerts.push(`记忆库不完整：异 embedder ${mem.foreign_embedder} / 维度不符 `
       + `${mem.wrong_dim} / 空向量 ${mem.no_embedding} / 未验证 ${mem.unverified}`);
+  }
+  if (mem.ledger_trace === "partial") {
+    alerts.push(`记忆对不上账本：${mem.total} 条里有 ${mem.untraceable_count} 条`
+      + `在账本中找不到写入事件 ⇒ 记忆写入路径存在漏记`);
+  } else if (mem.ledger_trace === "pre_ledger") {
+    alerts.push(`记忆 ${mem.total} 条、账本 0 条写入事件 ⇒ 这些是账本化之前的`
+      + `存量（不可溯源；重跑一轮即带证据）`);
+  }
+  if ((kinds["attribution.unavailable"] ?? 0) > 0) {
+    alerts.push(`层归因失败 ${kinds["attribution.unavailable"]} 次 ⇒ `
+      + `"这次提升来自哪一层"没有证据（已记账，不再静默）`);
   }
   el("alert-card").style.display = alerts.length ? "" : "none";
   el("alert-body").innerHTML = alerts.map((a) => `<div>· ${esc(a)}</div>`).join("");

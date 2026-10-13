@@ -544,6 +544,18 @@ class EvolutionLoop:
             except Exception as e:  # noqa: BLE001 —— 归因失败不得影响提交
                 rep.layer_credit = {"available": False,
                                     "reason": f"{type(e).__name__}: {e}"}
+                #: ⛔ 但**不得静默**：归因是"哪一层真正起作用"的唯一证据，
+                #:    它挂了却只在内存报告里写一句 ⇒ 账本/控制台上都看不到
+                #:    ⇒ 下一次仍然不知道自己是在盲改（实测：18 次提交只有
+                #:    4 条归因事件，其余去哪了以前无人知晓）。
+                try:
+                    self.ledger.append("attribution.unavailable", {
+                        "round_no": round_no,
+                        "harness_id": new_h.harness_id,
+                        "error": f"{type(e).__name__}: {e}",
+                    }, actor="evolution")
+                except Exception:  # noqa: BLE001 —— 记账本身也不拖垮提交
+                    pass
         return rep
 
     # ── 多轮 ──────────────────────────────────────────────────────

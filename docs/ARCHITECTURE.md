@@ -547,3 +547,127 @@ passed = (not regressions) and (not errors)
 
 ⛔ 标注不是装饰：`baseline_all_red` 的意思是"本次裁决**无回归可判**"，
 而不是"已证明无回归"。这两句话在系统自证时差得很远。
+
+## 10. 跨轮判据必须有会话归属（监督器曾 8/8 误报）
+
+### 实测：一条规则报了 13 条 critical，逐条核对全是假的
+
+`supervisor/src/anomaly.ts` 的 `GENERALIZATION_GATE_BYPASSED` 是**跨语言
+不变量**的核心：Python 侧说"我拦下了 overfit 候选"，监督器只读账本就能
+独立验证"确实没提交"。它原来的匹配条件是：
+
+```ts
+commits.filter((c) => payloadOf(c).round_no === rn && c.seq > pe.seq)
+```
+
+只按 `round_no`。而 `round_no` **每个进程都从 1 重新数** ⇒ 跨小时、跨
+运行的事件被凑成"同一轮"。真实账本上的输出：
+
+```
+❌ @208 泛化闸裁决=overfit（round 1），但同轮仍提交了 harness ⇒ 闸被绕过
+   · @323 49ea71f7 · @356 db2ee5ab · @430 4efcad1e · @463 c098e95d ...
+```
+
+逐条核对后：被拦的候选是 `add_skill:patch:textscore`，被点名的提交**全是
+另一个候选 `add_skill:fix_control_flow`**（它自己的泛化闸判 `generalize`，
+提交完全合法），时间上相隔 69 秒到几小时。**8/8 是误报**，退出码 2。
+
+代码路径也印证了不可能是真绕过：`evolution.py` 里 `if pr.blocks:` 之后
+是 `best = None` ⇒ 被拦的候选根本到不了提交分支。
+
+### 修法：同候选 + 同会话，缺一不可
+
+```ts
+const cCap = String(p.capsule ?? "");
+if (pCap && cCap && cCap !== pCap) continue;   // ① 同一个候选
+// ② 同一次运行（sid）—— round_no 每次进程启动都重置
+```
+
+`sid` 由 `Ledger.append()` 注入 `payload`（**不新增 Event 字段** —— 那会改
+跨语言 hash 契约，TS 侧必须同步才能校验链；payload 本就参与 hash，历史
+文件缺 `sid` 也不影响 `verify_chain`）。
+
+### ⛔ 归属未知时不许硬判
+
+历史账本（718 条）里没有 `sid`。`round_no` 相同 + `capsule` 相同，仍然
+无法排除"这是两次独立运行"。此时：
+
+- **不判** critical（那是把无法判定当成已证明）；
+- **也不静默跳过** —— 报 `GATE_BYPASS_UNVERIFIABLE`（warn，18 组），
+  写明"无法判定是跨运行串味还是真绕过，新事件已带 sid 可精判"。
+
+修完：真实账本 critical 从 13 → **0**，退出码 2 → 1（那条 warn）。
+
+### 反证组（selfcheck C7–C13）
+
+| 用例 | 期望 |
+|---|---|
+| C7 同会话同候选被拦却提交 | **critical**（真绕过，退出码 2） |
+| C9 被拦 A、提交 B | 不报（闸在工作） |
+| C10 不同 sid 同 round_no | 不报（round_no 会重置） |
+| C11 旧账本缺 sid | 不报 critical，但报 **unverifiable warn** |
+| C12 同会话不同轮 | 不报 |
+
+注入事故版（退回"只看 round_no"）实测 **C9 / C11 转红** ⇒ 反证不是摆设。
+
+## 11. 记忆必须进账本（因果链上不能有没有证据的一环）
+
+宪法第 1 条说"事实只有一份"，但实测：
+
+```
+data/memory.json  →  11 条记忆
+data/ledger.jsonl →  0 条 memory.write
+```
+
+而记忆**跨运行继承、直接喂给提议器**（`MemoryAwareProposer`），是因果链
+上真实的一环 ⇒ 谁写的、什么时候写的、被闸拒了多少，全都查不到。
+
+现在：`MemoryOS.attach_ledger()`（挂载式，未挂载行为完全不变 ——
+`MemoryOS` 有几十处构造点，改签名会让所有调用点跟着动），每次写入
+**尝试**（含 `rejected_*`）记一条 `memory.write`：
+
+```json
+{"tier":"L3","channel":"curated","source":"round1","disposition":"written",
+ "note_id":"L3:7b3e9f8cbe0ce049","content_hash":"9ffcd716…","inherited":false}
+```
+
+⛔ 只记成功写入的话，"被拒了多少、为什么被拒"在事实源里就不存在 —— 那
+是把闸的另一半藏起来。
+
+### 对账读数：`pre_ledger` ≠ `partial`
+
+| 状态 | 含义 | 处置 |
+|---|---|---|
+| `complete` | 每条记忆都能在账本里找到写入证据 | 正常 |
+| `pre_ledger` | 账本 0 条事件（存量早于账本化） | 历史遗留，**不算事故** |
+| `partial` | 有事件，但仍有条目对不上 | **真问题**（写入路径漏记） |
+
+两者必须分开说，否则会拿历史遗留冒充事故、或拿事故冒充遗留。
+
+### 出口：`memory backfill`
+
+`pre_ledger` 如果不给出口，就是一条永远修不好的告警 —— 而修不好的告警
+会被忽略，等于没有告警。补记后 `untraceable` 归零（实测 13 条）。
+
+⛔ 但 backfill **不是**实时写入的等价物：它只证明"此刻库里有这条"，
+证明不了"它当初是这么被写进来的"（中途被外部改过也看不出来）。所以
+`disposition="backfill"` 单独计数，**不混进 `written`**。
+
+## 12. 失败不许只写在内存里（层归因）
+
+```python
+except Exception as e:
+    rep.layer_credit = {"available": False, "reason": ...}   # ← 只到这里
+```
+
+归因整段包在 try/except 里是对的（归因失败不得影响提交），但结果只进
+内存报告 ⇒ 账本上看不见、控制台看不到 ⇒ 下一次仍然不知道自己在盲改。
+
+现在同一分支 `append("attribution.unavailable", {error})`，监督器加
+`ATTRIBUTION_MISSING` / `ATTRIBUTION_FAILED` 两条 warn，控制台状态栏显示
+"层归因（成功/失败）"。
+
+⛔ 实测顺带澄清了一件事：账本里 18 次提交只有 4 条归因事件，看着像漏跑；
+逐条查 `round_no` 后确认——归因功能是后来才引入的，**引入之后的 4 次提交
+100% 有归因**。数量差不是缺陷，是时间差；若不看数据就会去"修"一个不存
+在的漏跑。

@@ -111,25 +111,97 @@ print(L.head_hash())
   const ev = (seq: number, kind: string, payload: Record<string, unknown>) =>
     ({ seq, ts: seq, kind, actor: "t", payload, prev_hash: "", hash: "" });
 
+  // ⛔ 构造必须与**真实 payload 同源**：生产里 probe 与 commit 都带
+  //    `capsule`，事件都带 `sid`（会话归属）。少了任何一项，这里的
+  //    "真绕过"用例测的就不是真实形态（实测踩过：缺 capsule 的用例
+  //    把不同候选的合法提交判成绕过，而测试还全绿）。
   const bypassed = detect([
     ev(1, "gen.probe", { round_no: 1, capsule: "narrow", verdict: "overfit",
-                         dev_gain: 1, heldout_gain: 0 }),
-    ev(2, "harness.commit", { round_no: 1, harness_id: "h1", gain: 1 }),
+                         dev_gain: 1, heldout_gain: 0, sid: "s1" }),
+    ev(2, "harness.commit", { round_no: 1, capsule: "narrow",
+                              harness_id: "h1", gain: 1, sid: "s1" }),
   ]);
-  ck("C7 泛化闸判 overfit 却仍提交 ⇒ critical（闸被绕过）",
+  ck("C7 同会话同候选：判 overfit 却仍提交 ⇒ critical（闸被绕过）",
      bypassed.some((f) => f.code === "GENERALIZATION_GATE_BYPASSED"
                           && f.severity === "critical"),
      JSON.stringify(bypassed.map((f) => f.code)));
+  ck("C7b 真绕过 ⇒ 退出码 2（CI 能吃到）", exitCode(bypassed) === 2,
+     String(exitCode(bypassed)));
 
   const rejected = detect([
     ev(1, "gen.probe", { round_no: 1, capsule: "narrow", verdict: "overfit",
-                         dev_gain: 1, heldout_gain: 0 }),
-    ev(2, "harness.revert", { round_no: 1, reason: "generalization_gate" }),
+                         dev_gain: 1, heldout_gain: 0, sid: "s1" }),
+    ev(2, "harness.revert", { round_no: 1, reason: "generalization_gate",
+                              sid: "s1" }),
   ]);
   ck("C8 拦下即无提交 ⇒ 不报 bypass（只有真绕过才 critical）",
      !rejected.some((f) => f.code === "GENERALIZATION_GATE_BYPASSED")
      && rejected.some((f) => f.code === "OVERFIT_REJECTED"),
      JSON.stringify(rejected.map((f) => f.code)));
+
+  // ── C9–C11：误报形态（实测在真实账本上抓到的三种）──────────────
+  //    这三组**必须不报 critical**，否则这条规则就是狼来了。
+  const otherCap = detect([
+    ev(1, "gen.probe", { round_no: 1, capsule: "narrow", verdict: "overfit",
+                         dev_gain: 1, heldout_gain: 0, sid: "s1" }),
+    ev(2, "harness.commit", { round_no: 1, capsule: "broad",
+                              harness_id: "h1", gain: 1, sid: "s1" }),
+  ]);
+  ck("C9 反证：被拦的是 A、提交的是 B ⇒ 不判绕过（闸在工作）",
+     !otherCap.some((f) => f.code === "GENERALIZATION_GATE_BYPASSED"),
+     JSON.stringify(otherCap.map((f) => f.code)));
+
+  const crossRun = detect([
+    ev(1, "gen.probe", { round_no: 1, capsule: "narrow", verdict: "overfit",
+                         dev_gain: 1, heldout_gain: 0, sid: "s1" }),
+    ev(2, "harness.commit", { round_no: 1, capsule: "narrow",
+                              harness_id: "h9", gain: 1, sid: "s2" }),
+  ]);
+  ck("C10 反证：不同会话的同号 round ⇒ 不判绕过（round_no 会重置）",
+     !crossRun.some((f) => f.code === "GENERALIZATION_GATE_BYPASSED"),
+     JSON.stringify(crossRun.map((f) => f.code)));
+
+  const legacy = detect([
+    ev(1, "gen.probe", { round_no: 1, capsule: "narrow", verdict: "overfit",
+                         dev_gain: 1, heldout_gain: 0 }),
+    ev(2, "harness.commit", { round_no: 1, capsule: "narrow",
+                              harness_id: "h1", gain: 1 }),
+  ]);
+  ck("C11 反证：旧账本缺 sid ⇒ 不硬判绕过，但必须报不可判定（warn）",
+     !legacy.some((f) => f.code === "GENERALIZATION_GATE_BYPASSED")
+     && legacy.some((f) => f.code === "GATE_BYPASS_UNVERIFIABLE"
+                           && f.severity === "warn"),
+     JSON.stringify(legacy.map((f) => f.code)));
+
+  const sameRunOtherRound = detect([
+    ev(1, "gen.probe", { round_no: 2, capsule: "narrow", verdict: "overfit",
+                         dev_gain: 1, heldout_gain: 0, sid: "s1" }),
+    ev(2, "harness.commit", { round_no: 1, capsule: "narrow",
+                              harness_id: "h1", gain: 1, sid: "s1" }),
+  ]);
+  ck("C12 反证：同会话但不同轮 ⇒ 不判绕过",
+     !sameRunOtherRound.some((f) => f.code === "GENERALIZATION_GATE_BYPASSED"),
+     JSON.stringify(sameRunOtherRound.map((f) => f.code)));
+
+  // ── C13：Python 侧写出的事件必须带会话归属（判据的数据来源）──────
+  let sidOk = false, sidDetail = "";
+  try {
+    const p = join(dir, "sid.jsonl");
+    execFileSync(PY, ["-c", `
+import sys; sys.path.insert(0, ${JSON.stringify(ROOT)})
+from aether.ledger import Ledger
+L = Ledger(${JSON.stringify(p)}, session="sess-abc")
+L.append("t.a", {"x": 1}); L.append("t.b", {"x": 2})
+print(L.session)
+`], { encoding: "utf8", cwd: ROOT });
+    const es = readLedger(p);
+    sidOk = es.length === 2 && es.every((e) => (e.payload as any)?.sid === "sess-abc");
+    sidDetail = JSON.stringify(es.map((e) => (e.payload as any)?.sid));
+  } catch (e) {
+    sidDetail = String(e).slice(0, 200);
+  }
+  ck("C13 反证：Python 写入的事件带 sid（否则跨运行判据无数据来源）",
+     sidOk, sidDetail);
 
   // ── D 组：真实账本（如果 V6 跑过）─────────────────────────────
   console.log("D 组：真实账本");

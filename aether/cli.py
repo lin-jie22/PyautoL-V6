@@ -78,10 +78,19 @@ def cmd_status(args: argparse.Namespace) -> int:
     print("投影一致性：" + ("✅ 与账本一致" if cons_ok else "❌ 与账本不一致"))
     #: 记忆完整性也进 status（与 serve 用**同一个**读数函数，不抄第二份）
     from .serve import memory_report
-    mr = memory_report(p["memory"])
+    mr = memory_report(p["memory"], ledger_events=led.events())
     print(json.dumps({"memory": mr}, ensure_ascii=False, indent=2))
     if mr.get("present") and not mr.get("integrity_ok"):
         print(f"⚠️ 记忆库不完整：{ {k: v for k, v in mr.items() if k.startswith(('foreign', 'wrong', 'no_embedding', 'unverified')) } }",
+              file=sys.stderr)
+    #: ⛔ 记忆对账：库里有东西却查不到它是怎么来的 ⇒ 因果链缺一环证据。
+    #:    "pre_ledger"（账本化之前的存量）不算事故，但必须说出来。
+    if mr.get("ledger_trace") == "partial":
+        print(f"⚠️ 记忆对不上账本：{mr.get('untraceable_count')} 条在账本里"
+              f"找不到写入事件 ⇒ 记忆账本化路径有漏记", file=sys.stderr)
+    elif mr.get("ledger_trace") == "pre_ledger":
+        print(f"ℹ️ 记忆有 {mr.get('total')} 条，但账本里 0 条写入事件 ⇒ "
+              f"这些是账本化之前的存量（不可溯源，重跑一轮即带证据）",
               file=sys.stderr)
     return 0 if (chain_ok and cons_ok) else 1
 
@@ -98,10 +107,32 @@ def cmd_memory(args: argparse.Namespace) -> int:
     from .serve import memory_report
     p = _paths(Path(args.root))
 
+    from .ledger import Ledger
+
     if args.memory_cmd == "show":
-        print(json.dumps(memory_report(p["memory"]), ensure_ascii=False,
-                         indent=2))
+        print(json.dumps(
+            memory_report(p["memory"],
+                          ledger_events=Ledger(p["ledger"]).events()),
+            ensure_ascii=False, indent=2))
         return 0
+
+    if args.memory_cmd == "backfill":
+        #: ⛔ 这是"记忆对不上账本"的**出口**：账本化之前写入的存量永远
+        #:    补不上票 ⇒ 告警会一直挂着 ⇒ 一直挂着的告警会被忽略。
+        from .embeddings import HashingEmbedder
+        led = Ledger(p["ledger"])
+        mem, _ = MemoryOS.load(p["memory"], HashingEmbedder(dim=256),
+                               min_content_len=60)
+        mem.attach_ledger(led)
+        n = mem.backfill_ledger()
+        mem.save(p["memory"])
+        after = memory_report(p["memory"], ledger_events=Ledger(p["ledger"]).events())
+        print(json.dumps({"backfilled": n, "after": after},
+                         ensure_ascii=False, indent=2))
+        if after.get("ledger_trace") == "complete":
+            print(f"✅ 存量记忆已补记 {n} 条账本证据（注意：backfill 只证明"
+                  f"「此刻库里有它」，不证明它当初是这么写进来的）")
+        return 0 if after.get("ledger_trace") in ("complete", "pre_ledger") else 1
 
     # ── reindex ──────────────────────────────────────────────────
     before = memory_report(p["memory"])
@@ -350,6 +381,10 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     #    （2026-10-13 实测两次运行记忆完全相同）。装载必须过污染闸与
     #    embedder 对齐闸，详见 `MemoryOS.load`。
     mem, mem_load = MemoryOS.load(p["memory"], embedder, min_content_len=60)
+    #: ⛔ 记忆必须接进账本：它跨运行继承、直接喂给提议器，是因果链一环。
+    #:    不进账本 ⇒ 谁写的、何时写的、被拒了多少都不可溯源（2026-10-13
+    #:    实测：宪法说"事实只有一份"，记忆却在账本之外另存一份）。
+    mem.attach_ledger(led)
     if mem_load.get("note"):
         print(f"💾 记忆装载：{mem_load['note']}", file=sys.stderr)
     runner = _default_runner(envs, memory=mem)
@@ -618,9 +653,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="（保留位）不备份旧库 —— 默认总是备份")
     s = sub.add_parser("synth", help="合成任务并统计 yield")
     s.add_argument("--max", default="8")
-    m = sub.add_parser("memory", help="记忆库：读数 / 换嵌入后全量重算")
+    m = sub.add_parser("memory", help="记忆库：读数 / 换嵌入后全量重算 / 补记账")
     ms = m.add_subparsers(dest="memory_cmd", required=True)
     ms.add_parser("show", help="打印记忆库完整性读数")
+    ms.add_parser("backfill",
+                  help="为账本化之前的存量记忆补记账本证据（对账告警的出口）")
     mr = ms.add_parser("reindex", help="换 embedder 后的唯一合法恢复路径")
     mr.add_argument("--to", default="hash", choices=["hash", "ollama"],
                     help="目标嵌入器")

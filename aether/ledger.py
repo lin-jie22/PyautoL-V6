@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import time
+import uuid
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -124,12 +125,21 @@ class Ledger:
 
     GENESIS_HASH = "0" * 64
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, session: Optional[str] = None):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock_path = self.path.with_suffix(self.path.suffix + ".lock")
         self._last_hash = self.GENESIS_HASH
         self._seq = 0
+        #: ⛔ 会话归属：`round_no` **每次进程启动都从 1 重新数**，
+        #:    没有它，"同一轮"会把跨小时、跨运行的事件串成一对 ——
+        #:    监督器那条"泛化闸被绕过"的规则曾因此把 8 条合法提交
+        #:    全判成 critical（实测）。跨轮/跨会话类判据必须有归属。
+        #: ⛔ 用 `is None` 而不是 `or`：显式传空串 = "这条没有会话归属"
+        #:    （测试要靠它模拟升级前的事件），不能悄悄补一个 uuid 变成
+        #:    "有归属" —— 那等于把缺失伪装成存在。
+        self.session = (session if session is not None
+                        else uuid.uuid4().hex[:12])
         self._hydrate()
 
     # ── 内部 ──────────────────────────────────────────────────────
@@ -170,8 +180,13 @@ class Ledger:
         try:
             self._hydrate()                      # 重读，防并发分叉
             seq = self._seq + 1
+            #: 会话归属写进 payload（⛔ 不是新增 Event 字段 —— 那会改跨语言
+            #: hash 契约，TS 侧必须同步才能校验链；payload 是本就参与 hash
+            #: 的自由区，历史文件缺 `sid` 也不影响链校验）
+            body = dict(payload or {})
+            body.setdefault("sid", self.session)
             ev = Event(seq=seq, ts=ts if ts is not None else time.time(),
-                       kind=kind, actor=actor, payload=payload,
+                       kind=kind, actor=actor, payload=body,
                        prev_hash=self._last_hash, hash="")
             ev = Event(**{**asdict(ev), "hash": content_hash(ev.identity())})
             with self.path.open("a", encoding="utf-8") as f:

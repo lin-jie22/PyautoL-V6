@@ -119,6 +119,14 @@ class MemNote:
 class MemoryOS:
     """5 层记忆 + 链接演化 + 检索 + 睡眠巩固 + 对抗验证。"""
 
+    #: ⛔ 类级兜底：记忆**必须能进账本** —— 它跨运行继承、直接喂给提议器，
+    #:    是因果链的一环。不进账本 ⇒ 记忆被谁写的、什么时候写的、被拒了
+    #:    多少，全都不可溯源，也无从发现被外部改动。默认 None ⇒ 未挂载时
+    #:    行为完全不变（鸭子类型挂载，不强制依赖）。
+    ledger: Any = None
+    #: 记账失败的原因（类级兜底，未挂载时恒为空串）
+    _ledger_error: str = ""
+
     def __init__(self, embedder: Any = None, dim: int = 0, link_topk: int = 3,
                  min_content_len: int = 0):
         """embedder 可以是 `Embedder` 对象（推荐，带 name/dim），
@@ -143,7 +151,17 @@ class MemoryOS:
         self.stats = {"written": 0, "deduped": 0, "rejected_channel": 0,
                       "rejected_empty": 0, "promoted": 0, "refuted": 0,
                       "rejected_dim_mismatch": 0, "rejected_embed_error": 0,
-                      "search_dim_mismatch": 0}
+                      "search_dim_mismatch": 0, "ledger_failed": 0}
+
+    # ── 账本挂载（事实源收敛）────────────────────────────────────
+    def attach_ledger(self, ledger: Any) -> "MemoryOS":
+        """把记忆写入接进账本。**返回 self** 便于链式构造。
+
+        ⛔ 用挂载而不是构造参数：`MemoryOS` 在测试/脚本里有几十处构造点，
+        改签名会让所有调用点跟着动；挂载是**可选增强**，未挂载行为不变。
+        """
+        self.ledger = ledger
+        return self
 
     # ── 嵌入调用（含维度契约）────────────────────────────────────
     def _embed_one(self, text: str) -> List[float]:
@@ -163,12 +181,54 @@ class MemoryOS:
               channel: str = "learner", keywords: Optional[Iterable[str]] = None,
               tags: Optional[Iterable[str]] = None, trust: float = 1.0,
               now: Optional[float] = None) -> Tuple[MemNote, str]:
+        """写一条记忆（**并记账**）。返回 (note, 处置)。
+
+        处置 ∈ {written, deduped, rejected_*}。⛔ 记账失败**不得**改变写入
+        的结果，但**必须**计数 —— 静默丢账本比丢写入更危险：库里有什么
+        将不再有据可查（`stats["ledger_failed"]` 就是这条裂缝的宽度）。
+        """
+        note, disp = self._write_raw(
+            tier, content, source=source, channel=channel, keywords=keywords,
+            tags=tags, trust=trust, now=now)
+        self._record_write(tier, content, note, disp, channel, source)
+        return note, disp
+
+    def _record_write(self, tier: str, content: str, note: MemNote,
+                      disposition: str, channel: str, source: str) -> None:
+        """一次写入尝试 = 账本一条 `memory.write`（**含被拒的**）。"""
+        led = getattr(self, "ledger", None)
+        if led is None:
+            return                       # 未挂载 ⇒ 行为与以前完全一致
+        try:
+            led.append("memory.write", {
+                "tier": tier, "channel": channel, "source": source,
+                "disposition": disposition,
+                "note_id": getattr(note, "note_id", "") or "",
+                "content_hash": content_hash((content or "").strip())[:16],
+                "inherited": "inherited" in tuple(getattr(note, "tags", ()) or ()),
+            }, actor="memory")
+        except Exception as e:  # noqa: BLE001
+            self.stats["ledger_failed"] += 1
+            self._ledger_error = f"{type(e).__name__}: {e}"
+
+    def _write_raw(self, tier: str, content: str, *, source: str = "",
+              channel: str = "learner", keywords: Optional[Iterable[str]] = None,
+              tags: Optional[Iterable[str]] = None, trust: float = 1.0,
+              now: Optional[float] = None) -> Tuple[MemNote, str]:
+        """真正的写入（不含记账）—— `write()` 是它 + 记账的包装。
+
+        拆开是为了让**巩固/装载**等内部路径也走同一套闸，而不是各抄一份。
+        """
         """写一条记忆。返回 (note, 处置)。处置 ∈ {written, deduped, rejected_*}。
 
         ⛔ 三条闸（缺一条就会出现"库越来越大但什么也检索不到"）：
           · 通道闸：learner 不许直接写 L2 事实层（V5：写入权由通道定）；
           · 去重闸：同内容指纹只更新 access 与链接，不新增行；
           · 完整性闸：embedding 为空 ⇒ 拒绝入库（不是"降级成功"）。
+
+        ⛔⛔ 每一次尝试（**含被拒的**）都进账本：只记成功写入的话，
+        "被拒了多少、为什么被拒"在事实源里就不存在，等于把闸的另一半
+        藏起来。`memory.write` 的 `disposition` 就是那另一半。
         """
         if tier not in TIERS:
             raise ValueError(f"未知 tier {tier}（可选 {TIERS}）")
@@ -218,6 +278,37 @@ class MemoryOS:
         self._link(note)
         self.stats["written"] += 1
         return note, "written"
+
+    def backfill_ledger(self) -> int:
+        """为**存量**记忆补记账本证据（账本化之前写入的那些）。
+
+        ⛔ 为什么必须有这个出口：没有它，"库里有 N 条、账本里 0 条"会变成
+        一条**永远修不好**的告警 —— 而修不好的告警会被忽略，等于没有告警
+        （和"投影不一致却只报一句"是同一个坑）。
+
+        ⛔ 但它**不是**实时写入的等价物：`disposition="backfill"` 只能证明
+        "此刻库里有这条"，不能证明"它当初是这么被写进来的"（中途被外部
+        改过也看不出来）。所以读数里必须把它**单独计数**，不能混进 written。
+        """
+        led = getattr(self, "ledger", None)
+        if led is None:
+            return 0
+        n = 0
+        for note in list(self.notes.values()):
+            try:
+                led.append("memory.write", {
+                    "tier": note.tier, "channel": note.channel,
+                    "source": note.source or "",
+                    "disposition": "backfill",
+                    "note_id": note.note_id,
+                    "content_hash": content_hash(note.content.strip())[:16],
+                    "inherited": "inherited" in tuple(note.tags or ()),
+                }, actor="memory")
+                n += 1
+            except Exception as e:  # noqa: BLE001
+                self.stats["ledger_failed"] += 1
+                self._ledger_error = f"{type(e).__name__}: {e}"
+        return n
 
     # ── 链接演化（A-MEM / Zettelkasten）───────────────────────────
     def _link(self, note: MemNote) -> None:

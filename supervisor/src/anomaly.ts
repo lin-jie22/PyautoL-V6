@@ -141,18 +141,67 @@ export function detect(events: Event[], cfg: AnomalyConfig = DEFAULT_CONFIG): Fi
   //     就能独立验证"确实没提交"。两侧用同一份事实、各自算一遍 ——
   //     任何一方绕过闸门都会在这里被发现，不需要信任对方的日志。
   const probes = events.filter((e) => e.kind === "gen.probe");
+  const unattributable: string[] = [];
+  const unverifiable: string[] = [];
   for (const pe of probes) {
     const v = String(payloadOf(pe).verdict ?? "");
     if (v === "generalize") continue;
     const rn = payloadOf(pe).round_no;
-    const bad = commits.filter((c) => payloadOf(c).round_no === rn && c.seq > pe.seq);
-    if (bad.length) {
-      out.push({
-        code: "GENERALIZATION_GATE_BYPASSED", severity: "critical",
-        detail: `@${pe.seq} 泛化闸裁决=${v}（round ${rn}），但同轮仍提交了 harness ⇒ 闸被绕过`,
-        evidence: bad.map((c) => `@${c.seq} ${payloadOf(c).harness_id}`),
-      });
+    const pCap = String(payloadOf(pe).capsule ?? "");
+    const pSid = String(payloadOf(pe).sid ?? "");
+    if (!pCap) {
+      unattributable.push(`@${pe.seq} probe 未记 capsule ⇒ 无法归因到具体候选`);
     }
+    // ① 同一个候选才算：A 被拦、B 被放行并提交 —— 那是闸在工作，不是绕过。
+    //    ⛔ 少了这条，实测把一批合法提交判成 critical（狼来了）。
+    const matches: typeof commits = [];
+    for (const c of commits) {
+      const p = payloadOf(c);
+      if (c.seq <= pe.seq || p.round_no !== rn) continue;
+      const cCap = String(p.capsule ?? "");
+      if (pCap && cCap && cCap !== pCap) continue;
+      matches.push(c);
+    }
+    if (!matches.length) continue;
+
+    // ② 同一次运行才算：`round_no` **每个进程都从 1 重新数**，跨小时的
+    //    两次运行会撞出同一个 round 1。⛔ 归属未知时**不许**当成"同一次
+    //    运行"硬判 —— 那是把无法判定的东西判成已证明（实测 8 条全假）。
+    if (pSid) {
+      const bad = matches.filter(
+        (c) => !String(payloadOf(c).sid ?? "") || String(payloadOf(c).sid) === pSid);
+      if (bad.length) {
+        out.push({
+          code: "GENERALIZATION_GATE_BYPASSED", severity: "critical",
+          detail: `@${pe.seq} 泛化闸裁决=${v}（round ${rn}，capsule=${pCap || "?"}），`
+            + `同一次运行内该候选仍被提交 ⇒ 闸被绕过`,
+          evidence: bad.map((c) => `@${c.seq} ${payloadOf(c).harness_id}`),
+        });
+      }
+    } else {
+      // 旧账本（sid 引入之前）：无法区分"跨运行串味"与"真绕过"。
+      // ⛔ 不静默跳过、也不降级成 info —— 规则对它们**失效**必须可见。
+      for (const c of matches) {
+        unverifiable.push(`@${pe.seq}(${v},${pCap || "?"}) → @${c.seq} `
+          + `${payloadOf(c).harness_id}：缺会话归属，无法判定是否同一运行`);
+      }
+    }
+  }
+  if (unverifiable.length) {
+    out.push({
+      code: "GATE_BYPASS_UNVERIFIABLE", severity: "warn",
+      detail: `${unverifiable.length} 组"裁决非 generalize 却见同候选提交"缺会话`
+        + `归属 ⇒ 无法判定是跨运行串味还是真绕过（新事件已带 sid，可精判）`,
+      evidence: unverifiable.slice(0, 5),
+    });
+  }
+  if (unattributable.length) {
+    out.push({
+      code: "PROBE_UNATTRIBUTABLE", severity: "warn",
+      detail: `${unattributable.length} 条泛化判定缺 capsule ⇒ 绕过检测对它们失效`
+        + `（不静默跳过，也不硬凑归因）`,
+      evidence: unattributable.slice(0, 5),
+    });
   }
   const overfit = probes.filter((e) => payloadOf(e).verdict === "overfit");
   if (overfit.length) {
@@ -164,6 +213,32 @@ export function detect(events: Event[], cfg: AnomalyConfig = DEFAULT_CONFIG): Fi
         return `@${e.seq} ${p.capsule}: dev ${p.dev_gain} / held-out ${p.heldout_gain}`;
       }),
     });
+  }
+
+  // ── 6.5 层归因：有没有 / 挂没挂 ──────────────────────────────
+  //     ⛔ "哪一层真正起作用"是唯一能回答"这次提升来自哪里"的证据。
+  //     它挂了却只写在内存报告里 ⇒ 账本上看不见 ⇒ 下一次仍在盲改。
+  const attrOk = new Set(
+    events.filter((e) => e.kind === "attribution.layer"
+                      || e.kind === "attribution.unavailable")
+      .map((e) => String(payloadOf(e).harness_id ?? "")),
+  );
+  const modern = commits.filter((c) => String(payloadOf(c).sid ?? "") !== "");
+  const noAttr = modern.filter(
+    (c) => !attrOk.has(String(payloadOf(c).harness_id ?? "")));
+  if (noAttr.length) {
+    out.push({ code: "ATTRIBUTION_MISSING", severity: "warn",
+               detail: `${noAttr.length} 次提交后没有层归因 ⇒ 这次提升来自`
+                 + `哪一层没有证据（只统计带会话归属的新事件）`,
+               evidence: noAttr.slice(-3).map(
+                 (c) => `@${c.seq} ${payloadOf(c).harness_id}`) });
+  }
+  const attrFailed = events.filter((e) => e.kind === "attribution.unavailable");
+  if (attrFailed.length) {
+    out.push({ code: "ATTRIBUTION_FAILED", severity: "warn",
+               detail: `${attrFailed.length} 次层归因报错 ⇒ 已记账，不再静默`,
+               evidence: attrFailed.slice(-3).map(
+                 (e) => `@${e.seq} ${String(payloadOf(e).error ?? "").slice(0, 80)}`) });
   }
 
   // ── 7. 受保护层被自动改动：必须人工确认 ───────────────────────

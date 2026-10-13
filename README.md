@@ -38,7 +38,8 @@ $PY -m aether.cli evolve --rounds 3 --group 3
 $PY -m aether.cli verify-chain     # 账本链是否被篡改过
 $PY -m aether.cli rebuild --check  # 投影（SQLite）与账本对不对得上
 $PY -m aether.cli rebuild          # 对不上时的恢复路径（备份旧库 → 重放 → 再对账）
-$PY -m aether.cli memory show      # 记忆库完整性读数（混库/空向量/污染）
+$PY -m aether.cli memory show      # 记忆库完整性读数（混库/空向量/污染/对账）
+$PY -m aether.cli memory backfill  # 存量记忆补记账本证据（对账告警的出口）
 $PY -m aether.cli memory reindex --to hash   # 换 embedder 后的唯一恢复路径
 $PY scripts/demo_evolve.py         # 端到端 demo + 出报告
 $PY scripts/llm_e2e.py --rounds 3  # 真模型端到端：跑通 vs 赢过
@@ -91,7 +92,7 @@ V6/
 │   ├── eventflow/          事件流聚合（会话切分 / 滑动窗口 / 分位数）
 │   ├── stateflow/          状态机（转移 / 合法性 / 可达性 / 路径计数）
 │   └── scheduler/          区间调度（冲突 / 最大并发 / 贪心 / 区间合并）
-├── tests/                  11 个契约测试（RED→GREEN + 反证组）
+├── tests/                  12 个契约测试（RED→GREEN + 反证组）
 ├── supervisor/             TypeScript 外部监督器（只读账本 + 异常检测）
 ├── console/                零构建的只读可视化控制台
 ├── scripts/demo_evolve.py  端到端 demo + 报告
@@ -183,6 +184,22 @@ V6/
     改成 fail-closed。
     ⛔⛔ 但"基线里没有一条通过"**不能**同样拦死：系统还没能力 ⇒ 基线全 0
     ⇒ 每个候选都被拦 ⇒ 永远无法进化 —— 与难度分层那个自指死锁同形态。
+21. **跨轮/跨运行的判据必须有会话归属**：`round_no` 每个进程都从 1 重新
+    数，只按它匹配会把跨小时的两次运行凑成"同一轮"。实测：监督器那条
+    "泛化闸被绕过"的规则在真实账本上报了 **13 条 critical，逐条核对后
+    8/8 全是误报**（被拦的是 `patch:textscore`，被点名的却是另一个候选
+    的合法提交）。现在事件带 `sid`，匹配要同 capsule **且**同会话。
+    ⛔ 永远在喊狼来了的规则 = 没有规则；归属未知时**不许**硬判，要报
+    "不可判定"（`GATE_BYPASS_UNVERIFIABLE`）而不是判成"已证明绕过"。
+22. **记忆也在因果链上，所以也要进账本**：记忆跨运行继承、直接喂给提议
+    器。实测账本里 0 条写入事件、而 `data/memory.json` 躺着 11 条 ⇒
+    谁写的、何时写的、被闸拒了多少都查不到。现在每次写入尝试（**含被拒
+    的**）都记 `memory.write`，`status` 做「文件 vs 账本」对账。
+    ⛔ 存量补票走 `memory backfill`，证据强度**低于**实时写入（只证明
+    "此刻库里有它"）⇒ 单独计数，不混进 `written`。
+23. **失败不许只写在内存里**：层归因整段包在 try/except 中，失败只进内存
+    报告 ⇒ 账本上看不见 ⇒ 下一次仍不知道自己在盲改。现在记
+    `attribution.unavailable`（带异常类型），控制台与监督器都可读。
     两者的分界是：**套件为空 = 无从判别（拦）**；
     **套件非空而基线全 0 = 确实没有可回归的东西（照跑，只标注判别力为零）**。
 
