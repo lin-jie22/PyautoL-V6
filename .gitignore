@@ -1,7 +1,8 @@
 __pycache__/
 *.pyc
 data/*.db
-data/*.db.bak_*          # rebuild 的旧库备份（留现场，不进版本库）
+# rebuild 的旧库备份（留现场对账，不进版本库）
+data/*.db.bak_*
 data/*.db-shm
 data/*.db-wal
 data/*.jsonl
