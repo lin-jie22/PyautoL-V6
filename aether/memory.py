@@ -126,6 +126,12 @@ class MemoryOS:
     ledger: Any = None
     #: 记账失败的原因（类级兜底，未挂载时恒为空串）
     _ledger_error: str = ""
+    #: ⛔ 类级兜底（V5 教训 M7）：对象可能经 `__new__` 构造而拿不到 `__init__`
+    #:    里赋的实例属性 ⇒ `consolidate()` 首行赋值前读它会 AttributeError。
+    #:    这里给 None，`consolidation_report()` 对 None 返回全零表。
+    last_consolidation: Optional[Dict[str, Any]] = None
+    #: 同上（类级兜底）：上一次真剪枝的分账
+    last_prune: Optional[Dict[str, Any]] = None
 
     def __init__(self, embedder: Any = None, dim: int = 0, link_topk: int = 3,
                  min_content_len: int = 0):
@@ -408,63 +414,215 @@ class MemoryOS:
     def consolidate(self, *, max_age_s: float = 86400.0,
                     min_access: int = 2,
                     summarizer: Optional[Callable[[List[MemNote]], str]] = None,
+                    min_group: int = 2,
                     now: Optional[float] = None) -> List[MemNote]:
-        """离线把 L4 情景归档 → L2/L3 稳定知识（"LLM 的 REM 睡眠"）。
+        """离线把 L4 情景归档 → L3 稳定知识（"LLM 的 REM 睡眠"）。
+
+        ⛔⛔ 巩固是**跨条聚合**，不是逐条复制（2026-10-14 修）：
+        逐条摘要的产物恒等于输入，写回时必然被自己的去重闸吃掉 ⇒ 产出恒 0。
+        现在按"模板骨架"分组，只有同构的一组（>= min_group 条）才归纳。
 
         规则（保守，宁可不巩固也不制造幻觉）：
           · 只处理被访问过 >= min_access 次 或 足够老的 L4；
-          · 默认 summarizer 是**抽取式**（取高频句子），不编造；
-          · 巩固产物走 curated 通道写 L2/L3，并 `supersedes` 指回原 note。
+          · 默认 summarizer 是**抽取式归纳**（骨架 + 槽位分布），不编造；
+          · 巩固产物走 curated 通道写 L3，并 `supersedes` 指回组内首条。
+
+        ⛔ 记账必须分开设：只报一个数字的话，"没有新信息可归纳"与
+        "机制坏了"在输出里长得一模一样 —— 典型静默失败。分账见
+        `consolidation_report()`：made / deduped / skipped_* 各自独立。
         """
         ts = now if now is not None else time.time()
         pool = [n for n in self.notes.values()
                 if n.tier == "L4"
                 and (n.access_count >= min_access or (ts - n.created_at) >= max_age_s)]
+        rep = {"pool": len(pool), "groups": 0, "made": 0, "deduped": 0,
+               "skipped_below_min_group": 0, "skipped_not_isomorphic": 0,
+               "skipped_empty": 0, "rejected": 0}
+        self.last_consolidation = rep
         if not pool:
             return []
-        summ = summarizer or _extractive_summary
-        made: List[MemNote] = []
+
+        #: ⛔ 分组键用**归一化 source**（把数字抹平），不用内容骨架：
+        #:    内容模板一旦改版（比如换掉一个词），骨架分组就会把所有记录
+        #:    拆成互不相同的单条组 ⇒ 全部 skip ⇒ 又回到"产出恒 0 但看不出
+        #:    为什么"。source 是"同一个生产者 + 同一套模板"的可靠代理。
+        #:    内容是否同构由归纳器自己校验（槽位数不一致 ⇒ 明确记 skipped）。
+        #: ⛔ 第二维是槽位数：同一个 source 里可能混着**不同代的模板**
+        #:    （旧格式把 8 位 hash 写进内容 ⇒ 数字个数随 hash 浮动，3~7 槽
+        #:    都有）。只按 source 分组会让新旧混在一组 ⇒ 整组不同构 ⇒
+        #:    连同新格式一起被 skip，历史脏数据把新机制也拖死（实测
+        #:    skipped_not_isomorphic=30）。按 (source, 槽位数) 分则可各自归纳。
+        groups: Dict[Tuple[str, int], List[MemNote]] = {}
         for n in pool:
-            text = summ([n])
-            if not text.strip():
+            key = (_skeleton(n.source) or "#nosource", len(_slots(n.content)))
+            groups.setdefault(key, []).append(n)
+
+        summ = summarizer or _inductive_summary
+        made: List[MemNote] = []
+        for _skel, grp in groups.items():
+            if len(grp) < min_group:
+                rep["skipped_below_min_group"] += len(grp)
                 continue
-            new, how = self.write("L3", text, source=f"consolidated:{n.note_id}",
+            rep["groups"] += 1
+            text = summ(grp)
+            if not text.strip():
+                rep["skipped_not_isomorphic"] += len(grp)
+                continue
+            new, how = self.write("L3", text,
+                                  source=f"consolidated:{grp[0].note_id}",
                                   channel="curated", tags=("consolidated",))
             if how == "written":
-                self.notes[new.note_id] = replace(new, supersedes=n.note_id)
+                self.notes[new.note_id] = replace(new, supersedes=grp[0].note_id)
                 made.append(self.notes[new.note_id])
+                rep["made"] += 1
+            elif how == "deduped":
+                #: 同样的归纳已经存在 ⇒ 没有新信息。这是**正确**结果，不是故障
+                rep["deduped"] += 1
+            else:
+                rep["rejected"] += 1
             # 原 L4 归档保留（历史不删），只标记已被巩固
-            self.notes[n.note_id] = replace(n, tags=tuple(n.tags) + ("consolidated",))
+            # ⛔ 标签必须去重：无脑追加会让 consolidated 重复 11~19 次（存量污染）
+            for n in grp:
+                if "consolidated" not in n.tags:
+                    self.notes[n.note_id] = replace(
+                        n, tags=tuple(n.tags) + ("consolidated",))
+        self.stats["consolidated_made"] = self.stats.get("consolidated_made", 0) + rep["made"]
+        self.stats["consolidated_deduped"] = self.stats.get("consolidated_deduped", 0) + rep["deduped"]
         return made
+
+    def consolidation_report(self) -> Dict[str, Any]:
+        """上一次巩固的**分账**。没跑过也返回全零表，绝不给 None。
+
+        ⛔ 调用方看到 `deduped > 0 / made == 0` 与 `pool == 0` 的处置完全
+        不同：前者是"没有新信息"，后者是"根本没有素材"。合并成一个数字
+        就无法区分（V5 老教训：静默失败最爱藏在聚合读数里）。
+        """
+        r = self.last_consolidation
+        if r:
+            return dict(r)
+        return {"pool": 0, "groups": 0, "made": 0, "deduped": 0,
+                "skipped_below_min_group": 0, "skipped_not_isomorphic": 0,
+                "skipped_empty": 0, "rejected": 0, "note": "not_run"}
+
+    def dedup_tags(self) -> int:
+        """把所有 note 的重复标签压成唯一（幂等）。返回被修改的条数。
+
+        存量污染来源：旧的 consolidate 无脑 `tags + ("consolidated",)` 且
+        不去重 ⇒ 生产库里同一条 note 的 tags 出现 consolidated 重复 11~19
+        次。既空转又污染数据，而读数完全看不出来。
+        """
+        fixed = 0
+        for nid, n in list(self.notes.items()):
+            seen: List[str] = []
+            for t in n.tags:
+                if t not in seen:
+                    seen.append(t)
+            if len(seen) != len(n.tags):
+                self.notes[nid] = replace(n, tags=tuple(seen))
+                fixed += 1
+        return fixed
 
     # ── 剪枝（产物增殖闸）─────────────────────────────────────────
     def prune(self, *, max_notes: int = 10000,
               min_trust: float = 0.05,
               stale_s: float = 30 * 86400.0,
-              now: Optional[float] = None) -> List[str]:
-        """剪掉低信任 + 长期未访问的记忆。
+              now: Optional[float] = None,
+              actor: str = "memory") -> List[str]:
+        """剪掉低信任 + 长期未访问的记忆（**真删，会留痕**）。
 
         2026 文献点名的失败模式：sub-agent/harness artifact proliferation
         —— 产物只增不减会让系统退化。必须显式剪枝。
         ⛔ L0/L1（元规则与路由索引）**永不剪**。
+        ⛔⛔ 它是不可逆的 ⇒ 默认路径请走 `prune_dryrun()`（只报数不删），
+        真删由人显式触发（CLI `memory prune --apply`）。
         """
         ts = now if now is not None else time.time()
-        victims = [nid for nid, n in self.notes.items()
-                   if n.tier not in ("L0", "L1")
-                   and (n.trust < min_trust
-                        or (ts - n.last_access) > stale_s and n.access_count == 0)]
-        over = len(self.notes) - len(victims) - max_notes
-        if over > 0:
-            rest = sorted((n for n in self.notes.values()
-                           if n.note_id not in set(victims)
-                           and n.tier not in ("L0", "L1")),
-                          key=lambda n: (n.access_count, n.last_access))[:over]
-            victims += [n.note_id for n in rest]
+        victims, by_reason = self._select_prune_victims(
+            max_notes=max_notes, min_trust=min_trust, stale_s=stale_s, ts=ts)
+        #: ⛔⛔ 剪枝是**不可逆**操作 ⇒ 删了什么必须留痕。不留的话，"这条记忆
+        #:    去哪了"在事实源里根本不存在 —— 与 V5 "except 吞异常"同族：
+        #:    静默丢失，且事后无从追究。没挂账本时**照删但记账失败原因**。
+        for nid in victims:
+            n = self.notes.get(nid)
+            if n is None:
+                continue
+            if self.ledger is None:
+                self._ledger_error = "ledger_not_attached（剪枝未留痕）"
+                break
+            try:
+                self.ledger.append(
+                    "memory.pruned",
+                    {"note_id": nid, "tier": n.tier,
+                     "trust": round(float(n.trust), 4),
+                     "access_count": int(n.access_count),
+                     "age_s": round(ts - n.last_access, 1),
+                     "content_hash": content_hash(n.content)},
+                    actor=actor)
+            except Exception as e:  # noqa: BLE001
+                self._ledger_error = f"{type(e).__name__}: {e}"
+                break
         for nid in victims:
             n = self.notes.pop(nid, None)
             if n:
                 self._by_fp.pop(n.fingerprint, None)
+        self.last_prune = {"n": len(victims), "by_reason": by_reason,
+                           "remaining": len(self.notes)}
         return victims
+
+    def _select_prune_victims(self, *, max_notes: int, min_trust: float,
+                              stale_s: float,
+                              ts: float) -> Tuple[List[str], Dict[str, int]]:
+        """剪枝判据的**唯一事实源** —— dry-run 与真剪共用同一份。
+
+        ⛔ 两条判据各写一份是灾难：`memory prune` 报"要剪 5 条"，真剪却剪了
+        7 条，而没人能说清差在哪（与 V5 "分数定义必须唯一来源"同源）。
+        """
+        by_reason = {"low_trust": 0, "stale_unused": 0, "over_capacity": 0}
+        victims: List[str] = []
+        for nid, n in self.notes.items():
+            if n.tier in ("L0", "L1"):
+                continue        # ⛔ 元规则与路由索引永不剪
+            if n.trust < min_trust:
+                victims.append(nid)
+                by_reason["low_trust"] += 1
+            elif (ts - n.last_access) > stale_s and n.access_count == 0:
+                victims.append(nid)
+                by_reason["stale_unused"] += 1
+        over = len(self.notes) - len(victims) - max_notes
+        if over > 0:
+            vset = set(victims)
+            rest = sorted((n for n in self.notes.values()
+                           if n.note_id not in vset
+                           and n.tier not in ("L0", "L1")),
+                          key=lambda n: (n.access_count, n.last_access))[:over]
+            victims += [n.note_id for n in rest]
+            by_reason["over_capacity"] += len(rest)
+        return victims, by_reason
+
+    def prune_dryrun(self, *, max_notes: int = 10000,
+                     min_trust: float = 0.05,
+                     stale_s: float = 30 * 86400.0,
+                     now: Optional[float] = None) -> Dict[str, Any]:
+        """只算不删（**默认路径**）。判据与 `prune()` 同源。
+
+        ⛔ 为什么自动路径只报数不删：剪枝不可逆，而"产物增殖闸"要的是
+        **看得见**，不是自动删。 evolve 结束时跑这个 ⇒ 该不该剪由人决定。
+        """
+        ts = now if now is not None else time.time()
+        victims, by_reason = self._select_prune_victims(
+            max_notes=max_notes, min_trust=min_trust, stale_s=stale_s, ts=ts)
+        return {"n": len(victims), "by_reason": by_reason,
+                "remaining": len(self.notes) - len(victims),
+                "total": len(self.notes),
+                "sample": victims[:10], "applied": False}
+
+    def prune_report(self) -> Dict[str, Any]:
+        """上一次**真**剪枝的分账。没跑过返回全零表（不给 None）。"""
+        r = self.last_prune
+        if r:
+            return dict(r)
+        return {"n": 0, "by_reason": {}, "remaining": len(self.notes),
+                "note": "not_run"}
 
     # ── 重索引：换 embedder 的**唯一**合法路径 ──────────────────────
     def reindex(self, new_embedder: Any, *,
@@ -700,6 +858,9 @@ class MemoryOS:
             mem.notes[note.note_id] = note
             mem._by_fp[note.fingerprint] = note.note_id
             rep["loaded"] += 1
+        #: 存量自愈（幂等）：旧的 consolidate 无脑追加 consolidated 标签，
+        #: 生产库里同一条 note 最多重复 19 次。装载即压平，不必等下次巩固。
+        rep["tags_deduped"] = mem.dedup_tags()
         return mem, rep
 
 
@@ -735,3 +896,69 @@ def _extractive_summary(notes: List[MemNote]) -> str:
             continue
         parts.append(sents[0])
     return " ".join(parts)[:400]
+
+
+# ── 跨条归纳（巩固的正确形态）──────────────────────────────────────
+_NUM = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _skeleton(text: str) -> str:
+    """把数字替换成占位符，得到该条记录的"模板骨架"。
+
+    纯机械正则替换，**不做任何语义归纳** ⇒ 不可能编造。
+    骨架相同 = 两条记录由同一个模板产出，才谈得上"归纳出模式"。
+    """
+    return _NUM.sub("#", text or "").strip()
+
+
+def _slots(text: str) -> Tuple[str, ...]:
+    """取出该条记录里所有数字（= 骨架上的"槽位取值"）。"""
+    return tuple(_NUM.findall(text or ""))
+
+
+def _inductive_summary(notes: List[MemNote], max_chars: int = 400) -> str:
+    """跨 note 的抽取式归纳：保留模板骨架 + 枚举每个槽位的取值分布。
+
+    ⛔⛔ 巩固的语义是**聚合**，不是逐条复制（2026-10-14 修）：
+    旧实现 `for n in pool: summ([n])` 逐条调 `_extractive_summary`，
+    而抽取式摘要取的是首句 ⇒ 对单条 note 而言**摘要恒等于原文**；
+    写回 L3 时内容指纹必然命中它自己 ⇒ 一律 `deduped` ⇒ 产出恒 0。
+    （实测：生产库 33 条 L4，consolidate 返回 0 条。）
+
+    归纳输出在文本上**必然不同于任何单条原文**（多了骨架与槽位分布），
+    所以不会自我去重；而"同样一组再巩固一次"仍会 dedup —— 那是对的：
+    没有新信息就不该产出新知识。
+
+    ⛔ 全程仍是抽取：只搬运原文里**出现过**的数字与句子，不生成新句子
+    ⇒ 不会把幻觉带进会被 promote 的 L2/L3。
+    """
+    if len(notes) < 2:
+        return ""
+    skel = _skeleton(notes[0].content)
+    slots = [_slots(n.content) for n in notes]
+    nslot = len(slots[0])
+    if nslot == 0 or any(len(s) != nslot for s in slots):
+        #: 槽位数不一致 ⇒ 不同构，归纳出的"模式"不可校验 ⇒ 如实不产出
+        return ""
+    if any(_skeleton(n.content) != skel for n in notes):
+        #: ⛔ 槽位数**相同但文字骨架不同**（如 "基线 reward=1，候选 2 个"
+        #:    vs "上限 reward=3，阶段 4 个"）：数字个数一样但根本不是同一个
+        #:    模板 ⇒ 拿第一条的骨架去归纳会编造出一个两条都不成立的"模式"
+        #:    ⇒ 必须拒绝。这是"抽取式"的最后一道闸：宁可不产出，不误导。
+        return ""
+    cols: List[Tuple[str, ...]] = []
+    for j in range(nslot):
+        vals: List[str] = []
+        for s in slots:
+            if s[j] not in vals:
+                vals.append(s[j])
+        cols.append(tuple(vals))
+    bits: List[str] = []
+    for j, vals in enumerate(cols):
+        if len(vals) == 1:
+            bits.append(f"槽位{j}恒为 {vals[0]}")
+        else:
+            shown = "/".join(vals[:8]) + ("..." if len(vals) > 8 else "")
+            bits.append(f"槽位{j}取 {len(vals)} 种：{shown}")
+    head = f"归纳 {len(notes)} 条同类归档，模板：{skel}"
+    return (head + " | " + "；".join(bits))[:max_chars]

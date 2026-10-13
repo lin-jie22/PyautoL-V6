@@ -1671,3 +1671,130 @@ A11 + A14 红；整数值不用 BigInt ⇒ A11×2 + A13 红；指数阈值改 1e
 2. 沙箱：接入层复用的仍是 `environment` 的进程沙箱；`trusted=True` 的
    inproc 能力**不受沙箱约束**（它在宿主进程里跑）—— 这是 `trusted` 的语义。
 3. 清单里的 `python` 形态 = 任意代码进本进程 ⇒ 信任边界是"写清单的人"。
+
+---
+
+## 24. 巩固链：参数与接口契约（2026-10-14 第 23 轮）
+
+这一节是**接口对齐**，不含论证（论证见宪法第 39 / 40 条）。
+
+### 24.1 `MemoryOS` 侧参数
+
+| 签名 | 变更 | 说明 |
+|---|---|---|
+| `consolidate(*, max_age_s=86400.0, min_access=2, summarizer=None, min_group=2, now=None)` | **新增 `min_group`** | 一组少于 `min_group` 条不归纳（1 条归纳不出"模式"）。其余参数语义不变 |
+| `summarizer` 的契约 | **改了** | 旧：`Callable[[List[MemNote]], str]`，但被**逐条**调用（`summ([n])`）。新：**整组传入**（`summ(grp)`），必须返回"跨条"文本。⛔ 传一个逐条复制的函数 ⇒ 产出恒 0（E1 钉住） |
+| `consolidation_report()` | **新增** | 返回上一次巩固的分账 dict；没跑过返回全零表 + `note="not_run"`，**绝不返回 None** |
+| `dedup_tags()` | **新增** | 幂等，返回被修改条数。装载时自动调一次（`load()` 里），报告记 `tags_deduped` |
+
+返回值：`consolidate` 仍返回 `List[MemNote]`（向后兼容），**分账不在这里**，
+必须读 `consolidation_report()`。
+
+### 24.2 分账字段（`consolidation_report()`）
+
+| 字段 | 含义 | 处置不同在哪 |
+|---|---|---|
+| `pool` | 进入候选的 L4 条数 | `0` ⇒ 根本没有素材 |
+| `groups` | 分出的组数 | — |
+| `made` | 真写出新知识的条数 | 这才是"巩固成功" |
+| `deduped` | 同样的归纳已存在 | **正确结果**：没有新信息 ⇒ 不该产出 |
+| `skipped_below_min_group` | 组内不足 `min_group` 条 | 素材不够 |
+| `skipped_not_isomorphic` | 槽位数不同 **或** 文字骨架不同 | 不是同一个模板 ⇒ 拒绝，不编造 |
+| `skipped_empty` / `rejected` | 摘要为空 / 写入被拒 | — |
+| `trigger` | CLI 侧附加 | `stagnant` / `all_committed` |
+| `idle_rounds` / `uncommitted_rounds` | CLI 侧附加 | 让"为什么触发"可读 |
+
+⛔⛔ `made` 绝不能单独使用。只看一个数字的话，"没有新信息"与"机制坏了"
+在输出里长得一模一样 —— 这正是原 bug 藏了两轮的原因。
+
+### 24.3 L4 写入契约（CLI → 巩固的**输入**契约）
+
+CLI 每轮写一条 L4，`source=f"round{n}"`，内容**必须**是同一套模板，且
+**数字个数固定**（否则归纳器判不同构 ⇒ 拒收）：
+
+```
+第 {round_no} 轮进化：基线 reward={base:.2f}，候选 {n} 个，被拒 {rej} 个，
+结果={提交|回滚}，裁决 {verdict}，易层增益 {easy:+.2f}，难层增益 {hard:+.2f}，
+空转 {0|1}
+```
+
+⛔ 三条硬约束：
+1. **不许把 hash / id 写进内容** —— 十六进制 hash 里的数字个数随 hash 浮动
+   （实测 3~7 槽），会让同模板的记录互相判成不同构。要带 id 请放 `source`
+   或 `keywords`，不要放 `content`。
+2. **数字必须恒定存在**：`%+.2f` 保证增益位哪怕为 0 也是一个数字。写成
+   `"增益 {x}"` 而 `x` 有时为空 ⇒ 槽位数漂移 ⇒ 拒收。
+3. `verdict` 取自受控词表（`generalize` / `overfit` / `inconclusive` /
+   `out_of_reach` / `none`），不是自由文本 —— 自由文本会打碎骨架。
+
+### 24.4 触发条件契约
+
+```
+触发 ⟺ 存在未提交的轮次（uncommitted_rounds > 0）
+```
+
+⛔ 不是 `idle`。`idle` 只在"压根没事可做"时为真，而
+`no_candidate_passed`（**有候选、全被闸拒**）恰恰是最该沉淀的场景 ——
+实测三轮 `idle_rounds=0`，用 `idle` 当触发会让修复好的机制一次都不跑。
+
+### 24.5 兼容性
+
+- `consolidate` 返回值类型不变；`memory_consolidated: int` **保留**
+  （= `made`），新增 `memory_consolidation: dict` 承载分账。
+- 旧格式 L4 不会被删，只会被判不同构而 `skip`（有账）。要让它们重新可归纳，
+  只能靠新格式积累 —— 不为历史数据放宽判据。
+
+---
+
+## 25. 产物增殖闸：接口与接线（2026-10-14 第 23 轮 · D）
+
+`MemoryOS.prune()` 一直有实现，但**全仓库零调用点** ⇒ 这条闸是装饰。接线时
+的关键判断：**剪枝不可逆**，所以"闸被接上"的判据不是"会自动清理"，而是
+**增殖这件事第一次可读**。
+
+### 25.1 三条路径
+
+| 路径 | 调用 | 行为 |
+|---|---|---|
+| `evolve` 结束 | `prune_dryrun()` | 只把"将剪 N 条"写进输出 `memory_prune`。**不删** |
+| `aether.cli memory prune` | `prune_dryrun()` | 同上（安全默认），并提示加 `--apply` |
+| `aether.cli memory prune --apply` | `prune()` | 真删，**逐条往账本 append `memory.pruned`** |
+
+⛔ 自动路径一律不删。该不该剪由人决定 —— 与"涉及生产语义的变更保留人工
+审批节点"是同一条纪律。
+
+### 25.2 判据唯一事实源
+
+`_select_prune_victims()` 是**唯一**的选人逻辑，`prune()` 与 `prune_dryrun()`
+都调它。⛔ 两份判据的后果：`memory prune` 报"要剪 5 条"、真剪剪了 7 条，
+而没人能说清差在哪（B3 钉住）。
+
+| 原因 | 条件 |
+|---|---|
+| `low_trust` | `trust < min_trust` |
+| `stale_unused` | `now - last_access > stale_s` **且** `access_count == 0` |
+| `over_capacity` | 超出 `max_notes`，按 `(access_count, last_access)` 升序剪 |
+
+⛔ L0 / L1（元规则与路由索引）**永不剪**，哪怕 `trust=0` 且 900 天没访问（A2）。
+
+### 25.3 留痕契约
+
+剪枝不可逆 ⇒ 每条删除都 `append("memory.pruned", {...})`，payload 含
+`note_id` / `tier` / `trust` / `access_count` / `age_s` / `content_hash`。
+
+⛔ 没挂账本时**照删但点亮 `_ledger_error`**，CLI 见到它就打印 ❌ 并返回 1 ——
+不留痕的删除是数据事故，不是"删成功就完事"（C4 / E2）。
+
+### 25.4 CLI 参数
+
+```
+memory prune [--apply] [--max-notes N] [--min-trust F] [--stale-days D]
+```
+
+默认 `max-notes=10000`、`min-trust=0.05`、`stale-days=30`。
+
+### 25.5 为什么契约里有 G 组（端点测试）
+
+只测 `MemoryOS.prune` 的话，CLI 那行根本没被调用也能全绿 —— 与 §18
+"测组件 ≠ 测端点"是同一个洞。G 组走**真 CLI**（`--root` 指向临时目录），
+断言 dry-run 落盘条数不变、`--apply` 真删了且 L0 保住。

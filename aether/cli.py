@@ -155,6 +155,39 @@ def cmd_memory(args: argparse.Namespace) -> int:
                   f"「此刻库里有它」，不证明它当初是这么写进来的）")
         return 0 if after.get("ledger_trace") in ("complete", "pre_ledger") else 1
 
+    if args.memory_cmd == "prune":
+        #: ⛔⛔ **默认只报数，不删**。剪枝不可逆，而"产物增殖闸"要的是
+        #:    **看得见**（库在增殖 ⇒ 有人该决定怎么办），不是自动删。
+        #:    真删必须显式 `--apply`，且每条都往账本 append `memory.pruned`
+        #:    ⇒ 事后能回答"这条记忆去哪了"。
+        from .embeddings import HashingEmbedder
+        led = Ledger(p["ledger"])
+        mem, _ = MemoryOS.load(p["memory"], HashingEmbedder(dim=256),
+                               min_content_len=60)
+        mem.attach_ledger(led)
+        kw = {"max_notes": int(getattr(args, "max_notes", 10000)),
+              "min_trust": float(getattr(args, "min_trust", 0.05)),
+              "stale_s": float(getattr(args, "stale_days", 30)) * 86400.0}
+        if not getattr(args, "apply", False):
+            dry = mem.prune_dryrun(**kw)
+            print(json.dumps(dry, ensure_ascii=False, indent=2))
+            print(f"ℹ️ dry-run：共 {dry['total']} 条，将剪 {dry['n']} 条"
+                  f"（{dry['by_reason']}）⇒ 真删请加 --apply")
+            return 0
+        victims = mem.prune(actor="cli.memory.prune", **kw)
+        mem.save(p["memory"])
+        rep = mem.prune_report()
+        err = getattr(mem, "_ledger_error", "")
+        print(json.dumps({"applied": True, "victims": len(victims), **rep,
+                          "ledger_error": err},
+                         ensure_ascii=False, indent=2))
+        #: ⛔ 剪了却没留痕 ⇒ 明知有事故也要报出来（不是"删成功就完事"）
+        if err:
+            print(f"❌ 已剪 {len(victims)} 条，但**没留痕**：{err}", file=sys.stderr)
+            return 1
+        print(f"✅ 已剪 {len(victims)} 条并逐条留痕（remaining={rep['remaining']}）")
+        return 0
+
     # ── reindex ──────────────────────────────────────────────────
     before = memory_report(p["memory"])
     if not before.get("present"):
@@ -641,10 +674,24 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     final, reports = loop.run(h0, rounds=int(args.rounds))
 
     for r in reports:
+        #: ⛔ L4 是巩固的**唯一输入**。旧写法只记轮次模板（"第 N 轮：基线
+        #:    reward=X，候选 M 个，结果=Y"），各轮之间只差数字 ⇒ 巩固归纳
+        #:    出来还是模板，没有可沉淀的信息。现在把"这一轮到底为什么没成"
+        #:    一并写进去（裁决 / 被拒数 / 分层增益 / 是否空转），巩固才有料。
+        _g = r.generalization if isinstance(r.generalization, dict) else {}
+        _verdict = str(_g.get("verdict") or "none")
+        #: ⛔ `r.candidates` 是 Candidate 对象（不是 dict）—— 判据/取值必须与
+        #:    被测对象同源，别照抄 JSON 输出里的 `.get()` 写法。
+        _rej = sum(1 for c in r.candidates if not getattr(c, "accepted", False))
+        _by = _g.get("dev_by_difficulty") or {}
+        _easy = float(_by.get("easy") or 0.0)
+        _hard = float(_by.get("hard") or 0.0)
         mem.write("L4",
                   f"第 {r.round_no} 轮进化：基线 reward={r.baseline_reward:.2f}，"
-                  f"候选 {len(r.candidates)} 个，"
-                  f"结果={'提交 ' + (r.committed or '')[:8] if r.committed else '回滚：' + r.revert_reason}",
+                  f"候选 {len(r.candidates)} 个，被拒 {_rej} 个，"
+                  f"结果={'提交' if r.committed else '回滚'}，裁决 {_verdict}，"
+                  f"易层增益 {_easy:+.2f}，难层增益 {_hard:+.2f}，"
+                  f"空转 {1 if r.idle else 0}",
                   channel="system", source=f"round{r.round_no}")
         if r.weakness:
             mem.write("L3",
@@ -659,7 +706,25 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         promoted.append({"note": nid, "ok": ok, "why": why})
     # fail-closed：无验证器 ⇒ 拒绝提升
     _, no_verifier_why = mem.promote(list(mem.notes)[0], verifier=None) if mem.notes else (False, "")
-    consolidated = mem.consolidate(min_access=0)
+    #: ⛔ 巩固是"睡眠期"行为 —— 只在**没变好**时才做，而不是无条件每轮跑
+    #:    （旧行为跑是跑了，但"产出 0 是因为没有新信息"还是"因为机制坏了"
+    #:    完全不可分辨，只能靠猜）。
+    #:
+    #: ⛔⛔ 触发信号不能只用 `idle`（2026-10-14 实测打脸）：round2/3 是
+    #:    `no_candidate_passed` —— **有候选、全被闸拒**，这恰恰是最该沉淀
+    #:    教训的场景，而 `idle` 只在"压根没事可做"时才为真 ⇒ 实测三轮
+    #:    idle_rounds=0 ⇒ 巩固一次都没被触发，等于把修好的机制又关掉了。
+    #:    正确的语义是「这一轮没提交 ⇒ 有失败素材可反思」。
+    _idle = [r for r in reports if getattr(r, "idle", False)]
+    _uncommitted = [r for r in reports if not getattr(r, "committed", None)]
+    if _uncommitted:
+        consolidated = mem.consolidate(min_access=0)
+    else:
+        consolidated = []
+    _cons_rep = mem.consolidation_report()
+    _cons_rep["trigger"] = "stagnant" if _uncommitted else "all_committed"
+    _cons_rep["idle_rounds"] = len(_idle)
+    _cons_rep["uncommitted_rounds"] = len(_uncommitted)
     # ⛔ 提议器诊断必须落盘：看到"0 个候选"时要能分辨
     #    「闸在工作」/「模型没接通」/「输出被截断」—— 三者处置完全不同，
     #    缺了它，进化循环"正确地什么都不做"和"供给根本没通"长得一模一样。
@@ -696,6 +761,14 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "memory_promote": promoted,
         "memory_promote_without_verifier": no_verifier_why,
         "memory_consolidated": len(consolidated),
+        #: ⛔ 分账（不再只报一个数字）：made / deduped / skipped_* 各自独立，
+        #:    否则"没新信息"与"机制坏了"不可分辨。
+        "memory_consolidation": _cons_rep,
+        #: ⛔ 产物增殖闸的**读数**（2026-10-14 接线）：之前 `prune()` 有实现
+        #:    却零调用点 ⇒ 这条闸是装饰。自动路径**只报数不删** —— 剪枝不
+        #:    可逆，该不该剪由人决定（`aether.cli memory prune --apply`）。
+        #:    于是"库在增殖"这件事第一次变得可见。
+        "memory_prune": mem.prune_dryrun(),
     }
     mem_saved = mem.save(p["memory"])
     out["memory_load"] = mem_load
@@ -791,6 +864,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     mr = ms.add_parser("reindex", help="换 embedder 后的唯一合法恢复路径")
     mr.add_argument("--to", default="hash", choices=["hash", "ollama"],
                     help="目标嵌入器")
+    mp = ms.add_parser("prune", help="产物增殖闸：默认只报数，加 --apply 才真删")
+    mp.add_argument("--apply", action="store_true",
+                    help="真的删除（默认 dry-run：只算不删）")
+    mp.add_argument("--max-notes", default="10000", help="容量上限")
+    mp.add_argument("--min-trust", default="0.05", help="低于此信任度即剪")
+    mp.add_argument("--stale-days", default="30", help="未访问超过这么多天且零访问即剪")
     c = sub.add_parser("caps", help="接入层：列出 / 查看 / 调用 agents 与 skills")
     c.add_argument("--caps", default="",
                    help="能力清单 JSON（不传则只显示源码内注册的能力）")
