@@ -33,18 +33,94 @@ export interface Event {
   hash: string;
 }
 
-/** 与 Python `_norm` 对齐：整数值的 float 降级为 int。 */
-function norm(v: unknown): unknown {
-  if (Array.isArray(v)) return v.map(norm);
-  if (v !== null && typeof v === "object") {
-    const out: Record<string, unknown> = {};
-    for (const k of Object.keys(v as object).sort()) {
-      out[k] = norm((v as Record<string, unknown>)[k]);
-    }
-    return out;
+/** 按 **Unicode 码位**比较（不是 UTF-16 码元）。
+
+⛔⛔ `Array.prototype.sort()` 默认按 UTF-16 码元排，而 Python 的
+`sort_keys` 按**码位**排。两者在非 BMP 字符（emoji、U+20000 以上的汉字）
+上**顺序相反**：
+  · 码位：`"�"`(U+FFFD=65533) < `"😀"`(U+1F600=128512)
+  · UTF-16：`"😀"` 的首码元 \uD83D(55357) < `"�"`(65533)
+⇒ 键序不同 ⇒ canonical JSON 不同 ⇒ hash 不同 ⇒ 监督器把**完好的**账本
+判成"payload 被篡改"（假红，且真因极难排查）。实测用例 `emoji_key`。
+⛔ 于是这里**不能**用 `.sort()`，必须自己比码位。
+*/
+function cmpCodePoint(a: string, b: string): number {
+  const A = Array.from(a);          // 按码位切分（不是 UTF-16 码元）
+  const B = Array.from(b);
+  const n = Math.min(A.length, B.length);
+  for (let i = 0; i < n; i++) {
+    const d = (A[i].codePointAt(0) as number) - (B[i].codePointAt(0) as number);
+    if (d !== 0) return d;
   }
-  if (typeof v === "number" && Number.isInteger(v)) return v; // JS 已是 "1"
-  return v;
+  return A.length - B.length;       // 前缀短的在前（与 Python 一致）
+}
+
+/** 字符串转义 —— 与 Python `json.dumps(ensure_ascii=False)` 对齐。 */
+function escStr(s: string): string {
+  let out = '"';
+  for (const ch of s) {             // 按码位迭代
+    const c = ch.codePointAt(0) as number;
+    if (ch === '"') out += '\\"';
+    else if (ch === "\\") out += "\\\\";
+    else if (c === 0x08) out += "\\b";
+    else if (c === 0x0c) out += "\\f";
+    else if (c === 0x0a) out += "\\n";
+    else if (c === 0x0d) out += "\\r";
+    else if (c === 0x09) out += "\\t";
+    else if (c < 0x20) out += "\\u" + c.toString(16).padStart(4, "0");
+    else out += ch;
+  }
+  return out + '"';
+}
+
+/** 把指数部分补到**至少两位**（`1e-7` ⇒ `1e-07`）。
+
+⛔ Python `repr` 的指数恒为 2 位起（`1e-07`、`1e+16`），JS 是 1 位起
+（`1e-7`、`1e+7`）⇒ 任何小浮点数（1e-7 量级的 reward / epsilon / 概率）
+都会让两端算出不同 hash。
+*/
+function padExp(s: string): string {
+  const m = /e([+-])(\d+)$/.exec(s);
+  if (!m) return s;
+  return s.slice(0, m.index) + "e" + m[1] + m[2].padStart(2, "0");
+}
+
+/** 数字格式化 —— 与 Python `_norm` + `json.dumps(float)` 对齐（实测基准）。
+
+⛔⛔ **不要用 `JSON.stringify` 序列化 number**：JS 与 Python 的 number→string
+规则在三处不同，每处都会让监督器假红：
+  ① 指数补零：`1e-7` vs `1e-07`（实测 `float_small` 用例 drift）
+  ② 指数阈值：JS <1e-6 / ≥1e21 用指数，Python <1e-4 / ≥1e16 用指数
+     ⇒ `1e-5` 在两端一个定点一个指数
+  ③ 整数值 float：Python `_norm` 转 `int` 后用**定点**（1e21 ⇒ 22 位整数，
+     1e308 ⇒ 309 位整数），JS `String(1e21)` 给 `1e+21`
+⛔ 简化依据：|x| ≥ 2^53 的 float **必为整数值**（精度所限）⇒ 走 BigInt
+定点分支；于是"非整数 float"必 |x| < 9e15 < 1e16 ⇒ **只有 `|x| < 1e-4`
+才需要指数形式**，其余用定点最短往返即可。
+*/
+function fmtNumber(x: number): string {
+  if (Number.isNaN(x)) return "NaN";            // Python: NaN
+  if (x === Infinity) return "Infinity";        // Python: Infinity
+  if (x === -Infinity) return "-Infinity";      // Python: -Infinity
+  if (Number.isInteger(x)) return BigInt(x).toString();  // 定点，含 309 位
+  const ax = Math.abs(x);
+  if (ax < 1e-4) return padExp(x.toExponential());
+  return String(x);
+}
+
+/** 递归序列化（手写，不用 JSON.stringify —— 见 `fmtNumber` 的注释）。 */
+function ser(v: unknown): string {
+  if (v === null) return "null";
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "number") return fmtNumber(v);
+  if (typeof v === "string") return escStr(v);
+  if (Array.isArray(v)) return "[" + v.map(ser).join(",") + "]";
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    const keys = Object.keys(o).sort(cmpCodePoint);
+    return "{" + keys.map((k) => escStr(k) + ":" + ser(o[k])).join(",") + "}";
+  }
+  return "null";        // undefined / function ⇒ Python 侧不会出现
 }
 
 /** 银行家舍入（round-half-to-even）—— **必须与 Python `round()` 一致**。
@@ -64,9 +140,9 @@ export function roundHalfEven(x: number): number {
   return f % 2 === 0 ? f : f + 1;      // 恰好 .5 ⇒ 取偶
 }
 
-/** 与 Python `canonical_json` 对齐。 */
+/** 与 Python `canonical_json` 对齐（键排序 + 紧凑分隔 + 数字规则）。 */
 export function canonicalJson(obj: unknown): string {
-  return JSON.stringify(norm(obj));
+  return ser(obj);
 }
 
 export function contentHash(obj: unknown): string {

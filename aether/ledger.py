@@ -48,7 +48,15 @@ HYDRATE_TAIL_BYTES = 64 * 1024
 LEDGER_VERSION = 1
 
 
-def _norm(obj: Any) -> Any:
+#: JS `Number` 能精确表示的最大整数（2^53）。
+#: ⛔ 超过它的 **int 字面量**在 TS 侧 `JSON.parse` 时就会丢精度
+#:    （`9007199254740993` ⇒ `...992`）⇒ 两端 hash 必然不同（实测用例
+#:    `bigint_2p53p1`）。这是 JS 的语言限制，TS 侧无法补救 ⇒ 只能在
+#:    **写入侧**拦住（见 `_norm`）。
+JS_MAX_SAFE_INT = 2 ** 53
+
+
+def _norm(obj: Any, _path: str = "$") -> Any:
     """数字规范化：**跨语言序列化一致性的关键**。
 
     Python 的 `json.dumps(1.0)` 是 `1.0`，JS 的 `JSON.stringify(1.0)` 是 `1`
@@ -56,11 +64,29 @@ def _norm(obj: Any) -> Any:
 
     约定：整数值的 float 一律降级为 int（`1.0 → 1`）。
     非整数 float 两边都用"最短往返表示"（Python repr / JS String），通常一致。
+
+    ⛔⛔ **超出 JS 安全整数范围的 int ⇒ 抛错，绝不静默**：
+        静默的后果是算出一个 TS 端**永远对不上**的 hash ⇒ 监督器把完好的
+        账本报成"payload 被篡改"（假红，真因极难排查）。宁可写不进去，
+        不可写进去一个监督器校验不了的事实（宪法：绝不静默降级）。
+        ⛔ 只拦**原始 int**：整数值的 float（如 `1e308` ⇒ 309 位整数）
+        不拦 —— 那个值本来就是某个 float 的精确十进制展开，TS 侧
+        `BigInt(x).toString()` 能精确往返（3014 个随机 float 实测全一致）。
     """
+    #: ⛔ `bool` 是 `int` 的子类，必须先排除，否则 `True` 会被当整数检查
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, int):
+        if -JS_MAX_SAFE_INT <= obj <= JS_MAX_SAFE_INT:
+            return obj
+        raise ValueError(
+            f"跨语言不安全：{_path} 的 int {obj} 超出 JS 安全整数范围 "
+            f"(±{JS_MAX_SAFE_INT})，TS 监督器 JSON.parse 会丢精度 ⇒ 两端 "
+            f"hash 必然不同。改用字符串或毫秒（纳秒时间戳 1.79e18 也会命中）。")
     if isinstance(obj, dict):
-        return {k: _norm(v) for k, v in obj.items()}
+        return {k: _norm(v, f"{_path}.{k}") for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
-        return [_norm(v) for v in obj]
+        return [_norm(v, f"{_path}[{i}]") for i, v in enumerate(obj)]
     if isinstance(obj, float) and obj.is_integer():
         return int(obj)
     return obj

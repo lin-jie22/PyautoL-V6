@@ -10,7 +10,7 @@
  * 这一项立刻变红。
  */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readLedger, readLedgerIter, verifyChain, canonicalJson, contentHash,
@@ -90,6 +90,103 @@ print(ev.hash)
       ck("A10 舍入取偶：...736.5 ⇒ ...736（不是 half-up 的 ...737）",
          identity(hev[0]).ts === 1791871960736,
          String(identity(hev[0]).ts));
+    }
+
+    // ── A11+：canonical 序列化的**数字与键序**形态 ──────────────────
+    //    ⛔ 2026-10-13 实测：这四类形态在改造前**全部 drift**，且 drift 的
+    //       方向是"监督器把完好的账本判成 payload 被篡改"（假红，真因是
+    //       语言差异，极难排查）：
+    //         ① 指数补零    `1e-7`  vs `1e-07`（任何 1e-7 量级的 reward/ε）
+    //         ② 指数阈值    `1e-5`  Python 指数 / JS 定点
+    //         ③ 整数值大 float `1e21` Python 定点 22 位 / JS `1e+21`
+    //         ④ 非 BMP 键序 码位序 vs UTF-16 码元序（emoji 键名顺序相反）
+    //       生产账本 1533 条里四类**全部 0 命中** ⇒ 是潜伏地雷，不是已爆的雷。
+    const driftPath = join(dir, "drift.jsonl");
+    let pyDrift = "";
+    try {
+      pyDrift = execFileSync(PY, ["-c", `
+import sys, json, random
+sys.path.insert(0, ${JSON.stringify(ROOT)})
+from aether.ledger import Ledger, canonical_json
+L = Ledger(${JSON.stringify(driftPath)})
+CASES = [
+    ("float_small",   {"f": 1e-7}),
+    ("float_1e_5",    {"f": 1e-5}),
+    ("float_1e21",    {"f": 1e21}),
+    ("float_1e308",   {"f": 1e308}),
+    ("float_neg_exp", {"f": -1e-7}),
+    ("emoji_key",     {"\\U0001F600": 1, "�": 2, "a": 3}),
+    ("nested_emoji",  {"n": {"\\U0001F600": 1, "z": 2}}),
+]
+cases = []
+for name, pl in CASES:
+    ev = L.append("cross.probe", pl, actor="probe")
+    cases.append({"case": name, "seq": ev.seq, "hash": ev.hash})
+bigint_err = "NOT_RAISED"
+try:
+    L.append("cross.bad", {"big": 2**53 + 1}, actor="probe")
+except ValueError:
+    bigint_err = "ValueError"
+random.seed(7)
+def rnd():
+    r = random.random()
+    if r < 0.4:  return random.random()
+    if r < 0.7:  return random.uniform(-1, 1) * 10 ** random.uniform(-320, 308)
+    if r < 0.85: return float(random.randint(-10**18, 10**18))
+    return random.uniform(-1, 1) * 10 ** random.uniform(-6, -3)
+vs = [rnd() for _ in range(600)]
+#: ⛔ 别写成一行里再调一次 rnd() 去填 v —— 那样 rnd() 会被调第二次，
+#:    v 与 cj 成了两个不同的随机数 ⇒ 600/600 假红（我第一版就这么写，
+#:    看起来像"实现全错"，其实是测试自己错了）。
+#: ⛔ 另外：这里的注释**不许出现反引号** —— 它在外层 TS 模板字符串里，
+#:    一个反引号就会把模板字符串提前终止（实测报
+#:    ERR_INVALID_TYPESCRIPT_SYNTAX，指到八竿子打不着的行）。
+fl = [{"v": repr(v), "cj": canonical_json({"f": v})} for v in vs]
+print(json.dumps({"cases": cases, "bigint_err": bigint_err, "floats": fl}))
+`], { encoding: "utf8", cwd: ROOT, maxBuffer: 64 * 1024 * 1024 }).trim();
+    } catch (e) {
+      ck("A11a Python 端可生成对拍数据", false, String(e).slice(0, 200));
+    }
+    if (pyDrift) {
+      const d = JSON.parse(pyDrift);
+      const dev = readLedger(driftPath);
+      const bySeq = new Map(dev.map((e) => [e.seq, e]));
+      // ⛔ 逐条对拍，不是"整链 ok 就完事"：整链 ok 只能证明这一批没漂，
+      //    说不清是哪条形态守住了（合成用例撞不到 ⇒ 必须显式造）。
+      for (const c of d.cases) {
+        const ev = bySeq.get(c.seq);
+        ck(`A11 ${c.case} ⇒ TS 与 Python 算出同一个 hash`,
+           !!ev && contentHash(identity(ev)) === c.hash,
+           ev ? `TS=${contentHash(identity(ev)).slice(0, 16)} PY=${c.hash.slice(0, 16)}` : "找不到事件");
+      }
+      ck("A12 超出 JS 安全整数的 int ⇒ Python 侧 **抛错**（不静默漂移）",
+         d.bigint_err === "ValueError", d.bigint_err);
+      let bad = 0;
+      let firstDiff = "";
+      for (const f of d.floats) {
+        const got = canonicalJson({ f: Number(f.v) });
+        if (got !== f.cj) {
+          bad++;
+          if (!firstDiff) firstDiff = `${f.v}: py=${f.cj} ts=${got}`;
+        }
+      }
+      ck(`A13 随机 float ${d.floats.length} 个：canonical 逐字一致`,
+         bad === 0, `${bad} 个不一致，例：${firstDiff}`);
+      ck("A14 非 BMP 键名按**码位**排序（不是 UTF-16 码元序）",
+         canonicalJson({ "😀": 1, "�": 2 }) === '{"�":2,"😀":1}',
+         canonicalJson({ "😀": 1, "�": 2 }));
+    }
+
+    // ── A15：真实账本整链校验（合成用例替代不了的覆盖）─────────────
+    //    ⛔ 合成用例永远撞不到真实形态（ts 半整数就是真实账本撞出来的）。
+    //       生产账本存在时**必须**跑一遍 —— 它是"跨语言契约没漂"的最强证据。
+    const realPath = join(ROOT, "data", "ledger.jsonl");
+    if (existsSync(realPath)) {
+      const rev = readLedger(realPath);
+      const rr = verifyChain(rev);
+      ck(`A15 真实账本（${rev.length} 条）TS 侧整链完整`, rr.ok, rr.reason);
+    } else {
+      console.log("  skip A15 真实账本不存在");
     }
   }
 
