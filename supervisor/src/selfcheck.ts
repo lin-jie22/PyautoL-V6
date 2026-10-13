@@ -215,6 +215,43 @@ print(ev.hash)
      !sameRunOtherRound.some((f) => f.code === "GENERALIZATION_GATE_BYPASSED"),
      JSON.stringify(sameRunOtherRound.map((f) => f.code)));
 
+  // ── C14/C15：闸的闸 —— 无判别力的 held-out 不许放行 ─────────────
+  //     `discriminative === false` = 这套 held-out 只有单一难度层，它无法
+  //     区分「真泛化」与「只会修一类题」。此时任何 `generalize` 都是实现
+  //     自相矛盾（Python 侧 `_downgrade_if_flat` 保证不输出）。
+  //     ⛔ 用 `=== false` 而非 falsy：`null`/undefined 是合法的"未打标签"。
+  const flatPass = detect([
+    ev(1, "gen.probe", { round_no: 1, capsule: "narrow", verdict: "generalize",
+                         dev_gain: 1, heldout_gain: 1,
+                         discriminative: false, sid: "s1" }),
+  ]);
+  ck("C14 discriminative=false 却判 generalize ⇒ critical（闸自身失效）",
+     flatPass.some((f) => f.code === "PASS_WITHOUT_DISCRIMINATION"
+                          && f.severity === "critical"),
+     JSON.stringify(flatPass.map((f) => f.code)));
+  ck("C14b 闸失效 ⇒ 退出码 2（CI 能吃到）", exitCode(flatPass) === 2,
+     String(exitCode(flatPass)));
+
+  // ⛔ 反证：三态不能被合并。`generalize` + `discriminative: true` 是
+  //    **正常放行**；`null`（没打标签）是"未测"，两者都**不许**报。
+  //    不写这条，把判据放宽成 `!discriminative` 也能全绿 ⇒ 反证失效。
+  const goodPass = detect([
+    ev(1, "gen.probe", { round_no: 1, capsule: "broad", verdict: "generalize",
+                         dev_gain: 1, heldout_gain: 1,
+                         discriminative: true, sid: "s1" }),
+  ]);
+  ck("C15 反证：有判别力（true）的放行 ⇒ 不报（不是闸失效）",
+     !goodPass.some((f) => f.code === "PASS_WITHOUT_DISCRIMINATION"),
+     JSON.stringify(goodPass.map((f) => f.code)));
+  const unlabeled = detect([
+    ev(1, "gen.probe", { round_no: 1, capsule: "broad", verdict: "generalize",
+                         dev_gain: 1, heldout_gain: 1,
+                         discriminative: null, sid: "s1" }),
+  ]);
+  ck("C15b 反证：未打标签（null）= 没测过 ⇒ 不报（不可判别 ≠ 有罪）",
+     !unlabeled.some((f) => f.code === "PASS_WITHOUT_DISCRIMINATION"),
+     JSON.stringify(unlabeled.map((f) => f.code)));
+
   // ── C13：Python 侧写出的事件必须带会话归属（判据的数据来源）──────
   let sidOk = false, sidDetail = "";
   try {

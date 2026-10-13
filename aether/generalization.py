@@ -76,6 +76,30 @@ class HeldOutSuite:
         """有没有难度跨度。⛔ 没有跨度的 held-out **判别力不足**。"""
         return len(self.levels) >= 2
 
+    @property
+    def discriminative(self) -> Optional[bool]:
+        """这套 held-out **有没有能力**区分「真泛化」与「只会修一类题」。
+
+        三态，⛔ 三态必须区分开，合成两态会把"没测"当成"没问题"：
+
+          True  —— 有难度标签**且**有跨度 ⇒ 判别力已确认；
+          False —— 有难度标签**但只有一层** ⇒ **有证据**的判别力不足
+                   （缺的那一层没被测，放行结论不可信）；
+          None  —— **没有难度标签** ⇒ 判别力**未测**，不是"不足"。
+                   （V5：不可判别 ≠ 有罪 —— 没测过不等于有问题，
+                     所以这种情况不拦，只在裁决里标注。）
+
+        ⛔ 存在理由（`False` 这一支）：2026-10-13 实测反证
+           `scripts/probe_spread_audit.py` —— 同一个"只在 easy 层涨"的
+           挑食候选，held-out 采到 hard 层 ⇒ `partial`（拦）；少采一层
+           ⇒ `generalize`（**放行**），且输出里照样带着 `by_difficulty`
+           字段，看起来像做过分层裁决。也就是说放行结论依赖的是
+           **采样量**，不是候选行为。
+        """
+        if not self.difficulty:
+            return None
+        return self.spread
+
 
 @dataclass
 class ProbeResult:
@@ -94,6 +118,10 @@ class ProbeResult:
     dev_by_difficulty: Dict[str, float] = field(default_factory=dict)
     #: 被判为"超出能力边界"的层（同层发展集也涨不动 ⇒ 不处罚，不是挑食）
     out_of_reach: Tuple[str, ...] = ()
+    #: held-out 自身的判别力三态（True/False/None，见 `HeldOutSuite.discriminative`）。
+    #: ⛔ False 出现在一个 `generalize` 裁决里 ⇒ 那个放行**不可信**，
+    #:   必须是 bug。观测侧要能一眼看见，不能只看 verdict。
+    discriminative: Optional[bool] = None
 
     @property
     def blocks(self) -> bool:
@@ -102,6 +130,7 @@ class ProbeResult:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"verdict": self.verdict,
+                "discriminative": self.discriminative,
                 "dev_gain": round(self.dev_gain, 4),
                 "heldout_gain": round(self.heldout_gain, 4),
                 "base_heldout": round(self.base_heldout, 4),
@@ -194,11 +223,65 @@ class GeneralizationGate:
             out[level] = c - b
         return out
 
+    # ── 判别力兜底：只降级"放行"，不覆盖已有的拦截结论 ──────────────
+    def _downgrade_if_flat(self, res: ProbeResult) -> ProbeResult:
+        """把一次**本来要放行**的裁决，在 held-out 无跨度时降级为拦截。
+
+        ⛔⛔ 为什么只作用在这一条路径上：
+          · `overfit` / `partial` / `no_gain` 都是**有确凿证据**的拦截
+            （held-out 没涨、某层挑食、发展集没涨）。判别力不足只会让
+            "放行"失去依据，**不会**让这些拦截失效 —— 用 inconclusive
+            覆盖它们等于把硬证据换成"我也不知道"，是信息倒退。
+          · 反过来，判别力不足时判 `generalize` 是在**下一个没有证据的
+            结论**，它与真放行在输出上完全同形（连 `by_difficulty` 都在）。
+
+        ⛔ 为什么 `None`（没打难度标签）不拦：那只是"没测过"，不是
+           "测了发现不行"。V5 纪律：不可判别 ≠ 有罪。拦它只会让所有
+           未分层的老配置一夜之间变成"永远不提交"。
+
+        ⛔ 这是**兜底**不是出路：正确的处置是先把 held-out 补采样到有
+           跨度（`repair.grow_for_difficulty`），本方法只负责"补不出来
+           的时候不许假装已验证"。
+        """
+        if self.suite.discriminative is not False:
+            return res
+        return ProbeResult(
+            verdict="inconclusive", dev_gain=res.dev_gain,
+            heldout_gain=res.heldout_gain, base_heldout=res.base_heldout,
+            cand_heldout=res.cand_heldout, n_tasks=res.n_tasks,
+            by_difficulty=res.by_difficulty,
+            dev_by_difficulty=res.dev_by_difficulty,
+            out_of_reach=res.out_of_reach, discriminative=False,
+            reason=(f"held-out 有难度标签但只有一层 {sorted(self.suite.levels)}"
+                    f" ⇒ 它无法区分「真泛化」与「只会修这一类题」⇒ 本可判 "
+                    f"generalize（ho {res.heldout_gain:+.4f}），但放行结论不可信"
+                    f" ⇒ 按拦截处理。出路：先把 held-out 补采样到有难度跨度"
+                    f"（--max-tasks 或 grow_for_difficulty），不要放宽判据"))
+
     # ── 裁决 ────────────────────────────────────────────────────────
     def probe(self, base_h: Harness, cand_h: Harness, runner: Runner,
               dev_gain: float,
               dev_by_difficulty: Optional[Dict[str, float]] = None
               ) -> ProbeResult:
+        """公开入口 = 裁决 + **统一后处理**。真正的判据在 `_probe_inner`。
+
+        ⛔ 判别力三态由这里统一写入，不在各分支里分别赋值：
+           它是 **held-out 自身的属性**，不是某个裁决分支的属性。让每个
+           分支自己填 ⇒ 只有"放行"分支会记得填，拦截分支全是 `None`
+           ⇒ 观测侧会把"拦了但 held-out 本就没判别力"误读成"没测过"
+           （实测：`overfit` 裁决上出现过 `discriminative=None`，
+            而同一套 held-out 在放行时是 `False`）。
+        """
+        res = self._probe_inner(base_h, cand_h, runner, dev_gain,
+                                dev_by_difficulty)
+        if res.discriminative is None:
+            res.discriminative = self.suite.discriminative
+        return res
+
+    def _probe_inner(self, base_h: Harness, cand_h: Harness, runner: Runner,
+                     dev_gain: float,
+                     dev_by_difficulty: Optional[Dict[str, float]] = None
+                     ) -> ProbeResult:
         """对 (基线, 候选) 做一次泛化裁决。
 
         ⛔ 判据顺序有讲究：先判"发展集到底涨没涨"，再判"涨的是不是泛化的"。
@@ -304,7 +387,8 @@ class GeneralizationGate:
                             f"「挑食」⇒ 按拦截处理（补该难度的 dev 任务后再判）"))
             # 未涨的层全是"发展集也修不动" ⇒ 能力边界，不是挑食 ⇒ 放行
             shown = sorted(f"{lv}{by_diff[lv]:+.4f}" for lv in out_of_reach)
-            return ProbeResult(verdict="generalize", dev_gain=dev_gain,
+            return self._downgrade_if_flat(ProbeResult(
+                               verdict="generalize", dev_gain=dev_gain,
                                heldout_gain=ho_gain, base_heldout=base_ho,
                                cand_heldout=cand_ho, n_tasks=self.suite.n_tasks,
                                by_difficulty=by_diff,
@@ -313,15 +397,16 @@ class GeneralizationGate:
                                reason=(f"发展集 +{dev_gain:.4f} 且 held-out {ho_gain:+.4f}"
                                        f"（分层 {by_diff}）⇒ 泛化，放行。"
                                        f" {shown} 未涨但发展集同层同样未涨"
-                                       f" ⇒ 判为能力边界而非挑食"))
-        return ProbeResult(verdict="generalize", dev_gain=dev_gain,
+                                       f" ⇒ 判为能力边界而非挑食")))
+        return self._downgrade_if_flat(ProbeResult(
+                           verdict="generalize", dev_gain=dev_gain,
                            heldout_gain=ho_gain, base_heldout=base_ho,
                            cand_heldout=cand_ho, n_tasks=self.suite.n_tasks,
                            by_difficulty=by_diff,
                            dev_by_difficulty=dict(dev_by_difficulty or {}),
                            reason=f"发展集 +{dev_gain:.4f} 且 held-out {ho_gain:+.4f}"
                                   + (f"（分层 {by_diff}）" if by_diff else "")
-                                  + " ⇒ 泛化，放行")
+                                  + " ⇒ 泛化，放行"))
 
 
 def make_heldout(env_id: str, tasks: List[FrozenTask], name: str = "",

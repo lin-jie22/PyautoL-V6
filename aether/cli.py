@@ -416,23 +416,53 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     rep_ho = None
     diff_report = None
     ho_levels: set = set()
+    #: ⛔ held-out 补采样记录。没有它，"泛化闸判 inconclusive"和
+    #:    "held-out 采样不够"在输出里长得一模一样。
+    grow_ho_report: Dict[str, Any] = {}
     if args.heldout == "on":
         rep_ho = synthesize_tasks(envs[ho_name], max_n=int(args.max_tasks))
         if rep_ho.tasks:
-            ho_tasks = [
-                FrozenTask(task_id=t.task_id,
-                           spec={"env_id": ho_name,
-                                 "broken_source": t.broken_source,
-                                 "topic": ho_name, "task_class": TASK_CLASS})
-                for t in rep_ho.tasks]
+            def _ho_tasks(src_tasks) -> list:
+                return [FrozenTask(task_id=t.task_id,
+                                   spec={"env_id": ho_name,
+                                         "broken_source": t.broken_source,
+                                         "topic": ho_name,
+                                         "task_class": TASK_CLASS})
+                        for t in src_tasks]
+
+            ho_tasks = _ho_tasks(rep_ho.tasks)
             # ⛔ held-out 也要有**难度跨度**：全是简单题的话，它会放行
             #    "只会修简单题"的候选。难度由"通用修法能否修好"执行判定。
             diff_report = difficulty_report(envs[ho_name], ho_tasks)
             ho_levels = set(diff_report["labels"].values())
             if not diff_report["spread"]:
-                print(f"⚠️ held-out 只有单一难度（easy {diff_report['n_easy']}"
-                      f" / hard {diff_report['n_hard']}）⇒ 判别力不足，"
-                      f"它无法区分「真泛化」与「只会修这类题」", file=sys.stderr)
+                # ⛔⛔ 光警告没有出口 ⇒ 泛化闸会把每次放行都降级成
+                #    inconclusive ⇒ "永远不提交"，和"候选不好"完全同形。
+                #    所以先**补采样**：合成任务来自 AST 变异、与候选无关，
+                #    扩大 held-out 采样不给任何候选优待（同 dev 的 grow）。
+                #    到顶仍无跨度 ⇒ 才真的报"判别力不足"。
+                g_ho = grow_for_difficulty(
+                    envs[ho_name],
+                    lambda n: synthesize_tasks(envs[ho_name], max_n=n).tasks,
+                    ("easy", "hard"), max_n=int(args.max_tasks))
+                if g_ho["covered"]:
+                    ho_src = g_ho["tasks"]
+                    ho_tasks = _ho_tasks(ho_src)
+                    diff_report = difficulty_report(envs[ho_name], ho_tasks)
+                    ho_levels = set(diff_report["labels"].values())
+                    print(f"✅ held-out 判别力自愈：采样 {int(args.max_tasks)}"
+                          f"→{g_ho['max_n_used']} 补齐难度跨度"
+                          f"（easy {diff_report['n_easy']} / "
+                          f"hard {diff_report['n_hard']}）", file=sys.stderr)
+                grow_ho_report = {k: v for k, v in g_ho.items() if k != "tasks"}
+                if not diff_report["spread"]:
+                    print(f"⚠️ held-out 只有单一难度（easy {diff_report['n_easy']}"
+                          f" / hard {diff_report['n_hard']}）⇒ 判别力不足，"
+                          f"它无法区分「真泛化」与「只会修这类题」"
+                          f" ⇒ 泛化闸将把每次放行降级为 inconclusive"
+                          f"（补采样到上限仍缺层："
+                          f"{'/'.join(g_ho['missing']) or '未知'}）",
+                          file=sys.stderr)
         else:
             print(f"⚠️ held-out 环境 {ho_name} 合成 yield=0 ⇒ 泛化闸无从裁决",
                   file=sys.stderr)
@@ -612,6 +642,9 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         #: ⛔ 发展集缺难度层时的**补采样**记录（没有它，"永远判 inconclusive"
         #:   和"候选不好"在输出里长得一模一样）
         "grow": grow_report or None,
+        #: ⛔ held-out 的补采样记录（同上：缺了它，"永远 inconclusive"
+        #:   和"held-out 采样不够"在输出里无法区分）
+        "grow_heldout": grow_ho_report or None,
         "heldout_difficulty": ({k: v for k, v in diff_report.items()
                                 if k != "labels"} if diff_report else None),
         "dev_difficulty": {k: v for k, v in dev_diff.items() if k != "labels"},

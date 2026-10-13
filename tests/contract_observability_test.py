@@ -30,6 +30,7 @@
     python tests/contract_observability_test.py
 """
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -285,6 +286,62 @@ with tempfile.TemporaryDirectory() as td:
     ck("F3 rebuild 之后重新一致（判出来的问题有恢复路径）",
        c3.get("ok") is True, str(c3))
     st.close()
+
+print()
+print("== G 组：held-out 判别力必须**进观测侧**（不是只在 JSON 里）==")
+#    ⛔ 2026-10-13 实测：无跨度的 held-out 会把"只在 easy 层涨"的挑食候选
+#    判成 generalize，放行输出里还带着 by_difficulty，看起来像做过分层裁决。
+#    闸侧已修（`_downgrade_if_flat`），但**观测侧不显示**的话，
+#    "这次放行靠的是不是一套有判别力的 held-out"仍然只有读 JSON 才知道。
+import re  # noqa: E402
+import subprocess  # noqa: E402
+
+NODE = os.environ.get("V6_NODE", "/Users/linshaojie/.workbuddy/binaries/node"
+                                "/versions/22.22.2-6/bin/node")
+CONSOLE = ROOT / "console" / "index.html"
+html = CONSOLE.read_text(encoding="utf-8")
+
+ck("G1 控制台泛化闸表有「held-out 判别力」列（不是只有裁决）",
+   "held-out 判别力" in html, "缺列")
+
+#: ⛔ 抽取 console 里**真实的**判据函数在 node 里跑，不在 Python 里另抄一份
+#:    （另抄一份 ⇒ 控制台改了判据这里还绿，V5 同源纪律）。
+m = re.search(r"(const discBadge = [\s\S]*?;\n)", html)
+ck("G2 能从控制台源码里抽出 discBadge 判据（判据必须同源）",
+   bool(m), "未找到")
+if m:
+    js = (m.group(1)
+          + """
+const cases = [[false,"无跨度"],[true,"有跨度"],[null,"未标注"],[undefined,"未标注"]];
+let out = [];
+for (const [d, want] of cases) {
+  const got = discBadge(d);
+  // ⛔ 判据必须与渲染同源且**精确**：子串 "bad" 会被 "badge" 命中
+  //    （实测四个用例全是 bad=True ⇒ 断言形同虚设）。判的是 class。
+  out.push({d: String(d), want, ok: got.includes(want),
+            bad: /class="badge bad"/.test(got)});
+}
+console.log(JSON.stringify(out));
+""")
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "disc.mjs"
+        p.write_text(js, encoding="utf-8")
+        try:
+            r = subprocess.run([NODE, str(p)], capture_output=True,
+                               text=True, timeout=30)
+            got = json.loads((r.stdout or "[]").strip().splitlines()[-1])
+        except Exception as e:  # noqa: BLE001
+            got = []
+            print(f"      （node 未跑起来：{type(e).__name__}: {e}）")
+    ck("G3 三态渲染各不相同：false=无跨度 / true=有跨度 / 未标注",
+       len(got) == 4 and all(g["ok"] for g in got), str(got))
+    ck("G4 ⛔ 只有 `false` 才标红（bad）；`null` 是「没测过」不许标红",
+       [g["bad"] for g in got] == [True, False, False, False], str(got))
+
+ck("G5 自相矛盾（无判别力却放行）在控制台有可见告警",
+   "闸失效" in html and "discriminative === false" in html, "缺告警")
+ck("G6 判别力不足要进红色告警区（不是只在表格里安静地显示）",
+   "没有难度跨度" in html and "alerts.push" in html, "缺告警")
 
 print()
 print("=" * 60)

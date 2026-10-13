@@ -216,12 +216,38 @@ g_lenient = _gate(DIFF, floor=-1e9)
 pr_lenient = g_lenient.probe(_H({}), _H({}), _Phased(), dev_gain=0.5)
 ck("F1 放宽每层地板 ⇒ 同一个候选被**放行**（证明 D1 拦的是分层增益）",
    pr_lenient.verdict == "generalize", str(pr_lenient.to_dict()))
-# F2 把难度标签全改成 easy ⇒ 分层失效，挑食候选过关
+# F2 把难度标签全改成 easy ⇒ 分层失效
+# ⛔ 断言形态在 2026-10-13 改过：原先断言"被误放行 generalize"。
+#    加了判别力兜底之后，标错标签不再导致**误放行**，而是导致
+#    **诊断能力退化** —— 危害陈述必须跟着改，否则反证会静默失效：
+#      旧：标错 ⇒ 放行挑食候选（错误结论）
+#      新：标错 ⇒ 只能判 inconclusive（结论仍安全，但**丢了「挑食」这个诊断**，
+#          且 reason 会指向"去补采样"而不是"这个候选在挑食" ⇒ 排查方向错了）
 g_mislabel = _gate({f"ho::{i}": "easy" for i in range(4)})
-pr_mis = g_mislabel.probe(_H({}), _H({}), _Phased(), dev_gain=0.5)
-ck("F2 难度标签标错（全标 easy）⇒ 挑食候选被误放行"
+pr_mis = g_mislabel.probe(_H({}), _H({}), _Phased(), dev_gain=0.5,
+                          dev_by_difficulty={"easy": 1.0, "hard": 1.0})
+ck("F2 难度标签标错（全标 easy）⇒ held-out 失去判别力 ⇒ 不再判 partial，"
+   "退成 inconclusive（仍拦，但丢了「挑食」诊断）"
    " ⇒ 标签必须由执行判定，不能靠猜",
-   pr_mis.verdict == "generalize", str(pr_mis.to_dict()))
+   pr_mis.verdict == "inconclusive" and pr_mis.discriminative is False
+   and pr_mis.blocks, str(pr_mis.to_dict()))
+ck("F2b 诊断退化的**证据**：分层明细里根本没有 hard 这一层"
+   "（缺的层是「没被测」，不是「被测了没涨」）",
+   set(pr_mis.by_difficulty) == {"easy"}, str(pr_mis.by_difficulty))
+# F5 ⛔ 反证：把判别力兜底短路掉 ⇒ F2 必须翻转回放行
+#    不注入事故版的话，F2 在新旧实现下都能"碰巧绿"，反证等于没有。
+from aether import generalization as G  # noqa: E402
+
+_orig_downgrade = G.GeneralizationGate._downgrade_if_flat
+G.GeneralizationGate._downgrade_if_flat = lambda self, res: res
+try:
+    pr_no_brake = g_mislabel.probe(_H({}), _H({}), _Phased(), dev_gain=0.5,
+                                   dev_by_difficulty={"easy": 1.0, "hard": 1.0})
+finally:
+    G.GeneralizationGate._downgrade_if_flat = _orig_downgrade
+ck("F5 ⛔ 反证：拆掉判别力兜底 ⇒ 标错标签的 held-out **放行**挑食候选"
+   "（F2 必须翻转，否则这两条断言是恒真的）",
+   pr_no_brake.verdict == "generalize", str(pr_no_brake.to_dict()))
 # F3 修法集合里塞进 restore_baseline ⇒ 所有题都变 easy ⇒ 分层消失
 from aether import repair as R  # noqa: E402
 
@@ -280,6 +306,85 @@ g_a = grow_for_difficulty(e, _synth, ("easy",), max_n=8)
 g_b = grow_for_difficulty(e, _synth, ("easy",), max_n=8)
 ck("G8 补采样确定性：两次调用标签完全一致（判据不因采样次数而漂移）",
    g_a["labels"] == g_b["labels"])
+
+# ══ H 组：held-out 无难度跨度 ⇒ 不许判"放行" ═══════════════════════
+# ⛔ 这一组是 2026-10-13 用反证探针挖出来的真缺口（scripts/probe_spread_audit.py）：
+#   同一个"只在 easy 层涨"的挑食候选，held-out 采到 hard 层 ⇒ partial（拦）；
+#   少采一层 ⇒ **generalize（放行）**，而放行输出里照样带着 by_difficulty
+#   字段，看起来像做过分层裁决。也就是说放行结论依赖的是采样量，不是候选行为。
+#   在此之前 `HeldOutSuite.spread` 只被**测试**读到，判据里根本没读它 ——
+#   "有属性、有警告、但没进判据"是最容易漏的一种缺口。
+print()
+print("== H 组：held-out 没判别力 ⇒ 不许放行（只降级放行，不盖掉拦截）==")
+
+#: 无跨度的 held-out：4 条全是 easy（模拟采样偏到 easy 一侧）
+FLAT = {f"ho::{i}": "easy" for i in range(4)}
+g_flat = _gate(FLAT)
+
+
+class _PhasedFlat:
+    """base 全红 → cand 在**仅有的 easy 层**变绿。
+
+    行为与 D 组的 `_Phased` **完全一致**（都是"easy 涨、hard 不涨"），
+    区别只在于这里 held-out 里 hard 那两层**根本不存在**。
+    """
+
+    def __init__(self):
+        self.n = 0
+
+    def __call__(self, h, spec):
+        self.n += 1
+        i = spec.get("i")
+        if self.n <= 4:
+            return _bad(i)
+        return _ok(i) if FLAT.get(f"ho::{i}") == "easy" else _bad(i)
+
+
+kw = dict(dev_gain=0.5, dev_by_difficulty={"easy": 1.0, "hard": 1.0})
+pr_flat = g_flat.probe(_H({}), _H({}), _PhasedFlat(), **kw)
+ck("H1 无跨度的 held-out ⇒ 不判 generalize（放行结论不可信）",
+   pr_flat.verdict == "inconclusive", str(pr_flat.to_dict()))
+ck("H2 但仍**拦截**（不可判别 ⇒ fail-closed，不是放行）", pr_flat.blocks)
+ck("H3 discriminative=False 写进裁决（观测侧能一眼看见不可信）",
+   pr_flat.discriminative is False, str(pr_flat.discriminative))
+ck("H4 理由给出**出路**（去补采样），而不是让人去改候选",
+   ("补采样" in pr_flat.reason) and ("不要放宽判据" in pr_flat.reason),
+   pr_flat.reason)
+# ⛔ 与 D 组对拍：同行为、同对照，只差 held-out 有没有采到 hard
+ck("H5 ⛔ 对拍：与 D 组同一候选行为，有跨度=partial / 无跨度=inconclusive"
+   " ⇒ 裁决不再被采样量翻转",
+   (pr_partial.verdict, pr_flat.verdict) == ("partial", "inconclusive")
+   and pr_partial.blocks and pr_flat.blocks,
+   f"{pr_partial.verdict} vs {pr_flat.verdict}")
+
+# ⛔ 只降级"放行"，**不准**盖掉已有确凿证据的拦截
+pr_flat_overfit = g_flat.probe(_H({}), _H({}),
+                               lambda h, s: _bad(s.get("i")), **kw)
+ck("H6 无跨度 + held-out 完全没涨 ⇒ 仍判 **overfit**"
+   "（兜底只降级放行，不把硬证据换成「我也不知道」）",
+   pr_flat_overfit.verdict == "overfit"
+   and pr_flat_overfit.discriminative is False,
+   str(pr_flat_overfit.to_dict()))
+
+# ⛔ 三态必须分开：没打标签 = "没测过"，不许当成"测了发现不行"
+g_none = _gate({})
+pr_none = g_none.probe(_H({}), _H({}), _PhasedAll(), dev_gain=0.5)
+ck("H7 没有难度标签 ⇒ discriminative=None（未测），且**不拦**"
+   "（V5：不可判别 ≠ 有罪；拦它会让所有未分层配置变成「永远不提交」）",
+   pr_none.discriminative is None and not pr_none.blocks,
+   str(pr_none.to_dict()))
+ck("H8 三态齐全：True（有跨度）/ False（无跨度）/ None（未标注）",
+   (pr_all.discriminative, pr_flat.discriminative, pr_none.discriminative)
+   == (True, False, None),
+   f"{pr_all.discriminative}/{pr_flat.discriminative}/{pr_none.discriminative}")
+
+# ⛔ 判别力是 held-out 的属性 ⇒ **每个裁决分支**都必须带上，
+#    不能只有放行分支记得填（实测：overfit 分支上出现过 None）
+ck("H9 同一套 held-out 下，拦截/放行裁决的 discriminative **一致**",
+   pr_flat_overfit.discriminative is False
+   and pr_flat.discriminative is False
+   and pr_partial.discriminative is True,
+   f"{pr_flat_overfit.discriminative}/{pr_partial.discriminative}")
 
 print()
 print(f"{'ALL PASS' if not FAILS else str(len(FAILS)) + ' FAILED'}"

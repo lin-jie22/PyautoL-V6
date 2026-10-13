@@ -104,7 +104,7 @@
        控制台原先根本没有这张表，只有一张"优势"列恒为 — 的空壳。 -->
   <section class="card">
     <h2>泛化闸（发展集涨 ≠ 变强）</h2>
-    <table id="gen"><thead><tr><th>capsule</th><th>dev 增益</th><th>held-out 增益</th><th>裁决</th></tr></thead>
+    <table id="gen"><thead><tr><th>capsule</th><th>dev 增益</th><th>held-out 增益</th><th>裁决</th><th>held-out 判别力</th></tr></thead>
       <tbody></tbody></table>
   </section>
 </main>
@@ -212,8 +212,11 @@ async function load() {
     alerts.push(`层归因失败 ${kinds["attribution.unavailable"]} 次 ⇒ `
       + `"这次提升来自哪一层"没有证据（已记账，不再静默）`);
   }
-  el("alert-card").style.display = alerts.length ? "" : "none";
-  el("alert-body").innerHTML = alerts.map((a) => `<div>· ${esc(a)}</div>`).join("");
+  const renderAlerts = () => {
+    el("alert-card").style.display = alerts.length ? "" : "none";
+    el("alert-body").innerHTML = alerts.map((a) => `<div>· ${esc(a)}</div>`).join("");
+  };
+  renderAlerts();
 
   const evs = data.events ?? [];
 
@@ -288,12 +291,39 @@ async function load() {
   // ── 泛化闸裁决（V6 的核心判据，控制台必须有它）───────────────
   const gen = evs.filter((e) => e.kind === "gen.probe").map((e) => e.payload);
   const vcls = (v) => v === "generalize" ? "ok" : (v === "overfit" ? "bad" : "warn");
+  // ⛔ 判别力三态（true=有跨度 / false=只有一层 / null=没打标签）。
+  //    用 `=== false` 区分，别用 falsy —— null 是"没测过"，不是"测了不行"。
+  const discBadge = (d) => d === false
+    ? '<span class="badge bad">✗ 无跨度</span>'
+    : (d === true ? '<span class="badge ok">✓ 有跨度</span>'
+                  : '<span class="badge warn">未标注</span>');
   el("gen").querySelector("tbody").innerHTML = gen.slice(-12).map((g) => {
     const v = String(g.verdict ?? "—");
+    // ⛔ 自相矛盾：无判别力却放行。理论上不可能（Python 侧保证），
+    //    出现了就是闸被改坏 —— 必须一眼看见，不能藏在 JSON 里。
+    const paradox = (g.discriminative === false && v === "generalize");
     return `<tr><td>${esc(g.capsule)}</td>
       <td>${esc(g.dev_gain ?? "—")}</td><td>${esc(g.heldout_gain ?? "—")}</td>
-      <td><span class="badge ${vcls(v)}">${esc(v)}</span></td></tr>`;
-  }).join("") || '<tr><td colspan="4" class="sub">暂无泛化闸记录</td></tr>';
+      <td><span class="badge ${vcls(v)}">${esc(v)}</span></td>
+      <td>${discBadge(g.discriminative)}${paradox
+        ? ' <b style="color:#c0392b">⚠ 闸失效</b>' : ""}</td></tr>`;
+  }).join("") || '<tr><td colspan="5" class="sub">暂无泛化闸记录</td></tr>';
+
+  // ⛔ 判别力不足必须**单独告警**：它意味着这一轮的"放行/拦截"结论都
+  //    不可信，而表格里每行的裁决看起来都很正常 —— 不看这一条就会误读。
+  const flat = gen.filter((g) => g.discriminative === false);
+  if (flat.length) {
+    alerts.push(`${flat.length} 条泛化裁决来自**没有难度跨度**的 held-out`
+      + ` ⇒ 它无法区分「真泛化」与「只会修一类题」，裁决不可信`
+      + `（出路：补采样到有跨度，不要放宽判据）`);
+  }
+  const paradoxes = gen.filter((g) => g.discriminative === false
+                                      && String(g.verdict) === "generalize");
+  if (paradoxes.length) {
+    alerts.push(`${paradoxes.length} 条「无判别力却放行」⇒ 泛化闸自身失效`
+      + `（critical，见 supervisor PASS_WITHOUT_DISCRIMINATION）`);
+  }
+  renderAlerts();
 }
 
 load();

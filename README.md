@@ -50,6 +50,9 @@ $PY scripts/llm_e2e.py --no-llm    # 离线对照组（模板提议器）
 # （实测：e2e 组因接口变更坏掉而无人发现，就是因为它从没被跑过）
 for t in tests/contract_*_test.py; do $PY $t; $PY $t --e2e; done
 
+# 反证探针：单独挖某一类缺口的**对拍脚本**（不是契约测试，是取证工具）
+$PY scripts/probe_spread_audit.py  # held-out 没判别力时闸会不会假放行
+
 # TypeScript 监督器（Node ≥22 原生跑 TS，无需 npm install）
 cd supervisor && node src/selfcheck.ts                     # 含跨语言一致性验证
 node src/index.ts --ledger ../data/ledger.jsonl --watch 30
@@ -121,7 +124,7 @@ V6/
 
 ## 5. 系统如何自证（判据清单）
 
-这十一条是 V6 的"宪法"。每条都有对应的契约测试守着：
+这二十七条是 V6 的"宪法"。每条都有对应的契约测试守着：
 
 1. **事实只有一份**：账本（hash 链）。SQLite 是投影，`rebuild_from_ledger()` 可重建。
    ⛔⛔ 实测（2026-10-13）：投影曾**丢掉 89.7% 的执行历史** —— 账本 495 条
@@ -220,6 +223,16 @@ V6/
     `ts*1000` 恰好半整数时 Python 银行家舍入（…736）与 JS half-up（…737）
     不同 —— 1028 条命中 1 条，而 selfcheck 的 ts 全是整数，永远撞不到。
     修法：TS 侧 `roundHalfEven` 对齐 Python（不改写入端 ⇒ 历史 hash 不失效）。
+27. **闸的判别力必须由闸自己检查（有属性 ≠ 进了判据）**：`HeldOutSuite.spread`
+    早就存在、docstring 写了危害、CLI 也打 ⚠️，但 `probe()` 的判据里没读过它
+    —— 实测同一挑食候选，held-out 采到 hard 层 ⇒ `partial`（拦），少采一层
+    ⇒ `generalize`（**放行**），且放行输出照样带 `by_difficulty`，与真放行
+    完全同形。⛔ 加闸前先做交叉表：`--max-tasks` ≥10 时 4 个环境全有跨度
+    ⇒ 新闸命中 0 次，默认配置能跑通是**巧合**不是保证 ⇒ 所以修法必须是
+    "补采样出口 + 兜底"两段，只加闸就会变成"永远不提交"。
+    ⛔ 三态不能合并：`False`（只有一层，有证据的判别力不足，拦）/
+    `True`（有跨度）/`None`（没打标签 = 没测过，**不拦** —— 不可判别 ≠ 有罪）。
+    ⛔ 兜底只降级"放行"，**不许**盖掉 `overfit` 这类有硬证据的拦截。
 
 ---
 

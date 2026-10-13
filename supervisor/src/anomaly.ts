@@ -143,8 +143,20 @@ export function detect(events: Event[], cfg: AnomalyConfig = DEFAULT_CONFIG): Fi
   const probes = events.filter((e) => e.kind === "gen.probe");
   const unattributable: string[] = [];
   const unverifiable: string[] = [];
+  const flatPass: string[] = [];
   for (const pe of probes) {
     const v = String(payloadOf(pe).verdict ?? "");
+    // ⛔ **闸的闸**：`discriminative === false` 的意思是"这套 held-out 没有
+    //    难度跨度 ⇒ 它无法区分真泛化与挑食"。此时**任何** `generalize`
+    //    都是实现自相矛盾（Python 侧 `_downgrade_if_flat` 保证不会输出它）。
+    //    出现即说明闸被绕过或判据被改坏 ⇒ critical，不能当普通放行读。
+    //    注意用 `=== false` 而不是 falsy：`null`（未打标签）是合法的"未测"。
+    const disc = payloadOf(pe).discriminative;
+    if (disc === false && v === "generalize") {
+      flatPass.push(`@${pe.seq} verdict=generalize 但 discriminative=false`
+        + `（capsule=${String(payloadOf(pe).capsule ?? "?")}）`
+        + ` ⇒ 无判别力的 held-out 却放行了，闸自身失效`);
+    }
     if (v === "generalize") continue;
     const rn = payloadOf(pe).round_no;
     const pCap = String(payloadOf(pe).capsule ?? "");
@@ -193,6 +205,14 @@ export function detect(events: Event[], cfg: AnomalyConfig = DEFAULT_CONFIG): Fi
       detail: `${unverifiable.length} 组"裁决非 generalize 却见同候选提交"缺会话`
         + `归属 ⇒ 无法判定是跨运行串味还是真绕过（新事件已带 sid，可精判）`,
       evidence: unverifiable.slice(0, 5),
+    });
+  }
+  if (flatPass.length) {
+    out.push({
+      code: "PASS_WITHOUT_DISCRIMINATION", severity: "critical",
+      detail: `${flatPass.length} 条放行裁决来自**没有判别力**的 held-out`
+        + ` ⇒ 闸自身失效（放行结论不可信，与挑食候选被放过完全同形）`,
+      evidence: flatPass.slice(0, 5),
     });
   }
   if (unattributable.length) {

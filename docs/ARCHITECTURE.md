@@ -776,3 +776,75 @@ A10 舍入取偶：...736.5 ⇒ ...736
 
 ⛔ 教训与 §10 同源：**反证的构造必须与真实 payload 同源**。合成用例里
 ts 取整数，测的不是真实形态，绿了也是假的。
+
+
+## 13. held-out 的判别力必须由闸自己检查（有属性 ≠ 进了判据）
+
+泛化闸的全部价值建立在一个前提上：**这套 held-out 有能力区分"真泛化"
+与"只会修一类题"**。这个前提此前是**没被检查**的。
+
+`HeldOutSuite.spread` 早就存在，`repair.py` 的 docstring 里也白纸黑字写了
+危害（"held-out 全是 easy ⇒ 只会修 easy 的 harness 会被判成 generalize"），
+`cli.py` 也会打 ⚠️ 警告 —— 但 `probe()` 的判据里**从来没有读过它**。
+grep 确认：`spread` 只被**测试**（E1/E2）读到。
+
+这是最容易漏的一类缺口：有属性、有文档、有告警、唯独没进判据。
+
+### 反证：裁决被采样量翻转
+
+`scripts/probe_spread_audit.py` 用同一个候选、同一份行为（held-out 的 easy
+层涨、hard 层**不涨** ⇒ 典型挑食）做对拍：
+
+    held-out 采到 hard 层  ⇒ partial       （拦）
+    held-out 少采一层      ⇒ generalize    （放行）
+
+放行输出里还照样带着 `by_difficulty={'easy': 1.0}` 字段，看起来像做过
+分层裁决 —— **它和真放行完全同形**。也就是说"放行"这个结论依赖的是
+采样量，不是候选行为。
+
+### 交叉表（加闸前必做）
+
+| `--max-tasks` | 4 个环境里无跨度的个数 |
+|---|---|
+| 2 / 3 | 4 / 4 |
+| 4 / 5 / 6 | 3 / 4 |
+| 8 | 2 / 4（stateflow、textscore） |
+| 10 / 12 / 16 / 24 | 0 / 4 |
+
+⛔ 默认 12 下这套闸**命中 0 次** —— 也就是说默认配置能跑通是**巧合**，
+不是保证。正是这一点决定了修法必须是"补采样出口 + 兜底"，不能只是加闸。
+
+### 修法：三段，缺一段就变成"永远不提交"
+
+1. **出口优先**（`cli.py`）：held-out 无跨度 ⇒ 先 `grow_for_difficulty`
+   扩合成采样（实测 8→16 补齐），到顶仍缺层才报"判别力不足"。
+   ⛔ 合成任务来自 AST 变异、与候选无关 ⇒ 扩 held-out 采样不给任何候选
+   优待，不违反 H1（held-out 不参与选择）。
+2. **闸侧兜底**（`_downgrade_if_flat`）：仍无跨度 ⇒ 不许判 `generalize`，
+   降级为 `inconclusive`（拦截），reason 指向"去补采样"而不是"改候选"。
+3. **可观测**：`discriminative` 三态写进裁决本身、账本、控制台表格与告警区；
+   监督器加 `PASS_WITHOUT_DISCRIMINATION`（critical）—— 即**闸的闸**。
+
+### 三条边界（都有实测依据）
+
+- ⛔ **只降级"放行"，不盖掉拦截**。无跨度 + held-out 完全没涨 ⇒ 仍判
+  `overfit`。判别力不足只会让"放行"失去依据，不会让硬证据失效；用
+  inconclusive 覆盖 overfit 是把硬证据换成"我也不知道"（信息倒退）。
+- ⛔ **三态必须分开**：`True`（有跨度）/ `False`（只有一层，**有证据**的
+  判别力不足）/ `None`（没打标签 = **没测过**）。`None` 不拦 —— V5 纪律
+  "不可判别 ≠ 有罪"，拦它会让所有未分层配置一夜变成"永远不提交"。
+  监督器侧同样用 `=== false` 而不是 falsy（`null` 会漏进来）。
+- ⛔ **判别力是 held-out 的属性，不是某个分支的属性** ⇒ 由 `probe()` 统一
+  后处理写入。让各分支自己填 ⇒ 只有放行分支记得填，实测 `overfit` 裁决上
+  出现过 `discriminative=None`（H9 守这条）。
+
+### 反证组
+
+- `contract_difficulty_test.py` F5：把 `_downgrade_if_flat` 短路掉 ⇒
+  标错标签的 held-out 重新**放行**挑食候选（F2 必须翻转，否则恒真）。
+- H1–H9：无跨度 ⇒ 不判 generalize / 仍拦 / 给出路 / 与 D 组对拍 /
+  不盖 overfit / 三态齐全 / 分支一致。
+- **事故版注入**：临时把兜底改成 `if True` ⇒ 5 项（F2、H1、H2、H4、H5）
+  集体转红，反证探针重新报缺口。确认测试不是恒真的之后已还原。
+- `supervisor/src/selfcheck.ts` C14/C15/C15b：`discriminative=false` 却
+  `generalize` ⇒ critical；`true` 与 `null` 都不许报。
