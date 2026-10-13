@@ -695,6 +695,69 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _caps_registry(path: str):
+    """从清单装载（或返回源码内注册表）。
+
+    ⛔ 与 serve 同一份装载逻辑（`interop.load_manifest`）—— 两个入口各写
+    一份装载，会出现"CLI 能调、HTTP 调不到"的幽灵差异。
+    """
+    from .interop import Registry, load_manifest
+    if not path:
+        from .interop import _default_registry
+        return _default_registry(), LoadReportNone()
+    reg = Registry()
+    return reg, load_manifest(reg, path)
+
+
+class LoadReportNone:
+    """没有清单时的空报告（保持接口形状一致）。"""
+    source = ""
+    loaded: List[str] = []
+    skipped: List[Dict[str, Any]] = []
+
+
+def cmd_caps(args) -> int:
+    from .interop import Gateway, load_manifest
+    reg, rep = _caps_registry(getattr(args, "caps", "") or "")
+    for s in rep.skipped:
+        print(f"[caps] ⚠️ 跳过 {s.get('id')}：{s.get('reason')}", file=sys.stderr)
+    gw = Gateway(reg)
+    cmd = getattr(args, "caps_cmd", "list")
+
+    if cmd == "list":
+        print(json.dumps({"fingerprint": reg.fingerprint, "n": len(reg),
+                          "capabilities": reg.manifest()},
+                         ensure_ascii=False, indent=2))
+        return 0
+    if cmd == "show":
+        spec = reg.get(args.id)
+        if spec is None:
+            print(f"[caps] 未注册：{args.id}", file=sys.stderr)
+            return 2
+        print(json.dumps(spec.to_dict(), ensure_ascii=False, indent=2))
+        return 0
+    if cmd == "load":
+        r2 = load_manifest(reg, args.manifest)
+        print(json.dumps(r2.to_dict(), ensure_ascii=False, indent=2))
+        return 0 if r2.ok else 1
+    if cmd == "invoke":
+        try:
+            call_args = json.loads(args.json or "{}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[caps] --json 不是合法 JSON：{e}", file=sys.stderr)
+            return 2
+        if not isinstance(call_args, dict):
+            print("[caps] --json 必须是对象", file=sys.stderr)
+            return 2
+        res = gw.invoke(args.id, call_args, actor="cli")
+        print(json.dumps(res.to_dict(), ensure_ascii=False, indent=2,
+                         default=str))
+        #: ⛔ 退出码必须诚实：脚本要靠它判成败，全返回 0 就是把失败藏起来
+        return 0 if res.status == "ok" else 1
+    print(f"[caps] 未知子命令 {cmd}", file=sys.stderr)
+    return 2
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="aether", description="V6 · AETHER CLI")
     ap.add_argument("--root", default=str(ROOT), help="V6 根目录")
@@ -718,6 +781,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     mr = ms.add_parser("reindex", help="换 embedder 后的唯一合法恢复路径")
     mr.add_argument("--to", default="hash", choices=["hash", "ollama"],
                     help="目标嵌入器")
+    c = sub.add_parser("caps", help="接入层：列出 / 查看 / 调用 agents 与 skills")
+    c.add_argument("--caps", default="",
+                   help="能力清单 JSON（不传则只显示源码内注册的能力）")
+    cs = c.add_subparsers(dest="caps_cmd", required=True)
+    cs.add_parser("list", help="列出已注册能力")
+    sh = cs.add_parser("show", help="查看一个能力的声明")
+    sh.add_argument("id")
+    iv = cs.add_parser("invoke", help="调用一个能力")
+    iv.add_argument("id")
+    iv.add_argument("--json", default="{}", help='参数 JSON，如 \'{"text":"a"}\'')
+    ld = cs.add_parser("load", help="装载能力清单并报告每条成败")
+    ld.add_argument("manifest")
+
     e = sub.add_parser("evolve", help="跑 self-harness 进化")
     e.add_argument("--rounds", default="3")
     e.add_argument("--group", default="3")
@@ -746,6 +822,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "synth": cmd_synth,
         "memory": cmd_memory,
         "evolve": cmd_evolve,
+        "caps": cmd_caps,
     }[args.cmd](args)
 
 

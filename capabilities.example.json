@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "_doc": [
+    "能力清单：把外部 agents / skills 接入 V6，**不用改一行 Python 代码**。",
+    "跑法：",
+    "  python -m aether.cli caps --caps capabilities.example.json list",
+    "  python -m aether.cli caps --caps capabilities.example.json invoke ext.reverse --json '{\"text\":\"abc\"}'",
+    "  python -m aether.serve --caps capabilities.example.json",
+    "    然后 POST /api/invoke  {\"capability\":\"ext.reverse\",\"args\":{\"text\":\"abc\"}}",
+    "",
+    "impl.transport 三选一：",
+    "  cli     —— 子进程；stdin 收 JSON args，stdout 吐 JSON。trusted 可为 false。",
+    "  http    —— POST JSON 到 url。trusted 可为 false。",
+    "  python  —— importlib 导入 'pkg.mod:attr'（= 任意代码进本进程），",
+    "             ⛔ 必须显式写 trusted:true，否则注册时会被拒。",
+    "",
+    "⛔ trusted:false + python 形态 = 被拒：inproc 适配器杀不掉一个跑飞的实现，",
+    "   声明 timeout_s 就是假仪表。不可信实现请走 cli / http。"
+  ],
+  "capabilities": [
+    {
+      "id": "ext.reverse",
+      "kind": "tool",
+      "version": "0.1.0",
+      "summary": "外部 CLI 工具：反转字符串（示例用 python 当 CLI）",
+      "trusted": false,
+      "sandbox": "process",
+      "effects": ["exec"],
+      "timeout_s": 5.0,
+      "inputs": {"text": {"type": "str", "required": true, "desc": "输入文本"}},
+      "outputs": {"out": {"type": "str", "required": true}},
+      "impl": {
+        "transport": "cli",
+        "argv": ["python3", "scripts/ext_reverse.py"],
+        "env_allow": ["PATH", "HOME", "LANG", "TMPDIR"]
+      }
+    },
+    {
+      "id": "ext.upper",
+      "kind": "skill",
+      "version": "0.1.0",
+      "summary": "外部 Python 模块：转大写（trusted 才允许 inproc）",
+      "trusted": true,
+      "timeout_s": 5.0,
+      "inputs": {"text": {"type": "str", "required": true}},
+      "outputs": {"out": {"type": "str", "required": true}},
+      "impl": {"transport": "python", "target": "scripts.ext_upper:upper"}
+    },
+    {
+      "id": "ext.service",
+      "kind": "agent",
+      "version": "0.1.0",
+      "summary": "外部 HTTP 服务：POST JSON（示例指向本机，先起服务才有意义）",
+      "trusted": false,
+      "sandbox": "none",
+      "effects": ["network"],
+      "timeout_s": 5.0,
+      "inputs": {"text": {"type": "str", "required": true}},
+      "outputs": {"out": {"type": "str", "required": false}},
+      "impl": {"transport": "http", "url": "http://127.0.0.1:9911/invoke"}
+    },
+    {
+      "id": "ext.repairer",
+      "kind": "skill",
+      "version": "0.1.0",
+      "summary": "外部修复技能：可被 harness 的 L1 路由命中（bind_capability 绑定）",
+      "trusted": true,
+      "timeout_s": 10.0,
+      "inputs": {
+        "source": {"type": "str", "required": true, "desc": "待修源码"},
+        "baseline": {"type": "str", "required": false, "desc": "基线源码"},
+        "spec": {"type": "dict", "required": false, "desc": "任务 spec"}
+      },
+      "outputs": {"source": {"type": "str", "required": true, "desc": "修后源码"}},
+      "impl": {"transport": "python", "target": "scripts.ext_upper:repair"}
+    }
+  ]
+}

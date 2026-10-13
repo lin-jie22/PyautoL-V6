@@ -34,6 +34,10 @@ DEFAULT_EVENT_TAIL = 500
 #:    所以 `limit=-1` 不是"取 0 条"，是"全部吐出来"。
 MAX_LIST_LIMIT = 5000
 
+#: `/api/invoke` 请求体上限（字节）。**第四个人口**：前面三处（raw / events /
+#: status 的 limit）都修过，这个是新开的口子，不能又是无上限。
+MAX_INVOKE_BODY_BYTES = 1024 * 1024
+
 
 def _is_within(child: Path, parent: Path) -> bool:
     """按**路径分量**判断 child 是否在 parent 之下。
@@ -377,6 +381,9 @@ class Handler(BaseHTTPRequestHandler):
     #:    读到本机账本（含 harness 状态 / 记忆正文 / 失败轨迹）——
     #:    只读 ≠ 无隐私。跨源部署时显式列白名单，或传 "*"（知情选择）。
     cors_origins: tuple = ()
+    #: 接入层网关。**None ⇒ 调用端点返回 503 而不是 404**：能力没装载是
+    #: 配置问题，不是"端点不存在"，分诊方向必须正确。
+    gateway: Any = None
 
     def _cors_headers(self) -> Dict[str, str]:
         if not self.cors_origins:
@@ -461,6 +468,18 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 self._send(200, path.read_bytes(),
                            "application/x-ndjson")
+            elif _endpoint_is(u.path, "/api/capabilities"):
+                if Handler.gateway is None:
+                    self._json({"error": "capability gateway 未装载",
+                                "hint": "启动时用 --caps <manifest.json>"}, 503)
+                    return
+                q_kind = q.get("kind", [""])[0]
+                self._json({
+                    "fingerprint": Handler.gateway.registry.fingerprint,
+                    "n": len(Handler.gateway.registry),
+                    "capabilities": [s.to_dict() for s in
+                                     Handler.gateway.registry.list(kind=q_kind)],
+                })
             elif self.console_dir and (u.path == "/"
                                        or _endpoint_is(u.path, "/console")):
                 rel = ("index.html"
@@ -471,6 +490,62 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "unknown endpoint", "path": u.path}, 404)
         except Exception as e:  # noqa: BLE001
             self._json({"error": f"{type(e).__name__}: {e}"}, 500)
+
+    # ── POST：调用已注册的能力 ────────────────────────────────
+    def do_POST(self) -> None:  # noqa: N802
+        u = urlparse(self.path)
+        if not _endpoint_is(u.path, "/api/invoke"):
+            self._json({"error": "unknown endpoint", "path": u.path}, 404)
+            return
+        if Handler.gateway is None:
+            self._json({"error": "capability gateway 未装载",
+                        "hint": "启动时用 --caps <manifest.json>"}, 503)
+            return
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self._json({"error": "bad Content-Length"}, 400)
+            return
+        #: ⛔ 先按声明长度拒，**不要先读再判断**（读就已经付出内存了）
+        if n > MAX_INVOKE_BODY_BYTES:
+            self._json({"error": "request body too large", "bytes": n,
+                        "limit": MAX_INVOKE_BODY_BYTES}, 413)
+            return
+        raw = self.rfile.read(n) if n > 0 else b""
+        try:
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+        except Exception as e:  # noqa: BLE001
+            self._json({"error": f"invalid JSON body: {type(e).__name__}"}, 400)
+            return
+        if not isinstance(body, dict):
+            self._json({"error": "body 必须是 JSON 对象"}, 400)
+            return
+        cid = str(body.get("capability", "")).strip()
+        if not cid:
+            self._json({"error": "缺 capability"}, 400)
+            return
+        #: ⛔⛔ **只允许调用已注册的能力**：body 里出现 impl / argv / code /
+        #:    transport 一律拒绝。否则这个端点就是"远程执行任意命令"，
+        #:    能力清单就成了摆设 —— 清单的意义正是**事先**决定谁能被调。
+        banned = {"impl", "argv", "code", "source", "transport", "target",
+                  "adapter", "module"}
+        hit = banned & set(body)
+        if hit:
+            self._json({"error": "请求体不得携带实现描述（只允许引用已注册能力）",
+                        "rejected_keys": sorted(hit)}, 400)
+            return
+        args = body.get("args") or {}
+        if not isinstance(args, dict):
+            self._json({"error": "args 必须是对象"}, 400)
+            return
+        try:
+            res = Handler.gateway.invoke(
+                cid, args, actor=str(body.get("actor", "") or "http"))
+        except Exception as e:  # noqa: BLE001
+            self._json({"error": f"{type(e).__name__}: {e}"}, 500)
+            return
+        code = 200 if res.status in ("ok",) else 422
+        self._json(res.to_dict(), code)
 
     def log_message(self, fmt: str, *a: Any) -> None:
         sys.stderr.write("[aether] " + (fmt % a) + "\n")
@@ -486,7 +561,20 @@ def main(argv: Optional[list] = None) -> int:
     #:    不该能读。跨源部署时显式列出白名单，或传 "*"（知情选择）。
     ap.add_argument("--cors", default="",
                     help="CORS 白名单（逗号分隔 origin；'*' 表示任意）")
+    ap.add_argument("--caps", default="",
+                    help="能力清单 JSON：接入外部 agents/skills（见 "
+                         "capabilities.example.json）")
     args = ap.parse_args(argv)
+
+    if args.caps:
+        from .interop import Gateway, Registry, load_manifest
+        reg = Registry()
+        rep = load_manifest(reg, args.caps)
+        Handler.gateway = Gateway(reg)
+        print(f"[caps] 装载 {len(rep.loaded)} 个能力：{rep.loaded}")
+        #: ⛔ 每条 skip 都打印：能力没挂上却一声不响 = 调用时才发现的 404
+        for s in rep.skipped:
+            print(f"[caps] ⚠️ 跳过 {s.get('id')}：{s.get('reason')}")
 
     Handler.root = Path(args.root)
     Handler.console_dir = Path(args.console) if args.console else None

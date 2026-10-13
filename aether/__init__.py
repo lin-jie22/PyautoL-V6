@@ -16,6 +16,7 @@ V6 把这些从**工程师的纪律**变成**系统的结构**：
     memory         —— 5 层记忆 OS + 链接演化 + 睡眠巩固 + 对抗验证
     evolution      —— self-harness 循环（MINE/PROPOSE/VALIDATE/SELECT/COMMIT）
     store          —— SQLite 投影（可由账本重建，不是第二份事实源）
+    interop        —— 通用接入层：任何 agent/skill（函数/对象/CLI/HTTP）
 
 设计取舍：**零第三方依赖**（stdlib only），可插拔 LLM/embedding。
 理由：自进化系统的判据必须离线可回归 —— 依赖网络或模型，
@@ -34,6 +35,11 @@ from .runtime import Trajectory, Step, group_relative, assign_credit
 from .memory import MemoryOS, MemNote, hash_embedding
 from .evolution import EvolutionLoop, EvolutionConfig, Weakness, mine_weaknesses
 from .store import Store, RunRow
+from .interop import (
+    Registry, Gateway, CapabilitySpec, ParamSpec, Budget,
+    Invocation, InvocationResult, CapabilityError, capability,
+    load_manifest, bind_capability,
+)
 
 __all__ = [
     "__version__",
@@ -46,4 +52,7 @@ __all__ = [
     "MemoryOS", "MemNote", "hash_embedding",
     "EvolutionLoop", "EvolutionConfig", "Weakness", "mine_weaknesses",
     "Store", "RunRow",
+    "Registry", "Gateway", "CapabilitySpec", "ParamSpec", "Budget",
+    "Invocation", "InvocationResult", "CapabilityError", "capability",
+    "load_manifest", "bind_capability",
 ]

@@ -110,7 +110,8 @@ class HarnessAgent:
     """按 harness 的 5 层去完成一个任务，并产出**可执行判据**。"""
 
     def __init__(self, envs: Dict[str, Environment],
-                 memory: Optional[MemoryOS] = None, timeout: float = 10.0):
+                 memory: Optional[MemoryOS] = None, timeout: float = 10.0,
+                 gateway: Optional[Any] = None):
         #: ⛔ 明确拒绝非 dict：多环境化之后 env_id 是任务的寻址键，传单个
         #:    Environment 会在 run() 里炸成 `'Environment' object has no
         #:    attribute 'get'` —— 一个看不出根因的 AttributeError。
@@ -127,6 +128,9 @@ class HarnessAgent:
         #: ⇒ 基线已在天花板 ⇒ 再也挖不到弱点 ⇒ 进化循环永久失去动力。
         #: 看起来 reward 满分，实际是真实弱点（没有技能）被记忆掩盖了。
         self.memory_marker = "repair_hint:"
+        #: 接入层网关（`interop.Gateway`）。None ⇒ 走不到 UCI 分支，
+        #: ⛔ 但**必须显式记账**（step ok=False），不能悄悄退化成"无策略"。
+        self.gateway = gateway
 
     # ── 主流程 ──────────────────────────────────────────────────
     def run(self, h: Any, spec: Dict[str, Any]) -> AgentResult:
@@ -217,7 +221,12 @@ class HarnessAgent:
         # ── 应用策略 ───────────────────────────────────────────
         used.append("L3")
         applicable = True
-        if strategy == "fix_control_flow":
+        if strategy.startswith("uci:"):
+            #: 外部接入的技能（见 interop 模块）。⛔ 技能给的源码**照样**要过
+            #: 下面的 `verify_source` —— 判据只来自执行，技能自称修好了不算。
+            fixed, applicable = self._uci_apply(
+                strategy[len("uci:"):], src, env, spec, steps)
+        elif strategy == "fix_control_flow":
             fixed = revert_control_flow(src, env.source)   # 通用但保守
         elif strategy.startswith("patch:"):
             # ⛔ 定点修法必须**校验环境是否匹配**。不校验的话它会在任何环境
@@ -251,6 +260,57 @@ class HarnessAgent:
                 error=v.error, env_fingerprint=env.fingerprint, cost_s=v.cost_s),
             steps=tuple(steps), strategy=strategy,
             layers_used=tuple(sorted(set(used))))
+
+    # ── 接入层：外部技能（UCI）────────────────────────────────
+    @staticmethod
+    def uci_skill_id(cid: str) -> str:
+        """把一个 capability id 变成 harness 里的技能名。
+
+        ⛔ 前缀 `uci:` 是**契约**：routing 里写 `uci:ext.fixer` 就表示该技能
+        由接入层提供。没有这个前缀，L3 只有写死在源码里的那几个分支可用。
+        """
+        return f"uci:{cid}"
+
+    def _uci_apply(self, cid: str, src: str, env: Any,
+                   spec: Dict[str, Any], steps: List[AgentStep]
+                   ) -> Tuple[str, bool]:
+        """调用一个已注册的外部技能，返回 (修后的源码, 是否适用)。
+
+        UCI 技能契约（**唯一**约定，任何形态的实现照此即可接入）：
+            输入  {"source": str, "baseline": str, "spec": {...}}
+            输出  {"source": str, 可带任意附加字段}
+
+        ⛔ 调用不成功 ⇒ 返回**原样源码**并记 step=False，绝不返回"部分结果"。
+        ⛔ 技能自称成功不算成功：这里**不**看它的自述，只看 status 与
+        （若有）checks；最终判定仍然由后面的 `verify_source` 执行给出。
+        """
+        if self.gateway is None:
+            steps.append(AgentStep("L3", "uci", False,
+                                   f"未挂载接入层网关 ⇒ 技能 {cid} 不可达"))
+            return src, False
+        res = self.gateway.invoke(
+            cid, {"source": src, "baseline": env.source,
+                  "spec": {k: v for k, v in spec.items() if k != "broken_source"}},
+            actor=f"agent/{env.env_id}")
+        if res.status != "ok":
+            steps.append(AgentStep("L3", "uci", False,
+                                   f"{cid} 调用 {res.status}：{res.error[:120]}"))
+            return src, False
+        out = res.output if isinstance(res.output, dict) else None
+        new_src = (out or {}).get("source")
+        if not isinstance(new_src, str) or not new_src:
+            steps.append(AgentStep(
+                "L3", "uci", False,
+                f"{cid} 输出缺 source 字段（实得 {type(new_src).__name__}）"))
+            return src, False
+        detail = f"{cid} → {len(new_src)}B（changed={new_src != src}）"
+        if res.verified:
+            detail += f"，判据 {sum(c.passed for c in res.checks)}/{len(res.checks)}"
+        else:
+            #: ⛔ 没验证过就**明说**，不写成"已验证通过"
+            detail += f"，未验证（{res.unverified_reason}）"
+        steps.append(AgentStep("L3", "uci", True, detail))
+        return new_src, True
 
     # ── 适配 Runner 协议 ───────────────────────────────────────
     def as_runner(self) -> Callable[[Any, Dict[str, Any]], Verdict]:

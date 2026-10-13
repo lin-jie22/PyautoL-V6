@@ -1577,3 +1577,97 @@ A11 + A14 红；整数值不用 BigInt ⇒ A11×2 + A13 红；指数阈值改 1e
 报 `ERR_INVALID_TYPESCRIPT_SYNTAX`，指向八竿子打不着的行。
 ⇒ **造对拍基准时，"生成值"和"序列化值"必须是同一个值**；跨语言内嵌代码
 里的注释要当成"字符串内的字符串"来小心。
+
+---
+
+## 23. 通用接入层（UCI）：任何 agent / skill 都挂得上、叫得动（2026-10-13 第 19 轮）
+
+### 改造前的真实形态（不是"缺个接口"，是根本没有接口）
+
+    Harness.skills: Dict[str, str]        # 技能是**字符串**
+    agent.py 的 if/elif strategy == ...   # 执行逻辑写死在分支里
+    runner(h, spec) -> Verdict            # agent 的约定**没有任何地方声明**
+
+⇒ 加一个技能 = 改 `agent.py` 源码；加一个 agent = 手写一个恰好长成那个形状
+的函数。外部的东西（别人项目的函数、CLI 工具、HTTP 服务、MCP server）
+**根本没有入口**：既不能声明自己能干什么，也不能被路由到，更不能被调用。
+进化循环因此只能进化"它自己已经认识的那几个字符串"。
+
+### 结构
+
+    spec      声明：我是谁 / 我要什么 / 我给什么 / 我需要什么权限
+    adapter   适配：callable · 对象(run/invoke/execute) · CLI · HTTP
+    registry  注册：内容寻址 fingerprint + 冲突检测 + 可导出清单
+    gateway   调用：校验 → 预算 → 执行 → 输出校验 → 判据 → 记账
+    manifest  装载：JSON 清单，接外部能力**不用改 Python 代码**
+
+| 形态 | transport | timeout_enforced | 约束 |
+|---|---|---|---|
+| callable / 对象 | inproc | **`none`** | 只准 `trusted=True` |
+| CLI（stdin/stdout JSON） | subprocess | `forced` | env 净化、`shell=False` |
+| HTTP（POST JSON） | network | `forced` | 响应按字节封顶 |
+
+⛔ `timeout_enforced` 必须**如实**：inproc 杀不掉一个跑飞的实现，写 `forced`
+就是假仪表。所以**不可信实现不许 inproc** —— 注册时直接拒（D1/D7 钉住）。
+实测：CLI 不传 timeout 时同一个用例从 0.4s 变成 5.03s 才返回（事故 7）⇒
+证明 `forced` 不是声称。
+
+### 三条宪法级约束
+
+**1. 调用结果不产 reward。** `InvocationResult` **故意没有** reward 字段，
+只有 `checks`；reward 只由 `Verdict` 产生。于是"外部自称 ok / self_reported"
+在结构上**没有通路**（不是被过滤掉，是不存在）。C4 钉这条。
+
+**2. 失败必须能分诊。**
+
+| status | 含义 | 反例（不许这么做） |
+|---|---|---|
+| `unavailable` | 未注册 / 适配器不可用 | 返回 ok + 空输出 |
+| `rejected` | 输入不合规 | 尽力调一把 |
+| `failed` | 实现抛错 / 声明的输出没兑现 | 缺字段也判 ok |
+| `timeout` | 真的被杀了 | 跑完才报超时 |
+
+混成一类 ⇒ 调用方分不清"没调用成功"和"调用成功但没用" —— 那是假成功的温床。
+
+**3. 端点只接受能力引用。** `/api/invoke` 的请求体里出现 `impl` / `argv` /
+`code` / `transport` 一律 400：否则这个端点就是"远程执行任意命令"，能力清单
+沦为摆设（F5 钉住）。接外部 Python 对象（`transport: python`）等同任意代码
+进本进程 ⇒ 清单必须显式 `trusted: true`，默认 false。
+
+### 与 harness 打通
+
+`bind_capability(h, cid, route_from=...)` 把能力写进 `h.skills`（键为
+`uci:<id>`）并加 L1 路由 ⇒ `harness_id` 随之改变（技能层真的进了基因组，
+不是旁路）。执行时外部技能给的源码**照样**要过 `verify_source` —— 判据只来自
+执行，技能自称修好了不算（E2 实测 reward=1.0 来自环境判据）。
+⛔ 没挂网关时**显式记"技能不可达"**（step ok=False、reward 0），不静默退化
+成"无策略"（E4）。
+
+### 验证
+
+| 证据 | 结果 |
+|---|---|
+| 四形态接入 | callable / 对象 / CLI / HTTP（真实本机服务）全 ok |
+| 失败分诊 | unavailable / rejected / failed / timeout 各归其位 |
+| 判据 | 有 checker ⇒ verified；无 checker ⇒ `verified=False` + 显性 reason |
+| 自述 | `{"ok":true,"self_reported":true}` ⇒ **不产生 Verdict**（C4） |
+| 端点 | 携带 `argv`/`impl`/`code` ⇒ 400；body 超限 ⇒ 413；未装载 ⇒ 503 |
+| 事故注入 | **8/8 全部转红**（输入校验 / 输出校验 / 未注册 / adapt 降级 / verified / trusted / timeout / 端点） |
+
+⛔⛔ **本轮踩到的坑：空容器在布尔上下文里是 falsy**。
+`Registry` 定义了 `__len__`，于是 `Gateway(registry or _default_registry())`
+在传入**空注册表**时静默换成默认空表 ⇒ 冒烟时 **8/8 全 `unavailable`**，
+而报错信息写的是"已注册 0 个" —— 极易误判成"注册没生效"。
+⇒ 凡是有 `__len__` / `__bool__` 的对象，**一律显式写 `is not None`**。
+
+⛔ 第二个坑：`fingerprint` **故意不含 summary**（改一句描述 ≠ 能力变了，
+否则改错别字都让指纹漂移）。我第一版用 summary 造差异写 D2 ⇒ 指纹相同 ⇒
+"没拦住"的假红。现已补 D2b 把这条设计判断钉住。
+
+### 仍保留的边界
+
+1. inproc 形态**没有真正的超时**（Python 杀不掉线程）⇒ 只给可信实现；
+   要真超时请走 CLI / HTTP。这是能力边界，不是待办。
+2. 沙箱：接入层复用的仍是 `environment` 的进程沙箱；`trusted=True` 的
+   inproc 能力**不受沙箱约束**（它在宿主进程里跑）—— 这是 `trusted` 的语义。
+3. 清单里的 `python` 形态 = 任意代码进本进程 ⇒ 信任边界是"写清单的人"。
