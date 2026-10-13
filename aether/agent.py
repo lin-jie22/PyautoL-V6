@@ -36,7 +36,7 @@ from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
 
 from .environment import Environment, verify_source
 from .memory import MemoryOS
-from .repair import revert_control_flow          # 唯一事实源（难度分层也用它）
+from .repair import revert_control_flow, revert_literals   # 唯一事实源（难度分层也用它）
 from .verifier import Verdict, error_verdict
 
 #: L0 元规则指令表。**指令是有后果的**，不是注释。
@@ -228,6 +228,11 @@ class HarnessAgent:
                 strategy[len("uci:"):], src, env, spec, steps)
         elif strategy == "fix_control_flow":
             fixed = revert_control_flow(src, env.source)   # 通用但保守
+        elif strategy == "fix_literals":
+            #: 通用字面量修法：**另一个能力维度**（只对齐数值常量）。
+            #: ⛔ 它跟 `fix_control_flow` 一样是通用的（不点名环境），
+            #:    换环境照样生效 ⇒ 能不能过 held-out 由闸判，不在这里预判。
+            fixed = revert_literals(src, env.source)
         elif strategy.startswith("patch:"):
             # ⛔ 定点修法必须**校验环境是否匹配**。不校验的话它会在任何环境
             #    都"生效" ⇒ 定点退化成通用 ⇒ 泛化闸再也发现不了它。

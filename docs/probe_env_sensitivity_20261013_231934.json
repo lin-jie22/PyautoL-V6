@@ -1,0 +1,150 @@
+{
+  "dev_env": "textscore",
+  "ho_envs": [
+    "eventflow",
+    "stateflow",
+    "scheduler"
+  ],
+  "max_tasks": 12,
+  "rows": [
+    {
+      "ho_env": "eventflow",
+      "pool": "general",
+      "dev_tasks": 5,
+      "ho_tasks": 5,
+      "ho_easy": 3,
+      "ho_hard": 2,
+      "verdict": "generalize",
+      "dev_gain": 0.6,
+      "ho_gain": 0.6,
+      "by_difficulty": {
+        "easy": 1.0,
+        "hard": 0.0
+      },
+      "discriminative": true,
+      "committed": true,
+      "cost_s": 7.29
+    },
+    {
+      "ho_env": "eventflow",
+      "pool": "narrow",
+      "dev_tasks": 5,
+      "ho_tasks": 5,
+      "ho_easy": 3,
+      "ho_hard": 2,
+      "verdict": "overfit",
+      "dev_gain": 1.0,
+      "ho_gain": 0.0,
+      "by_difficulty": {
+        "easy": 0.0,
+        "hard": 0.0
+      },
+      "discriminative": true,
+      "committed": false,
+      "cost_s": 4.13
+    },
+    {
+      "ho_env": "stateflow",
+      "pool": "general",
+      "dev_tasks": 5,
+      "ho_tasks": 5,
+      "ho_easy": 1,
+      "ho_hard": 4,
+      "verdict": "generalize",
+      "dev_gain": 0.6,
+      "ho_gain": 0.2,
+      "by_difficulty": {
+        "easy": 1.0,
+        "hard": 0.0
+      },
+      "discriminative": true,
+      "committed": true,
+      "cost_s": 17.32
+    },
+    {
+      "ho_env": "stateflow",
+      "pool": "narrow",
+      "dev_tasks": 5,
+      "ho_tasks": 5,
+      "ho_easy": 1,
+      "ho_hard": 4,
+      "verdict": "overfit",
+      "dev_gain": 1.0,
+      "ho_gain": 0.0,
+      "by_difficulty": {
+        "easy": 0.0,
+        "hard": 0.0
+      },
+      "discriminative": true,
+      "committed": false,
+      "cost_s": 7.09
+    },
+    {
+      "ho_env": "scheduler",
+      "pool": "general",
+      "dev_tasks": 5,
+      "ho_tasks": 11,
+      "ho_easy": 3,
+      "ho_hard": 8,
+      "verdict": "generalize",
+      "dev_gain": 0.6,
+      "ho_gain": 0.2727,
+      "by_difficulty": {
+        "easy": 1.0,
+        "hard": 0.0
+      },
+      "discriminative": true,
+      "committed": true,
+      "cost_s": 18.42
+    },
+    {
+      "ho_env": "scheduler",
+      "pool": "narrow",
+      "dev_tasks": 5,
+      "ho_tasks": 11,
+      "ho_easy": 3,
+      "ho_hard": 8,
+      "verdict": "overfit",
+      "dev_gain": 1.0,
+      "ho_gain": 0.0,
+      "by_difficulty": {
+        "easy": 0.0,
+        "hard": 0.0
+      },
+      "discriminative": true,
+      "committed": false,
+      "cost_s": 6.16
+    }
+  ],
+  "checks": [
+    {
+      "name": "J1/J3 general: 三个 held-out 环境裁决一致（['generalize']）",
+      "ok": true
+    },
+    {
+      "name": "J2 general: 三个环境**全部放行**（实测 [False]）",
+      "ok": true
+    },
+    {
+      "name": "J1/J3 narrow: 三个 held-out 环境裁决一致（['overfit']）",
+      "ok": true
+    },
+    {
+      "name": "J2 narrow: 三个环境**全部拦截**（实测 [True]）",
+      "ok": true
+    },
+    {
+      "name": "J4 eventflow: general=generalize 与 narrow=overfit 方向相反",
+      "ok": true
+    },
+    {
+      "name": "J4 stateflow: general=generalize 与 narrow=overfit 方向相反",
+      "ok": true
+    },
+    {
+      "name": "J4 scheduler: general=generalize 与 narrow=overfit 方向相反",
+      "ok": true
+    }
+  ],
+  "all_pass": true
+}

@@ -1,0 +1,249 @@
+{
+  "max_n": 12,
+  "rows": [
+    {
+      "env": "textscore",
+      "task": "textscore::m2",
+      "kind": "compare",
+      "desc": "比较符反转 Lt→GtE",
+      "reward": 0.0
+    },
+    {
+      "env": "textscore",
+      "task": "textscore::m3",
+      "kind": "compare",
+      "desc": "比较符反转 Gt→LtE",
+      "reward": 0.0
+    },
+    {
+      "env": "textscore",
+      "task": "textscore::m5",
+      "kind": "compare",
+      "desc": "比较符反转 LtE→Gt",
+      "reward": 0.0
+    },
+    {
+      "env": "textscore",
+      "task": "textscore::m8",
+      "kind": "literal",
+      "desc": "常量 1→2",
+      "reward": 1.0
+    },
+    {
+      "env": "textscore",
+      "task": "textscore::m10",
+      "kind": "literal",
+      "desc": "常量 1→2",
+      "reward": 1.0
+    },
+    {
+      "env": "eventflow",
+      "task": "eventflow::m3",
+      "kind": "compare",
+      "desc": "比较符反转 Gt→LtE",
+      "reward": 0.0
+    },
+    {
+      "env": "eventflow",
+      "task": "eventflow::m6",
+      "kind": "literal",
+      "desc": "常量 1→2",
+      "reward": 1.0
+    },
+    {
+      "env": "eventflow",
+      "task": "eventflow::m7",
+      "kind": "binop",
+      "desc": "运算符替换 Sub→Add",
+      "reward": 0.0
+    },
+    {
+      "env": "eventflow",
+      "task": "eventflow::m8",
+      "kind": "compare",
+      "desc": "比较符反转 LtE→Gt",
+      "reward": 0.0
+    },
+    {
+      "env": "eventflow",
+      "task": "eventflow::m10",
+      "kind": "literal",
+      "desc": "常量 0.0→1.0",
+      "reward": 1.0
+    },
+    {
+      "env": "stateflow",
+      "task": "stateflow::m3",
+      "kind": "literal",
+      "desc": "常量 0→1",
+      "reward": 0.0
+    },
+    {
+      "env": "stateflow",
+      "task": "stateflow::m4",
+      "kind": "literal",
+      "desc": "常量 1→2",
+      "reward": 0.0
+    },
+    {
+      "env": "stateflow",
+      "task": "stateflow::m6",
+      "kind": "literal",
+      "desc": "常量 1→2",
+      "reward": 1.0
+    },
+    {
+      "env": "stateflow",
+      "task": "stateflow::m8",
+      "kind": "compare",
+      "desc": "比较符反转 Eq→NotEq",
+      "reward": 0.0
+    },
+    {
+      "env": "stateflow",
+      "task": "stateflow::m11",
+      "kind": "literal",
+      "desc": "常量 0→1",
+      "reward": 1.0
+    },
+    {
+      "env": "scheduler",
+      "task": "scheduler::m0",
+      "kind": "literal",
+      "desc": "常量 1→2",
+      "reward": 1.0
+    },
+    {
+      "env": "scheduler",
+      "task": "scheduler::m1",
+      "kind": "literal",
+      "desc": "常量 0→1",
+      "reward": 1.0
+    },
+    {
+      "env": "scheduler",
+      "task": "scheduler::m2",
+      "kind": "literal",
+      "desc": "常量 1→2",
+      "reward": 1.0
+    },
+    {
+      "env": "scheduler",
+      "task": "scheduler::m3",
+      "kind": "binop",
+      "desc": "运算符替换 Sub→Add",
+      "reward": 0.0
+    },
+    {
+      "env": "scheduler",
+      "task": "scheduler::m4",
+      "kind": "literal",
+      "desc": "常量 1→2",
+      "reward": 1.0
+    },
+    {
+      "env": "scheduler",
+      "task": "scheduler::m5",
+      "kind": "compare",
+      "desc": "比较符反转 Lt→GtE",
+      "reward": 0.0
+    },
+    {
+      "env": "scheduler",
+      "task": "scheduler::m6",
+      "kind": "literal",
+      "desc": "常量 1→2",
+      "reward": 0.0
+    },
+    {
+      "env": "scheduler",
+      "task": "scheduler::m7",
+      "kind": "literal",
+      "desc": "常量 0→1",
+      "reward": 0.0
+    },
+    {
+      "env": "scheduler",
+      "task": "scheduler::m8",
+      "kind": "compare",
+      "desc": "比较符反转 LtE→Gt",
+      "reward": 0.0
+    },
+    {
+      "env": "scheduler",
+      "task": "scheduler::m9",
+      "kind": "literal",
+      "desc": "常量 1→2",
+      "reward": 1.0
+    },
+    {
+      "env": "scheduler",
+      "task": "scheduler::m11",
+      "kind": "literal",
+      "desc": "常量 0→1",
+      "reward": 1.0
+    }
+  ],
+  "agg": {
+    "textscore/compare": {
+      "n": 3,
+      "fixed": 0
+    },
+    "textscore/literal": {
+      "n": 2,
+      "fixed": 2
+    },
+    "eventflow/compare": {
+      "n": 2,
+      "fixed": 0
+    },
+    "eventflow/literal": {
+      "n": 2,
+      "fixed": 2
+    },
+    "eventflow/binop": {
+      "n": 1,
+      "fixed": 0
+    },
+    "stateflow/literal": {
+      "n": 4,
+      "fixed": 2
+    },
+    "stateflow/compare": {
+      "n": 1,
+      "fixed": 0
+    },
+    "scheduler/literal": {
+      "n": 8,
+      "fixed": 6
+    },
+    "scheduler/binop": {
+      "n": 1,
+      "fixed": 0
+    },
+    "scheduler/compare": {
+      "n": 2,
+      "fixed": 0
+    }
+  },
+  "checks": [
+    {
+      "name": "J1 通用性：常量题在 ≥2 个环境被修好（实测 ['eventflow', 'scheduler', 'stateflow', 'textscore']）",
+      "ok": true
+    },
+    {
+      "name": "J2 不越界：控制流题不被它修好（0/10）",
+      "ok": true
+    },
+    {
+      "name": "J3 不塌方：常量题也没有全被修好（12/16 < 全部）",
+      "ok": true
+    },
+    {
+      "name": "J4 常量题确实存在（否则这条修法没有对象）",
+      "ok": true
+    }
+  ],
+  "all_pass": true,
+  "cost_s": 21.21
+}

@@ -307,9 +307,10 @@ def _default_runner(envs, memory=None, timeout: float = 10.0):
     （L0 元规则可禁用修法 / L1 路由决定技能可不可达 / L2 工具缺失直接失败 /
     L3 是修法本身 / L4 记忆是第二条通路）。
 
-    ⛔ 两类技能的区别，它把 "reward hacking" 变成可判定的：
+    ⛔ 三类技能的区别，它把 "reward hacking" 变成可判定的：
 
         fix_control_flow        —— **保守通用修法**：任何环境都能修，但修不全
+        fix_literals            —— **通用字面量修法**：另一个维度（只对齐数值常量）
         patch::<env_id>         —— **定点修法**：只在点名的那个环境生效，修得全
 
     在**单一环境**的评测里，后者**严格更好**（发展集分数更高）⇒ 它一定会被
@@ -536,10 +537,19 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     #    除非泛化闸拦住它。这就是 reward hacking 的可执行形态。
     pool = {
         "fix_control_flow": "保守通用修法：只恢复控制流（比较/运算），不动字面量",
+        "fix_literals": "通用字面量修法：只把数值常量对齐基线，不动结构/字符串",
         f"patch:{dev_name}": f"定点修法：{dev_name} 整个文件换回基线（换环境即失效）",
     }
+    #: ⛔ 三类并列，前两类都是**通用**的（不点名环境），第三类是定点的：
+    #:    在**发展集**上定点修法严格更好 ⇒ 一定会被选中 ⇒ 一定会被提交，
+    #:    除非泛化闸拦住它。这就是 reward hacking 的可执行形态。
+    #: ⛔ 为什么要有 `fix_literals`（2026-10-13 实测）：只有
+    #:    `fix_control_flow` 时，常量变异题**永远**是 hard，而唯一能修它的
+    #:    `patch:*` 必然被 held-out 拦 ⇒ 闭环第一轮之后**注定停滞**
+    #:    （实测 round2/3 全 `saturated:stagnated`）。它是第二个**能力维度**，
+    #:    不是第二个定点修法。
     if args.capsules == "general":
-        pool = {"fix_control_flow": pool["fix_control_flow"]}
+        pool = {k: v for k, v in pool.items() if not k.startswith("patch:")}
     elif args.capsules == "narrow":
         pool = {f"patch:{dev_name}": pool[f"patch:{dev_name}"]}
     # ⛔ 路由键用**任务类别**而不是环境名：按环境名路由本身就是一种定点化，

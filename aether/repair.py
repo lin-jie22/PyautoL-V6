@@ -68,6 +68,44 @@ def revert_control_flow(broken_src: str, base_src: str) -> str:
     return ast.unparse(b)
 
 
+def revert_literals(broken_src: str, base_src: str) -> str:
+    """**通用**字面量修法：数值常量按同一遍历序对齐到基线，其余一律不动。
+
+    与 `revert_control_flow` 的关系：那一维修的是"比较/运算"，这一维修的是
+    "数值字面量"。两者都只把自己那一类对齐到基线、都不碰别的东西 ⇒
+    它们是**可叠加的两个能力维度**，不是同一个修法的两种写法。
+
+    ⛔⛔ 它**刻意不进** `GENERIC_REPAIRS`（2026-10-13 实测取证
+        `scripts/probe_repair_literals.py`：4/4 环境能修常量题，控制流题
+        0/10 被它修好）。难度由"通用修法能否修好"定义（见本文件顶部），
+        把它加进那个集合 ⇒ 常量题从 hard 变 easy ⇒ 发展集与 held-out 的
+        **难度跨度消失** ⇒ 泛化闸退化。它只作为**技能**进入 proposer 池：
+        泛不泛化由 held-out 闸在执行中判，不由"是不是通用修法"预先判。
+
+    ⛔ 与 `restore_baseline` 的区别：它**只动数值常量**，字符串、结构、
+       比较符、运算符一律保留 broken 的形态。
+    """
+    b = ast.parse(broken_src)
+    g = ast.parse(base_src)
+
+    def nums(tree):
+        """收集数值常量节点。⛔ 排除 bool：`True` 是 int 的子类，
+        不排除会把 `if x` 变成 `if 1`。"""
+        out = []
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Constant) \
+                    and isinstance(n.value, (int, float)) \
+                    and not isinstance(n.value, bool):
+                out.append(n)
+        return out
+
+    bo, go = nums(b), nums(g)
+    for i in range(min(len(bo), len(go))):
+        bo[i].value = go[i].value
+    ast.fix_missing_locations(b)
+    return ast.unparse(b)
+
+
 def restore_baseline(broken_src: str, base_src: str) -> str:
     """**完整恢复**：整个文件换回基线。
 
