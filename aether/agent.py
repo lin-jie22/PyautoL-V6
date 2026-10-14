@@ -498,8 +498,10 @@ class HarnessAgent:
             return self.run(h, spec).verdict
         #: ⛔ 挂上 agent 引用：**反事实重放的唯一入口**。
         #:    Runner 协议只有 `(harness, spec) -> Verdict`，光有它无法
-        #:    "去掉某一步再跑一次" ⇒ step 级信用分配永远拿不到 replay_fn
-        #:    ⇒ `assign_credit` 在生产上恒为 turn-level 不可用（实测 0 次）。
+        #:    "去掉某一步再跑一次" ⇒ step 级信用分配拿不到 replay_fn
+        #:    ⇒ `assign_credit` 恒为 `available=False`（2026-10-13 实测 0 次）。
+        #:    ⛔ 该缺口已于 2026-10-14（r27）由下面 `replay_fn()` 修掉；
+        #:       挂这个引用**正是**修复的一部分 —— 别当遗留注释删掉。
         #:    这里显式带上宿主对象，让消费方能 `getattr(runner, "agent")`。
         runner.agent = self            # type: ignore[attr-defined]
         return runner

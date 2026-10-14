@@ -18,5 +18,8 @@ docs/probe_growth_ceiling_*.json
 docs/probe_residual_diag_*.json
 data/_probe_store.jsonl-shm
 data/_probe_store.jsonl-wal
+# 沙箱自探测的 seatbelt profile 残留（生成物）
+_sandbox.sb
+_sandbox.json
 node_modules/
 .DS_Store

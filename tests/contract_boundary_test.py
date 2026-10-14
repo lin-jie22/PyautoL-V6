@@ -80,11 +80,17 @@ def group_a() -> None:
 
     #: ⛔ 对照组：关掉 deny 后同一段代码**必须能跑通**。
     #:   没有这一条，A1 的"没跑成"可能只是代码本身写错了（假绿）。
+    #: ⛔⛔ 2026-10-14（r28）：沙箱现在是**两道闸**（事件级 + 模块级），
+    #:    对照组必须**两道都关**才谈得上"关掉 deny"。只清 `_AUDIT_DENY_EVENTS`
+    #:    ⇒ `import ctypes` 仍被模块黑名单拦 ⇒ 对照组恒红（真红，但红在
+    #:    对照组自己身上，会让人误以为防线失效）。
     import aether.environment as E
     orig = E._AUDIT_DENY_EVENTS
+    orig_m = E._AUDIT_DENY_MODULES
     cache = getattr(E, "_AUDIT_PROBE", None)
     try:
         E._AUDIT_DENY_EVENTS = ()
+        E._AUDIT_DENY_MODULES = ()
         if isinstance(cache, dict):
             cache.clear()
         r2, sb2 = _run("import ctypes\nlibc = ctypes.CDLL(None)\n"
@@ -92,6 +98,7 @@ def group_a() -> None:
         ran = _np(r2) == 1
     finally:
         E._AUDIT_DENY_EVENTS = orig
+        E._AUDIT_DENY_MODULES = orig_m
         if isinstance(cache, dict):
             cache.clear()
     ck("A", "A3 对照组：关掉 deny ⇒ ctypes 真能跑通（A1 不是假绿）",
@@ -223,9 +230,13 @@ def group_f() -> None:
 
     #: F1 清空 deny ⇒ A1 判据必须翻转
     orig = E._AUDIT_DENY_EVENTS
+    orig_m = E._AUDIT_DENY_MODULES
     cache = getattr(E, "_AUDIT_PROBE", None)
     try:
+        #: ⛔ 两道闸都关（同 A3 的理由）：只关事件级 ⇒ 模块级仍然拦
+        #:   ⇒ 事故版造不出"转红"，反而证明不了判据有判别力。
         E._AUDIT_DENY_EVENTS = ()
+        E._AUDIT_DENY_MODULES = ()
         if isinstance(cache, dict):
             cache.clear()
         r, sb = _run("import ctypes\nlibc = ctypes.CDLL(None)\n"
@@ -234,9 +245,26 @@ def group_f() -> None:
                      and _np(r) == 0)
     finally:
         E._AUDIT_DENY_EVENTS = orig
+        E._AUDIT_DENY_MODULES = orig_m
         if isinstance(cache, dict):
             cache.clear()
-    ck("F", "F1 事故版（清空 deny）⇒ A1 转红（证明非恒真）", broke)
+    ck("F", "F1 事故版（清空两道 deny）⇒ A1 转红（证明非恒真）", broke)
+
+    #: F4 新增反证：事故版（模块黑名单里塞一个拦不住的条目）
+    #: ⇒ G1 必须抓到"漏网"。没有这一条，G1 可能只是恒真断言。
+    try:
+        E._AUDIT_DENY_MODULES = tuple(E._AUDIT_DENY_MODULES) + ("_never_real",)
+        if isinstance(cache, dict):
+            cache.clear()
+        _, sbx = _run("import mmap\nreturn 1", expect=1)
+        #: `_never_real` 不在名单生效范围（它根本不会被 import），
+        #: 这里验的是：G1 的**逐模块**形态能区分"真拦住"与"名单里有但没生效"
+        fake_ok = any(d == "import:mmap" for d in _denied(sbx))
+    finally:
+        E._AUDIT_DENY_MODULES = orig_m
+        if isinstance(cache, dict):
+            cache.clear()
+    ck("F", "F4 事故版（名单注水）⇒ 真条目仍生效，G1 形态能分辨", fake_ok)
 
     #: F2 静默降级版 replay（永远返回 baseline）⇒ B6 必须转红。
     #:    这守的是"归因真的做了 leave-one-out"而不是"永远说贡献 0"。
@@ -293,11 +321,133 @@ def group_f() -> None:
        got is None)
 
 
+# ── G 组：原生扩展 import 通道（audit 管辖不到的那半）────────────
+def group_g() -> None:
+    print("\n【G】原生扩展：只堵 dlopen = 堵正门、留侧门")
+
+    #: ⛔ 逐个模块验，不只验一个 —— 名单里每一条都必须真的生效，
+    #:    否则"黑名单"就是装饰（与落点要兑现同一条纪律）。
+    mods = ("ctypes", "mmap", "fcntl", "termios", "pty", "tty",
+            "syslog", "signal", "_posixsubprocess", "readline")
+    bad: List[str] = []
+    for m in mods:
+        _, sb = _run(f"import {m}\nreturn 1", expect=1)
+        if not any(d == f"import:{m}" for d in _denied(sb)):
+            bad.append(m)
+    ck("G", f"G1 {len(mods)} 个原生扩展模块全部被拦在 import 层",
+       not bad, f"漏网={bad}")
+
+    #: `resource` 刻意**不在**模块黑名单（拦不住：runner 自用在先），
+    #: 它的闸是动作级 `resource.setrlimit`。
+    from aether.environment import _AUDIT_DENY_MODULES as _mods
+    ck("G", "G2 resource 不在模块黑名单（诚实：拦不住就别写）",
+       "resource" not in _mods,
+       "它的真闸是事件级 resource.setrlimit（见 G3）")
+
+    _, sb = _run("import resource\n"
+                 "resource.setrlimit(resource.RLIMIT_NOFILE, (999999, 999999))\n"
+                 "return 1", expect=1)
+    ck("G", "G3 setrlimit（改我们自己的限制）⇒ 动作级拦住",
+       any("setrlimit" in d for d in _denied(sb)), f"denied={_denied(sb)[:2]}")
+
+    _, sb = _run("import resource\n"
+                 "cur = resource.getrlimit(resource.RLIMIT_NOFILE)\n"
+                 "return 1", expect=1)
+    ck("G", "G4 getrlimit（只读）⇒ 放行（动作级拦截零误伤）",
+       not _denied(sb), f"denied={_denied(sb)[:2]}")
+
+    #: 对照组：关掉黑名单后同一段代码**必须能跑通** ⇒ G1 不是假绿
+    import aether.environment as E
+    orig = E._AUDIT_DENY_MODULES
+    orig_e = E._AUDIT_DENY_EVENTS
+    cache = getattr(E, "_AUDIT_PROBE", None)
+    try:
+        E._AUDIT_DENY_MODULES = ()
+        E._AUDIT_DENY_EVENTS = ()
+        if isinstance(cache, dict):
+            cache.clear()
+        rr, _ = _run("import mmap\nreturn 1", expect=1)
+        ran = _np(rr) == 1
+    finally:
+        E._AUDIT_DENY_MODULES = orig
+        E._AUDIT_DENY_EVENTS = orig_e
+        if isinstance(cache, dict):
+            cache.clear()
+    ck("G", "G5 对照组：关掉黑名单 ⇒ import mmap 真能跑通",
+       ran, f"n_passed={_np(rr)}")
+
+    #: ⛔ 最硬的误伤面：4 个真实任务环境的**干净源码**必须全通过
+    from aether.environment import Environment, verify_source
+    broken_envs: List[str] = []
+    for e in ("textscore", "eventflow", "stateflow", "scheduler"):
+        env = Environment.from_dir(ROOT / "tasks" / e)
+        if not verify_source(env, env.source, timeout=15.0).passed:
+            broken_envs.append(e)
+    ck("G", "G6 零误伤：4 个真实环境干净源码全部通过",
+       not broken_envs, f"被误伤={broken_envs}")
+
+
+# ── H 组：seatbelt_active 不许硬编码（假仪表）───────────────────
+def group_h() -> None:
+    print("\n【H】声明与实际的落差必须暴露，不许硬编码读数")
+
+    from aether.interop import (BaseAdapter, CapabilitySpec, CliAdapter,
+                                Gateway, Registry)
+
+    ck("H", "H1 BaseAdapter 有 seatbelt_active 字段（可探测，非硬编码）",
+       hasattr(BaseAdapter, "seatbelt_active"),
+       f"默认值={getattr(BaseAdapter, 'seatbelt_active', None)!r}")
+
+    ck("H", "H2 未探测时 sandbox_detail 不许空串冒充『已确认没有』",
+       bool(getattr(BaseAdapter, "sandbox_detail", "")),
+       f"={getattr(BaseAdapter, 'sandbox_detail', None)!r}")
+
+    #: 端到端：声明 seatbelt 的能力，实际没套上 ⇒ 落差必须被记账
+    reg = Registry()
+    gw = Gateway(reg)          # ⛔ 别写成 `reg, gw = Registry(), Gateway(reg)`
+    spec = CapabilitySpec(id="echo_cli", kind="tool", sandbox="seatbelt",
+                          trusted=True)
+    try:
+        reg.register(spec, adapter=CliAdapter(argv=["/bin/cat"]))
+    except Exception as e:                              # noqa: BLE001
+        ck("H", "H3 CLI 能力可注册", False, f"{type(e).__name__}: {e}")
+        return
+    res = gw.invoke("echo_cli", {"text": "hello"})
+    sbx = dict(getattr(res, "sandbox", None) or {})
+
+    ck("H", "H3 seatbelt_active 是探测结果且带原因（不是裸 False）",
+       isinstance(sbx.get("seatbelt_active"), bool)
+       and bool(sbx.get("seatbelt_detail")),
+       f"active={sbx.get('seatbelt_active')} "
+       f"detail={str(sbx.get('seatbelt_detail'))[:50]}")
+
+    ck("H", "H4 声明 seatbelt 却没套上 ⇒ declared_but_unenforced=True",
+       sbx.get("declared") == "seatbelt"
+       and sbx.get("declared_but_unenforced") is True,
+       f"declared={sbx.get('declared')} "
+       f"unenforced={sbx.get('declared_but_unenforced')}")
+
+    ck("H", "H5 落差暴露不拖垮调用（能力本身仍可用）",
+       res.status == "ok", f"status={res.status} error={res.error}")
+
+    #: 声明 process ⇒ 不该报落差（否则落差字段自己就是恒真的假仪表）
+    spec2 = CapabilitySpec(id="echo_p", kind="tool", sandbox="process",
+                           trusted=True)
+    reg.register(spec2, adapter=CliAdapter(argv=["/bin/cat"]))
+    r2 = gw.invoke("echo_p", {"text": "x"})
+    sb2 = dict(getattr(r2, "sandbox", None) or {})
+    ck("H", "H6 声明 process ⇒ declared_but_unenforced=False（非恒真）",
+       sb2.get("declared_but_unenforced") is False,
+       f"declared={sb2.get('declared')} "
+       f"unenforced={sb2.get('declared_but_unenforced')}")
+
+
 def main() -> int:
     print("=" * 66)
-    print("边界契约：ctypes / step 级归因 / 观测侧流式")
+    print("边界契约：ctypes / 原生扩展 import / step 级归因 / "
+          "观测侧流式 / 落差记账")
     print("=" * 66)
-    for fn in (group_a, group_b, group_c, group_d, group_f):
+    for fn in (group_a, group_b, group_c, group_d, group_g, group_h, group_f):
         try:
             fn()
         except Exception as e:                              # noqa: BLE001

@@ -59,6 +59,8 @@ try:
     _allow = [os.path.realpath(p) for p in (_cfg.get("allow") or [])]
     _path_events = set(_cfg.get("path_events") or [])
     _deny_events = set(_cfg.get("deny_events") or [])
+    #: 原生扩展模块黑名单（见 `_AUDIT_DENY_MODULES`）。
+    _deny_modules = set(_cfg.get("deny_modules") or [])
 
     def _ok_path(p):
         try:
@@ -74,6 +76,12 @@ try:
         if event in _deny_events:
             _SB["denied"].append(event)
             raise PermissionError("V6_SANDBOX_DENY:" + event)
+        #: 原生扩展：拦截在 import 层（dlopen 之外的那半通道）。
+        #: ⛔ 记账写成 `import:<模块名>`，与事件类 deny 区分得开 ——
+        #:    否则观测侧分不清"被拒的是动作还是模块"。
+        if event == "import" and args and args[0] in _deny_modules:
+            _SB["denied"].append("import:" + str(args[0]))
+            raise PermissionError("V6_SANDBOX_DENY:import:" + str(args[0]))
         if event in _path_events:
             for p in args:
                 if isinstance(p, int):        # fd：不是路径
@@ -81,6 +89,12 @@ try:
                 if isinstance(p, (str, bytes, os.PathLike)) and not _ok_path(p):
                     _SB["denied"].append(event + ":" + str(p)[:120])
                     raise PermissionError("V6_SANDBOX_DENY:" + event)
+    #: ⛔⛔ 内存守卫要的模块必须在 `addaudithook` **之前** import。
+    #:    2026-10-14（r28）：`resource` 进了原生扩展黑名单（它能改 rlimit
+    #:    ⇒ 可以拆掉我们自己的限制）。而 hook 一旦装上就不再区分"runner
+    #:    自己 import"和"被测代码 import" ⇒ 放在 hook 之后 runner 会自杀。
+    #:    先把依赖备齐，再装 hook —— 顺序本身就是这条防线的一部分。
+    import resource as _res, threading as _th, time as _tm
     sys.addaudithook(_hook)
     _SB["audit"] = True
 except Exception as _e:
@@ -92,7 +106,6 @@ except Exception as _e:
 #    ⇒ "限制内存"在 rlimit 层根本没生效，而调用方看到的 sandbox.rlimits
 #    却写着 1 GB（假仪表）。进程内看 RSS 并自杀是这里唯一能生效的路线。
 try:
-    import resource as _res, threading as _th, time as _tm
     _cap = int(_cfg.get("mem_cap_bytes") or 0)
     if _cap > 0:
         #: ⛔ ru_maxrss 单位**跨平台不同**：macOS = 字节，Linux = KB。
@@ -274,6 +287,49 @@ _AUDIT_DENY_EVENTS = (
     "socket.connect", "socket.bind", "socket.create_connection",
     #: 原生 syscall 通道（见上）：加载库 / 解析符号 / 造可写原生缓冲区
     "ctypes.dlopen", "ctypes.dlsym", "ctypes.create_string_buffer",
+    #: ⛔ `resource.setrlimit`：被测代码可以改 rlimit ⇒ 拆掉我们自己的
+    #:    限制（超时/写盘/描述符）。实测它**不是**靠 `import resource`
+    #:    拦得住的 —— runner 自己要用 resource 做内存守卫，早已把它
+    #:    装进 `sys.modules`，而 CPython 只对**首次加载**发 `import`
+    #:    事件 ⇒ 模块黑名单对它无效（实测 `import resource` 仍 n_passed=1）。
+    #:    ⇒ 改拦**动作**：`setrlimit` 拒、`getrlimit` 放行（只读不改，
+    #:    零误伤）。事件名同样是实测出来的。
+    "resource.setrlimit",
+)
+
+#: audit hook 拦的**原生扩展模块名**（`import` 事件的 `args[0]`）。
+#:
+#: ⛔⛔ 这是 §5.6 「原生扩展不受 audit 管辖」的补法（2026-10-14 · r28）。
+#:    `ctypes.dlopen` 只拦**加载**这一步；而 CPython 里相当一部分能力是
+#:    import 一个 C 扩展就直接拿到手的，中间根本没有 `dlopen` 事件
+#:    （实测：`import mmap` / `fcntl` / `termios` / `pty` 都只发 `import`）。
+#:    ⇒ 只堵 dlopen 等于堵了正门、留着侧门。
+#:
+#: ⛔ 模块名是**实测**出来的（addaudithook 打印 `import` 事件的 args[0]），
+#:    不是照着文档猜。⛔ 每个名字都必须能回答"不拦会怎样"：
+#:      mmap      —— 映射可执行内存 / 绕过文件读写审计直接改磁盘
+#:      fcntl     —— ioctl / 文件锁，能碰文件描述符底层
+#:      termios/tty/pty —— 夺终端、起伪终端会话（pty 能开 shell）
+#:      syslog    —— 往系统日志写（带外通道）
+#:      signal    —— 改信号处置，能让父进程的 kill 失效
+#:
+#: ⛔ `resource` **刻意不在这里**：实测拦不住（runner 自用在先，
+#:    `sys.modules` 已有 ⇒ 不再发 `import` 事件）。它的真闸是事件级
+#:    `resource.setrlimit`（见 `_AUDIT_DENY_EVENTS`）—— 拦动作比拦
+#:    模块更准，而且 `getrlimit` 仍能读 ⇒ 零误伤。
+#:    把拦不住的条目留在黑名单里就是**假仪表**（看着有，实际没有）。
+#:      _posixsubprocess / _subprocess —— subprocess 的底层入口
+#:      ctypes / _ctypes / ctypes.util —— 原生 syscall（dlopen 之外的路径）
+#:      curses / readline —— 终端与历史文件（readline 会写 ~/.python_history）
+_AUDIT_DENY_MODULES = (
+    "ctypes", "_ctypes", "ctypes.util", "mmap", "fcntl", "termios",
+    "tty", "pty", "syslog", "signal", "_posixsubprocess",
+    "_subprocess", "_curses", "curses", "readline",
+    #: ⛔ `subprocess` 单独列出是**为了记账可读**，不是因为它拦不住：
+    #:    它本来就撞 `signal` / `_posixsubprocess`。但不列它，观测侧看到的
+    #:    是 `import:signal` —— 看着像"想装信号处理器"，实际是"想 fork
+    #:    子进程"。归因错位会让排障方向全反（V5 反复栽的同一条）。
+    "subprocess",
 )
 
 
@@ -418,13 +474,16 @@ def _os_sandbox_cmd(workdir: str) -> Optional[Tuple[List[str], str]]:
             return None
         # ⛔ **先自探测一次**：profile 在这个环境到底能不能 apply，
         #    只有真跑一次才知道（实测 deny default 在受限宿主里会失败）。
-        try:
-            chk = subprocess.run([exe, "-f", str(pf), PY, "-c", "print(1)"],
-                                 capture_output=True, text=True, timeout=10)
-        except Exception:  # noqa: BLE001
+        #
+        #    ⛔⛔ 2026-10-14（r28）：探测**必须缓存**。它要真起一个子进程
+        #    （约 10ms~），而 `_os_sandbox_cmd` 被放进每次执行的热点路径
+        #    ⇒ 每次跑测试 / 每次 UCI 调用都白搭一个子进程。
+        #    可用性只取决于"这台机器上 seatbelt 能不能 apply"，
+        #    **与 workdir 无关** ⇒ 可以全局缓存；变的是 profile 路径。
+        ok, why = _os_sandbox_usable(exe)
+        if not ok:
             return None
-        if chk.returncode != 0 or "1" not in (chk.stdout or ""):
-            return None
+        del why
         return [exe, "-f", str(pf)], "seatbelt"
     # Linux：bwrap / unshare 存在才用（同样的探测式接入）
     for name, tmpl in (("bwrap", None), ("unshare", None)):
@@ -438,6 +497,57 @@ def _os_sandbox_cmd(workdir: str) -> Optional[Tuple[List[str], str]]:
 def _sb_str(s: str) -> str:
     """Seatbelt profile 里的字符串字面量（转义，避免路径注入 profile）。"""
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+#: OS 层沙箱**可用性**的探测缓存（2026-10-14 · r28）。
+#: ⛔ 只缓存"能不能用"，**不缓存**命令 —— 命令里含 workdir 相关的
+#:    profile 路径，跨目录复用会把别处的目录写进 profile（越权）。
+_OSB_USABLE: Dict[str, Any] = {}
+
+
+def _os_sandbox_usable(exe: str) -> Tuple[bool, str]:
+    """探测 seatbelt 在这台机器上能不能真正 apply。**结果全局缓存**。
+
+    ⛔ 为什么值得单独抽出来：可用性是**机器级**属性（与 workdir 无关），
+       而探测本身要起一个子进程。放进每次执行的热点路径却不缓存
+       ⇒ 每次跑测试都白搭一个子进程。
+    ⛔ 缓存的是**结论**不是命令：命令里的 profile 路径与 workdir 绑定，
+       跨目录复用等于把别处的目录写进 profile（越权）。
+    ⛔ 仍然返回"为什么不可用"，不许空串 —— 调用方要能区分
+       "探测过确实没有" 与 "根本没探测"。
+    """
+    if "ok" in _OSB_USABLE and _OSB_USABLE.get("exe") == exe:
+        return bool(_OSB_USABLE["ok"]), str(_OSB_USABLE.get("why", ""))
+    ok, why = False, ""
+    try:
+        #: ⛔ 必须用**与真实调用同形态**的 profile 来探测，不能图省事用
+        #:    `(deny default)`：那个连 Python 自己的标准库都读不了 ⇒
+        #:    必然失败 ⇒ 会永远把 seatbelt 判成不可用（假的"没有"）。
+        #:    判"能用"和判"不能用"用的是同一把尺子，才叫探测。
+        with tempfile.TemporaryDirectory(prefix="v6osb_") as td:
+            pf = Path(td) / "_probe.sb"
+            pf.write_text(
+                "(version 1)\n(deny default)\n"
+                "(allow process-exec)\n(allow process-fork)\n"
+                "(allow signal (target self))\n(allow sysctl-read)\n"
+                '(allow file-read* (subpath "/usr/lib"))\n'
+                '(allow file-read* (subpath "/usr/local"))\n'
+                '(allow file-read* (subpath "/opt/homebrew"))\n'
+                '(allow file-read* (subpath "/Library"))\n'
+                '(allow file-read* (subpath "/System/Library"))\n'
+                f'(allow file-read* (subpath {_sb_str(td)}))\n',
+                encoding="utf-8")
+            chk = subprocess.run([exe, "-f", str(pf), PY, "-c", "print(1)"],
+                                 capture_output=True, text=True, timeout=10)
+        if chk.returncode != 0 or "1" not in (chk.stdout or ""):
+            why = (f"自探测失败（rc={chk.returncode}）："
+                   f"{(chk.stderr or '').strip()[:120]}")
+        else:
+            ok = True
+    except Exception as ex:                             # noqa: BLE001
+        why = f"自探测抛异常：{type(ex).__name__}"
+    _OSB_USABLE.update({"ok": ok, "why": why, "exe": exe})
+    return ok, why
 
 
 _AUDIT_PROBE: Dict[str, Any] = {}
@@ -478,6 +588,7 @@ def _probe_audit(workdir: str) -> bool:
             "allow": _audit_allowed_paths(td),
             "path_events": list(_AUDIT_PATH_EVENTS),
             "deny_events": list(_AUDIT_DENY_EVENTS),
+            "deny_modules": list(_AUDIT_DENY_MODULES),
             "mem_cap_bytes": 0,
         }), encoding="utf-8")
         runner = Path(td) / "runner.py"
@@ -577,6 +688,7 @@ def run_in_sandbox(source: str, tests: List[Dict[str, Any]],
             "allow": _audit_allowed_paths(td) if audit_ok else [],
             "path_events": list(_AUDIT_PATH_EVENTS) if audit_ok else [],
             "deny_events": list(_AUDIT_DENY_EVENTS) if audit_ok else [],
+            "deny_modules": list(_AUDIT_DENY_MODULES) if audit_ok else [],
             "mem_cap_bytes": int(MEM_CAP_BYTES),
         }), encoding="utf-8")
         cmd = (osb[0] if osb else []) + [PY, str(runner), str(spec),

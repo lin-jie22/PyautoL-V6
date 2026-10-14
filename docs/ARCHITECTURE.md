@@ -132,8 +132,17 @@ run_round(h, n):
 6. **沙箱是「进程层 + audit 层」**，不是容器级隔离（2026-10-14 复核）。  
    进程层：env 净化 + rlimit + 输出封顶；audit 层（`sys.addaudithook`）：
    文件系统越界、`os.system`/`subprocess`/`fork`、socket、**ctypes 原生
-   加载**全部拦住并记账。⛔ 仍不等于容器：OS 层（`sandbox-exec`）在
-   本环境不可用（`os_isolated=false`），原生扩展不受 audit 管辖。
+   加载**、**原生扩展 import** 全部拦住并记账。
+
+   rlimit 实测（`rlimits_applied` 字段）：`fsize` / `cpu` / `nofile`
+   **三条生效**；`as` / `data` 在 macOS 上**物理不可设**
+   （`ValueError: current limit exceeds maximum limit`）⇒ 内存只能靠
+   进程内守卫，如实记账 —— 不许把"设了但没生效"写成 1 GB。
+
+   ⛔ 仍不等于容器：OS 层（`sandbox-exec`）在本环境不可用
+   （`os_isolated=false`，实测 rc=71 `Operation not permitted`）。
+   ⛔ 「原生扩展不受 audit 管辖」这条 **2026-10-14（r28）已补**：
+      `import` 事件携带模块名 ⇒ 可按黑名单拒（详见 §30）。
 7. **账本里有 495 条历史事件不带 `run_id`**（本轮改动之前写的）。重建时
    它们用派生键 `rebuilt:{seq}` 补齐 ⇒ 条数能对上、可溯源，但**无法与当年
    那次运行用的键对上** ⇒ 这 495 条不参与键比对（只参与条数比对）。
@@ -926,12 +935,18 @@ Python 层的入口一应俱全，**原生 syscall 通道却是敞开的** —�
    加入 `_AUDIT_DENY_EVENTS`（事件名是实测出来的，不是照文档抄的），
    正常 `import math/heapq/json` 零误伤。
 
-### 仍保留的边界（如实，复核后）
+⛔ 但这半只堵了「加载」这一步。2026-10-14（r28）二次复核发现：CPython 里
+相当一部分能力是 `import` 一个 C 扩展就直接拿到手的，中间**根本没有
+`dlopen` 事件**（实测 `import mmap` / `fcntl` / `termios` / `pty` 都只发
+`import`）⇒ 只堵 dlopen 等于堵正门、留侧门。已补模块级黑名单（§30）。
+
+### 仍保留的边界（如实，二次复核后）
 
 - **OS 层仍不可用**：`sandbox-exec` 在已沙箱化的宿主里一律
   `Operation not permitted` ⇒ `os_isolated=false` 写进每个 Verdict。
-  现在 fs 隔离靠 audit 层（`fs_audit=true`），**不等于**容器级隔离：
-  原生扩展（C 写的模块）不在 audit 覆盖范围内。
+  现在 fs 隔离靠 audit 层（`fs_audit=true`），**不等于**容器级隔离。
+  ✅ 「原生扩展不在 audit 覆盖范围内」这条**已作废**（r28 补上 import 层）；
+  仍成立的是：**真正加载进进程的 C 扩展内部**发生什么，audit 看不到。
 - **rlimit 内存限制仍然失败**：`RLIMIT_AS/DATA/RSS` 三条全抛
   `ValueError` ⇒ 靠进程内守卫 + 父进程看门狗，`rlimits_applied` 如实记账。
 
@@ -2015,9 +2030,19 @@ ALE（Agent Lifespan Engineering, 2026）研究的正是后者：压缩、干扰
 `runtime.MODEL_KINDS` / `ENV_KINDS` 里已有的值；未知 ⇒ 归到 **env 侧**
 （保守：宁可高估环境占比去触发告警，也不能把环境观测算成策略产出）。
 
-⚠️ `assign_credit` 的 turn-level 归因**仍然恒不可用**（生产没有
-`replay_fn`），这是刻意的 —— 不可重放就不给数字。想读"哪一层真正起
-作用"用 `attribution.attribute_layers()` 的反事实消融。
+✅ `assign_credit` 的 turn-level 归因**已于 2026-10-14（r27）可用** ——
+上一版这里写的是"仍然恒不可用"，那条**已过期**，保留原句会误导下一轮
+再去修一遍。现状取证：`mode=turn_level` / `available=True`，账本里已有
+真 `attribution.step` 事件（此前恒 0）。
+
+⛔ 但"不可重放就不给数字"这条纪律**没有变**：`replay_fn()` 先做可重放性
+   自检，两次 reward 不一致 ⇒ 返回 `None` ⇒ 归因保持 `available=False`。
+   变的是"终于有得可重放"，不是"放宽了门槛"。
+
+⛔ 两个粒度别混：这里消融的是**步**（`ABLATABLE_STEPS`），
+   `attribution.attribute_layers()` 消融的是**层**（L1–L5）。步更细，
+   但只对可消融的步有定义 —— 去掉判据步 reward 就没有定义了，它返回的
+   baseline 是**定义**不是"测出来没用"。
 
 ---
 
@@ -2096,3 +2121,73 @@ ALE（Agent Lifespan Engineering, 2026）研究的正是后者：压缩、干扰
 ⛔ 它**仍然不是 O(1)**：commits × probes 的配对要判断"被拦的候选后来
    有没有被提交"，两侧都得看完才知道 ⇒ 这部分是 O(#commits + #probes)
    的**精简记录**。把这条硬说成 O(1) 就是假仪表。
+
+---
+
+## 30. 原生扩展 import 通道 + 落差记账（2026-10-14 · r28）
+
+### 30.1 只堵 dlopen 是不够的：CPython 的侧门在 import
+
+r27 堵住了 `ctypes.dlopen`，当时的结论是"原生 syscall 通道已封"。
+**这个结论不完整**。二次复核实测：
+
+| 动作 | 发出什么 audit 事件 |
+|---|---|
+| `ctypes.CDLL(...)` | `ctypes.dlopen` ✅ 已拦 |
+| `import mmap` | 只有 `import` ❌ 当时没拦 |
+| `import fcntl` / `termios` / `pty` / `syslog` | 只有 `import` ❌ |
+
+⇒ CPython 里相当一部分能力是 import 一个 C 扩展就直接拿到手的，中间
+根本没有 dlopen 事件。只堵 dlopen = **堵了正门、留着侧门**。
+
+补法：`_AUDIT_DENY_MODULES`（模块名黑名单），拦 `import` 事件的
+`args[0]`。记账写成 `import:<模块名>`，与事件类 deny 区分得开 ——
+否则观测侧分不清"被拒的是动作还是模块"。
+
+### 30.2 拦不住的条目不许留在名单里（假仪表）
+
+`resource` 原本在黑名单里，实测 **`import resource` 仍然成功**
+（`n_passed=1` / `denied=[]`）。根因：runner 自己要用 `resource` 做内存
+守卫，早已装进 `sys.modules`，而 CPython 只对**首次加载**发 `import` 事件。
+
+⇒ 两条处置，都是纪律不是权宜：
+1. 把它从模块黑名单**移除** —— 拦不住的条目留在名单里就是假仪表
+   （看着有防线，实际没有）；
+2. 改拦**动作**：`resource.setrlimit` 进 `_AUDIT_DENY_EVENTS`。
+   拦动作比拦模块更准，而且 `getrlimit` 仍能读 ⇒ **零误伤**。
+
+⛔ 顺带必须把 `import resource` 移到 `addaudithook` **之前**：hook 一旦
+装上就不再区分"runner 自己 import"和"被测代码 import"，顺序本身就是
+这条防线的一部分。
+
+### 30.3 一个连带效应，以及为什么它必须被记账
+
+`import subprocess` 会连带 `import signal` ⇒ subprocess 通道被 import 层
+**顺带堵死**。这是收益，但记账若只显示 `import:signal`，观测侧会读成
+"想装信号处理器"，而实际意图是"想 fork 子进程" —— **归因错位会让排障
+方向全反**。⇒ 把 `subprocess` 也单列进名单，让 `denied` 直白。
+
+### 30.4 落差记账：声明要沙箱 ≠ 真的套了沙箱
+
+`interop.py` 的 UCI 调用记账里，`seatbelt_active` 原先**硬编码 `False`**。
+问题不在于这个值当前对不对（本环境确实没有），而在于：**将来真套上了
+它也永远报 False** —— 与 `rlimits_applied` 同一个坑。
+
+改为：由适配器**自己探测**并写回 `seatbelt_active` + `sandbox_detail`
+（不许空串冒充"已确认没有"）。
+
+⛔⛔ 新增 `declared_but_unenforced`：spec 写 `sandbox="seatbelt"` 而实际
+没套上，此前**没有任何读数**暴露这件事 ⇒ 调用方会以为声明生效了。
+这是"声明了但没兑现"，与 §28「落点要兑现，不只是存在」同一条纪律。
+（H6 守着它非恒真：声明 `process` ⇒ 必须 False。）
+
+### 30.5 ⛔ 本轮最贵的坑：对照组必须关掉**全部**闸
+
+沙箱现在是**两道**闸（事件级 + 模块级）。原先的对照组只清
+`_AUDIT_DENY_EVENTS` ⇒ `import ctypes` 仍被模块黑名单拦 ⇒ 对照组**恒红**。
+
+红在对照组自己身上最误导人：看起来像"防线失效"，实际是"对照组没关干净"。
+⇒ 契约 A3 / F1 / G5 与探针 X4 **全部**改为两道都关。
+
+这条会反复出现：**每加一道闸，所有对照组都要重审一遍**。加闸不是只改
+判据，是把所有"关掉闸"的地方同步更新。

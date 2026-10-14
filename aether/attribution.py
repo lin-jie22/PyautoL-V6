@@ -2,11 +2,24 @@
 
 ## 为什么需要它
 
-`runtime.assign_credit` 的 turn-level 归因**恒不可用**：生产链路上从来没有
-`replay_fn`（2026-10-13 实测：端到端 evolve 里 `assign_credit` 被调用 **0 次**，
+`runtime.assign_credit` 的 turn-level 归因**曾经恒不可用**（2026-10-13 实测：
+生产链路上从来没有 `replay_fn`，端到端 evolve 里被调用 **0 次**，
 `CreditReport.mode` 永远是 `trajectory` / `available=False`）。
 于是"这个变体变好了"只能归给整条 harness，**无法归因到某一层** ——
 而 harness 是 5 层的，不知道哪层有用就等于不知道该往哪层继续进化。
+
+⛔ **2026-10-14 已修（r27），本段以上是历史**：`HarnessAgent.replay_fn()`
+   提供真反事实重放 ⇒ turn-level **已可用**。现状取证（别再信旧说法）：
+
+       assign_credit(traj, replay_fn=agent.replay_fn(h, spec))
+       ⇒ mode='turn_level' / available=True / per_step=[0,0,0,1.0,0]
+
+   账本里也已有真数据：`attribution.step` 事件（此前恒 0）。
+
+⛔ **两个粒度是两回事，别混**：本模块消融的是**层**（L1–L5，5 个）；
+   `assign_credit` 消融的是**步**（链上每一项各一步）。步更细，但只对
+   `ABLATABLE_STEPS` 里的步有定义 —— 去掉判据步 reward 就没有定义了，
+   它返回的 baseline 是**定义**不是"测出来没用"。
 
 本模块把归因做成**可执行**的：runner 是确定性的（同输入 ⇒ 同判定），
 所以可以安全地对每一层做**反事实消融**：

@@ -344,6 +344,14 @@ class BaseAdapter:
     transport: str = "inproc"
     timeout_enforced: str = "none"
     detail: str = ""
+    #: ⛔ `seatbelt_active` 必须**探测出来**，不许硬编码。
+    #:   2026-10-14 前它在记账里写死 `False`：即使将来 OS 层沙箱可用
+    #:   （换环境 / 换 Linux bubblewrap），记账也永远说 False ⇒ 与
+    #:   `rlimits_applied` 同一个坑（假仪表）。
+    #:   ⇒ 由**适配器自己**在真正跑之前探测并写回；没探测过 ⇒ False
+    #:     且 `sandbox_detail` 必须说明原因（不许空串冒充"已确认没有"）。
+    seatbelt_active: bool = False
+    sandbox_detail: str = "未探测"
 
     def __call__(self, args: Dict[str, Any], budget: Budget) -> Any:
         raise NotImplementedError
@@ -424,12 +432,41 @@ class CliAdapter(BaseAdapter):
         if not self.argv:
             raise AdapterError("CliAdapter.argv 不得为空")
 
+    #: ── OS 层沙箱：**探测式**接入（与 environment 同一纪律）─────────
+    #: ⛔ 为什么在这里也做一遍：`sandbox-exec` 在本环境实测不可用
+    #:    （rc=71 / `Operation not permitted`），但这不是"永远不会有" ——
+    #:    换环境、或将来接 Linux bubblewrap 就能用。写死 False 会让记账
+    #:    在它可用之后仍然说 False ⇒ 假仪表。
+    #: ⛔ 探测失败**必须留原因**（不许空串）：调用方要能区分
+    #:    "探测过，确实没有" 与 "根本没探测"。
+    def _resolve_seatbelt(self) -> List[str]:
+        try:
+            from .environment import _os_sandbox_cmd
+        except Exception as ex:  # noqa: BLE001
+            self.seatbelt_active = False
+            self.sandbox_detail = f"探测不可用（import 失败：{ex}）"
+            return []
+        try:
+            got = _os_sandbox_cmd(self.cwd or os.getcwd())
+        except Exception as ex:  # noqa: BLE001
+            self.seatbelt_active = False
+            self.sandbox_detail = f"探测抛异常：{type(ex).__name__}"
+            return []
+        if not got:
+            self.seatbelt_active = False
+            self.sandbox_detail = "探测过：本环境 OS 层沙箱不可用（已降级为进程隔离）"
+            return []
+        self.seatbelt_active = True
+        self.sandbox_detail = f"OS 层沙箱已套用：{got[1]}"
+        return list(got[0])
+
     def __call__(self, args: Dict[str, Any], budget: Budget) -> Any:
         payload = json.dumps(args, ensure_ascii=False).encode("utf-8")
         env = {k: os.environ[k] for k in self.env_allow if k in os.environ}
+        prefix = self._resolve_seatbelt()
         try:
             p = subprocess.run(
-                [str(a) for a in self.argv], input=payload,
+                prefix + [str(a) for a in self.argv], input=payload,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 timeout=max(0.01, float(budget.timeout_s)),
                 env=env, shell=False, cwd=self.cwd,
@@ -1016,13 +1053,28 @@ class Gateway:
             #:    · `transport`     —— 实际走什么形态
             #:    · `enforced`      —— 超时是否真的能中断
             #:    · `seatbelt_active` —— seatbelt 沙箱是否真的装上了
+            #:    · `seatbelt_detail` —— 为什么装/没装（不许空串）
+            #:    · `declared_but_unenforced` —— **声明与实际的落差**
             #:    ⛔ 不要用 `transport in ("subprocess","network")` 冒充
             #:    "沙箱已装上" —— 进程隔离 ≠ seatbelt 沙箱。
+            #:    ⛔ 2026-10-14（r28）：`seatbelt_active` 原为**硬编码
+            #:       False**（假仪表 —— 将来真套上了也永远报 False）。
+            #:       现改为读适配器自己探测的结果。
+            #:    ⛔⛔ 新增 `declared_but_unenforced`：spec 写
+            #:       `sandbox="seatbelt"` 而实际没套上，之前**没有任何读数**
+            #:       暴露这件事 ⇒ 调用方会以为声明生效了。这是"声明了但没
+            #:       兑现"，与 §28「落点要兑现，不只是存在」同一条纪律。
             sandbox={
                 "declared": spec.sandbox,
                 "transport": ad.transport,
                 "enforced": ad.timeout_enforced,
-                "seatbelt_active": False,   # 尚未实现沙箱强制，如实说
+                "seatbelt_active": bool(
+                    getattr(ad, "seatbelt_active", False)),
+                "seatbelt_detail": str(
+                    getattr(ad, "sandbox_detail", "") or "适配器未报告"),
+                "declared_but_unenforced": (
+                    spec.sandbox == "seatbelt"
+                    and not bool(getattr(ad, "seatbelt_active", False))),
             },
             invocation_id=inv.invocation_id,
             meta={"unknown_args": unknown} if unknown else {})

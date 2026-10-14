@@ -100,11 +100,16 @@ def group_a() -> None:
        _blocked(r, sb, "os.system"),
        f"denied={_denied(sb)[:3]} n_passed={_np(r)}")
 
+    #: ⛔ 2026-10-14（r28）：subprocess 现在被**两道**闸拦 —— 事件级
+    #:   `subprocess.Popen`，以及模块级 `import:subprocess`（后者先命中：
+    #:   连 import 都进不来）。判据必须接受任一层，否则会把它读成"没拦住"。
     r, sb = _attack("import subprocess\n"
                     "subprocess.Popen(['/bin/echo','pwned'])\nreturn 0")
+    d4 = _denied(sb)
     ck("A", "A4 subprocess.Popen（fork 子进程）⇒ 被 deny",
-       _blocked(r, sb, "subprocess.Popen"),
-       f"denied={_denied(sb)[:3]} n_passed={_np(r)}")
+       _blocked(r, sb, "subprocess.Popen")
+       or any("subprocess" in d for d in d4),
+       f"denied={d4[:3]} n_passed={_np(r)}")
 
     r, sb = _attack("import socket\n"
                     "socket.create_connection(('127.0.0.1', 9), 0.2)\n"
@@ -262,6 +267,63 @@ def group_d() -> None:
            else "已流式")
 
 
+def group_e() -> None:
+    print("\n【E】原生扩展 import 通道 + 声明与实际的落差")
+
+    from aether.environment import _AUDIT_DENY_MODULES as _mods
+
+    #: ⛔ 名单里每一条都必须真的生效 —— 否则"黑名单"是装饰。
+    leaked: List[str] = []
+    for m in ("ctypes", "mmap", "fcntl", "termios", "pty", "tty",
+              "syslog", "signal", "_posixsubprocess", "readline"):
+        _, sb = _attack(f"import {m}\nreturn 1", expect=1)
+        if not any(d == f"import:{m}" for d in _denied(sb)):
+            leaked.append(m)
+    ck("E", f"E1 {len(_mods)} 条模块黑名单逐条生效（无装饰条目）",
+       not leaked, f"漏网={leaked}")
+
+    #: resource 刻意不在名单（拦不住 ⇒ 不许写进去冒充防线）
+    ck("E", "E2 resource 不在模块黑名单（诚实：拦不住就不算防线）",
+       "resource" not in _mods, "真闸是事件级 resource.setrlimit")
+
+    _, sb = _attack("import resource\n"
+                    "resource.setrlimit(resource.RLIMIT_NOFILE, "
+                    "(999999, 999999))\nreturn 1", expect=1)
+    ck("E", "E3 setrlimit（拆我们自己的限制）⇒ 动作级拦住",
+       any("setrlimit" in d for d in _denied(sb)), f"denied={_denied(sb)[:2]}")
+
+    _, sb = _attack("import resource\n"
+                    "cur = resource.getrlimit(resource.RLIMIT_NOFILE)\n"
+                    "return 1", expect=1)
+    ck("E", "E4 getrlimit（只读）⇒ 放行（动作级拦截零误伤）",
+       not _denied(sb) and _np(_) == 1, f"denied={_denied(sb)[:2]}")
+
+    #: 声明 vs 实际的落差必须被记账（此前硬编码 False）
+    try:
+        from aether.interop import (CapabilitySpec, CliAdapter, Gateway,
+                                    Registry)
+        reg = Registry()
+        #: ⛔ 别写成 `reg, gw = Registry(), Gateway(reg)` —— 拆包赋值时
+        #:    `Gateway(reg)` 会引用尚未绑定的 `reg`（UnboundLocalError）。
+        gw = Gateway(reg)
+        reg.register(CapabilitySpec(id="_e_cli", kind="tool",
+                                    sandbox="seatbelt", trusted=True),
+                     adapter=CliAdapter(argv=["/bin/cat"]))
+        res = gw.invoke("_e_cli", {"text": "x"})
+        sbx = dict(getattr(res, "sandbox", None) or {})
+        ck("E", "E5 声明 seatbelt 却没套上 ⇒ declared_but_unenforced=True",
+           sbx.get("declared_but_unenforced") is True,
+           f"declared={sbx.get('declared')} "
+           f"detail={str(sbx.get('seatbelt_detail'))[:40]}")
+        ck("E", "E6 seatbelt_active 带探测原因（不是裸 False/空串）",
+           isinstance(sbx.get("seatbelt_active"), bool)
+           and bool(sbx.get("seatbelt_detail")),
+           f"active={sbx.get('seatbelt_active')}")
+    except Exception as ex:                             # noqa: BLE001
+        ck("E", "E5 落差记账可端到端取到", False,
+           f"{type(ex).__name__}: {ex}")
+
+
 # ── X 组：反证（证明上面的判据不是恒真）────────────────────────────────
 def group_x() -> None:
     print("\n【X】反证组：判据必须能被事故版翻转")
@@ -297,9 +359,14 @@ def group_x() -> None:
     #:    可能只是"代码本身跑不起来"（假绿）—— 这正是本次审计里差点
     #:    犯的错：攻击代码缩进错了 ⇒ 没编译 ⇒ 看起来像"被拦住了"。
     orig_d = E._AUDIT_DENY_EVENTS
+    orig_m = E._AUDIT_DENY_MODULES
     cache = getattr(E, "_AUDIT_PROBE", None)
     try:
+        #: ⛔⛔ 沙箱现在是**两道闸**（事件级 + 模块级）⇒ 对照组必须两道
+        #:    都关。只清 `_AUDIT_DENY_EVENTS` ⇒ `import ctypes` 仍被模块
+        #:    黑名单拦 ⇒ 对照组恒红。这个坑在契约 A3/F1 上同时发生过。
         E._AUDIT_DENY_EVENTS = ()
+        E._AUDIT_DENY_MODULES = ()
         if isinstance(cache, dict):
             cache.clear()
         r4, sb4 = _attack("import ctypes\nlibc = ctypes.CDLL(None)\n"
@@ -307,6 +374,7 @@ def group_x() -> None:
         ran = _np(r4) == 1
     finally:
         E._AUDIT_DENY_EVENTS = orig_d
+        E._AUDIT_DENY_MODULES = orig_m
         if isinstance(cache, dict):
             cache.clear()
     ck("X", "X4 对照组（关掉 deny）⇒ ctypes 真能跑通（A6 不是假绿）",
@@ -325,7 +393,7 @@ def main() -> int:
     print("=" * 68)
     print("边界兑现审计 —— 只问一句：这条边界，今天还成立吗")
     print("=" * 68)
-    for fn in (group_a, group_b, group_c, group_d, group_x):
+    for fn in (group_a, group_b, group_c, group_d, group_e, group_x):
         try:
             fn()
         except Exception as e:  # noqa: BLE001
