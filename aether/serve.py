@@ -32,12 +32,15 @@ import threading
 
 #: ⛔ 与 CLI 同一套日志：常驻进程的诊断**必须**带 ts/level/logger，否则
 #:    连跑几天的日志分不清哪行是哪次请求、哪个级别（r35）。
-from .logging_setup import LEVELS, get_logger, setup as _log_setup
+from .logging_setup import get_logger, setup as _log_setup
 
 _log = get_logger("aether.serve")      # ⛔ 显式名，理由见 cli.py 同位置
 from urllib.parse import parse_qs, urlparse
 
-ROOT = Path(__file__).resolve().parent.parent
+from .entry import NO_CAPS, add_log_args, add_root_arg, add_serve_args
+#: ⛔ `ROOT` 与数据布局来自 `paths`（唯一事实源）—— 与 cli / ui 同源。
+#:    此前三个入口各写一行 `Path(__file__).resolve().parent.parent`。
+from .paths import ROOT, paths
 
 #: `/api/ledger/raw` 单次响应上限（字节）。账本 append-only ⇒ 无上限读取
 #: 会让内存峰值随历史线性增长；超限直接 413，让调用方走分页/同机直读路径。
@@ -339,9 +342,12 @@ def _collect(root: Path, limit: int = 200) -> Dict[str, Any]:
     from .ledger import Ledger
     from .store import Store
 
-    led = Ledger(root / "data" / "ledger.jsonl")
-    db = root / "data" / "aether.db"
-    mpath = root / "data" / "memory.json"
+    #: ⛔ 布局来自 `paths`：手拼 `root / "data" / ...` 是 r36 收口的对象
+    #:    （serve 里此前有 3 处，与 cli/doctor/backup 各写一份）。
+    p = paths(root)
+    led = Ledger(p["ledger"])
+    db = p["db"]
+    mpath = p["memory"]
 
     #: ⛔⛔ **一次磁盘遍历，多个消费者共享同一条流**。
     #:    上一轮消掉的是"解析 4.69 遍"（同一份响应里三个读数来自不同时刻
@@ -542,8 +548,7 @@ class Handler(BaseHTTPRequestHandler):
                 #:    （4 个聚合器），拿它当 liveness 会在账本变大时把探活
                 #:    拖成超时 ⇒ 编排层（k8s/docker healthcheck）误判服务死
                 #:    了而重启它，而它其实是健康的。这里只做 O(1) 的 stat。
-                data_dir = self.root / "data"
-                ledger_p = data_dir / "ledger.jsonl"
+                ledger_p = paths(self.root)["ledger"]
                 self._json({
                     "ok": True,
                     "uptime_s": round(time.time() - _STARTED, 3),
@@ -565,7 +570,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": err}, 400)
                     return
                 kind = q.get("kind", [None])[0]
-                led = Ledger(self.root / "data" / "ledger.jsonl")
+                led = Ledger(paths(self.root)["ledger"])
                 #: ⛔ 流式：只留最后 limit 条，**不物化整份账本**。
                 #:    `led.replay()` 曾为了取尾部 200 条而把 1533 条全量解析
                 #:    两遍（列表推导再造一份）⇒ 峰值 6.50 MB（实测）。
@@ -576,7 +581,7 @@ class Handler(BaseHTTPRequestHandler):
                 #:    否则 TS 侧两个端点各拿一套字段，契约两头不对账。
                 self._json({"events": tail.result()})
             elif _endpoint_is(u.path, "/api/ledger/raw"):
-                path = self.root / "data" / "ledger.jsonl"
+                path = paths(self.root)["ledger"]
                 if not path.exists():
                     self._json({"error": "ledger not found"}, 404)
                     return
@@ -781,34 +786,25 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write("[aether] " + (fmt % a) + "\n")
 
 
-def main(argv: Optional[list] = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """serve 的 parser。**单独抽出**有两个理由：
+
+      1. 与 cli / ui 的公共参数可以逐项比对（`tests/contract_entrypoints`
+         的 B 组直接遍历 `parser._actions`）；
+      2. ⛔⛔ `entry.build_forward()` **以它为准**导出 ui → serve 的透传
+         清单 ⇒ ui 不可能"漏传一个开关"（漏了会抛错，见 entry 的说明）。
+    """
     ap = argparse.ArgumentParser(prog="aether-serve")
-    ap.add_argument("--root", default=str(ROOT))
-    ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8611)
-    ap.add_argument("--console", default="")
-    #: ⛔ 默认**不发** CORS 头：本机账本含 harness/记忆正文，任意网页
-    #:    不该能读。跨源部署时显式列出白名单，或传 "*"（知情选择）。
-    ap.add_argument("--cors", default="",
-                    help="CORS 白名单（逗号分隔 origin；'*' 表示任意）")
-    ap.add_argument("--caps", default="",
-                    help="能力清单 JSON：接入外部 agents/skills（见 "
-                         "capabilities.example.json）")
-    ap.add_argument("--caps-hot", action="store_true",
-                    help="允许 POST /api/capabilities/reload 热装载"
-                         "（默认关闭：热装载 = 运行时改变本进程能力集）")
-    ap.add_argument("--api-token", default="",
-                    help="API 鉴权令牌。设置后所有请求必须带 "
-                         "Authorization: Bearer <token> 或 X-API-Key。\n"
-                         "⛔ 监听非回环地址时**必须**设置（否则拒绝启动）："
-                         "本服务暴露账本原文与能力调用端点，"
-                         "--host 0.0.0.0 + 无 token = 裸奔。\n"
-                         "也可用环境变量 V6_API_TOKEN 传（不写进命令行历史）。")
-    ap.add_argument("--log-level", default="INFO", choices=list(LEVELS),
-                    help="诊断输出级别（默认 INFO = 与改造前可见性一致）")
-    ap.add_argument("--log-json", action="store_true",
-                    help="诊断输出改成每行一个 JSON（常驻进程建议开）")
-    args = ap.parse_args(argv)
+    add_root_arg(ap)
+    #: ⛔ serve 默认**不接**外部清单（`NO_CAPS`）：服务是常驻进程，启动时
+    #:    挂什么清单必须是显式决定，不能靠"恰好有个示例文件在仓库里"。
+    add_serve_args(ap, caps_default=NO_CAPS, with_console=True)
+    add_log_args(ap)
+    return ap
+
+
+def main(argv: Optional[list] = None) -> int:
+    args = build_parser().parse_args(argv)
 
     #: ⛔ 先配日志再鉴权 —— 否则「拒绝启动」这条最该被看到的诊断，
     #:    恰恰走的是还没配好的通道。

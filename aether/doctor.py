@@ -38,6 +38,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from .paths import data_dir, paths
+
 __all__ = ["OK", "FAIL", "SKIPPED", "Check", "run", "CHECKS"]
 
 
@@ -67,9 +69,13 @@ class Check:
 
 
 def _paths(root: Path) -> Dict[str, Path]:
-    return {"ledger": root / "data" / "ledger.jsonl",
-            "db": root / "data" / "aether.db",
-            "memory": root / "data" / "memory.json"}
+    """⛔ 与 cli / serve / backup **同一份布局**（r36）。
+
+    此前这里单独手写了一遍 `root / "data" / ...`（3 个键与 cli 的 `_paths`
+    完全重复）⇒ 布局改一次要改两处，漏一处就是"体检说没问题、而它查的是
+    另一个文件"。现在直接从 `paths` 取，键名保持不变（调用方只看键）。
+    """
+    return paths(root)
 
 
 # ── 各项检查（顺序即报告顺序：先事实源，再派生量）─────────────────
@@ -140,7 +146,7 @@ def _check_backup(root: Path, ctx: Dict[str, Any]) -> Check:
     """唯一事实源有没有退路。⛔ 这是**最容易被忽略**的一项：
     备份平时用不上，等要用时才发现从来没做过。"""
     from . import backup as B
-    bdir = root / "backups"
+    bdir = paths(root)["backups"]
     if not bdir.exists():
         return Check("backup.present", FAIL, "没有任何备份（唯一事实源无退路）",
                      "跑 aether backup --to <目录>", "no_backup_dir")
@@ -184,7 +190,9 @@ def _check_caps(root: Path, ctx: Dict[str, Any]) -> Check:
 
 
 def _check_writable(root: Path, ctx: Dict[str, Any]) -> Check:
-    d = root / "data"
+    #: ⛔ 与其余检查项同源（`paths.data_dir`）：手写 `root / "data"` 就是
+    #:    "体检说 data/ 可写、而它测的其实是另一个目录"的来源。
+    d = data_dir(root)
     try:
         d.mkdir(parents=True, exist_ok=True)
         probe = d / ".doctor_probe"

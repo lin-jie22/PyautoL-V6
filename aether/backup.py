@@ -49,11 +49,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 #: ⛔ 备份的**唯一清单**：只有这些文件被带走。加文件必须显式加到这儿
 #:    （并说明它属于事实源还是投影），不做目录通配。
-BACKUP_TARGETS: Tuple[Tuple[str, str], ...] = (
-    ("data/ledger.jsonl", "source"),      # 唯一事实源
-    ("data/memory.json", "source"),       # 记忆快照（可从账本部分重建）
-    ("data/aether.db", "projection"),     # SQLite 投影（可从账本重建）
-)
+#: ⛔ 值来自 `paths.BACKUP_TARGETS`（r36）：此前这里写的是相对路径字面量，
+#:    与 cli/serve/doctor 手拼的 `root / "data" / ...` **各是一份** ⇒ 改布局
+#:    时漏改这里就会出现"`status` 读 A 文件、`backup` 带走 B 文件"。
+from .paths import (BACKUP_FLAT, BACKUP_TARGETS, DATA_DIRNAME,   # noqa: F401
+                    LEDGER_NAME)
 
 __all__ = ["BACKUP_TARGETS", "BackupError", "Manifest", "create", "verify",
            "restore", "report", "archive", "unarchive"]
@@ -135,7 +135,9 @@ def create(root: str | Path, dest: str | Path,
                  path=str(out))
     #: ⛔ 备份完**立刻**验副本的链：不验的话，"拷成功了"会被当成
     #:   "备份可用"，而半截拷贝在恢复的那一刻才发现（假仪表）。
-    led_copy = out / "data__ledger.jsonl"
+    #: ⛔ 扁平名的映射只有一处（`paths.flat_name`）：写了副本再按另一个
+    #:    规则去读 ⇒ "备份里有账本"和"验链时找不到账本"会同时成立。
+    led_copy = out / BACKUP_FLAT[f"{DATA_DIRNAME}/{LEDGER_NAME}"]
     if led_copy.exists():
         try:
             from .ledger import Ledger

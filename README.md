@@ -144,7 +144,8 @@ V6/
 
 ## 5. 系统如何自证（判据清单）
 
-这 54+14 条是 V6 的"宪法"（第 55–64 条见 §5-bis，第 65–68 条见 §5-ter）。
+这 54+18 条是 V6 的"宪法"（第 55–64 条见 §5-bis，第 65–68 条见 §5-ter，
+第 69–72 条见 §5-quater）。
 每条都有对应的契约测试守着：
 
 1. **事实只有一份**：账本（hash 链）。SQLite 是投影，`rebuild_from_ledger()` 可重建。
@@ -841,6 +842,50 @@ dev_env/heldout/parallel/embedder/budget/checkpoint/resumed_from）。
 ⛔ **防路径穿越**：归档里可能带 `../`，解压前逐条检查目标仍在 dest 之内。
 ⛔ manifest 补 `path` 字段：此前记了内容却没记位置 ⇒ 事后拿到 manifest 还要靠
 人记得它拷到哪去了。
+
+---
+
+## 5-quater. 第 69–71 条：r36 收口（2026-10-14 · 统一参数与接口）
+
+### 69. **入口参数只能有一份；三个入口各自声明 = 三个真相**
+
+`cli` / `serve` / `ui` 三个入口共用一批参数（root / port / log-level / log-json /
+caps / caps-hot / api-token / cors / console）。此前各写一遍，实测出四处漂移：
+`--log-level` 的 choices 在 ui 里是**硬编码**的一份列表；`--port 8611` 三处各写
+一遍；`--root` 三个入口各自 `Path(__file__).parent.parent`。⇒ 公共参数收进
+`aether/entry.py`，三个入口只调 `add_root_arg / add_log_args / add_serve_args`。
+⛔ 契约直接遍历三个 `build_parser()` 的 `_actions` 逐项比对（不是抓 `--help`
+字符串 —— 那会把"改了 help 文案"误报成"参数不一致"）。
+
+### 70. **透传清单不手写：以"接收方的 parser"为准动态导出**
+
+⛔⛔ 收口前最坏的一条：`aether ui --log-level DEBUG` **静默无效** —— ui 起服务
+的手写转发清单漏了 `--log-level / --log-json / --api-token`，命令行开关丢了却
+一切正常。⇒ `entry.build_forward()` 遍历**接收方** parser 的选项导出清单：
+以后给 serve 加参数，ui 要么自动跟着长出来，要么在这里**抛 ValueError**
+（缺属性 ⇒ 抛错，绝不静默跳过 —— 静默跳过 = 开关失效却无人知晓）。
+⛔ 三层包装（cli → ui → serve）每一层都只认**下一层**的参数：拿 serve 的 parser
+去导出给 ui 的命令，会多出 ui 不认的 `--console` ⇒ rc=2（实测抓到过）。
+
+### 71. **子 parser 的默认值会盖掉主 parser 已解析的值（argparse 陷阱）**
+
+`argparse` 派发子命令时会把子 parser 的 namespace **整个拷回**主 namespace，
+**包括它的默认值**。于是 `aether --log-level DEBUG ui` 里的 DEBUG 会被 ui 子
+命令的默认值 INFO 悄悄盖掉；`aether --root /x ui` 同理。⇒ 子命令的参数一律用
+`default=argparse.SUPPRESS`（没解析到的键不进 namespace）+ `normalize_log_args()`
+兜底。契约 D13 用**事故版**（不用 SUPPRESS）证明这个坑真实存在 —— 反证不翻转，
+就说明这条闸是恒真的空账。
+
+### 72. **数据布局是声明式的，且只有一份**
+
+`data/ledger.jsonl` 这组路径此前在 **4 处各自手拼**（cli._paths / doctor._paths /
+serve 三处 / backup.BACKUP_TARGETS）。改布局要改四处，漏一处 ⇒ `status` 读的文件
+与 `backup` 带走的文件**不是同一个**—— 备份报成功，恢复时才发现少东西。
+⇒ `aether/paths.py`：`ROOT` / `paths()` / `data_dir()` / `flat_name()` /
+`BACKUP_TARGETS` 唯一事实源，四处消费者全部引用它。
+⛔ 静态闸只判**路径拼接**形态（`"data" / "ledger.jsonl"` 的 BinOp），不判所有字符串
+常量 —— `"data"` 也是 HTTP 响应里的常见键名，按常量判会误伤；误伤一次就会有人
+加白名单，白名单一开这条闸就废了。
 
 ---
 

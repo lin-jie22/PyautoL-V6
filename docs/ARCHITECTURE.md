@@ -2575,3 +2575,70 @@ resumed_from），同时出现在 stdout 输出里（同源，不各写一遍）
 
 修法是**放大账本 + 预热**（让信噪比足够），不是放宽判据 —— 判据方向没变，
 并补了一条"放大后差距必须 >10x"守住信噪比。
+
+---
+
+## 33. 入口参数与数据布局同源（2026-10-14 · r36）
+
+主题：**同一件事有两个入口（或两处声明）时，漏的那一处永远不报错**。
+本轮收的是两个面 —— 命令行入口的参数声明，和数据文件的布局常量。
+
+### 33.1 取证：四处漂移
+
+| # | 现象 | 后果 |
+|---|---|---|
+| 1 | `data/ledger.jsonl` 在 cli / doctor / serve（3 处）/ backup 各拼一遍 | 改布局漏一处 ⇒ `status` 读的与 `backup` 带走的不是同一个文件 |
+| 2 | `--log-level` 的 choices 在 ui 里硬编码一份 | 级别表改了 ui 不跟着改 ⇒ 同一份配置在 cli 合法、在 ui 报 rc=2 |
+| 3 | ⛔⛔ `aether ui --log-level DEBUG` **静默无效** | 手写转发清单漏了 log-level / log-json / api-token |
+| 4 | `--port 8611` 三处各写一遍 | 改端口要改三处（目前还没漏，只是运气） |
+
+第 3 条是本轮最值钱的一条：命令行开关丢了却**没有任何报错**，与 V5
+"有机制 ≠ 这条路被走到"是同一个洞，只是这次发生在参数层。
+
+### 33.2 收口：两个新模块
+
+```
+aether/paths.py   ROOT / paths() / data_dir() / flat_name() / BACKUP_TARGETS
+aether/entry.py   add_root_arg / add_log_args / add_serve_args / add_ui_args
+                  build_forward / normalize_log_args / DEFAULT_*
+```
+
+四个布局消费者（cli / doctor / serve / backup）与三个参数入口全部改为引用它。
+`backup.BACKUP_TARGETS` 直接 `from .paths import BACKUP_TARGETS` ⇒ 与契约里
+`B.BACKUP_TARGETS is paths.BACKUP_TARGETS` 的断言配套：它们就是**同一个对象**，
+不是抄一份。
+
+### 33.3 透传清单不手写
+
+三层包装：**cli → ui → serve**。每一层都以**接收方的 parser** 为准导出命令行：
+
+```python
+build_forward(ns, parser=<接收方的 parser>, console=..., port=...)
+```
+
+⛔ 曾经踩的一次：拿 `serve` 的 parser 去导出给 **ui** 的命令 ⇒ 多出 ui 不认的
+`--console` ⇒ `aether.ui: error: unrecognized arguments` rc=2。这正是"以接收方
+为准"这条纪律的来处。
+
+⛔ 缺参数 ⇒ **抛 ValueError**，不是静默跳过。静默跳过的失败模式是"开关丢了但
+一切正常"，而抛错至少让 bug 停在改动它的那一次提交里。
+
+### 33.4 argparse 陷阱：子 parser 的默认值会盖掉主 parser 已解析的值
+
+`_SubParsersAction` 派发时会把子 namespace 的**每一个键**（包括默认值）拷回主
+namespace ⇒ `aether --log-level DEBUG ui` 的 DEBUG 被子命令的 INFO 悄悄换掉。
+
+修法 `default=argparse.SUPPRESS` + `normalize_log_args()` 兜底。契约 D13 用
+**事故版**复现了这个坑（bug 版确实得到 INFO）⇒ 证明这条闸在防真问题，不是恒真。
+
+### 33.5 契约：`tests/contract_entrypoints_test.py`
+
+A 三入口公共参数同源 / B `aether ui` 与 `python -m aether.ui` 逐项一致 /
+C ui 覆盖 serve 的服务参数 / **D 透传闭合（含 3 组反证）** /
+E 布局静态闸 + 运行时对拍 / F 三个入口 `--help` 可执行 /
+**G 端到端起服务，验证透传出去的 `--api-token` 真的生效**。
+
+⛔ G 组自己的一个坑值得记：探活请求必须**带令牌** —— 服务是开着鉴权起的，
+无令牌一律 401 ⇒ 拿它探活会永远"没起来"。看起来像 G1 坏了，实际是 G2 在生效。
+⛔ 收尾用 `start_new_session` + `killpg`：只 terminate 父进程会让 serve 子进程
+变孤儿并占住端口 ⇒ 下一次跑"服务起不来"，而真实原因只是上次没清干净。

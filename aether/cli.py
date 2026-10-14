@@ -18,11 +18,17 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .logging_setup import LEVELS, get_logger, setup as _log_setup
+from .logging_setup import get_logger, setup as _log_setup
 #: ⛔ 显式传名，不用 `__name__`：`python -m aether.cli` 时 `__name__` 是
 #:    `"__main__"` ⇒ 多进程日志（CLI + 常驻 serve + UI 父进程）里三家的
 #:    logger 全叫 __main__，分不清哪行是谁打的（契约 C2 实测抓到）。
 _log = get_logger("aether.cli")
+from .entry import (DEFAULT_CAPS, NO_CAPS, add_log_args, add_root_arg,
+                    add_serve_args, add_ui_args, build_forward,
+                    normalize_log_args)
+#: ⛔ `ROOT` 与数据布局来自 `paths`（唯一事实源），不在这里再推一遍
+#:    —— 三个入口各推一次就会漂移（r36：此前 cli/serve/ui 各写一行）。
+from .paths import ROOT, paths as _paths
 
 
 def _setup_logging(level: str, json_output: bool = False) -> None:
@@ -34,8 +40,6 @@ def _setup_logging(level: str, json_output: bool = False) -> None:
         print(f"❌ {e}", file=sys.stderr)   # logger 还没配上，只能用 print
         raise SystemExit(2) from None
 
-ROOT = Path(__file__).resolve().parent.parent
-
 
 #: 自带环境。**四个是刻意的**：两个只能区分"变强"与"讨好一个环境"，
 #: 四个才能让 held-out 有难度跨度、且 dev/held-out 可以任意配对。
@@ -44,16 +48,6 @@ DEFAULT_ENVS = ("textscore", "eventflow", "stateflow", "scheduler")
 
 #: 任务类别。**路由按它来**，不按环境名 —— 见 TemplateProposer.route_key。
 TASK_CLASS = "repair"
-
-
-def _paths(root: Path) -> Dict[str, Path]:
-    return {
-        "ledger": root / "data" / "ledger.jsonl",
-        "db": root / "data" / "aether.db",
-        "memory": root / "data" / "memory.json",
-        "task": root / "tasks" / "textscore",
-        "tasks_root": root / "tasks",
-    }
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -441,7 +435,7 @@ def _default_runner(envs, memory=None, timeout: float = 10.0):
 def _verify_fixed(env, broken_src, fixed_src, timeout: float = 10.0):
     """判定：修好后是否**所有原本通过的测试都回来了**（可执行判据）。"""
     from .environment import verify_source
-    from .verifier import Check, Verdict
+    from .verifier import Verdict
     v = verify_source(env, source=fixed_src, timeout=timeout)
     n = len(v.checks)
     return Verdict(passed=v.passed, checks=v.checks,
@@ -458,7 +452,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     from .genome import Harness
     from .ledger import Ledger
     from .nongression import Baseline, FrozenTask, NonRegressionGate
-    from .providers import StubProvider, TemplateProposer
+    from .providers import TemplateProposer
     from .store import Store
 
     p = _paths(Path(args.root))
@@ -1061,7 +1055,7 @@ def cmd_caps(args) -> int:
 def cmd_backup(args) -> int:
     """备份：把唯一事实源与投影拷走，**带校验和**。"""
     from . import backup as B
-    dest = args.to or str(Path(args.root) / "backups")
+    dest = args.to or str(_paths(args.root)["backups"])
     m = B.create(args.root, dest, note=args.note or "")
     out = {"dest": dest, "manifest": m.to_dict(),
            "chain_ok": m.chain_ok, "chain_reason": m.chain_reason}
@@ -1142,17 +1136,20 @@ def cmd_doctor(args) -> int:
     return rep["exit_code"]
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """构造 CLI 的 parser（**单独抽出**是为了可测）。
+
+    ⛔ 为什么拆：入口参数一致性只能靠"把三个入口的 parser 拿出来逐项比对"
+       来验证；parser 埋在 `main()` 里 ⇒ 测试只能 `--help` 抓字符串，
+       而字符串比对会把"改了 help 文案"误报成"参数不一致"。
+       公共参数（`--root` / `--log-*`）走 `entry.add_*`，不在这里手写。
+    """
     ap = argparse.ArgumentParser(prog="aether", description="V6 · AETHER CLI")
-    ap.add_argument("--root", default=str(ROOT), help="V6 根目录")
+    add_root_arg(ap)
     #: ⛔ 默认 INFO 而非 WARNING：改造前这些诊断是 `print(file=sys.stderr)`，
     #:    **全部可见**。默认 WARNING 会让 💾/ℹ 那几条凭空消失 ⇒ 静默改了
     #:    用户可见行为。要安静请显式 `--log-level WARNING`。
-    ap.add_argument("--log-level", default="INFO", choices=list(LEVELS),
-                    help="诊断输出级别（默认 INFO = 与改造前可见性一致）")
-    ap.add_argument("--log-json", action="store_true",
-                    help="诊断输出改成每行一个 JSON（供脚本消费；"
-                         "**结果输出始终走 stdout，不受影响**）")
+    add_log_args(ap)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("status", help="账本 + 库统计 + 投影一致性")
@@ -1167,7 +1164,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     rs.add_argument("--yes", action="store_true",
                     help="真的执行覆盖（恢复前会自动留一份当前状态）")
     dc = sub.add_parser("doctor", help="一条命令体检（只读，不改任何东西）")
-    dc.add_argument("--caps", default="",
+    #: ⛔ 默认**不接**外部清单（`NO_CAPS`）：命令行体检的默认口径是
+    #:    "只查仓库自带的"，与 UI 默认挂示例清单（`DEFAULT_CAPS`）不同 ——
+    #:    两个默认值都在 `entry` 里命名，散在入口里就看不出是刻意的。
+    dc.add_argument("--caps", default=NO_CAPS,
                     help="顺带校验能力清单能否装载（未指定 ⇒ 该项记 skipped）")
     rb = sub.add_parser("rebuild", help="从账本重建 SQLite 投影（库只是视图）")
     rb.add_argument("--check", action="store_true",
@@ -1202,7 +1202,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     mp.add_argument("--min-trust", default="0.05", help="低于此信任度即剪")
     mp.add_argument("--stale-days", default="30", help="未访问超过这么多天且零访问即剪")
     c = sub.add_parser("caps", help="接入层：列出 / 查看 / 调用 agents 与 skills")
-    c.add_argument("--caps", default="",
+    c.add_argument("--caps", default=NO_CAPS,
                    help="能力清单 JSON（不传则只显示源码内注册的能力）")
     cs = c.add_subparsers(dest="caps_cmd", required=True)
     cs.add_parser("list", help="列出已注册能力")
@@ -1262,20 +1262,34 @@ def main(argv: Optional[List[str]] = None) -> int:
                         "⛔ 换尺子 / 换配置 / 账本回退 ⇒ 拒绝并说明是哪一种。")
 
     u = sub.add_parser("ui", help="起 API + 控制台，并打开桌面窗口")
-    u.add_argument("--port", type=int, default=8611)
-    u.add_argument("--caps", default="capabilities.example.json")
-    u.add_argument("--caps-hot", action="store_true",
-                   help="开能力热装载（默认关 —— 宪法第 52 条）")
-    u.add_argument("--no-open", action="store_true", help="只起服务，不开窗口")
+    #: ⛔ 与 `aether.ui` **同一份**参数声明（`entry.add_serve_args`）。
+    #:    手写一遍就必然漂移 —— 漂移的表现是"CLI 认这个开关、UI 不认"，
+    #:    而两边的 help 都还写着"支持"。
+    add_root_arg(u, suppress=True)
+    add_serve_args(u, caps_default=DEFAULT_CAPS, with_console=False)
+    add_ui_args(u)
+    #: ⛔ `suppress=True`：子 parser 的默认值会**盖掉**主 parser 已解析的值
+    #:    （见 `entry.add_log_args` 的说明）⇒ `aether --log-level DEBUG ui`
+    #:    会静默退回 INFO。SUPPRESS 让"没在子命令后写"时保留全局值。
+    add_log_args(u, suppress=True)
 
+    return ap
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    ap = build_parser()
     args = ap.parse_args(argv)
     if args.cmd == "ui":
+        from .ui import build_parser as ui_parser
         from .ui import main as ui_main
-        return ui_main(["--port", str(args.port),
-                        "--root", str(args.root),
-                        "--caps", args.caps]
-                       + (["--caps-hot"] if args.caps_hot else [])
-                       + (["--no-open"] if args.no_open else []))
+        #: ⛔ 透传清单**不手写**，且以**接收方的 parser** 为准导出
+        #:    （这里的目标是 ui，不是 serve —— 三层包装里每一层都只认
+        #:    下一层的参数。此前手写清单漏了 --log-level / --log-json /
+        #:    --api-token ⇒ "设了不生效"且没有任何报错）。
+        #:    ⛔ `--console` 不传：那是 ui 自己决定的（它知道仓库里的
+        #:    console/ 在哪），传过去会被子 parser 当成未知参数 ⇒ rc=2。
+        return ui_main(build_forward(normalize_log_args(args),
+                                     parser=ui_parser()))
 
     #: ⛔ `ui` 会把控制权交给子进程（它自己会再 setup 一次），这里不重复配。
     _setup_logging(getattr(args, "log_level", "INFO"),

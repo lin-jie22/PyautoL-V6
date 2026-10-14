@@ -31,8 +31,13 @@ from pathlib import Path
 from .logging_setup import get_logger
 _log = get_logger("aether.ui")         # ⛔ 显式名，理由见 cli.py 同位置
 
-ROOT = Path(__file__).resolve().parent.parent
-CONSOLE = ROOT / "console"
+from .entry import (DEFAULT_CAPS, add_log_args, add_root_arg, add_serve_args,
+                    add_ui_args, build_forward, normalize_log_args)
+from .paths import ROOT, paths
+#: ⛔ 控制台目录**由本入口决定**（不接受命令行覆盖）：它是"一键起控制台"
+#:    的一部分，让人改了就会冒出"页面 404 而 API 正常"的幽灵故障。
+#:    ⛔ 位置仍来自 `paths`：手拼 `ROOT / "console"` 就是布局又多一份。
+CONSOLE = paths(ROOT)["console"]
 
 #: ⛔ 只认这两个浏览器的 app 模式；没有就退化，不硬依赖。
 APP_BROWSERS = (
@@ -86,22 +91,32 @@ def _open_desktop(url: str) -> str:
     return "系统默认浏览器（未找到 Chrome/Edge ⇒ 不是独立窗口）"
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """ui 的 parser。
+
+    ⛔ 与 `cli` 的 `ui` 子命令**逐项同源**（都调 `entry.add_serve_args`）：
+       收口前两边各写一遍，cli 侧的 `--log-level` 甚至不在转发清单里
+       ⇒ `python -m aether.cli ui --log-level DEBUG` 静默无效。
+    ⛔ `--log-level` 的 choices 走 `LEVELS`：此前这里硬编码了一份列表，
+       与 cli/serve 分叉（级别表改了它不会跟着改）。
+    """
     ap = argparse.ArgumentParser(prog="aether.ui",
                                  description="起 API + 打开桌面控制台")
-    ap.add_argument("--port", type=int, default=8611)
-    ap.add_argument("--root", default=str(ROOT))
-    ap.add_argument("--caps", default="capabilities.example.json",
-                    help="能力清单（默认用仓库里的示例清单）")
-    ap.add_argument("--caps-hot", action="store_true",
-                    help="开能力热装载（默认关 —— 见 README 宪法第 52 条）")
-    ap.add_argument("--no-open", action="store_true", help="只起服务，不开窗口")
-    ap.add_argument("--log-level", default="INFO",
-                    choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-                    help="诊断输出级别（会**透传给子进程 serve**）")
-    ap.add_argument("--log-json", action="store_true",
-                    help="诊断输出改成每行一个 JSON（同样透传）")
-    args = ap.parse_args(argv)
+    #: ⛔ 与 cli 的 `ui` 子命令**逐项同源**（连 SUPPRESS 都一致）：
+    #:    一边 SUPPRESS 一边有默认 ⇒ "同参数不同默认"又要靠人去记。
+    #:    缺的值由 `normalize_log_args` 一次性补回（见 `entry`）。
+    add_root_arg(ap, suppress=True)
+    add_serve_args(ap, caps_default=DEFAULT_CAPS, with_console=False)
+    add_ui_args(ap)
+    #: ⛔ `suppress=True` + `normalize_log_args`：与 cli 的 `ui` 子命令
+    #:    **逐项同源**（两边都 SUPPRESS），否则一边 INFO 一边 SUPPRESS，
+    #:    "同参数不同默认"又要靠人去记哪个是哪个。
+    add_log_args(ap, suppress=True)
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = normalize_log_args(build_parser().parse_args(argv))
 
     #: ⛔ 父子进程都配：父进程的「端口被占」「服务没起来」是**父进程**的
     #:    诊断，走子进程的日志是看不到的（那是两个进程）。
@@ -124,18 +139,13 @@ def main(argv: list[str] | None = None) -> int:
     if caps and not Path(caps).is_file() and (ROOT / caps).is_file():
         caps = str(ROOT / caps)
 
-    cmd = [sys.executable, "-m", "aether.serve",
-           "--root", str(args.root), "--port", str(port),
-           "--console", str(CONSOLE)]
-    if caps:
-        cmd += ["--caps", caps]
-    if args.caps_hot:
-        cmd += ["--caps-hot"]
-    #: ⛔ 日志口径**透传**给子进程：父子各配一套却级别不同 = 父进程说
-    #:    「WARNING 以上」、子进程把所有 INFO 都打出来 ⇒ 开关形同虚设。
-    cmd += ["--log-level", args.log_level]
-    if args.log_json:
-        cmd += ["--log-json"]
+    #: ⛔ 透传清单由 `serve.build_parser()` **动态导出**（见 `entry`），
+    #:    不手写 —— 手写的失败模式是"开关丢了但一切正常"。
+    #:    日志口径也在其中（父子各配一套却级别不同 ⇒ 开关形同虚设）。
+    from .serve import build_parser as serve_parser
+    args.caps = caps            #: 用解析后的路径（相对 → 相对 ROOT 的绝对）
+    cmd = [sys.executable, "-m", "aether.serve"] + build_forward(
+        args, parser=serve_parser(), console=str(CONSOLE), port=port)
 
     proc = subprocess.Popen(cmd, cwd=str(ROOT))
     url = f"http://127.0.0.1:{port}/"
