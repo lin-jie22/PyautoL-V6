@@ -48,7 +48,15 @@ $PY scripts/llm_e2e.py --no-llm    # 离线对照组（模板提议器）
 # 契约测试（含反证组）—— ⛔ **两种模式都要跑**
 # e2e 组默认跳过；只跑默认模式等于把最重的那几组永久关掉
 # （实测：e2e 组因接口变更坏掉而无人发现，就是因为它从没被跑过）
+$PY scripts/run_contracts.py -j 4       # 统一 runner：汇总 + 诚实退出码
 for t in tests/contract_*_test.py; do $PY $t; $PY $t --e2e; done
+
+# 运维面（r34 补齐）
+$PY -m aether.cli doctor                # 一条命令体检（只读）
+$PY -m aether.cli backup --to backups   # 备份账本/记忆/投影（自带校验和）
+$PY -m aether.cli restore --from backups/backup-xxx --yes
+$PY -m aether.cli evolve --checkpoint cp.json --resume   # 断点续跑
+$PY -m aether.serve --api-token $TOKEN  # 非本机部署必须带上
 
 # 反证探针：单独挖某一类缺口的**对拍脚本**（不是契约测试，是取证工具）
 $PY scripts/probe_spread_audit.py   # held-out 没判别力时闸会不会假放行
@@ -94,7 +102,14 @@ V6/
 │   ├── evolution.py        self-harness 循环（MINE/PROPOSE/VALIDATE/SELECT/COMMIT）
 │   ├── store.py            SQLite 投影（可由账本重建 + 账本/投影对账）
 │   ├── providers.py        可插拔 LLM + LLMProposer（模型输出当不可信输入）
-│   ├── cli.py / serve.py   命令行 / 只读 HTTP API（共用同一份记忆读数）
+│   ├── cli.py / serve.py   命令行 / HTTP API（共用同一份记忆读数）
+│   ├── checkpoint.py       断点续跑（轮号接续 + 换环境拒绝）
+│   ├── backup.py           备份/恢复（唯一事实源此前无退路）
+│   ├── doctor.py           一条命令体检（三态：ok / fail / skipped）
+│   ├── learner.py          外部知识摄入（复用记忆闸，不自搞一套）
+│   ├── aging.py            跨轮退化检测（ALE 四类信号）
+│   ├── interop.py          UCI 通用接入层（agent/skill/tool 挂得上叫得动）
+│   └── ui.py               桌面窗口（同源托管，不引 Electron）
 ├── tasks/                  4 个可验证环境（解法形状刻意不同）
 │   ├── textscore/          数值归一化与打分
 │   ├── eventflow/          事件流聚合（会话切分 / 滑动窗口 / 分位数）
@@ -721,6 +736,53 @@ E2–E5（监督器误报、严重度统计）**一条都没跑**。⇒ 加 `_fi
 PATH → 项目约定路径（`~/.workbuddy/binaries/node/versions/*/bin/node`，
 与 `scripts/demo_evolve.py` 同源）→ 常见前缀；真找不到就**明确报红**
 并说清原因。"跑不了"与"跑过了没问题"必须能分辨。
+
+### 60. **运行的中间态必须可恢复 —— 中断的代价不是"浪费时间"**
+
+`--rounds 20` 在第 17 轮崩了，重跑的后果比"再来一遍"严重：账本
+append-only 且没有幂等键 ⇒ 前 16 轮事件被**再写一遍** ⇒ 账本里出现两个
+"第 3 轮"；`_run_seq` 锚来自账本 seq ⇒ 前后两半的 run_id 不同 ⇒ 投影对账
+时它们看着像两次独立实验，其实是**一次被劈成两半**。
+
+⇒ `aether/checkpoint.py` + `evolve --checkpoint/--resume`。三条硬约束：
+① **轮号接续**（否则账本自相矛盾）；② **换环境拒绝**（换尺子 / 换配置 /
+账本回退，三类分开报 —— 合起来说"不一致"会让人去改 checkpoint，而正确
+处置是"别恢复"）；③ **checkpoint 是派生量**：写失败不得中断进化，但必须
+记账（`evolution.checkpoint_failed`），否则"我开了续跑"是假仪表。
+
+### 61. **默认安全必须由启动期强制，不能靠隐式约定**
+
+六个端点此前零鉴权，唯一保护是"默认绑 127.0.0.1"这条**隐式约定** ——
+`--host` 一个开关就能拆掉它，且拆掉时没有任何提示。⇒ `serve --api-token`
+（或 `V6_API_TOKEN`）：**监听非回环地址且无令牌 ⇒ 拒绝启动**（fail-closed）。
+⛔ 比较用 `hmac.compare_digest`（`==` 会按字节提前退出 ⇒ 逐字节可还原令牌）；
+⛔ 鉴权状态必须可读（`/api/status.auth`）—— 否则"服务上没上锁"事后无从查证。
+
+### 62. **要保护的是不可重建的那个**
+
+`rebuild` 能从账本重建 SQLite 投影 ⇒ 投影有退路；而唯一事实源
+`ledger.jsonl` 自己**没有任何备份命令**。即：能重建的被保护了，不能重建的
+没人管。⇒ `aether backup / restore`：自带 sha256 清单、**备份完立刻验副本
+的链**（不验的话"拷成功"会被当成"备份可用"，半截拷贝要到恢复那一刻才暴露）、
+恢复前先留当前状态（覆盖写不可逆）、校验不过一律拒绝。
+⛔ `doctor` 把"没有备份"判为 **fail** 而不是 skipped —— 唯一事实源无退路
+是坏消息，不是"没查"。
+
+### 63. **"没查过" ≠ "查过没问题"**
+
+诊断能力此前散在 `status` / `verify-chain` / `rebuild --check` 四个入口，
+没有一条命令能回答"现在健康吗"；唯一的自检入口在 TS 侧，只跑 Python 的人
+拿不到一次成型的结论。⇒ `aether doctor`：每项**三态**（ok / fail / skipped），
+skipped 必须带原因与出路、**不计入通过**、且在汇总里被点名。
+⛔ doctor **只读**，每项失败给 `action`（该跑哪条命令）但自己不动手 ——
+体检恰恰是在数据可疑时跑的，自动修改 = 未告知就改数据。
+
+### 64. **探活与体检是两个端点，不能拿重的那个顶替**
+
+最轻的端点 `/api/status` 也要全量扫账本（4 个聚合器）⇒ 拿它当 liveness，
+账本一大就把探活拖成超时 ⇒ 编排层会重启一个**其实是健康的**服务。
+⇒ `/api/health`：只做 O(1) 的 stat（在不在 / 多大 / uptime / 有没有上锁），
+**不返回事件列表**。契约里用"5 次探活 < 1 次 status"实测钉住它。
 
 ---
 

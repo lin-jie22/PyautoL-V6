@@ -35,11 +35,12 @@ V6 相对这些工作多做的三件事（来自 V5 的硬教训 + 2026 文献�
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 #: ⛔ 老化（跨轮退化）检测与 `runtime` 轨迹记账，此前**从未**被生产链路
 #:    import —— 兑现审计实测：它们只活在 demo 脚本里。这里接上主流程。
+from . import checkpoint as _cp
 from .aging import RoundTrace
 from .genome import Capsule, Harness, apply_capsule, blast_radius, diff
 from .ledger import Ledger
@@ -325,6 +326,16 @@ class EvolutionLoop:
     #:    pickle 构造，拿不到 `__init__` 的赋值 ⇒ 访问 `self.budget` 会
     #:    AttributeError。默认 None = **不限**（保持旧行为与旧基线可比）。
     budget: Optional[RunBudget] = None
+    #: ⛔ 类级兜底（与 `budget` 同形态）：对象可能经 `__new__` / pickle
+    #:    构造，拿不到 `__init__` 的赋值 ⇒ 访问 `self.checkpoint_path`
+    #:    会 AttributeError。默认 None = 不写 checkpoint（保持旧行为）。
+    checkpoint_path: Optional[str] = None
+    last_checkpoint: Optional[str] = None
+    #: checkpoint 里保留的**最近轮次摘要条数**。⛔ 有界窗口：不能把每轮
+    #:    报告全塞进去（轮数越多文件越大，而它是每轮都重写的文件）。
+    #:    ⛔ 计数与展示分离：`round_no` 是**真实总数**，这个窗口只影响
+    #:    `done_rounds` 的展示条数，绝不能反过来用它推算完成到第几轮。
+    _CP_KEEP_ROUNDS: int = 10
 
     def __init__(self, ledger: Ledger, gate: NonRegressionGate,
                  dev_suite: List[FrozenTask], runner: Runner,
@@ -335,7 +346,8 @@ class EvolutionLoop:
                  dev_difficulty: Optional[Dict[str, str]] = None,
                  on_round_end: Optional[Callable[[Any], None]] = None,
                  aging_probes: Optional[List[FrozenTask]] = None,
-                 budget: Optional[RunBudget] = None):
+                 budget: Optional[RunBudget] = None,
+                 checkpoint_path: Optional[str] = None):
         self.ledger = ledger
         self.gate = gate
         self.dev_suite = dev_suite
@@ -364,6 +376,13 @@ class EvolutionLoop:
         self.aging_events: Dict[str, Any] = {}
         #: 全局预算（None = 不限，行为与加预算前一致）。
         self.budget = budget
+        #: 断点续跑：checkpoint 落盘路径（None = 不写 ⇒ 无法续跑）。
+        #: ⛔ 默认 None 而非"默认写到 data/"：写文件是**副作用**，不该由
+        #:    库层替调用方决定往哪儿写（CLI 侧显式开 `--checkpoint`）。
+        self.checkpoint_path = checkpoint_path
+        #: 最近一次成功落盘的 checkpoint 路径（读数，供 CLI/观测侧显示）。
+        #: ⛔ 类级兜底见上方 `checkpoint_path` 的声明处。
+        self.last_checkpoint: Optional[str] = None
         #: 跨轮纵向读数（老化检测的事实源，可投影到账本）。
         self.aging_traces: List[RoundTrace] = []
         #: 内存态 run 账（**不依赖 store**）：机制正确性不该依赖外部存储存在。
@@ -1226,18 +1245,93 @@ class EvolutionLoop:
         return rep
 
     # ── 多轮 ──────────────────────────────────────────────────────
-    def run(self, h: Harness, rounds: int = 3) -> Tuple[Harness, List[RoundReport]]:
+    # ── 断点续跑（checkpoint）─────────────────────────────────────
+    def _cfg_fingerprint(self) -> str:
+        """进化配置的指纹。**只**取 `EvolutionConfig` 自己的字段。"""
+        try:
+            return _cp.fingerprint(asdict(self.cfg))
+        except Exception:      # noqa: BLE001 —— 指纹算不出 ⇒ 退回空串
+            return ""
+
+    def write_checkpoint(self, h: Harness, reports: List[RoundReport],
+                         rounds_total: int) -> Optional[str]:
+        """把"已完成到第几轮 + 当前 harness"落盘。**只在轮末调用**。
+
+        ⛔ 为什么只在轮末：轮中写的 checkpoint 会与"写到一半的账本"配对
+        ⇒ 恢复后这一轮被跑第二遍（与 `RunBudget` 只在轮末查挂钟同源）。
+
+        ⛔ 写失败**不得**中断进化：checkpoint 是**派生量**，不是事实源
+        （事实源是账本）。但必须记账 —— 否则"我明明开了 --checkpoint"
+        却续跑不了，是没有任何读数的静默失败（假仪表）。
+        """
+        if not self.checkpoint_path:
+            return None
+        try:
+            cp = _cp.Checkpoint(
+                round_no=reports[-1].round_no if reports else 0,
+                rounds_total=rounds_total,
+                harness=h.to_dict(),
+                harness_id=str(getattr(h, "harness_id", "") or ""),
+                ledger_seq=int(getattr(self.ledger, "seq", 0) or 0),
+                run_seq=int(self._run_seq),
+                caliber_fp=_cp.fingerprint(self.caliber),
+                cfg_fp=self._cfg_fingerprint(),
+                done_rounds=tuple(r.to_dict()
+                                  for r in reports[-self._CP_KEEP_ROUNDS:]),
+            )
+            path = _cp.write(self.checkpoint_path, cp)
+        except Exception as e:  # noqa: BLE001 —— 记账，不吞
+            try:
+                self.ledger.append(
+                    "evolution.checkpoint_failed",
+                    {"path": self.checkpoint_path, "error": f"{type(e).__name__}: {e}",
+                     "note": "checkpoint 是派生量 ⇒ 不中断进化，但本次进度"
+                             "不可续跑（没有读数就等于没有这个功能）"},
+                    actor="evolution")
+            except Exception:   # noqa: BLE001 —— 账本也写不进 ⇒ 只能放弃
+                pass
+            return None
+        self.last_checkpoint = path
+        return path
+
+    def load_checkpoint(self, path: Optional[str] = None
+                        ) -> Tuple[Any, Harness]:
+        """读并**校验** checkpoint，返回 `(Checkpoint, harness)`。
+
+        ⛔ fail-closed：任何不一致都抛 `CheckpointError`（带可行动原因）。
+        ⛔ 校验用的 caliber / cfg / ledger_seq 全部取自**当前实例**：
+           拿"当时的环境"去校验是无意义的，resume 要回答的是
+           "现在这套环境能不能接着那次跑"。
+        """
+        p = path or self.checkpoint_path
+        if not p:
+            raise _cp.CheckpointError(
+                "未指定 checkpoint 路径（用 --checkpoint 指定，或先跑一次"
+                "带 --checkpoint 的 evolve）")
+        cp = _cp.read(p)
+        _cp.verify_or_raise(cp,
+                            ledger_seq=int(getattr(self.ledger, "seq", 0) or 0),
+                            caliber=self.caliber, cfg=asdict(self.cfg))
+        return cp, Harness.from_dict(cp.harness)
+
+    def run(self, h: Harness, rounds: int = 3,
+            start_round: int = 0) -> Tuple[Harness, List[RoundReport]]:
         """跑多轮进化。返回 (最终 harness, 每轮报告)。
 
         ⛔ 回滚语义：某轮没选出候选 ⇒ harness 保持不变（指针不前进），
         而不是"部分应用"。
+
+        ⛔ `start_round`：续跑时轮号必须**接着上次的编号**，否则账本里
+        会出现两个"第 3 轮"，而"跑了几轮"这个读数随之失真（与 run_id
+        锚同族的事故）。
         """
         reports: List[RoundReport] = []
         cur = h
         idle_streak = 0
         t0 = time.time()
+        rounds_total = start_round + rounds
         for i in range(rounds):
-            rep = self.run_round(cur, round_no=i + 1)
+            rep = self.run_round(cur, round_no=start_round + i + 1)
             reports.append(rep)
             if self.budget is not None:
                 self.budget.spend(rounds=1, seconds=time.time() - t0)
@@ -1259,6 +1353,12 @@ class EvolutionLoop:
             #:    放在 run() 之后 ⇒ 只能看到最后一轮 ⇒ 退化曲线退化成一个点
             #:    （有机制 ≠ 被走到，V5 第 2 条）。
             self._record_aging(rep, cur)
+
+            #: ⛔ checkpoint 必须在 **`cur` 前进之后**写：写在前面会把
+            #:    "本轮提交前的 harness"当成进度 ⇒ 续跑后本轮的收益被丢掉。
+            #:    也必须写在**提前终止判断之前**：否则"无事可做/预算耗尽"
+            #:    这两种正常结束反而没有 checkpoint（可它们同样是进度）。
+            self.write_checkpoint(cur, reports, rounds_total)
 
             #: ⛔ 无事可做就停：不是失败，是"再跑也是空转"。实测 10 轮里
             #:    r2–r10 全在重复同一轮（base 恒 1.0 / advantage 恒 0），
@@ -1291,4 +1391,22 @@ class EvolutionLoop:
                      "note": "预算耗尽 ⇒ 提前终止（不是失败，也不是空转）"},
                     actor="evolution")
                 break
+
+        #: ⛔ 落点要兑现：写了 checkpoint 却没有任何读数 ⇒ "我开了续跑"
+        #:    与"续跑真的可用"在外部无法区分（假仪表）。这里记一条事件，
+        #:    让 `status` / 账本能回答"最近一次进度存到哪、存到第几轮"。
+        if self.last_checkpoint:
+            try:
+                self.ledger.append(
+                    "evolution.checkpoint",
+                    {"path": self.last_checkpoint,
+                     "round_no": reports[-1].round_no if reports else 0,
+                     "rounds_total": rounds_total,
+                     "rounds_done": len(reports),
+                     "harness_id": getattr(cur, "harness_id", "") or "",
+                     "resumable": bool(reports) and reports[-1].round_no
+                     < rounds_total},
+                    actor="evolution")
+            except Exception:   # noqa: BLE001 —— 账本写不进 ⇒ 不影响返回
+                pass
         return cur, reports

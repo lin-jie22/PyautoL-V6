@@ -436,7 +436,7 @@ def _verify_fixed(env, broken_src, fixed_src, timeout: float = 10.0):
 def cmd_evolve(args: argparse.Namespace) -> int:
     from .environment import (DEFAULT_MUTATION_KINDS, Environment,
                               synthesize_tasks)
-    from .evolution import EvolutionConfig, EvolutionLoop
+    from .evolution import EvolutionConfig, EvolutionLoop, RunBudget
     from .generalization import GeneralizationGate, make_heldout
     from .genome import Harness
     from .ledger import Ledger
@@ -769,10 +769,35 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         except Exception:                              # noqa: BLE001
             pass
 
+    cp_path = str(getattr(args, "checkpoint", "") or "")
+
+    def _int_or_none(v):
+        v = str(v or "").strip()
+        return int(v) if v else None
+
+    def _float_or_none(v):
+        v = str(v or "").strip()
+        return float(v) if v else None
+
+    budget = RunBudget(max_rounds=_int_or_none(getattr(args, "max_rounds", "")),
+                       max_seconds=_float_or_none(
+                           getattr(args, "max_seconds", "")),
+                       max_propose_calls=_int_or_none(
+                           getattr(args, "max_propose", "")),
+                       max_eval_runs=_int_or_none(
+                           getattr(args, "max_eval_runs", "")))
+    #: ⛔ 没设任何一项 ⇒ 传 None（保持旧行为），不是传一个"全空预算"。
+    #:    全空预算会让 `budget.limited` 报 False 但每轮多一份读数 ⇒
+    #:    "装了止损"和"没装"在输出里长得一样（假仪表）。
+    if not budget.limited:
+        budget = None
+
     loop = EvolutionLoop(led, gate, dev, runner, proposer, store=store,
                          caliber=caliber, heldout=heldout,
                          dev_difficulty=dev_difficulty,
                          on_round_end=_remember_round,
+                         checkpoint_path=cp_path or None,
+                         budget=budget,
                          config=EvolutionConfig(
                              group_size=int(args.group),
                              #: ⛔ 默认 0 = 串行（与历史基线同口径）。并行只
@@ -780,13 +805,39 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                              parallel_workers=int(
                                  getattr(args, "parallel", "0") or 0)))
 
-    #: ⛔ 初始 harness 必须**先进账本**再落投影：只写库的话，从账本重建会
-    #:    丢掉它（实测 7 个快照重建只剩 6 个）⇒ "账本是唯一事实源"被违反。
-    loop.register_root(h0)
-    mem.write("L0", h0.meta_rules, channel="curated", source="seed-harness")
+    #: ── 断点续跑 ──────────────────────────────────────────────
+    #: ⛔ resume 时**不**重新 register_root：root 已经在上一次运行里写进
+    #:   账本了，再写一条会让账本出现两个 root ⇒ "唯一事实源"自相矛盾。
+    start_round = 0
+    h_start = h0
+    rounds = int(args.rounds)
+    resumed_from = None
+    if getattr(args, "resume", False):
+        if not cp_path:
+            print("❌ --resume 需要配合 --checkpoint <路径>", file=sys.stderr)
+            return 2
+        try:
+            cpx, h_start = loop.load_checkpoint(cp_path)
+        except Exception as e:      # noqa: BLE001 —— 拒绝原因要原样给人看
+            print(f"❌ 无法续跑：{e}", file=sys.stderr)
+            return 2
+        if cpx.rounds_left <= 0:
+            print(f"✅ checkpoint 显示 {cpx.rounds_total} 轮已全部跑完"
+                  f"（第 {cpx.round_no} 轮）⇒ 无需续跑。")
+            return 0
+        start_round, rounds = cpx.round_no, cpx.rounds_left
+        resumed_from = cpx.round_no
+        print(f"♻️  续跑：从第 {start_round + 1} 轮开始，还剩 {rounds} 轮"
+              f"（计划 {cpx.rounds_total} 轮，已完成 {cpx.round_no} 轮）")
+    else:
+        #: ⛔ 初始 harness 必须**先进账本**再落投影：只写库的话，从账本重建
+        #:    会丢掉它（实测 7 个快照重建只剩 6 个）⇒ "唯一事实源"被违反。
+        loop.register_root(h0)
+        mem.write("L0", h0.meta_rules, channel="curated",
+                  source="seed-harness")
 
     t0 = time.time()
-    final, reports = loop.run(h0, rounds=int(args.rounds))
+    final, reports = loop.run(h_start, rounds=rounds, start_round=start_round)
 
     for r in reports:
         #: ⛔ L4 是巩固的**唯一输入**。旧写法只记轮次模板（"第 N 轮：基线
@@ -867,6 +918,16 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "seed_harness_id": h0.harness_id,
         "improved": any(r.improved for r in reports),
         "cost_s": round(time.time() - t0, 2),
+        #: ⛔ 续跑读数必须可见：不打印，"开了 --checkpoint"与"进度真的
+        #:    存下来了"在外部无从区分（假仪表）。`resumable=False`
+        #:    说明已跑完，别再诱导一次无意义的续跑。
+        "checkpoint": ({"path": loop.last_checkpoint or cp_path,
+                        "round_no": reports[-1].round_no if reports else 0,
+                        "rounds_total": start_round + rounds,
+                        "resumable": bool(reports)
+                        and reports[-1].round_no < start_round + rounds,
+                        "resumed_from": resumed_from}
+                       if (cp_path or loop.last_checkpoint) else None),
         "embedder": embedder_report,
         "ledger": led.stats(),
         "memory": mem.integrity(),
@@ -950,6 +1011,73 @@ def cmd_caps(args) -> int:
     return 2
 
 
+def cmd_backup(args) -> int:
+    """备份：把唯一事实源与投影拷走，**带校验和**。"""
+    from . import backup as B
+    dest = args.to or str(Path(args.root) / "backups")
+    m = B.create(args.root, dest, note=args.note or "")
+    out = {"dest": dest, "manifest": m.to_dict(),
+           "chain_ok": m.chain_ok, "chain_reason": m.chain_reason}
+    print(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+    #: ⛔ 退出码必须诚实：链验出来是断的 ⇒ 这份备份**不可信**，必须报失败
+    #:    （否则"备份成功"会被当成"有退路"，而它其实没有）。
+    if m.chain_ok is False:
+        print(f"❌ 备份副本的账本链是断的：{m.chain_reason}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_restore(args) -> int:
+    """恢复：fail-closed，且恢复前先给当前状态留一份。"""
+    from . import backup as B
+    src = args.src
+    ok, problems, m = B.verify(src)
+    if not ok:
+        print("❌ 备份校验不通过 ⇒ 拒绝恢复：", file=sys.stderr)
+        for p_ in problems:
+            print(f"   - {p_}", file=sys.stderr)
+        return 2
+    assert m is not None
+    print(f"将用 {src}（{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(m.created_at))}）"
+          f" 覆盖 {args.root} 的账本/记忆/投影。")
+    if m.chain_ok is False:
+        print(f"⚠️ 这份备份的账本链是断的：{m.chain_reason}", file=sys.stderr)
+    #: ⛔ 恢复是不可逆的覆盖写 ⇒ 默认**不**自动执行，必须显式 --yes。
+    #:    （"备份时留了当前状态"是第二道保险，不是让人随手执行的理由。）
+    if not args.yes:
+        print("加 --yes 才真的执行（恢复前会自动把当前状态另存一份）。")
+        return 0
+    try:
+        rep = B.restore(src, args.root)
+    except B.BackupError as e:
+        print(f"❌ 恢复失败：{e}", file=sys.stderr)
+        return 2
+    print(json.dumps(rep, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def cmd_doctor(args) -> int:
+    """一条命令回答"这个系统现在健康吗"。**只读，不修任何东西**。
+
+    ⛔ 每项失败都带 `action`（该跑哪条命令），但 doctor 自己不动手：
+    体检恰恰是在数据可疑时跑的，此时自动修改 = 未告知就改数据。
+    """
+    from . import doctor as D
+    rep = D.run(args.root, caps=getattr(args, "caps", "") or "")
+    icons = {D.OK: "✅", D.FAIL: "❌", D.SKIPPED: "⏭️ "}
+    for c in rep["checks"]:
+        line = f"{icons.get(c['status'], '?')} {c['name']}: {c['detail']}"
+        if c["status"] == D.SKIPPED and c.get("skipped_reason"):
+            line += f"（未查：{c['skipped_reason']}）"
+        if c["action"]:
+            line += f"\n     ⇒ {c['action']}"
+        print(line)
+    if rep["note"]:
+        print(f"ℹ️  {rep['note']}")
+    print(json.dumps(rep, ensure_ascii=False, indent=2, default=str))
+    return rep["exit_code"]
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="aether", description="V6 · AETHER CLI")
     ap.add_argument("--root", default=str(ROOT), help="V6 根目录")
@@ -957,6 +1085,16 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     sub.add_parser("status", help="账本 + 库统计 + 投影一致性")
     sub.add_parser("verify-chain", help="校验账本哈希链")
+    bk = sub.add_parser("backup", help="备份账本/记忆/投影（自带校验和）")
+    bk.add_argument("--to", default="", help="备份存放目录（默认 <root>/backups）")
+    bk.add_argument("--note", default="", help="给这份备份写一句备注")
+    rs = sub.add_parser("restore", help="从备份恢复（默认只演练，--yes 才执行）")
+    rs.add_argument("--from", dest="src", required=True, help="备份目录")
+    rs.add_argument("--yes", action="store_true",
+                    help="真的执行覆盖（恢复前会自动留一份当前状态）")
+    dc = sub.add_parser("doctor", help="一条命令体检（只读，不改任何东西）")
+    dc.add_argument("--caps", default="",
+                    help="顺带校验能力清单能否装载（未指定 ⇒ 该项记 skipped）")
     rb = sub.add_parser("rebuild", help="从账本重建 SQLite 投影（库只是视图）")
     rb.add_argument("--check", action="store_true",
                     help="只校验投影与账本是否一致，不重建")
@@ -1033,6 +1171,21 @@ def main(argv: Optional[List[str]] = None) -> int:
                         "要可比就用默认串行。")
     e.add_argument("--embedder", default="hash", choices=["hash", "auto", "ollama"],
                    help="嵌入器：hash（默认，离线）/ auto|ollama（须过选型闸）")
+    #: ⛔ 预算四项**默认全空 = 不限**（与历史基线同口径）。接真 LLM 时
+    #:    不设就是"把预算交给循环自己"（一次 propose = 一次付费调用）。
+    e.add_argument("--max-rounds", default="", help="预算：最多跑几轮")
+    e.add_argument("--max-seconds", default="", help="预算：挂钟上限（秒，轮末检查）")
+    e.add_argument("--max-propose", default="",
+                   help="预算：提议器最多调几次（真 LLM = 付费调用数）")
+    e.add_argument("--max-eval-runs", default="",
+                   help="预算：发展集最多评估多少次任务")
+    e.add_argument("--checkpoint", default="",
+                   help="断点续跑：每轮末把进度（第几轮 + 当前 harness）"
+                        "原子写到这个文件。不指定 ⇒ 不写 ⇒ 不可续跑。")
+    e.add_argument("--resume", action="store_true",
+                   help="从 --checkpoint 记录的位置接着跑，轮号**接续**"
+                        "（否则账本里会出现两个「第 3 轮」）。"
+                        "⛔ 换尺子 / 换配置 / 账本回退 ⇒ 拒绝并说明是哪一种。")
 
     u = sub.add_parser("ui", help="起 API + 控制台，并打开桌面窗口")
     u.add_argument("--port", type=int, default=8611)
@@ -1057,6 +1210,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         "memory": cmd_memory,
         "evolve": cmd_evolve,
         "caps": cmd_caps,
+        "backup": cmd_backup,
+        "restore": cmd_restore,
+        "doctor": cmd_doctor,
     }[args.cmd](args)
 
 

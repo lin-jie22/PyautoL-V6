@@ -20,12 +20,14 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import os
 import sys
 import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+import hmac
 import threading
 from urllib.parse import parse_qs, urlparse
 
@@ -53,6 +55,25 @@ MAX_INVOKE_BODY_BYTES = 1024 * 1024
 #: `/api/capabilities/reload` 请求体上限（字节）。这个 body **只需要一个
 #: 路径**，给 1MB 没有理由 —— 上限越窄，被塞进来的余地越小。
 MAX_RELOAD_BODY_BYTES = 64 * 1024
+
+#: 视为"只监听本机"的地址集合。⛔ 只认**字面量**：不要试图解析域名或用
+#: `socket` 判断 —— 那会把判断结果押在 DNS 与路由表上（可失真），而这里
+#: 需要的是一个**保守的**判定。认不出的地址一律按"非回环"处理
+#: ⇒ 没开 token 就拒绝启动（fail-closed，宁可拦错不可放行）。
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+
+#: 进程启动时刻（`/api/health` 的 uptime 用）。模块级 ⇒ 每个进程一份。
+_STARTED = time.time()
+
+
+def _code_version() -> str:
+    """代码版本的**唯一读取处**。
+
+    ⛔ 函数内 import：本模块可能被 `aether` 包在初始化过程中导入，
+    顶层 `from . import __version__` 有循环导入风险。
+    """
+    from . import __version__
+    return str(__version__)
 
 
 def _is_within(child: Path, parent: Path) -> bool:
@@ -385,7 +406,10 @@ def _collect(root: Path, limit: int = 200) -> Dict[str, Any]:
         "snapshots_total": snaps_total,
         "snapshots_truncated": snaps_truncated,
         "memory": mem,
-        "version": "0.1.0",
+        #: ⛔ 版本号**不许再写字面量**：此前 `aether/__init__.py` 与这里
+        #:    各写一份（实测已漂移：包是 0.1.0、另一处是 0.2.0）⇒ 同一个
+        #:    进程的两个端点能报出两个版本。唯一事实源 = `__version__`。
+        "version": _code_version(),
     }
 
 
@@ -413,6 +437,42 @@ class Handler(BaseHTTPRequestHandler):
     #: ⛔ ThreadingHTTPServer ⇒ 多线程并发；热装载不成对（计数 +1 与替换
     #:    gateway 之间被另一个 reload 插队）会让读数与实况对不上。
     caps_lock: Any = threading.Lock()
+    #: ⛔⛔ API 鉴权令牌。空串 = **不鉴权**（localhost 默认场景，向后兼容）。
+    #:    非空 ⇒ 所有请求都必须在 `Authorization: Bearer <token>` 或
+    #:    `X-API-Key: <token>` 里带上它。
+    #:    ⛔ "不鉴权"只在**监听回环地址**时才可接受 —— 这条约束由 `main()`
+    #:    在启动期强制（非 localhost 且无 token ⇒ 拒绝启动），不靠调用方自觉。
+    api_token: str = ""
+
+    # ── 鉴权 ──────────────────────────────────────────────────
+    def _authorized(self) -> bool:
+        """校验本次请求。不通过时**本方法自己发 401**并返回 False。
+
+        ⛔ 为什么要有它：本服务暴露的是账本原文、记忆正文、失败轨迹，
+        以及 `POST /api/invoke`（能触发外部能力执行）。此前它零鉴权，
+        唯一的保护是"默认绑 127.0.0.1"这条**隐式约定** —— 而 `--host`
+        一个开关就能把它拆掉，且拆掉时没有任何提示。
+
+        ⛔ 比较必须用 `hmac.compare_digest`：用 `==` 比字符串会按字节
+        提前退出 ⇒ 逐字节试探可还原令牌（时序侧信道）。这是"看起来能
+        工作的鉴权"与"真鉴权"的分界。
+        """
+        if not Handler.api_token:
+            return True
+        hdr = (self.headers.get("Authorization") or "").strip()
+        token = ""
+        if hdr.lower().startswith("bearer "):
+            token = hdr[7:].strip()
+        if not token:
+            token = (self.headers.get("X-API-Key") or "").strip()
+        if token and hmac.compare_digest(token, Handler.api_token):
+            return True
+        self._json({"error": "unauthorized",
+                    "hint": "请求头带 Authorization: Bearer <token> "
+                            "或 X-API-Key: <token>",
+                    "note": "本服务暴露账本原文与能力调用 ⇒ 非本机部署"
+                            "必须开鉴权（--api-token 或 V6_API_TOKEN）"}, 401)
+        return False
 
     def _cors_headers(self) -> Dict[str, str]:
         if not self.cors_origins:
@@ -453,6 +513,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, f.read_bytes(), ctype)
 
     def do_GET(self) -> None:  # noqa: N802
+        if not self._authorized():
+            return
         u = urlparse(self.path)
         q = parse_qs(u.query)
         try:
@@ -461,7 +523,35 @@ class Handler(BaseHTTPRequestHandler):
                 if not ok:
                     self._json({"error": err}, 400)
                     return
-                self._json(_collect(self.root, limit=limit))
+                #: ⛔ 鉴权状态必须**可读**：没这个读数，"服务有没有上锁"
+                #:    只能靠翻启动命令 —— 而启动时是从哪台机器起的、
+                #:    有没有带 --api-token，事后无从查证（假仪表同族）。
+                st = _collect(self.root, limit=limit)
+                st["auth"] = {"required": bool(Handler.api_token),
+                              "scheme": "bearer|api-key"
+                              if Handler.api_token else "none"}
+                self._json(st)
+            elif _endpoint_is(u.path, "/api/health"):
+                #: ⛔ 探活端点必须**真的轻**：`/api/status` 要全量扫账本
+                #:    （4 个聚合器），拿它当 liveness 会在账本变大时把探活
+                #:    拖成超时 ⇒ 编排层（k8s/docker healthcheck）误判服务死
+                #:    了而重启它，而它其实是健康的。这里只做 O(1) 的 stat。
+                data_dir = self.root / "data"
+                ledger_p = data_dir / "ledger.jsonl"
+                self._json({
+                    "ok": True,
+                    "uptime_s": round(time.time() - _STARTED, 3),
+                    "pid": os.getpid(),
+                    "auth_required": bool(Handler.api_token),
+                    "caps_loaded": Handler.gateway is not None,
+                    "checks": {
+                        "ledger_present": ledger_p.exists(),
+                        "ledger_bytes": (ledger_p.stat().st_size
+                                         if ledger_p.exists() else 0),
+                    },
+                    "note": "只做 O(1) 检查 ⇒ 可当探活；"
+                            "链完整性请用 verify-chain / status",
+                })
             elif _endpoint_is(u.path, "/api/events"):
                 from .ledger import Ledger
                 ok, limit, err = _parse_limit(q, DEFAULT_EVENT_TAIL)
@@ -560,6 +650,8 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── POST：热装载能力清单 / 调用已注册的能力 ────────────────
     def do_POST(self) -> None:  # noqa: N802
+        if not self._authorized():
+            return
         u = urlparse(self.path)
         if _endpoint_is(u.path, "/api/capabilities/reload"):
             self._do_reload()
@@ -699,7 +791,24 @@ def main(argv: Optional[list] = None) -> int:
     ap.add_argument("--caps-hot", action="store_true",
                     help="允许 POST /api/capabilities/reload 热装载"
                          "（默认关闭：热装载 = 运行时改变本进程能力集）")
+    ap.add_argument("--api-token", default="",
+                    help="API 鉴权令牌。设置后所有请求必须带 "
+                         "Authorization: Bearer <token> 或 X-API-Key。\n"
+                         "⛔ 监听非回环地址时**必须**设置（否则拒绝启动）："
+                         "本服务暴露账本原文与能力调用端点，"
+                         "--host 0.0.0.0 + 无 token = 裸奔。\n"
+                         "也可用环境变量 V6_API_TOKEN 传（不写进命令行历史）。")
     args = ap.parse_args(argv)
+
+    #: ── 鉴权（fail-closed）─────────────────────────────────────
+    token = (args.api_token or os.environ.get("V6_API_TOKEN") or "").strip()
+    if not token and args.host not in _LOOPBACK_HOSTS:
+        print(f"❌ 拒绝启动：--host {args.host} 不是回环地址，但没有设置"
+              f" API 令牌 ⇒ 账本原文 / 记忆正文 / 能力调用端点将对网络裸奔。\n"
+              f"   出路：加 --api-token <token>（或环境变量 V6_API_TOKEN），"
+              f"或改回 --host 127.0.0.1。", file=sys.stderr)
+        return 2
+    Handler.api_token = token
 
     #: ⛔ **与 CLI 同一个装载接线**（`interop.mount_capabilities`）：两边各写
     #:    一遍 `Registry → load_manifest → Gateway` 就会出现"CLI 看得到被拒
