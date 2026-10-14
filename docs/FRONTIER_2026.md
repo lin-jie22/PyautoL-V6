@@ -127,6 +127,32 @@ rejected_no_failure / rejected_error。合成不出任务 = 环境没用，
 
 ---
 
+## 6.5 兑现审计（2026-10-14）与它挖出来的真缺口
+
+对上面 §1–§7 的每一条"落点"做了一次**运行时取证**（不 grep 符号 ——
+grep 到 `def foo` 只证明写过，不证明被调用过），脚本见
+`scripts/probe_frontier_audit.py`。结论分两半：
+
+1. **§1/§3/§4/§6/§7 的落点 56/56 全部兑现**（含反证组：注入事故版，
+   对应判据会翻转）。
+2. **§2 里有一支是空账** —— `tool-observation masking` 与 `信用分配`
+   的落点 `runtime.Trajectory` / `masking_ratio` / `assign_credit`，
+   **从未被生产链路 import**。它们在 `scripts/demo_evolve.py` 里被手工
+   构造过，所以看起来"有落点"，实质是**平行于主流程的死代码**。
+   佐证：`aether/attribution.py` 的文档字符串自己就写着
+   "端到端 evolve 里 `assign_credit` 被调用 **0 次**"。
+
+**已修**：`HarnessAgent.run()` 现在按层动作序列产出真实 `Trajectory`
+（`trajectory_from_steps()`，kind 与 `runtime.MODEL_KINDS`/`ENV_KINDS`
+同源），挂到 `AgentResult.trajectory` 并在 `to_dict()` 里暴露
+`masking` 读数。至此 masking 在生产链路上第一次有真值。
+
+⚠️ 与 §5 一致的处理：`assign_credit` 的 turn-level 归因**仍然恒不可用**
+（没有 `replay_fn`），这是**刻意**的 —— 不可重放就不给数字，替代方案是
+`attribution.attribute_layers()` 的反事实消融。
+
+---
+
 ## 7. 与 V5 经验的对应
 
 V5 三年积累的硬教训，在 V6 里全部有落点（不是重述，是变成结构）：
@@ -140,3 +166,43 @@ V5 三年积累的硬教训，在 V6 里全部有落点（不是重述，是变�
 | 记账方式变了 ⇒ Δ 要拆账 | 账本单一事实源，投影可由账本重建 |
 | 并发写会被热进程回写覆盖 | `ledger.append()` 先重读再写（`_hydrate()`）+ flock |
 | 数字 1.0 vs 1 的序列化漂移 | `_norm()` + TS 侧同规则（selfcheck A1 守） |
+| 「有机制」≠「这条路被走到」 | 兑现审计：运行时取证 + 可达性计数（本次抓出 masking 空账） |
+
+---
+
+## 8. 2026-10 新纳入的工作（本轮对照后补记）
+
+本节记录**上一版清单里没有**的 2026 工作，以及它们在 V6 里的落点。
+⛔ 与 §1 同一条原则：**没有落点的，不写进代码注释，只列在 §9**。
+
+| 工作 | 主张 | V6 落点 |
+|---|---|---|
+| **ALE**（Agent Lifespan Engineering, 2026） | 自进化系统会**长期退化**：压缩 / 干扰 / 修订 / 维护四种机制，让"每轮单看都没亏"的系统在长跑后变弱 —— **行为测试正常，准确率已衰减**。读法是时间依赖图 + 反事实探针，不是 aggregate reward | `aether/aging.py`：`RoundTrace` 纵向读数 + `detect_aging()` 四类信号（含 `interference` 此消彼长指纹） |
+| **EFC**（Effective Feedback Compute, 2026） | 只统计 **valid / legal / non-redundant / retained** 的反馈；它预测失败率远好于 raw token 数或工具调用数 | **只落地了 token 归属**那一层：`runtime.Trajectory.masking_ratio`。四分类有效性记账未落地（见 §9） |
+| **HarnessAudit**（2026） | 全轨迹审计**边界合规 / 执行保真 / 系统稳定性**；违规随轨迹变长而累积，多 agent 协作扩大风险面 | 逐任务层有 `verifier.Verdict.validate()`；**全轨迹聚合**未落地（见 §9） |
+| **META 综述**（衔远 + 清华, 2026-06） | 进化上限由**经验落点**决定；记忆的演进层应当学会"何时该写 / 何时该取 / **何时该忘**" | 写与取有（`consolidate` / `search`）；**"何时该忘"目前是固定阈值参数**，不可学习（见 §9） |
+| **MOSS**（源级自进化, 2026） | 失败取证 → 外部代码 agent 改系统源码 → 批量重放 + 试运行 + 人工审批 + 热替换 + 回滚 | `evolution` 的 MINE/PROPOSE/VALIDATE 三段 + `supersede` 留痕 + `ledger` hash 链 |
+| **Runtime interface adaptation**（2026） | 从训练轨迹里提取**反复出现的交互失败**，转成可复用干预（环境约束 / 流程技能 / 动作实现） | 部分：`MemoryAwareProposer.remember()` 把"被闸拒的经验"喂回提议器 |
+
+---
+
+## 9. 听说过、但**没有落点**的项（不写进代码注释）
+
+⛔ 这是 §0 那条原则要求的"最后一节"：下面这些**没有**可被测试断言的
+结构，因此它们**不是** V6 的能力，读代码时不要被注释误导。
+
+| 项 | 为什么没落点 |
+|---|---|
+| **EFC 的反馈有效性四分类** | 目前只记了 token 归属（model vs env）。"这条反馈后来有没有被决策用到"（retained）需要跨轮因果追踪，尚未实现 |
+| **记忆"何时该忘"的可学习策略** | `memory_policy` 是**固定阈值参数**（`recall_topk` / `min_content_len`），不是学出来的；`prune()` 现在是规则版 |
+| **全轨迹边界合规聚合（HarnessAudit 那一层）** | 逐任务判定有，跨步骤的违规累积计数没有 |
+| **多 agent 协作的风险面** | V6 目前是单 agent + 技能链；UCI 能挂外部能力，但没有多 agent 审计面 |
+| **200 轮尺度的寿命追踪** | 老化检测目前只在**单次 `loop.run()` 内**跨轮；跨进程 / 跨部署的寿命线尚未打通 |
+| **权重更新（SIA 式共进化）** | 已在 §5 明确**不采纳**（会让"非回归"失去确定性） |
+| **生成式记忆摘要** | 已在 §5 明确**不采纳**（离线巩固里一次幻觉会永久污染 L2） |
+
+**边界（诚实记录，别当"已解决"）**：
+- 沙箱只到进程层，**文件系统未隔离**，拦不住 ctypes / 原生 syscall。
+- held-out 环境只有 4 个，泛化结论的强度受限于此。
+- 默认嵌入仍是 hashing（不是语义嵌入）。
+- `inproc` 适配器**没有真超时**。

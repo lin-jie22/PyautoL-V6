@@ -32,11 +32,17 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
+from typing import (Any, Callable, Dict, FrozenSet, List, Optional,
+                    Sequence, Tuple)
 
 from .environment import Environment, verify_source
 from .genome import parse_route          # 路由语义的唯一解释处（不可另抄一份）
 from .memory import MemoryOS
+#: ⛔ 轨迹记账（masking / 信用分配）的唯一事实源。2026-10-14 兑现审计实测：
+#:    本模块此前**从未**被生产链路 import ⇒ `runtime.Trajectory` 只在
+#:    demo 脚本里被手工构造过 ⇔ masking_ratio 在生产上是空账。
+#:    这里 import 它，是为了让"每跑一步记一步"真正接到主流程上。
+from .runtime import Trajectory
 #: ⛔ 唯一事实源：`revert_control_flow` 难度分层也用它，改动会同时
 #:    改变"什么算 easy"的定义。
 from .repair import revert_boolops, revert_control_flow, revert_literals
@@ -96,17 +102,64 @@ class AgentResult:
     steps: Tuple[AgentStep, ...] = ()
     strategy: str = ""
     layers_used: Tuple[str, ...] = ()
+    #: 这一次执行的**轨迹记账**（model/env token 归属 + masking 比）。
+    #: ⛔ 它是账，不是装饰：masking_ratio 过高 ⇒ 这条轨迹的"能力"可能
+    #:    来自环境而非策略（见 `runtime.Trajectory`）。
+    trajectory: Optional[Trajectory] = None
 
     @property
     def reward(self) -> float:
         return self.verdict.reward
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"strategy": self.strategy,
-                "layers_used": list(self.layers_used),
-                "steps": [{"layer": s.layer, "action": s.action,
-                           "ok": s.ok, "detail": s.detail} for s in self.steps],
-                "reward": self.verdict.reward}
+        d = {"strategy": self.strategy,
+             "layers_used": list(self.layers_used),
+             "steps": [{"layer": s.layer, "action": s.action,
+                        "ok": s.ok, "detail": s.detail} for s in self.steps],
+             "reward": self.verdict.reward}
+        if self.trajectory is not None:
+            d["masking"] = {
+                "model_tokens": self.trajectory.model_tokens,
+                "env_tokens": self.trajectory.env_tokens,
+                "masking_ratio": round(self.trajectory.masking_ratio, 4),
+            }
+        return d
+
+
+#: 层动作 → runtime kind 的映射。⛔ **只做映射，不新造 kind**：
+#:    `runtime.MODEL_KINDS` / `ENV_KINDS` 才是判据读的集合。
+#:    映射写错 ⇒ 该步两边都不认 ⇒ tokens 计 0 ⇒ masking 变空账
+#:    （2026-10-14 兑现审计抓到的正是这个形态）。
+_STEP_KIND: Dict[Tuple[str, str], str] = {
+    ("L0", "directive"): "think",
+    ("L1", "route"): "call",
+    ("L2", "require_tools"): "env",
+    ("L2", "resolve_env"): "env",
+    ("L3", "apply"): "call",
+    ("L3", "uci"): "observation",
+    ("L4", "recall"): "observation",
+}
+#: 未知层动作 ⇒ 归到 **env 侧**（保守：宁可高估环境占比去触发告警，
+#: 也不能把环境观测算成策略产出 —— 后者会让 reward 看起来来自模型）。
+_UNKNOWN_STEP_KIND = "observation"
+
+
+def trajectory_from_steps(task_id: str, harness_id: str,
+                          steps: Sequence[AgentStep],
+                          verdict: Optional[Verdict] = None) -> Trajectory:
+    """把一次执行的层动作序列折算成**轨迹账**。
+
+    ⛔ 为什么在**返回前**一次性折算，而不是每步各记一次：
+       两处记账迟早会漂移（V5：同一份事实被两个地方写 ⇒ 必有一个是假的）。
+       这里 steps 是唯一事实源，Trajectory 是它的**投影**。
+    """
+    t = Trajectory(task_id=task_id, harness_id=harness_id)
+    for s in steps:
+        kind = _STEP_KIND.get((s.layer, s.action), _UNKNOWN_STEP_KIND)
+        t.add(kind, f"{s.layer}/{s.action}: {s.detail}")
+    if verdict is not None:
+        t.verdict = verdict
+    return t
 
 
 class HarnessAgent:
@@ -137,13 +190,17 @@ class HarnessAgent:
 
     # ── 主流程 ──────────────────────────────────────────────────
     def run(self, h: Any, spec: Dict[str, Any]) -> AgentResult:
+        tid = str(spec.get("task_id") or spec.get("env_id") or "task")
+        hid = str(getattr(h, "harness_id", "") or "")
         env = self.envs.get(str(spec.get("env_id", "")))
         if env is None:
+            _s: Tuple[AgentStep, ...] = (
+                AgentStep("L2", "resolve_env", False, "env 不存在"),)
             return AgentResult(
                 verdict=error_verdict("agent", ValueError(
                     f"未知 env_id={spec.get('env_id')!r}")),
-                steps=(AgentStep("L2", "resolve_env", False, "env 不存在"),),
-                strategy="", layers_used=("L2",))
+                steps=_s, strategy="", layers_used=("L2",),
+                trajectory=trajectory_from_steps(tid, hid, _s))
 
         src = str(spec.get("broken_source") or env.source)
         task_class = str(spec.get("task_class") or "repair")
@@ -253,18 +310,19 @@ class HarnessAgent:
             f"链={list(plan) or ['none']} 生效={applied} 总 changed={fixed != src}"))
 
         v = verify_source(env, source=fixed, timeout=self.timeout)
+        vd = Verdict(
+            passed=v.passed, checks=v.checks,
+            evidence={**(v.evidence or {}), "strategy": strategy,
+                      #: ⛔ `chain` 是**归因**字段：链上哪一项真的改了源码。
+                      #: 没有它，"链修好了这道题"就说不清是谁修的。
+                      "chain": list(plan), "applied": list(applied),
+                      "layers_used": sorted(set(used)),
+                      "n_steps": len(steps)},
+            error=v.error, env_fingerprint=env.fingerprint, cost_s=v.cost_s)
         return AgentResult(
-            verdict=Verdict(
-                passed=v.passed, checks=v.checks,
-                evidence={**(v.evidence or {}), "strategy": strategy,
-                          #: ⛔ `chain` 是**归因**字段：链上哪一项真的改了源码。
-                          #: 没有它，"链修好了这道题"就说不清是谁修的。
-                          "chain": list(plan), "applied": list(applied),
-                          "layers_used": sorted(set(used)),
-                          "n_steps": len(steps)},
-                error=v.error, env_fingerprint=env.fingerprint, cost_s=v.cost_s),
-            steps=tuple(steps), strategy=strategy,
-            layers_used=tuple(sorted(set(used))))
+            verdict=vd, steps=tuple(steps), strategy=strategy,
+            layers_used=tuple(sorted(set(used))),
+            trajectory=trajectory_from_steps(tid, hid, steps, vd))
 
     def _apply_one(self, strategy: str, src: str, env: Any,
                    spec: Dict[str, Any], steps: List[AgentStep]

@@ -1,0 +1,402 @@
+{
+  "ok": 66,
+  "total": 66,
+  "rows": [
+    {
+      "group": "A",
+      "name": "A1 最小编辑：单基因只动 skills 层",
+      "ok": true,
+      "detail": "别的层也被改了: []"
+    },
+    {
+      "group": "A",
+      "name": "A1b 原对象未被就地修改（frozen+纯函数）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "A",
+      "name": "A2 非法 target ⇒ 抛错（不静默忽略）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "A",
+      "name": "A3 层可编辑 meta_rules",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "A",
+      "name": "A3 层可编辑 routing",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "A",
+      "name": "A3 层可编辑 tools",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "A",
+      "name": "A3 层可编辑 skills",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "A",
+      "name": "A3 层可编辑 memory_policy",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "A",
+      "name": "A4 Capsule 含非法基因 ⇒ 整体拒绝（不留半截）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "A",
+      "name": "A5 blast_layers 覆盖 5 层",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "A",
+      "name": "A5b L0 标记为受保护（触碰即审批）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "A",
+      "name": "A6 血缘快照数 = 2",
+      "ok": true,
+      "detail": "got 2"
+    },
+    {
+      "group": "A",
+      "name": "A6b 快照含 parent 指针 ⇒ 可回放",
+      "ok": true,
+      "detail": "{\"harness_id\": \"ca030a7b3a494725\", \"parent_id\": \"bc512131876bda33\", \"accepted\": false, \"round_no\": 1, \"created_at\": 1791947897.196713, \"payload\": {\"meta_rules\": \"R0\", \"routing\": {\"repair\": \"s1\"}, \"too"
+    },
+    {
+      "group": "B",
+      "name": "B1 reward ∈ {0,1}",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "B",
+      "name": "B1b Verdict 无『模型觉得好』字段（无 score/quality）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "B",
+      "name": "B2 干净源码判据通过",
+      "ok": true,
+      "detail": "{\"n_passed\": 18, \"n_total\": 18, \"env_id\": \"scheduler\", \"sandbox\": {\"tier\": \"process\", \"os_sandbox\": null, \"env_purged\": true, \"os_isolated\": false, \"fs_isolated\": true, \"fs_audit\": true, \"mem_cap_byte"
+    },
+    {
+      "group": "B",
+      "name": "B2b 逐条 evidence 含 got=/expect=（真实断言，不是『跑过了』）",
+      "ok": true,
+      "detail": "18/18 含 got=；样例=['got=True expect=True', 'got=False expect=False']"
+    },
+    {
+      "group": "B",
+      "name": "B3 组内优势：赢者为正",
+      "ok": true,
+      "detail": "[1.4142135623730951, -0.7071067811865475, -0.7071067811865475]"
+    },
+    {
+      "group": "B",
+      "name": "B3b 全同 ⇒ 全 0（不除零爆 NaN）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "B",
+      "name": "B3c 单样本 ⇒ 0",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "B",
+      "name": "B4 group_relative 在真实 evolve 中被调用 > 0 次",
+      "ok": true,
+      "detail": "calls=1"
+    },
+    {
+      "group": "B",
+      "name": "B5 masking_ratio 随 env token 变化（真统计）",
+      "ok": true,
+      "detail": "0.6666666666666666 vs 0.9883720930232558"
+    },
+    {
+      "group": "B",
+      "name": "B5b masking_ratio = env/(model+env)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "B",
+      "name": "B6 无 replay_fn ⇒ available=False 且给理由",
+      "ok": true,
+      "detail": "{'mode': 'trajectory', 'available': False, 'reason': '环境不可重放 ⇒ turn-level 归因不可用（不给近似值）', 'top_steps': [], 'per_step': []}"
+    },
+    {
+      "group": "B",
+      "name": "B6b 有 replay_fn ⇒ 可用（leave-one-out）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "B",
+      "name": "B7 SELF_REPORT_KEYS 命中 ⇒ 抛错",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "B",
+      "name": "B7b Verdict.validate 拒收自述",
+      "ok": true,
+      "detail": "evidence 含自述/打分字段 ['self_score'] ⇒ 奖励不可信"
+    },
+    {
+      "group": "C",
+      "name": "C1 attempted > 0",
+      "ok": true,
+      "detail": "{'attempted': 6, 'valid': 6, 'rejected_no_failure': 0, 'rejected_error': 0, 'yield_rate': 1.0}"
+    },
+    {
+      "group": "C",
+      "name": "C2 valid > 0（真合成出任务）",
+      "ok": true,
+      "detail": "{'attempted': 6, 'valid': 6, 'rejected_no_failure': 0, 'rejected_error': 0, 'yield_rate': 1.0}"
+    },
+    {
+      "group": "C",
+      "name": "C3 yield 记账非负且 attempted 已计入",
+      "ok": true,
+      "detail": "attempted=6 valid=6 rejected_no_failure=0 rejected_error=0"
+    },
+    {
+      "group": "C",
+      "name": "C4 attempted == valid + rejected_no_failure + rejected_error",
+      "ok": true,
+      "detail": "{'attempted': 6, 'valid': 6, 'rejected_no_failure': 0, 'rejected_error': 0, 'yield_rate': 1.0}"
+    },
+    {
+      "group": "C",
+      "name": "C5 F2P：干净源码在合成任务上通过（红来自变异而非环境坏）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "C",
+      "name": "C6 变异落在未覆盖代码 ⇒ rejected_no_failure（不拿它充数）",
+      "ok": true,
+      "detail": "{'attempted': 3, 'valid': 0, 'rejected_no_failure': 3, 'rejected_error': 1, 'yield_rate': 0.0}"
+    },
+    {
+      "group": "D",
+      "name": "D1 TIERS = 5 层 L0..L4",
+      "ok": true,
+      "detail": "('L0', 'L1', 'L2', 'L3', 'L4')"
+    },
+    {
+      "group": "D",
+      "name": "D2 _link 生成了链接",
+      "ok": true,
+      "detail": "linked=6"
+    },
+    {
+      "group": "D",
+      "name": "D2b 链接双向对称",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "D",
+      "name": "D3 expand_links 召回更多（扩散真的生效）",
+      "ok": true,
+      "detail": "narrow=2 wide=6"
+    },
+    {
+      "group": "D",
+      "name": "D4 promote(verifier=None) ⇒ 拒绝（fail-closed）",
+      "ok": true,
+      "detail": "refuted:no_verifier（无验证器 ⇒ fail-closed，不提升）"
+    },
+    {
+      "group": "D",
+      "name": "D4b 有 verifier 且无反证 ⇒ 提升",
+      "ok": true,
+      "detail": "promoted"
+    },
+    {
+      "group": "D",
+      "name": "D4c verifier 证伪 ⇒ 拒绝",
+      "ok": true,
+      "detail": "refuted:找到反例"
+    },
+    {
+      "group": "D",
+      "name": "D5 MemNote 有 source / access_count / last_access",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "D",
+      "name": "D5b 检索会更新使用史（access_count 递增）",
+      "ok": true,
+      "detail": "1 -> 2"
+    },
+    {
+      "group": "E",
+      "name": "E1 非回归闸：好 harness 通过",
+      "ok": true,
+      "detail": "{'passed': True, 'regressions': [], 'caliber_ok': True, 'caliber_reason': '', 'deltas': {'f0': 0.0, 'f1': 0.0}, 'n_tasks': 2, 'errors': [], 'warnings': []}"
+    },
+    {
+      "group": "E",
+      "name": "E1b 非回归闸：回归被拦",
+      "ok": true,
+      "detail": "{'passed': False, 'regressions': ['f0: 1→0', 'f1: 1→0'], 'caliber_ok': True, 'caliber_reason': '', 'deltas': {'f0': -1.0, 'f1': -1.0}, 'n_tasks': 2, 'errors': [], 'warnings': []}"
+    },
+    {
+      "group": "E",
+      "name": "E2 supersede：旧基线被标记 superseded 且带 reason",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "E",
+      "name": "E3 min_reward_gain 存在且 > 0（能力地板）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "E",
+      "name": "E4 max_size_growth_ratio 存在且 < 1（增殖闸）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "E",
+      "name": "E5 env_fingerprint 区分不同环境且稳定",
+      "ok": true,
+      "detail": "927c4f27d6e10b83 b76b5d579095ea8d 927c4f27d6e10b83"
+    },
+    {
+      "group": "E",
+      "name": "E6 EVOLUTION_STALLED 存在",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "E",
+      "name": "E6b 停滞检测读的字段后端真的产出",
+      "ok": true,
+      "detail": "missing=[]"
+    },
+    {
+      "group": "G",
+      "name": "G1 老化信号恰好四类",
+      "ok": true,
+      "detail": "('compression', 'interference', 'revision', 'maintenance')"
+    },
+    {
+      "group": "G",
+      "name": "G2 compression：巩固后下降 ⇒ detected",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "G",
+      "name": "G3 interference 指纹：一升一降（均值抹平）仍被检出",
+      "ok": true,
+      "detail": "{'kind': 'interference', 'available': True, 'detected': True, 'delta': 0.0, 'degraded': ['t0'], 'improved': ['t1'], 'pattern': 'interference', 'evidence': ['t0: 1.0000 → 0.6000 (Δ-0.4000)']}"
+    },
+    {
+      "group": "G",
+      "name": "G4 revision：口径变更 ⇒ 直接报（不等下降）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "G",
+      "name": "G5 无事件 ⇒ available=False 且进 undetermined（不是通过）",
+      "ok": true,
+      "detail": "('compression', 'interference', 'revision', 'maintenance')"
+    },
+    {
+      "group": "G",
+      "name": "G6 探针集跨轮变化 ⇒ comparable=False 且 healthy=False（换尺子不判健康）",
+      "ok": true,
+      "detail": "{'rounds': 2, 'probe_ids': [], 'comparable': False, 'signals': [], 'overall_delta': 0.0, 'worst_regression': 0.0, 'healthy': False, 'undetermined': [], 'reason': '探针集跨轮发生变化 ⇒ 读数是换尺子不是变弱（fail-closed：不可"
+    },
+    {
+      "group": "G",
+      "name": "G7 HarnessAgent.run 产出 trajectory",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "G",
+      "name": "G7b model/env tokens 均 > 0（两侧都在记）",
+      "ok": true,
+      "detail": "model=39 env=12"
+    },
+    {
+      "group": "G",
+      "name": "G7c masking_ratio 是 (0,1) 内的真值（非空账）",
+      "ok": true,
+      "detail": "0.23529411764705882"
+    },
+    {
+      "group": "G",
+      "name": "G7d to_dict 暴露 masking 读数",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "X",
+      "name": "X1 事故版（静默忽略）⇒ A2 转红",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "X",
+      "name": "X2 事故版（连续 reward）⇒ B1 转红",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "X",
+      "name": "X3 事故版（fail-open promote）⇒ D4 转红",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "X",
+      "name": "X4 事故版（常量 masking）⇒ B5 转红",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "group": "X",
+      "name": "X5 对照：有覆盖环境 valid>0 且未覆盖环境 valid==0（同一合成器给出不同裁决 ⇒ C6 有判别力）",
+      "ok": true,
+      "detail": "covered={'attempted': 4, 'valid': 4, 'rejected_no_failure': 0, 'rejected_error': 0, 'yield_rate': 1.0} uncovered={'attempted': 2, 'valid': 0, 'rejected_no_failure': 2, 'rejected_error': 0, 'yield_rate': 0.0}"
+    },
+    {
+      "group": "X",
+      "name": "X5b 事故版（伪造『变红』）⇒ C6 转红",
+      "ok": true,
+      "detail": "{'attempted': 2, 'valid': 2, 'rejected_no_failure': 0, 'rejected_error': 0, 'yield_rate': 1.0}"
+    }
+  ]
+}

@@ -1927,3 +1927,66 @@ verify_source(fixed)      # ⛔ 全程只跑这一次
 
 三个修法在 `len(broken) != len(base)` 时**一律原样返回**，不再
 `min(len)` 部分对齐 —— 错位一次污染一片，没有"部分修"这种折中。
+
+---
+
+## 28. 跨轮退化检测（aging）与轨迹记账接线（2026-10-14 · r26）
+
+### 28.1 为什么需要它：闸是横截面，老化是纵向
+
+已有的 `nongression.NonRegressionGate` 每次只回答一件事：
+**这个变体相对冻结基线有没有变坏**。它是**准入闸**。
+
+它看不到的是：一个已经放行的系统，在第 1 轮到第 N 轮之间，
+**是不是在自己往下掉**。本项目实测过这个形态 —— 装一个新技能把旧的顶掉
+⇒ easy 层从 +1.0 掉到 −1.0，而那一轮的非回归闸**照样是绿的**
+（因为回归比的是冻结基线，不是上一轮的自己）。
+
+ALE（Agent Lifespan Engineering, 2026）研究的正是后者：压缩、干扰、修订、
+维护四种机制会造成长期退化，**行为测试看起来正常，准确率却已衰减**。
+
+⛔ 两者**必须正交**，不能合进一个闸：合一之后，一个"放行但正在退化"
+的系统会同时骗过准入与寿命两件事。
+
+### 28.2 四类信号
+
+`aether/aging.py` 的 `detect_aging(traces, eps)`：
+
+| 信号 | 事件（这一轮发生了什么） | 判定 |
+|---|---|---|
+| `compression` | `consolidated > 0` | 巩固后探针下降 |
+| `interference` | `skill_count` 增加 | 装新技能后旧任务下降 |
+| `maintenance` | `pruned > 0` | 剪枝后探针下降 |
+| `revision` | `caliber` 变更 | **口径一变，纵向 Δ 就不可比** ⇒ 直接报 |
+
+### 28.3 四条纪律
+
+1. ⛔ **探针集必须跨轮完全一致**。集合一变，Δ 是"换尺子"不是"变弱"
+   ⇒ 整体 `comparable=False`（fail-closed），不判健康。
+2. ⛔ **只看下降，不看上升**。上升是进步。把上升也计入 healthy 会造出
+   一个"涨了就永远绿"的闸。
+3. ⛔⛔ **事件没发生过 ⇒ 该类 `available=False`**，单列进 `undetermined`。
+   **它不是通过** —— "这 2 轮没做过巩固"不等于"巩固没退化"。
+   这是全项目最贵的一条：不可判别 ≠ 通过。
+4. ⛔ **证据是逐条探针的 Δ，不是聚合分**。聚合分会把"一升一降"
+   抹平成"没变化"，而那正是 ALE 点名的**干扰指纹**。
+
+### 28.4 轨迹记账（masking）终于接上了主流程
+
+兑现审计实测：`aether/runtime.py` 此前**从未**被生产链路 import，
+`Trajectory` 只在 demo 脚本里被手工构造过 ⇒ `masking_ratio` 在生产上是空账。
+
+现在 `HarnessAgent.run()` 在返回前用 `trajectory_from_steps()` 把层动作
+序列折算成轨迹账，挂到 `AgentResult.trajectory`，并在 `to_dict()` 暴露
+`{model_tokens, env_tokens, masking_ratio}`。
+
+⛔ 折算放在**返回前一次性做**，而不是每步各记一次：两个地方记同一份事实，
+迟早漂移（V5：必有一个是假的）。steps 是唯一事实源，Trajectory 是投影。
+
+⛔ kind **只做映射不新造**：`_STEP_KIND` 把 (layer, action) 映到
+`runtime.MODEL_KINDS` / `ENV_KINDS` 里已有的值；未知 ⇒ 归到 **env 侧**
+（保守：宁可高估环境占比去触发告警，也不能把环境观测算成策略产出）。
+
+⚠️ `assign_credit` 的 turn-level 归因**仍然恒不可用**（生产没有
+`replay_fn`），这是刻意的 —— 不可重放就不给数字。想读"哪一层真正起
+作用"用 `attribution.attribute_layers()` 的反事实消融。

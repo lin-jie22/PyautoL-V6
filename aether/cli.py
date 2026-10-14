@@ -657,26 +657,50 @@ def cmd_evolve(args: argparse.Namespace) -> int:
 
     proposer = MemoryAwareProposer(proposer, mem)
 
+    _consolidated_total = 0
+
     def _remember_round(rep) -> None:
         """把一轮的**执行经验**写进记忆 —— 记忆只能由执行填充。
 
         ⛔ 与"被闸拒的经验"（MemoryAwareProposer.remember）相对：
         这条记的是**修好了什么**。两者都是 L4 通路的燃料，
         而且都不是预置答案 —— 没有执行过就没有内容。
+
+        ⛔⛔ 巩固的**触发点就在这里**（轮末、循环内），不是跑完再补：
+            它是 ALE 所说的"睡眠期"行为，语义上属于这一轮的收尾；
+            放在 loop.run() 之后 ⇒ 本轮的教训对下一轮的提议器
+            **影响恒为 0**（V5：有机制 ≠ 这条路被走到）。
+            同时这里把事件条数写进 `loop.aging_events` ⇒ 老化检测
+            的"发生了什么"才有事实源。
         """
-        if not rep.committed:
+        nonlocal _consolidated_total
+        if rep.committed:
+            best = next((c for c in rep.candidates if c.accepted), None)
+            mem.write(
+                "L3",
+                f"repair_hint:{dev_name} 第 {rep.round_no} 轮：变异 "
+                f"{best.capsule_name if best else rep.committed[:8]} 修好了任务，"
+                f"基线 reward {rep.baseline_reward:.2f} → "
+                f"{(best.reward if best else 0.0):.2f}（全部由执行判据给出）。"
+                f"失败模式集中在控制流（比较与运算），保守修法覆盖其中一部分，"
+                f"技能不可达时它是第二条通路。",
+                channel="curated", source=f"round{rep.round_no}",
+                tags=("experience", "exec"))
             return
-        best = next((c for c in rep.candidates if c.accepted), None)
-        mem.write(
-            "L3",
-            f"repair_hint:{dev_name} 第 {rep.round_no} 轮：变异 "
-            f"{best.capsule_name if best else rep.committed[:8]} 修好了任务，"
-            f"基线 reward {rep.baseline_reward:.2f} → "
-            f"{(best.reward if best else 0.0):.2f}（全部由执行判据给出）。"
-            f"失败模式集中在控制流（比较与运算），保守修法覆盖其中一部分，"
-            f"技能不可达时它是第二条通路。",
-            channel="curated", source=f"round{rep.round_no}",
-            tags=("experience", "exec"))
+        #: 未提交 ⇒ 这一轮有失败素材 ⇒ 睡眠期巩固（ALE 的离线巩固语义）
+        try:
+            made = mem.consolidate(min_access=0)
+        except Exception as _e:                        # noqa: BLE001
+            made = []
+            print(f"⚠️ 巩固失败：{type(_e).__name__}: {_e}", file=sys.stderr)
+        _consolidated_total += len(made)
+        loop.aging_events["consolidated"] = len(made)
+        #: 剪枝**只报数不删** —— 不可逆 ⇒ 该不该剪由人拍板
+        try:
+            loop.aging_events["pruned"] = len(
+                mem.prune_dryrun().get("victims", []) or [])
+        except Exception:                              # noqa: BLE001
+            pass
 
     loop = EvolutionLoop(led, gate, dev, runner, proposer, store=store,
                          caliber=caliber, heldout=heldout,
@@ -736,10 +760,10 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     #:    正确的语义是「这一轮没提交 ⇒ 有失败素材可反思」。
     _idle = [r for r in reports if getattr(r, "idle", False)]
     _uncommitted = [r for r in reports if not getattr(r, "committed", None)]
-    if _uncommitted:
-        consolidated = mem.consolidate(min_access=0)
-    else:
-        consolidated = []
+    #: ⛔ 巩固**不在**这里跑 —— 它已移进 `_remember_round`（轮末、循环内）。
+    #:    放在这里 ⇒ 只在全部轮次结束后发生一次 ⇒ 本轮教训对下一轮
+    #:    提议器的影响恒为 0（V5：有机制 ≠ 这条路被走到）。
+    consolidated = [None] * _consolidated_total
     _cons_rep = mem.consolidation_report()
     _cons_rep["trigger"] = "stagnant" if _uncommitted else "all_committed"
     _cons_rep["idle_rounds"] = len(_idle)
@@ -788,6 +812,10 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         #:    可逆，该不该剪由人决定（`aether.cli memory prune --apply`）。
         #:    于是"库在增殖"这件事第一次变得可见。
         "memory_prune": mem.prune_dryrun(),
+        #: ⛔ 跨轮退化（老化）裁决。与"非回归闸"正交：
+        #:    闸 = 这一轮有没有变坏；老化 = 进来之后还在不在自己变弱。
+        #:    两者合一 ⇒ 一个"放行但正在退化"的系统会同时骗过两件事。
+        "aging": loop.aging_report(),
     }
     mem_saved = mem.save(p["memory"])
     out["memory_load"] = mem_load

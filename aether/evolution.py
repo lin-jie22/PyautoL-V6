@@ -37,6 +37,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+#: ⛔ 老化（跨轮退化）检测与 `runtime` 轨迹记账，此前**从未**被生产链路
+#:    import —— 兑现审计实测：它们只活在 demo 脚本里。这里接上主流程。
+from .aging import RoundTrace
 from .genome import Capsule, Harness, apply_capsule, blast_radius, diff
 from .ledger import Ledger
 from .nongression import FrozenTask, GateResult, NonRegressionGate
@@ -229,7 +232,8 @@ class EvolutionLoop:
                  config: Optional[EvolutionConfig] = None,
                  heldout: Optional[Any] = None,
                  dev_difficulty: Optional[Dict[str, str]] = None,
-                 on_round_end: Optional[Callable[[Any], None]] = None):
+                 on_round_end: Optional[Callable[[Any], None]] = None,
+                 aging_probes: Optional[List[FrozenTask]] = None):
         self.ledger = ledger
         self.gate = gate
         self.dev_suite = dev_suite
@@ -248,6 +252,16 @@ class EvolutionLoop:
         #: ⛔ 必须在**循环内**触发：放在 loop.run() 之后写，这一轮的下一轮
         #:    拿不到它 ⇒ 经验对因果链的影响恒为 0（V5：有机制 ≠ 被走到）。
         self.on_round_end = on_round_end
+        #: 老化检测的**冻结探针集**。⛔ 默认就是发展集，但**必须能显式指定**：
+        #:    老化看的是"同一批题跨轮怎么变"，探针集一换，Δ 就是换尺子。
+        self.aging_probes: List[FrozenTask] = list(
+            aging_probes) if aging_probes else list(dev_suite)
+        #: 本轮发生的"记忆事件"读数（巩固 / 剪枝条数），由外部在轮末写入。
+        #: ⛔ 不在这里猜 —— 记忆不在 loop 手里，猜出来的事件会让老化
+        #:    信号指向一个不存在的因（V5：记账方式变了 ⇒ Δ 要拆账）。
+        self.aging_events: Dict[str, Any] = {}
+        #: 跨轮纵向读数（老化检测的事实源，可投影到账本）。
+        self.aging_traces: List[RoundTrace] = []
         #: 内存态 run 账（**不依赖 store**）：机制正确性不该依赖外部存储存在。
         #: store 只是它的持久化投影。
         self._runs: List[RunRow] = []
@@ -267,6 +281,45 @@ class EvolutionLoop:
             "reasons": {"shrunk": 0, "chain_broken": 0,
                         "no_new_but_touched": 0},
         }
+
+    # ── 老化（跨轮退化）读数 ─────────────────────────────────────
+    def _record_aging(self, rep: RoundReport, h: Harness) -> Optional[Dict[str, Any]]:
+        """在**冻结探针集**上跑一遍，把本轮纵向读数写进账本。
+
+        ⛔ 为什么另跑一遍而不是复用 `evaluate_dev` 的结果：
+           老化要的是"同一批题、同一个 harness、跨轮可比的**逐条**读数"。
+           复用会掺进候选评估的中间态 ⇒ 尺子不统一。
+        """
+        from .aging import ProbeResult, RoundTrace
+        probes: List[ProbeResult] = []
+        for t in self.aging_probes:
+            try:
+                r = float(self.runner(h, t.spec).reward)
+            except Exception:                                # noqa: BLE001
+                r = 0.0
+            probes.append(ProbeResult(task_id=t.task_id, reward=r))
+
+        trace = RoundTrace(
+            round_no=rep.round_no, harness_id=h.harness_id,
+            probes=tuple(probes),
+            skill_count=len(getattr(h, "skills", {}) or {}),
+            consolidated=int(self.aging_events.get("consolidated", 0) or 0),
+            pruned=int(self.aging_events.get("pruned", 0) or 0),
+            caliber=dict(self.caliber or {}))
+        self.aging_traces.append(trace)
+        try:
+            self.ledger.append("aging.trace", trace.to_dict(),
+                               actor="evolution")
+        except Exception:                                    # noqa: BLE001
+            pass
+        #: 每轮读一次事件后清空 ⇒ 事件是**这一轮**的，不跨轮累积
+        self.aging_events = {}
+        return trace.to_dict()
+
+    def aging_report(self) -> Dict[str, Any]:
+        """整条寿命线的裁决（跨轮退化检测）。"""
+        from .aging import detect_aging
+        return detect_aging(self.aging_traces).to_dict()
 
     def next_run_id(self, h, task_id: str, tag: str = "") -> str:
         """生成**全局唯一**的 run_id（唯一事实源：只有这里产它）。"""
@@ -968,6 +1021,11 @@ class EvolutionLoop:
                 if snap:
                     from .genome import Harness as _H
                     cur = _H.from_dict(snap[-1]["payload"])
+            #: ⛔ 老化读数必须在**循环内**取，且取的是"本轮末"的 harness。
+            #:    放在 run() 之后 ⇒ 只能看到最后一轮 ⇒ 退化曲线退化成一个点
+            #:    （有机制 ≠ 被走到，V5 第 2 条）。
+            self._record_aging(rep, cur)
+
             #: ⛔ 无事可做就停：不是失败，是"再跑也是空转"。实测 10 轮里
             #:    r2–r10 全在重复同一轮（base 恒 1.0 / advantage 恒 0），
             #:    继续跑只会把"空转"记成"努力过但没成功"。
