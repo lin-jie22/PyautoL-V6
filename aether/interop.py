@@ -286,6 +286,16 @@ class InvocationResult:
     unverified_reason: str = ""
     transport: str = ""
     timeout_enforced: str = ""        # forced | cooperative | none
+    #: ⛔ **声明 vs 实际的落差记账**（2026-10-14 r29）：
+    #:    `timeout_enforced="none"` 只说"这个形态杀不掉"，但**这次到底
+    #:    超没超时**没有读数 ⇒ 调用方看到 status=ok 会以为预算兑现了。
+    #:    · `timeout_declared_s`              —— 本次**生效**的超时预算
+    #:      （= min(调用方预算, spec 声明)，与真正喂给适配器的是同一个值）
+    #:    · `timeout_declared_but_unenforced` —— 真跑超了却没被记为 timeout
+    #:    ⛔ 判据里必须排除 `status == "timeout"`：那正是**兑现**的样子
+    #:      （被中断了，耗时≈预算），把它算成落差就是颠倒黑白。
+    timeout_declared_s: float = 0.0
+    timeout_declared_but_unenforced: bool = False
     sandbox: Dict[str, Any] = field(default_factory=dict)
     invocation_id: str = ""
     meta: Dict[str, Any] = field(default_factory=dict)
@@ -323,6 +333,9 @@ class InvocationResult:
             "unverified_reason": self.unverified_reason,
             "transport": self.transport,
             "timeout_enforced": self.timeout_enforced,
+            "timeout_declared_s": round(float(self.timeout_declared_s), 4),
+            "timeout_declared_but_unenforced": bool(
+                self.timeout_declared_but_unenforced),
             "sandbox": self.sandbox, "invocation_id": self.invocation_id,
             "meta": self.meta,
         }
@@ -931,6 +944,23 @@ def load_manifest(registry: Registry, src: Union[str, Dict[str, Any]],
         return rep
     for d in items:
         cid = str(d.get("id", "?"))
+        if not isinstance(d, dict):
+            rep.skipped.append({"id": cid, "status": "rejected",
+                                "reason": "清单条目必须是对象"})
+            continue
+        #: ⛔⛔ JSON 清单**结构上**无法携带判据：`checker` 是代码，不可
+        #:    序列化。写进清单会被**静默忽略** ⇒ 能力永远是
+        #:    `verified=false`，而声明者以为自己挂上了判据（假仪表）。
+        #:    实测（2026-10-14 r29）：清单接入的能力 100% `no_checker`。
+        #:    ⇒ fail-closed：明确拒绝，并指出两条正当出路。
+        if "checker" in d:
+            rep.skipped.append({
+                "id": cid, "status": "rejected",
+                "reason": "JSON 清单不支持 checker（判据是代码，不可序列化）"
+                          "⇒ 写在这里会被静默忽略，能力将永远 verified=false。"
+                          "要带判据：① 用代码注册 CapabilitySpec(checker=...)；"
+                          "② 或交给下游（如 agent 的 verify_source）判定"})
+            continue
         try:
             spec = _spec_from(d)
             ad = _adapter_from(d)
@@ -988,10 +1018,41 @@ class Gateway:
         t0 = time.time()
         res = self._invoke_inner(inv)
         res.cost_s = time.time() - t0
+        #: ⛔ 落差记账必须在 `cost_s` 定下来之后算 —— 早一秒都读不到实际耗时
+        self._note_timeout_gap(res, inv)
         self.stats[res.status] = self.stats.get(res.status, 0) + 1
         if write_ledger and self.ledger is not None:
             self._append_ledger(res, inv)
         return res
+
+    def _note_timeout_gap(self, res: InvocationResult,
+                          inv: Invocation) -> None:
+        """把「声明的超时」与「实际耗时」的落差写进结果。
+
+        ⛔⛔ 为什么必须单独记账：`timeout_enforced="none"` 只描述**形态**
+        （inproc 杀不掉），不描述**这一次**。实测（2026-10-14 r29）：
+        声明 `timeout_s=0.5` 的 inproc 技能实跑 **1.50s** 未被中断，而结果
+        里 status 仍是 `ok` —— 调用方只看 status 会以为预算兑现了。这与
+        §28「声明与实际的落差必须记账」是同一条纪律，只是这次落在超时上。
+
+        ⛔ 生效预算 = `min(调用方预算, spec 声明)`，与适配器真正拿到的
+        是**同一个值**（记另一个口径就是假仪表）。
+        ⛔ 容差 0.05s：覆盖计时与进程调度抖动。`status == "timeout"`
+        必须排除 —— 被中断正是**兑现**的样子，算成落差就是颠倒黑白。
+        """
+        e = self.registry.entry(inv.capability)
+        if e is None:
+            return
+        try:
+            declared = min(float(inv.budget.timeout_s),
+                           float(e.spec.timeout_s))
+        except (TypeError, ValueError):
+            return
+        if declared <= 0:
+            return
+        res.timeout_declared_s = declared
+        res.timeout_declared_but_unenforced = (
+            res.cost_s > declared + 0.05 and res.status != "timeout")
 
     def _invoke_inner(self, inv: Invocation) -> InvocationResult:
         # ① 解析

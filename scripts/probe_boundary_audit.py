@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -168,10 +169,22 @@ def group_b() -> None:
         r, sb = None, {"error": str(e)}
     dt = time.time() - t0
     wd = sb.get("mem_watchdog") or {}
+    #: ⛔ 红的时候必须自带原因：看门狗这层靠 `ps` 读 RSS，而 `ps` 在
+    #:    某些受限宿主里会被拒（`Operation not permitted`）⇒ `usable=False`
+    #:    ⇒ B1 判失败。这不是代码回归（HEAD 副本上同样红，已对拍），
+    #:    但**不能**靠猜 —— 把 ps 可读性直接打进 detail，一眼分诊。
+    try:
+        from aether.environment import _ps_rss_kb
+        ps_readable = _ps_rss_kb(os.getpid()) is not None
+    except Exception:  # noqa: BLE001
+        ps_readable = False
     ck("B", "B1 吃内存 512MB ⇒ 内存守卫真的介入（不是只剩 timeout）",
        bool(wd.get("usable")) and (bool(wd.get("killed")) or _np(r) == 0),
        f"usable={wd.get('usable')} killed={wd.get('killed')} "
-       f"peak_rss_kb={wd.get('peak_rss_kb')} n_passed={_np(r)} {dt:.1f}s")
+       f"peak_rss_kb={wd.get('peak_rss_kb')} n_passed={_np(r)} {dt:.1f}s"
+       f" | ps_readable={ps_readable}"
+       + ("" if ps_readable else
+          " ⇒ 本宿主禁止 ps ⇒ 看门狗这层不可用（环境限制，非代码回归）"))
 
     ck("B", "B2 rlimits 意图 ≠ 实测：as/data 失败必须**记账**而不是假装生效",
        "failed" in str(sb.get("rlimits_applied", {}).get("as_bytes", "")),

@@ -447,6 +447,20 @@ def group_f() -> None:
            caps.get("n") == 1 and caps["capabilities"][0]["id"] == "http.echo",
            str(caps)[:80])
 
+        #: ⛔ r29：过滤后 `n` 必须跟随过滤（此前恒为注册表总数 ⇒ 列表 2 条
+        #:    却报 n=4，会被读成"过滤没生效"）；总数另给 `n_total`。
+        def _caps(qs=""):
+            with opener.open(base + "/api/capabilities" + qs, timeout=10) as r:
+                return json.loads(r.read().decode("utf-8"))
+
+        ck("F1b ⛔ ?kind= 过滤后 n 跟随过滤、n_total 恒为总数",
+           _caps("?kind=skill").get("n") == 1
+           and _caps("?kind=agent").get("n") == 0
+           and _caps("?kind=skill").get("n_total") == 1
+           and _caps("?kind=agent").get("n_total") == 1,
+           f"skill={str(_caps('?kind=skill'))[:70]} "
+           f"agent={str(_caps('?kind=agent'))[:70]}")
+
         code, body = post("/api/invoke", {"capability": "http.echo",
                                           "args": {"x": "hi"}})
         ck("F2 /api/invoke 调用已注册能力 ⇒ 200 + status=ok",
@@ -498,6 +512,102 @@ def group_f() -> None:
         SV.Handler.gateway = None
 
 
+def group_g() -> None:
+    """G 组：声明 vs 实际的落差记账（超时）+ 清单不支持 checker。
+
+    ⛔ 全部来自 2026-10-14 r29 的**接口端到端实测**：skill/tool/agent ×
+    CLI/HTTP 两个入口都调得通，但三处读数失真。本组只钉其中两处
+    （第三处 n/n_total 在 F1b）。
+    ⛔ G1/G2 必须成对：G1 单独绿可能只是"字段恒 True"，G2 是反向对照。
+    """
+    from aether.interop import (CapabilitySpec, Gateway, ParamSpec, Registry,
+                                load_manifest)
+
+    print("\nG 组 · 超时落差记账 / 清单不支持 checker（r29）")
+
+    def _slow(text=""):
+        time.sleep(1.2)
+        return {"out": "slow-" + str(text)}
+
+    reg = Registry()
+    reg.register(CapabilitySpec(id="g.slow", kind="skill", trusted=True,
+                                timeout_s=0.3,
+                                inputs={"text": ParamSpec("str", False)},
+                                outputs={"out": ParamSpec("str")}), _slow)
+    r1 = Gateway(reg).invoke("g.slow", {"text": "x"})
+    ck("G1 inproc 声明 0.3s 却实跑 1.2s ⇒ 落差**被记账**"
+       "（不是只有 timeout_enforced='none' 这一个形态读数）",
+       r1.status == "ok" and r1.timeout_enforced == "none"
+       and abs(r1.timeout_declared_s - 0.3) < 1e-6
+       and r1.timeout_declared_but_unenforced is True,
+       f"status={r1.status} declared={r1.timeout_declared_s} "
+       f"cost={r1.cost_s:.2f} flag={r1.timeout_declared_but_unenforced}")
+
+    reg2 = Registry()
+    reg2.register(CapabilitySpec(id="g.slow", kind="skill", trusted=True,
+                                 timeout_s=30.0,
+                                 inputs={"text": ParamSpec("str", False)},
+                                 outputs={"out": ParamSpec("str")}), _slow)
+    r2 = Gateway(reg2).invoke("g.slow", {"text": "x"})
+    #: ⛔ 生效预算 = `min(调用方预算, spec 声明)`：默认预算是 10.0，
+    #:    所以声明 30.0 时生效的是 **10.0**（记另一个口径就是假仪表）。
+    ck("G2 对照组：同一条慢能力声明放宽到 30s ⇒ 生效预算取更严的 10.0"
+       " ⇒ 没跑超 ⇒ 落差为 False",
+       r2.status == "ok" and abs(r2.timeout_declared_s - 10.0) < 1e-6
+       and r2.timeout_declared_but_unenforced is False,
+       f"declared={r2.timeout_declared_s} cost={r2.cost_s:.2f} "
+       f"flag={r2.timeout_declared_but_unenforced}")
+
+    #: ⛔ 真被中断的那次**不是**落差 —— 被中断正是兑现的样子
+    td = tempfile.mkdtemp(prefix="v6uci_g_")
+    slow_cli = _cli_tool(td, "import json,time\ntime.sleep(5)\n"
+                             "print(json.dumps({'out':'slow'}))\n")
+    reg3 = Registry()
+    reg3.register(CapabilitySpec(id="g.cli", kind="tool", trusted=False,
+                                 sandbox="process", timeout_s=0.4,
+                                 inputs={"text": ParamSpec("str", False)},
+                                 outputs={"out": ParamSpec("str")}),
+                  [sys.executable, slow_cli])
+    r3 = Gateway(reg3).invoke("g.cli", {"text": "x"})
+    ck("G3 ⛔ CLI 真被中断 ⇒ status=timeout 且**不算**落差（兑现了）",
+       r3.status == "timeout" and r3.cost_s < 3.0
+       and r3.timeout_declared_but_unenforced is False,
+       f"status={r3.status} cost={r3.cost_s:.2f} "
+       f"flag={r3.timeout_declared_but_unenforced}")
+
+    #: ⛔ 清单写 checker 曾经是**静默忽略**（写了等于没写 = 假仪表）
+    bad = {"capabilities": [{
+        "id": "g.checked", "kind": "skill", "trusted": True,
+        "inputs": {"text": {"type": "str", "required": True}},
+        "outputs": {"out": {"type": "str", "required": True}},
+        "checker": "some.module:check",
+        "impl": {"transport": "python",
+                 "target": "scripts.ext_upper:upper"}}]}
+    reg4 = Registry()
+    rep = load_manifest(reg4, bad)
+    ck("G4 ⛔ 清单声明 checker ⇒ 注册被拒（不是静默忽略）",
+       not rep.loaded and len(rep.skipped) == 1
+       and rep.skipped[0].get("status") == "rejected"
+       and "checker" in rep.skipped[0].get("reason", ""),
+       str(rep.skipped)[:120])
+    r5 = Gateway(reg4).invoke("g.checked", {"text": "x"})
+    ck("G5 被拒的能力确实不可用（unavailable，不是'照常能调'）",
+       r5.status == "unavailable", r5.status)
+
+    #: 正当出路：代码注册 checker ⇒ verified=True（证明缺口有出口）
+    from aether.verifier import Check
+    reg5 = Registry()
+    reg5.register(CapabilitySpec(
+        id="g.ok", kind="skill", trusted=True,
+        inputs={"text": ParamSpec("str")}, outputs={"out": ParamSpec("str")},
+        checker=lambda a, o: Check("ok", bool(o.get("out")), "非空")),
+        lambda text: {"out": str(text).upper()})
+    r6 = Gateway(reg5).invoke("g.ok", {"text": "x"})
+    ck("G6 出口：代码注册 CapabilitySpec(checker=...) ⇒ verified=True",
+       r6.status == "ok" and r6.verified is True and len(r6.checks) == 1,
+       f"verified={r6.verified} checks={r6.checks}")
+
+
 def main() -> int:
     t0 = time.time()
     print("契约测试：通用接入层（UCI）")
@@ -507,6 +617,7 @@ def main() -> int:
     group_d()
     group_e()
     group_f()
+    group_g()
     print()
     print("=" * 60)
     if FAILS:

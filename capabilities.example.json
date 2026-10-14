@@ -15,7 +15,14 @@
     "             ⛔ 必须显式写 trusted:true，否则注册时会被拒。",
     "",
     "⛔ trusted:false + python 形态 = 被拒：inproc 适配器杀不掉一个跑飞的实现，",
-    "   声明 timeout_s 就是假仪表。不可信实现请走 cli / http。"
+    "   声明 timeout_s 就是假仪表。不可信实现请走 cli / http。",
+    "",
+    "⛔ 本清单**不能声明 checker**（判据是代码，JSON 不可序列化）：",
+    "   写上去会在注册时**被拒**（r29 之前是静默忽略 ⇒ 写了等于没写）。",
+    "   ⇒ 清单接入的能力恒为 verified=false（unverified_reason=no_checker）。",
+    "   这不是遗漏，是声明式配置的结构性限制：判据只能来自执行。",
+    "   要带判据：① 代码注册 CapabilitySpec(checker=...);",
+    "             ② 交给下游（agent 的 verify_source）判定。"
   ],
   "capabilities": [
     {

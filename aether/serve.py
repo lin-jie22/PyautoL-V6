@@ -474,11 +474,16 @@ class Handler(BaseHTTPRequestHandler):
                                 "hint": "启动时用 --caps <manifest.json>"}, 503)
                     return
                 q_kind = q.get("kind", [""])[0]
+                caps = [s.to_dict() for s in
+                        Handler.gateway.registry.list(kind=q_kind)]
+                #: ⛔ `n` 必须**跟随过滤**：此前 `n` 恒为注册表总数，
+                #:    实测 `?kind=skill` 返回 `n=4` 而列表只有 2 条 ⇒
+                #:    调用方会读成"过滤没生效"。总数另给 `n_total`。
                 self._json({
                     "fingerprint": Handler.gateway.registry.fingerprint,
-                    "n": len(Handler.gateway.registry),
-                    "capabilities": [s.to_dict() for s in
-                                     Handler.gateway.registry.list(kind=q_kind)],
+                    "n": len(caps),
+                    "n_total": len(Handler.gateway.registry),
+                    "capabilities": caps,
                 })
             elif self.console_dir and (u.path == "/"
                                        or _endpoint_is(u.path, "/console")):
