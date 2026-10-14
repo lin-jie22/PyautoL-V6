@@ -975,6 +975,29 @@ def load_manifest(registry: Registry, src: Union[str, Dict[str, Any]],
     return rep
 
 
+def mount_capabilities(src: Union[str, Dict[str, Any], None]
+                       ) -> Tuple[Any, LoadReport]:
+    """装载能力并返回可直接用的网关 —— **两个入口唯一的装载接线**。
+
+    ⛔ 为什么必须抽出来：CLI（`cli.cmd_caps`）与 HTTP（`serve.main` 启动 +
+    `/api/capabilities/reload` 热装载）此前**各自**写了一遍
+    `Registry() → load_manifest() → Gateway()`。虽然底层都落到
+    `load_manifest`（判据同源），但**入口接线**有两份 ⇒ 一边加了打印 skip、
+    另一边没加，就会出现"CLI 看得到被拒的能力、HTTP 一声不响"的幽灵差异
+    （本项目反复栽过：判据有两份实现 = 没有判据）。
+
+    ⛔ `src` 为空 ⇒ 用源码内默认注册表（`_default_registry`），报告为空
+    （无来源可报，`source=""` 而不是伪造一个路径）。
+
+    返回 `(gateway, report)`。**调用方负责打印/暴露 skip** —— 装载报告
+    不自己吞掉：能力没挂上却一声不响 = 调用时才发现 404。
+    """
+    if not src:
+        return Gateway(_default_registry()), LoadReport()
+    reg = Registry()
+    return Gateway(reg), load_manifest(reg, src)
+
+
 # ──────────────────────────────────────────────────────────────────
 # 4. 网关
 # ──────────────────────────────────────────────────────────────────

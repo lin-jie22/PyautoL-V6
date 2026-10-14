@@ -124,6 +124,22 @@ class _Server:
         finally:
             c.close()
 
+    def post(self, path: str, obj: Any) -> tuple[int, dict]:
+        """POST JSON，返回 (status, parsed_body)。"""
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        try:
+            c.request("POST", path, body=json.dumps(obj).encode("utf-8"),
+                      headers={"Content-Type": "application/json"})
+            r = c.getresponse()
+            body = r.read()
+            try:
+                parsed = json.loads(body.decode("utf-8"))
+            except Exception:  # noqa: BLE001
+                parsed = {"_raw": body[:200].decode("utf-8", "replace")}
+            return r.status, parsed
+        finally:
+            c.close()
+
     def close(self) -> None:
         self.srv.shutdown()
         self.srv.server_close()
@@ -449,10 +465,147 @@ ck("H9 /api/status 带 snapshots_total 与 snapshots_truncated"
 srv.close()
 
 print("=" * 68)
+print("I 组 · 能力热装载：默认关闭 / 只收路径 / 换空不替换（r30）")
+
+#: ⛔ 自带实例：H 组末尾已 `srv.close()`；且 I 组要动 `Handler.caps_hot`
+srv = _Server()
+
+import tempfile  # noqa: E402
+_td = Path(tempfile.mkdtemp(prefix="v6hot_"))
+
+def _mf(name: str, items: list) -> str:
+    f = _td / name
+    f.write_text(json.dumps({"capabilities": items}), encoding="utf-8")
+    return str(f)
+
+_GOOD = {"id": "i.only", "kind": "skill", "trusted": True,
+         "inputs": {"text": {"type": "str", "required": True}},
+         "outputs": {"out": {"type": "str", "required": True}},
+         "impl": {"transport": "python",
+                  "target": "scripts.ext_upper:upper"}}
+_BAD = {"id": "i.bad", "kind": "nonsense", "inputs": {}, "outputs": {},
+        "impl": {"transport": "python", "target": "x:y"}}
+
+m_good = _mf("good.json", [_GOOD])
+m_bad = _mf("bad.json", [_BAD])
+m_partial = _mf("partial.json", [_GOOD, _BAD])
+
+#: ⛔ 初始能力集必须**非空且不含 i.only**：`gateway=None` 时 invoke 返回的是
+#:    503（配置问题，既有正确行为），而 I3 要证明的是"已装载但没这个能力
+#:    ⇒ 422 unavailable"。若初始为空，I3 会假红而 I5 变成恒真。
+from aether.interop import mount_capabilities  # noqa: E402
+_INIT = {"id": "i.other", "kind": "skill", "trusted": True,
+         "inputs": {"text": {"type": "str", "required": True}},
+         "outputs": {"out": {"type": "str", "required": True}},
+         "impl": {"transport": "python",
+                  "target": "scripts.ext_upper:upper"}}
+m_init = _mf("init.json", [_INIT])
+
+#: ⛔ I1 是**反证组的核心**：默认必须关。若这条绿而开启后也能装载，
+#:    才证明开关真在起作用（而不是"端点根本没接上"）。
+S.Handler.caps_hot = False
+S.Handler.caps_src = m_init
+S.Handler.gateway, _ = mount_capabilities(m_init)
+S.Handler.caps_reload_count = 0
+code, b = srv.post("/api/capabilities/reload", {"manifest": m_good})
+ck("I1 ⛔ 默认关闭 ⇒ 403（热装载=运行时改变能力集，不是默认能力）",
+   code == 403 and b.get("hot_reload") is False, f"{code} {b}")
+
+#: I2：不带 manifest 的行为必须**显式**，不能静默装个空表
+S.Handler.caps_hot = True
+_saved_src, S.Handler.caps_src = S.Handler.caps_src, ""
+code, b = srv.post("/api/capabilities/reload", {})
+ck("I2a 开闸后缺 manifest 且**无启动清单** ⇒ 400（不是静默装载空表）",
+   code == 400, f"{code} {b}")
+S.Handler.caps_src = _saved_src
+code, b = srv.post("/api/capabilities/reload", {})
+ck("I2b 缺 manifest 但**有启动清单** ⇒ 回退重载那一份（changed=false，"
+   "不是偷偷换成别的）",
+   code == 200 and b.get("path") == m_init and b.get("changed") is False,
+   f"{code} {b}")
+
+#: I3：热装载前能力不可达 —— 否则 I4 的"装载后可达"是恒真
+code, b = srv.post("/api/invoke",
+                   {"capability": "i.only", "args": {"text": "x"}})
+ck("I3 对照组：装载前 i.only ⇒ unavailable（不是 ok）",
+   code == 422 and b.get("status") == "unavailable", f"{code} {b.get('status')}")
+
+#: I4：真装载 ⇒ 200，且 fingerprint 变了、记账 +1
+#:    ⛔ 用**相对计数**（c0+1）而不是写死 1：I2b 也会 +1，写死会让后面
+#:    每加一条用例就漂移一次 —— 断言要钉语义，不是钉当前序号。
+c0 = S.Handler.caps_reload_count
+code, b = srv.post("/api/capabilities/reload", {"manifest": m_good})
+fp_after = b.get("fingerprint_after", "")
+ck("I4 热装载 ⇒ 200 且能力集真的换了（changed=true, reload_count+1）",
+   code == 200 and b.get("changed") is True
+   and b.get("reload_count") == c0 + 1 and b.get("n_after") == 1,
+   f"{code} {b}")
+
+#: I5：装载后**真的能调**（可达性取证，不只是"报告说装载了"）
+code, b = srv.post("/api/invoke",
+                   {"capability": "i.only", "args": {"text": "hot"}})
+ck("I5 装载后 i.only 真能调通（out=HOT）—— 不是只有装载报告说成功",
+   code == 200 and (b.get("output") or {}).get("out") == "HOT",
+   f"{code} {b.get('output')}")
+
+#: I6：远程注入闸 —— 与 /api/invoke 拒带 impl 同一条纪律
+code, b = srv.post("/api/capabilities/reload",
+                   {"capabilities": [_GOOD], "impl": "os:system"})
+ck("I6 ⛔ 内联能力描述 ⇒ 400（否则=远程注入实现进本进程）",
+   code == 400 and "impl" in (b.get("rejected_keys") or []), f"{code} {b}")
+
+#: I7：装载 0 条 ⇒ **不替换**（换空 = 能力凭空消失，比失败更难查）
+code, b = srv.post("/api/capabilities/reload", {"manifest": m_bad})
+ck("I7 ⛔ 装载 0 条 ⇒ 409 且保持原能力集（kept=装载前的 fingerprint）",
+   code == 409 and b.get("kept") == fp_after, f"{code} {b}")
+code, b = srv.post("/api/invoke",
+                   {"capability": "i.only", "args": {"text": "still"}})
+ck("I8 换空失败后 i.only 仍可调 ⇒ 证明真没被换成空表",
+   code == 200 and (b.get("output") or {}).get("out") == "STILL",
+   f"{code} {b.get('output')}")
+
+#: I9：部分成功 ⇒ 207（只回 200 会让只看 HTTP 码的人漏掉 skipped）
+code, b = srv.post("/api/capabilities/reload", {"manifest": m_partial})
+ck("I9 ⛔ 部分成功 ⇒ 207（不是 200）—— 与「status=ok 掩盖落差」同源",
+   code == 207 and b.get("status") == "partial"
+   and (b.get("report") or {}).get("n_skipped") == 1, f"{code} {b}")
+
+#: I10：路径不存在 ⇒ 404（不是"装载了个空表还报 200"）
+code, b = srv.post("/api/capabilities/reload", {"manifest": str(_td / "x.json")})
+ck("I10 manifest 不是文件 ⇒ 404", code == 404, f"{code} {b}")
+
+#: I11：读数必须暴露"跑的是哪份清单"—— 否则热装载后靠猜
+#:    ⛔ 计数**不是**"调了几次端点"：I7 的 409 没替换 ⇒ **不计数**
+#:    （没换成就不算装载一次，否则读数虚高）。
+c_now = S.Handler.caps_reload_count
+code, _, b = srv.get("/api/capabilities")
+ck("I11 /api/capabilities 暴露 source / hot_reload / reload_count "
+   "（磁盘清单 ≠ 进程清单时靠这个读数）",
+   code == 200 and b.get("source") == m_partial
+   and b.get("hot_reload") is True and b.get("reload_count") == c_now,
+   f"{code} src={b.get('source')} n={b.get('reload_count')}")
+
+#: I12：两个入口同源 —— 同一份清单，CLI 与 HTTP 的 fingerprint 必须一致
+_gw, _rep = mount_capabilities(m_partial)
+code, _, b = srv.get("/api/capabilities")
+ck("I12 ⛔ 同源对拍：CLI 与 HTTP 装载同一清单 ⇒ fingerprint 相同"
+   "（两个入口各写一份装载 ⇒ 幽灵差异）",
+   _gw.registry.fingerprint == b.get("fingerprint"),
+   f"cli={_gw.registry.fingerprint} http={b.get('fingerprint')}")
+
+import shutil as _sh  # noqa: E402
+_sh.rmtree(_td, ignore_errors=True)
+S.Handler.caps_hot = False
+S.Handler.gateway = None
+S.Handler.caps_src = ""
+S.Handler.caps_reload_count = 0
+srv.close()
+
+print("=" * 68)
 if FAILS:
     print(f"❌ {len(FAILS)} 项未通过：")
     for f in FAILS:
         print("  ✗", f)
 else:
-    print("✅ 只读 API 层契约全部通过：无前缀判断、无默认全开、无无上限读取")
+    print("✅ API 层契约全部通过：无前缀判断、无默认全开、无无上限读取、热装载默认关闭")
 sys.exit(1 if FAILS else 0)

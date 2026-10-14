@@ -3,7 +3,17 @@
 跨语言契约就一个：**账本 JSONL**。TS 侧既能直接读文件（同机部署），
 也能走这个 API（分离部署）。两端用**同一套判据**（链校验、异常检测）。
 
-⛔ 只读 API：这个服务不提供任何写接口。写只有一条路径 —— ledger.append。
+⛔ 账本侧只读：账本的写只有一条路径 —— `ledger.append`，本服务不提供
+   任何写账本的接口。
+
+⛔ 但**接入层有写口子**（2026-10-14 更正，此前这里写的是"不提供任何写
+   接口"，与 `POST /api/invoke` 早已存在的事实不符）：
+   · `POST /api/invoke` —— 会真的执行能力，能力与清单声明了 `effects` 就
+     有副作用；
+   · `POST /api/capabilities/reload` —— 运行时替换本进程的能力集
+     （**默认关闭**，须 `--caps-hot`）。
+   两者都不碰账本，所以"账本只读"仍然成立；但把它们当成"只读服务"
+   是错的 —— 分诊时会漏掉这两条攻击面。
 """
 from __future__ import annotations
 
@@ -11,10 +21,12 @@ import argparse
 import json
 import mimetypes
 import sys
+import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+import threading
 from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -37,6 +49,10 @@ MAX_LIST_LIMIT = 5000
 #: `/api/invoke` 请求体上限（字节）。**第四个人口**：前面三处（raw / events /
 #: status 的 limit）都修过，这个是新开的口子，不能又是无上限。
 MAX_INVOKE_BODY_BYTES = 1024 * 1024
+
+#: `/api/capabilities/reload` 请求体上限（字节）。这个 body **只需要一个
+#: 路径**，给 1MB 没有理由 —— 上限越窄，被塞进来的余地越小。
+MAX_RELOAD_BODY_BYTES = 64 * 1024
 
 
 def _is_within(child: Path, parent: Path) -> bool:
@@ -384,6 +400,19 @@ class Handler(BaseHTTPRequestHandler):
     #: 接入层网关。**None ⇒ 调用端点返回 503 而不是 404**：能力没装载是
     #: 配置问题，不是"端点不存在"，分诊方向必须正确。
     gateway: Any = None
+    #: ⛔ 热装载**默认关闭**。理由：热装载 = 运行时改变本进程的能力集，
+    #:    比 invoke 更靠近信任边界（清单里的 `python` 形态是任意代码进本
+    #:    进程）⇒ 必须 `aether-serve --caps-hot` 显式开启，不是默认能力。
+    caps_hot: bool = False
+    #: 当前生效清单的路径（热装载读数）。空 = 源码内默认注册表。
+    caps_src: str = ""
+    #: 热装载次数 / 最后一次装载时刻 —— **可见读数**，否则"服务里跑的到底
+    #: 是哪份清单"只能靠猜（与"声明 vs 实际"落差同源）。
+    caps_reload_count: int = 0
+    caps_last_reload: str = ""
+    #: ⛔ ThreadingHTTPServer ⇒ 多线程并发；热装载不成对（计数 +1 与替换
+    #:    gateway 之间被另一个 reload 插队）会让读数与实况对不上。
+    caps_lock: Any = threading.Lock()
 
     def _cors_headers(self) -> Dict[str, str]:
         if not self.cors_origins:
@@ -484,6 +513,12 @@ class Handler(BaseHTTPRequestHandler):
                     "n": len(caps),
                     "n_total": len(Handler.gateway.registry),
                     "capabilities": caps,
+                    #: ⛔ 「跑的到底是哪份清单」必须是**读数**而不是靠猜：
+                    #:    热装载存在时，磁盘上的清单 ≠ 进程里的清单。
+                    "source": Handler.caps_src,
+                    "hot_reload": bool(Handler.caps_hot),
+                    "reload_count": Handler.caps_reload_count,
+                    "last_reload_at": Handler.caps_last_reload,
                 })
             elif self.console_dir and (u.path == "/"
                                        or _endpoint_is(u.path, "/console")):
@@ -496,34 +531,50 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             self._json({"error": f"{type(e).__name__}: {e}"}, 500)
 
-    # ── POST：调用已注册的能力 ────────────────────────────────
-    def do_POST(self) -> None:  # noqa: N802
-        u = urlparse(self.path)
-        if not _endpoint_is(u.path, "/api/invoke"):
-            self._json({"error": "unknown endpoint", "path": u.path}, 404)
-            return
-        if Handler.gateway is None:
-            self._json({"error": "capability gateway 未装载",
-                        "hint": "启动时用 --caps <manifest.json>"}, 503)
-            return
+    def _read_body(self, limit: int) -> Tuple[Optional[Dict[str, Any]], bool]:
+        """读 JSON body。**先按声明长度拒，不要先读再判断**。
+
+        返回 `(body, ok)`：`ok=False` 表示已自行回过错误响应，调用方直接
+        return。⛔ 两个 POST 端点共用这一份 —— 长度闸与解析闸各写一遍
+        ⇒ 迟早有一个端点漏掉上限。
+        """
         try:
             n = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             self._json({"error": "bad Content-Length"}, 400)
-            return
-        #: ⛔ 先按声明长度拒，**不要先读再判断**（读就已经付出内存了）
-        if n > MAX_INVOKE_BODY_BYTES:
+            return None, False
+        if n > limit:
             self._json({"error": "request body too large", "bytes": n,
-                        "limit": MAX_INVOKE_BODY_BYTES}, 413)
-            return
+                        "limit": limit}, 413)
+            return None, False
         raw = self.rfile.read(n) if n > 0 else b""
         try:
             body = json.loads(raw.decode("utf-8")) if raw else {}
         except Exception as e:  # noqa: BLE001
             self._json({"error": f"invalid JSON body: {type(e).__name__}"}, 400)
-            return
+            return None, False
         if not isinstance(body, dict):
             self._json({"error": "body 必须是 JSON 对象"}, 400)
+            return None, False
+        return body, True
+
+    # ── POST：热装载能力清单 / 调用已注册的能力 ────────────────
+    def do_POST(self) -> None:  # noqa: N802
+        u = urlparse(self.path)
+        if _endpoint_is(u.path, "/api/capabilities/reload"):
+            self._do_reload()
+            return
+        if not _endpoint_is(u.path, "/api/invoke"):
+            self._json({"error": "unknown endpoint", "path": u.path}, 404)
+            return
+        if Handler.gateway is None:
+            self._json({"error": "capability gateway 未装载",
+                        "hint": "启动时用 --caps <manifest.json>，或 "
+                                "POST /api/capabilities/reload（须 --caps-hot）"},
+                       503)
+            return
+        body, ok = self._read_body(MAX_INVOKE_BODY_BYTES)
+        if not ok:
             return
         cid = str(body.get("capability", "")).strip()
         if not cid:
@@ -552,6 +603,82 @@ class Handler(BaseHTTPRequestHandler):
         code = 200 if res.status in ("ok",) else 422
         self._json(res.to_dict(), code)
 
+    # ── 热装载：运行时替换能力集 ──────────────────────────────
+    def _do_reload(self) -> None:
+        """`POST /api/capabilities/reload` —— 不重启就换掉能力清单。
+
+        ⛔⛔ 三道闸，缺一不可：
+        1. **默认关闭**（`--caps-hot` 才开）。热装载 = 运行时改变本进程的
+           能力集，比 invoke 更靠近信任边界；默认开着等于把"谁能被调"的
+           决定权从启动时的清单，移交给了任何一个能访问端口的人。
+        2. **body 只允许给路径**，不接受内联能力描述。否则这个端点就是
+           "远程注入任意实现进本进程" —— 与 `/api/invoke` 拒绝 body 携带
+           `impl/argv/code` **同一条纪律**（事先决定谁能被调）。
+        3. **装载 0 条 ⇒ 不替换**。把一份好清单换成空的是"能力凭空消失"，
+           比装载失败更糟：所有调用从 ok 变 unavailable，而没人动过代码。
+
+        ⛔ 返回码必须能反映"部分成功"：只回 200 会让调用方（只看 HTTP 码
+        的人）漏掉 skipped ⇒ 与 r29「`status=ok` 掩盖落差」同源 ⇒
+        有 skip 时回 **207**，装载 0 条回 **409**。
+        """
+        if not Handler.caps_hot:
+            self._json({"error": "热装载未启用",
+                        "hint": "启动时加 --caps-hot（默认关闭：热装载 = "
+                                "运行时改变本进程能力集）",
+                        "hot_reload": False}, 403)
+            return
+        body, ok = self._read_body(MAX_RELOAD_BODY_BYTES)
+        if not ok:
+            return
+        banned = {"capabilities", "impl", "argv", "code", "source",
+                  "transport", "target", "adapter", "module", "spec"}
+        hit = banned & set(body)
+        if hit:
+            self._json({"error": "热装载只接受清单**路径**，不接受内联能力描述"
+                                "（否则等于远程注入实现）",
+                        "rejected_keys": sorted(hit)}, 400)
+            return
+        mpath = str(body.get("manifest", "")).strip() or Handler.caps_src
+        if not mpath:
+            self._json({"error": "缺 manifest（且启动时没有 --caps 可重载）"},
+                       400)
+            return
+        p = Path(mpath)
+        if not p.is_file():
+            self._json({"error": "manifest 不是文件", "path": str(p)}, 404)
+            return
+
+        from .interop import mount_capabilities
+        with Handler.caps_lock:
+            gw, rep = mount_capabilities(str(p))
+            if not rep.loaded:
+                #: ⛔ 不替换：换空 = 能力凭空消失，比装载失败更难查
+                self._json({"error": "清单没装载上任何能力 ⇒ 保持原能力集不变",
+                            "path": str(p), "report": rep.to_dict(),
+                            "kept": (Handler.gateway.registry.fingerprint
+                                     if Handler.gateway is not None else "")},
+                           409)
+                return
+            old = Handler.gateway
+            before_fp = (old.registry.fingerprint if old is not None else "")
+            before_n = len(old.registry) if old is not None else 0
+            Handler.gateway = gw          #: 属性赋值是原子的：in-flight 调用
+            Handler.caps_src = str(p)     #: 仍持有旧对象，不会被抽掉
+            Handler.caps_reload_count += 1
+            Handler.caps_last_reload = time.strftime("%Y-%m-%dT%H:%M:%S")
+            after_fp = gw.registry.fingerprint
+            after_n = len(gw.registry)
+        self._json({"status": "ok" if rep.ok else "partial",
+                    "path": str(p),
+                    "fingerprint_before": before_fp,
+                    "fingerprint_after": after_fp,
+                    "n_before": before_n, "n_after": after_n,
+                    "changed": before_fp != after_fp,
+                    "reload_count": Handler.caps_reload_count,
+                    "last_reload_at": Handler.caps_last_reload,
+                    "report": rep.to_dict()},
+                   200 if rep.ok else 207)
+
     def log_message(self, fmt: str, *a: Any) -> None:
         sys.stderr.write("[aether] " + (fmt % a) + "\n")
 
@@ -569,18 +696,25 @@ def main(argv: Optional[list] = None) -> int:
     ap.add_argument("--caps", default="",
                     help="能力清单 JSON：接入外部 agents/skills（见 "
                          "capabilities.example.json）")
+    ap.add_argument("--caps-hot", action="store_true",
+                    help="允许 POST /api/capabilities/reload 热装载"
+                         "（默认关闭：热装载 = 运行时改变本进程能力集）")
     args = ap.parse_args(argv)
 
+    #: ⛔ **与 CLI 同一个装载接线**（`interop.mount_capabilities`）：两边各写
+    #:    一遍 `Registry → load_manifest → Gateway` 就会出现"CLI 看得到被拒
+    #:    的能力、HTTP 一声不响"的幽灵差异。判据有两份实现 = 没有判据。
     if args.caps:
-        from .interop import Gateway, Registry, load_manifest
-        reg = Registry()
-        rep = load_manifest(reg, args.caps)
-        Handler.gateway = Gateway(reg)
+        from .interop import mount_capabilities
+        gw, rep = mount_capabilities(args.caps)
+        Handler.gateway = gw
+        Handler.caps_src = str(args.caps)
         print(f"[caps] 装载 {len(rep.loaded)} 个能力：{rep.loaded}")
         #: ⛔ 每条 skip 都打印：能力没挂上却一声不响 = 调用时才发现的 404
         for s in rep.skipped:
             print(f"[caps] ⚠️ 跳过 {s.get('id')}：{s.get('reason')}")
 
+    Handler.caps_hot = bool(args.caps_hot)
     Handler.root = Path(args.root)
     Handler.console_dir = Path(args.console) if args.console else None
     Handler.cors_origins = tuple(

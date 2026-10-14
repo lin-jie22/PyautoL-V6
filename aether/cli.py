@@ -825,33 +825,23 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     return 0
 
 
-def _caps_registry(path: str):
-    """从清单装载（或返回源码内注册表）。
+def _caps_gateway(path: str):
+    """装载能力清单并返回网关。
 
-    ⛔ 与 serve 同一份装载逻辑（`interop.load_manifest`）—— 两个入口各写
-    一份装载，会出现"CLI 能调、HTTP 调不到"的幽灵差异。
+    ⛔ 直接调 `interop.mount_capabilities` —— 与 HTTP 服务（启动时装载 +
+    `/api/capabilities/reload` 热装载）**同一个函数**。两个入口各写一份
+    装载接线，就会出现"CLI 能调、HTTP 调不到"的幽灵差异。
     """
-    from .interop import Registry, load_manifest
-    if not path:
-        from .interop import _default_registry
-        return _default_registry(), LoadReportNone()
-    reg = Registry()
-    return reg, load_manifest(reg, path)
-
-
-class LoadReportNone:
-    """没有清单时的空报告（保持接口形状一致）。"""
-    source = ""
-    loaded: List[str] = []
-    skipped: List[Dict[str, Any]] = []
+    from .interop import mount_capabilities
+    return mount_capabilities(path)
 
 
 def cmd_caps(args) -> int:
-    from .interop import Gateway, load_manifest
-    reg, rep = _caps_registry(getattr(args, "caps", "") or "")
+    from .interop import load_manifest
+    gw, rep = _caps_gateway(getattr(args, "caps", "") or "")
     for s in rep.skipped:
         print(f"[caps] ⚠️ 跳过 {s.get('id')}：{s.get('reason')}", file=sys.stderr)
-    gw = Gateway(reg)
+    reg = gw.registry
     cmd = getattr(args, "caps_cmd", "list")
 
     if cmd == "list":
