@@ -1,0 +1,137 @@
+{
+  "version": 1,
+  "_doc": [
+    "REA（Reverse Engineer Anything）能力清单：把本机逆向分析接进 V6。",
+    "",
+    "跑法：",
+    "  python -m aether.cli caps --caps capabilities.rea.json list",
+    "  python -m aether.cli caps --caps capabilities.rea.json invoke \\",
+    "      rea.analyze_javascript_application --json '{\"path\":\"/abs/app\"}'",
+    "",
+    "⛔ 每个能力的 REA 命令由 impl.argv 里的 `--command` **钉死**，调用方",
+    "   不能通过 stdin 换命令 —— 换命令必须改本清单（= 要过 review）。",
+    "",
+    "⛔ 桥**不截断**输出：全量 Evidence 落在 data/rea/ 下，stdout 只回",
+    "   摘要信封（字段全部原样取自 REA 自己的 Evidence 信封）。",
+    "   要全量读 data/rea/<文件>（路径在响应的 full_output.path 里）。",
+    "",
+    "⛔ 引擎（Ghidra / jadx）由桥脚本按需注入，且**只在路径确实存在时**注入；",
+    "   没装就是没装 —— REA 自己会报 missing_analysis_engine，不冒充已就绪。",
+    "",
+    "⛔ 本清单接入的能力恒为 verified=false（unverified_reason=no_checker）：",
+    "   判据是代码，JSON 不可序列化。要带判据需走代码注册。"
+  ],
+  "capabilities": [
+    {
+      "id": "rea.analyze_javascript_application",
+      "kind": "tool",
+      "version": "0.1.0",
+      "summary": "REA：静态重建一个 JavaScript / Electron 应用（模块、import、IPC 边界）",
+      "trusted": false,
+      "sandbox": "process",
+      "effects": ["read"],
+      "timeout_s": 330.0,
+      "inputs": {
+        "path": {"type": "str", "required": true,
+                 "desc": "应用目录或 .asar 的**绝对路径**（相对路径会被桥拒绝）"},
+        "artifact_format": {"type": "str", "required": false,
+                            "desc": "auto | asar | directory"},
+        "integrity_policy": {"type": "str", "required": false,
+                             "desc": "fail | record-and-continue"},
+        "timeout_ms": {"type": "int", "required": false,
+                       "desc": "内部超时（默认 300000，上限 3600000）"}
+      },
+      "outputs": {
+        "ok": {"type": "bool", "required": true},
+        "evidence_id": {"type": "str", "required": false},
+        "summary": {"type": "dict", "required": false},
+        "full_output": {"type": "dict", "required": true,
+                        "desc": "{path, bytes, sha256} —— 全量 Evidence 的落点"}
+      },
+      "impl": {
+        "transport": "cli",
+        "argv": [
+          "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/bin/python3",
+          "/Users/linshaojie/V6/scripts/rea_bridge.py",
+          "--command", "analyze_javascript_application"
+        ]
+      }
+    },
+    {
+      "id": "rea.analyze",
+      "kind": "tool",
+      "version": "0.1.0",
+      "summary": "REA：拿到一个应用/程序的总览（原生二进制需 Ghidra/IDA/Hopper 引擎）",
+      "trusted": false,
+      "sandbox": "process",
+      "effects": ["read"],
+      "timeout_s": 330.0,
+      "inputs": {
+        "path": {"type": "str", "required": true, "desc": "目标绝对路径"},
+        "provider": {"type": "str", "required": false,
+                     "desc": "深分析 provider id（省略则自动选择）"},
+        "timeout_ms": {"type": "int", "required": false}
+      },
+      "outputs": {
+        "ok": {"type": "bool", "required": true},
+        "full_output": {"type": "dict", "required": true}
+      },
+      "impl": {
+        "transport": "cli",
+        "argv": [
+          "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/bin/python3",
+          "/Users/linshaojie/V6/scripts/rea_bridge.py",
+          "--command", "analyze"
+        ]
+      }
+    },
+    {
+      "id": "rea.capabilities",
+      "kind": "tool",
+      "version": "0.1.0",
+      "summary": "REA：列出本机 provider 能力与副作用（诊断用，不读目标）",
+      "trusted": false,
+      "sandbox": "process",
+      "effects": [],
+      "timeout_s": 60.0,
+      "inputs": {},
+      "outputs": {
+        "ok": {"type": "bool", "required": true},
+        "full_output": {"type": "dict", "required": true}
+      },
+      "impl": {
+        "transport": "cli",
+        "argv": [
+          "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/bin/python3",
+          "/Users/linshaojie/V6/scripts/rea_bridge.py",
+          "--command", "capabilities"
+        ]
+      }
+    },
+    {
+      "id": "rea.doctor",
+      "kind": "tool",
+      "version": "0.1.0",
+      "summary": "REA：自检（node/引擎/客户端注册/技能身份是否就绪）",
+      "trusted": false,
+      "sandbox": "process",
+      "effects": [],
+      "timeout_s": 120.0,
+      "inputs": {
+        "target": {"type": "str", "required": false, "desc": "可选：顺带检查的目标路径"}
+      },
+      "outputs": {
+        "ok": {"type": "bool", "required": true},
+        "full_output": {"type": "dict", "required": true}
+      },
+      "impl": {
+        "transport": "cli",
+        "argv": [
+          "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/bin/python3",
+          "/Users/linshaojie/V6/scripts/rea_bridge.py",
+          "--command", "doctor"
+        ]
+      }
+    }
+  ]
+}

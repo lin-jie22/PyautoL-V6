@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import mimetypes
 import os
@@ -64,6 +65,33 @@ MAX_INVOKE_BODY_BYTES = 1024 * 1024
 #: `/api/capabilities/reload` 请求体上限（字节）。这个 body **只需要一个
 #: 路径**，给 1MB 没有理由 —— 上限越窄，被塞进来的余地越小。
 MAX_RELOAD_BODY_BYTES = 64 * 1024
+
+#: ── 文件浏览与预览（控制台的 Workspace 面板）──────────────────────
+#: ⛔ 这两个端点**只读**，且只能看仓库内的东西。它们是"控制台能看文件"
+#:    这条需求的实现，不是文件服务器：没有写、没有上传、没有任意路径。
+
+#: `/api/file` 单次读取上限（字节）。超了明确 413 并给出提示 ——
+#: 静默截断会让"预览"变成"看半截文件"而不自知。
+MAX_FILE_BYTES = 512 * 1024
+
+#: 一次目录列举最多返回多少条目。
+MAX_LIST_ENTRIES = 500
+
+#: 列举时**整棵跳过**的目录名。⛔ 声明式：不扫这些目录，否则展开仓库根
+#:    会把 `.git` 的上万个对象、`node_modules` 的依赖树全读一遍 ——
+#:    一次点击变成几秒的卡顿，而用户只是想看 data/ 里有什么。
+FILE_SKIP_DIRS = frozenset({
+    ".git", ".venv", "node_modules", "__pycache__",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache",
+})
+
+#: 视作**文本**、可直接预览的扩展名。不在名单里的一律当二进制拒绝预览：
+#: 把二进制当 UTF-8 解出来是一屏乱码，比明确说"不能预览"更糟。
+TEXT_PREVIEW_EXTS = frozenset({
+    ".txt", ".md", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".ini",
+    ".py", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".html", ".css", ".sh",
+    ".cfg", ".csv", ".log", ".sql", ".svg", ".xml",
+})
 
 #: 视为"只监听本机"的地址集合。⛔ 只认**字面量**：不要试图解析域名或用
 #: `socket` 判断 —— 那会把判断结果押在 DNS 与路由表上（可失真），而这里
@@ -320,6 +348,49 @@ def _parse_limit(q: Dict[str, List[str]], default: int
         return False, 0, (f"limit 过大（{n} > {MAX_LIST_LIMIT}）："
                           "需要全量请同机直读文件，不要打穿这个端点")
     return True, n, ""
+
+
+# ── 文件浏览与预览的路径闸（控制台的 Workspace 面板）────────────────
+def _safe_repo_path(root: Any, raw: Optional[str]
+                    ) -> Tuple[Optional[Path], Optional[str]]:
+    """把用户给的 path 解析成**仓库内**的绝对路径。
+
+    ⛔ 三条硬约束，**少一条就变成任意文件读取**：
+
+      1. 只接受相对路径（`/...`、`~`、含盘符的一律拒）—— 绝对路径让
+         "限定在仓库内"这件事失去意义；
+      2. `resolve()` **之后**再判是否在仓库根内 ⇒ 同时挡住 `..` 与
+         **符号链接逃逸**（仓库里一个指向 /etc 的软链本身不是漏洞，
+         跟随它才是。先拼后判会漏，先 resolve 后判不会）；
+      3. 解析失败（权限、循环链接）同样拒，不"尽力而为"。
+
+    返回 `(path, None)` 或 `(None, 原因)`。原因会原样回给调用方 ——
+    被拒绝时必须说清是"路径不合法"还是"逃出了仓库"。
+    """
+    if raw is None:
+        return None, "缺 path 参数"
+    raw = (raw or "").strip()
+    if raw in ("", ".", "./"):
+        raw = "."
+    if raw.startswith("/") or raw.startswith("~"):
+        return None, f"path 必须是相对仓库根的相对路径，实得 {raw[:60]!r}"
+    root_p = Path(root).resolve()
+    try:
+        target = (root_p / raw).resolve()
+    except (OSError, ValueError) as ex:
+        return None, f"路径无法解析：{type(ex).__name__}"
+    if target != root_p and not target.is_relative_to(root_p):
+        return None, "路径逃出仓库根（.. 或符号链接）"
+    return target, None
+
+
+def _rel_to_root(root: Any, target: Path) -> str:
+    """绝对路径 → 相对仓库根的 POSIX 路径（前端显示与回传都用这个）。"""
+    try:
+        return target.resolve().relative_to(
+            Path(root).resolve()).as_posix()
+    except Exception:                                      # noqa: BLE001
+        return target.name
 
 
 def _event_dict(ev: Any) -> Dict[str, Any]:
@@ -598,6 +669,92 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 self._send(200, path.read_bytes(),
                            "application/x-ndjson")
+            elif _endpoint_is(u.path, "/api/files"):
+                #: 列目录（**只读**）。控制台的 Workspace 树用它。
+                target, why = _safe_repo_path(
+                    self.root, q.get("path", [""])[0])
+                if target is None:
+                    self._json({"error": why}, 400)
+                    return
+                if not target.is_dir():
+                    self._json({"error": "不是目录"}, 400)
+                    return
+                entries: List[Dict[str, Any]] = []
+                truncated = False
+                try:
+                    for child in sorted(
+                            target.iterdir(),
+                            key=lambda p: (not p.is_dir(), p.name.lower())):
+                        if child.name in FILE_SKIP_DIRS:
+                            continue
+                        if len(entries) >= MAX_LIST_ENTRIES:
+                            truncated = True
+                            break
+                        try:
+                            st = child.stat()
+                        except OSError:                    # noqa: BLE001
+                            continue
+                        entries.append({
+                            "name": child.name,
+                            "kind": "dir" if child.is_dir() else "file",
+                            "size": st.st_size if child.is_file() else 0,
+                            "mtime": round(st.st_mtime, 3),
+                            "ext": child.suffix.lower(),
+                        })
+                except OSError as ex:                      # noqa: BLE001
+                    self._json({"error": f"读取目录失败：{type(ex).__name__}"},
+                               500)
+                    return
+                #: ⛔ `n` 跟随实际条目数（不是"目录里有多少"）：
+                #:    超上限时另给 `truncated`，否则前端会把"还有更多"
+                #:    读成"就这些"。
+                #: ⛔ `skipped_dirs` **由服务端给出**，前端不许自己硬编码一份
+                #:   名单：两处各写一份 ⇒ 服务端改了而页面还在说旧名字
+                #:   ⇒ "看不见的目录有哪些"这件事变成**假的读数**。
+                self._json({"root": str(Path(self.root).resolve()),
+                            "path": _rel_to_root(self.root, target),
+                            "n": len(entries), "truncated": truncated,
+                            "skipped_dirs": sorted(FILE_SKIP_DIRS),
+                            "entries": entries})
+            elif _endpoint_is(u.path, "/api/file"):
+                #: 读单个文本文件（**只读**）。控制台的预览面板用它。
+                target, why = _safe_repo_path(
+                    self.root, q.get("path", [""])[0])
+                if target is None:
+                    self._json({"error": why}, 400)
+                    return
+                if not target.is_file():
+                    self._json({"error": "不是文件（或不存在）"}, 404)
+                    return
+                ext = target.suffix.lower()
+                if ext not in TEXT_PREVIEW_EXTS:
+                    #: ⛔ 415 而不是"尽力解一下"：把二进制当 UTF-8 吐出来
+                    #:    是一屏乱码，比明确说"不能预览"更糟。
+                    self._json({"error": "该文件类型不支持预览",
+                                "path": _rel_to_root(self.root, target),
+                                "ext": ext,
+                                "previewable": sorted(TEXT_PREVIEW_EXTS)},
+                               415)
+                    return
+                size = target.stat().st_size
+                if size > MAX_FILE_BYTES:
+                    self._json({"error": "文件超过预览上限",
+                                "size": size, "limit": MAX_FILE_BYTES,
+                                "hint": "用本地编辑器打开，或同机直读"},
+                               413)
+                    return
+                blob = target.read_bytes()
+                try:
+                    text = blob.decode("utf-8")
+                except UnicodeDecodeError:
+                    self._json({"error": "不是合法 UTF-8 文本（拒绝吐乱码）",
+                                "path": _rel_to_root(self.root, target)},
+                               415)
+                    return
+                self._json({"path": _rel_to_root(self.root, target),
+                            "bytes": size,
+                            "sha256": hashlib.sha256(blob).hexdigest(),
+                            "content": text})
             elif _endpoint_is(u.path, "/api/capabilities"):
                 if Handler.gateway is None:
                     self._json({"error": "capability gateway 未装载",

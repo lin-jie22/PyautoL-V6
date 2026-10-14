@@ -33,6 +33,9 @@ DATA_DIRNAME = "data"
 TASKS_DIRNAME = "tasks"
 BACKUPS_DIRNAME = "backups"
 CONSOLE_DIRNAME = "console"
+#: 外部能力（REA 桥）的全量输出落点。**声明式**：桥脚本只读这里，
+#: 不自己拼 `root / "data" / "rea"`（拼了就是布局又多一份）。
+REA_DIRNAME = "rea"
 
 LEDGER_NAME = "ledger.jsonl"
 DB_NAME = "aether.db"
@@ -52,9 +55,9 @@ BACKUP_TARGETS: Tuple[Tuple[str, str], ...] = (
 
 __all__ = [
     "ROOT", "DATA_DIRNAME", "TASKS_DIRNAME", "BACKUPS_DIRNAME",
-    "CONSOLE_DIRNAME", "LEDGER_NAME", "DB_NAME", "MEMORY_NAME",
-    "CAPS_EXAMPLE", "BACKUP_TARGETS", "data_dir", "paths", "flat_name",
-    "BACKUP_FLAT",
+    "CONSOLE_DIRNAME", "REA_DIRNAME", "LEDGER_NAME", "DB_NAME",
+    "MEMORY_NAME", "CAPS_EXAMPLE", "BACKUP_TARGETS", "data_dir", "paths",
+    "flat_name", "BACKUP_FLAT",
 ]
 
 
@@ -80,6 +83,9 @@ def paths(root: Union[str, Path], *, default_env: str = "textscore"
         "tasks_root": r / TASKS_DIRNAME,
         "backups": r / BACKUPS_DIRNAME,
         "console": r / CONSOLE_DIRNAME,
+        #: 外部能力输出（REA 桥的全量 Evidence 落点）。不入备份清单 ——
+        #: 它是**投影**（可从目标重跑得到），不是事实源。
+        "rea": r / DATA_DIRNAME / REA_DIRNAME,
     }
 
 

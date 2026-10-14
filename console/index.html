@@ -6,14 +6,32 @@
   会让它变成另一个需要维护的服务。它由 `aether/serve.py` 同源托管
   （`/` 与 `/console/`）⇒ 没有 CORS，也没有第二个服务要维护。
 
+  形态（对齐 DeepSeek Harness 桌面版的三栏工作台）：
+      左栏 = 导航 + Workspace 文件树（只读，来自 GET /api/files）
+      中栏 = 工作区面板（告警 / 状态 / reward / 谱系 / 事件 / 闸 / 能力）
+      右栏 = 检视器（文件预览 / 事件详情 + 与同 kind 上一条的差异）
+
   ⛔ 面板分两类，**必须区分**：
-    · 只读面板（状态 / 事件流 / 闸 / 泛化）—— 只 GET；
+    · 只读面板 —— 只 GET（/api/status · /api/files · /api/file）；
     · 可操作面板（能力调用 / 热装载）—— 真 POST `/api/invoke`、
       `/api/capabilities/reload`。它们**不是只读**，但都受服务端三道闸
       约束（未注册 ⇒ unavailable；内联实现 ⇒ 400；热装载默认关闭 ⇒ 403）。
 
   ⛔ UI **不提供**"跑进化 / 摄入知识"的按钮：那两个动作没有对应的 HTTP
      端点，硬做假按钮 = 假仪表。这里给出可复制的 CLI 命令（见「命令行」卡）。
+
+  ⛔⛔ **渲染中断必须是可见读数**（2026-10-14 实测事故，勿删）：
+      曾因 `const evs` 声明在 stats 面板**之后**，而 stats 的 IIFE 里引用了
+      它 ⇒ TDZ ReferenceError。`load()` 是 async ⇒ 抛错变成 **unhandled
+      rejection**，浏览器控制台之外**没有任何迹象**：卡片标题是静态 HTML，
+      占位符是 "…" ⇒ 页面看起来完全正常，而 9 个数据面板其实**从未渲染过**
+      （用页面自己的脚本 + 真实 /api/status 数据在 node 里跑一遍才抓到）。
+      修法两条，缺一不可：
+        ① `evs` 提到 `load()` 顶部（见下面的 `EVS` 声明处）；
+        ② `render_once()` 整体 try/catch + `window.onerror` /
+           `unhandledrejection` ⇒ 异常直接写进页面顶部的红色横幅
+           （`#render-err`）并停止"上次成功渲染"时间戳的更新 ——
+           **面板死了必须死在脸上，不许静默**。
 
   用法：
       python -m aether.ui                     # 一键起服务并打开桌面窗口
@@ -26,33 +44,58 @@
 <title>V6 · AETHER 控制台</title>
 <style>
   :root {
-    --bg: #0d1117; --panel: #161b22; --line: #30363d;
+    --bg: #0d1117; --panel: #161b22; --line: #30363d; --panel2: #11161c;
     --fg: #e6edf3; --dim: #8b949e; --ok: #3fb950; --warn: #d29922;
     --bad: #f85149; --acc: #58a6ff;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg);
          font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
-  header { padding: 18px 24px; border-bottom: 1px solid var(--line);
-           display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
-  h1 { font-size: 18px; margin: 0; letter-spacing: .5px; }
+
+  /* ── 顶栏 ────────────────────────────────────────────────── */
+  header { padding: 10px 16px; border-bottom: 1px solid var(--line);
+           display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+           position: sticky; top: 0; z-index: 20; background: var(--bg); }
+  h1 { font-size: 15px; margin: 0; letter-spacing: .5px; }
   .sub { color: var(--dim); font-size: 12px; }
-  main { padding: 20px 24px; display: grid; gap: 18px;
-         grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .spacer { flex: 1; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 6px;
+         overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; background: transparent;
+                color: var(--dim); padding: 4px 10px; font-weight: 500; }
+  .seg button.on { background: var(--acc); color: #06121f; font-weight: 700; }
+
+  /* ── 三栏骨架 ────────────────────────────────────────────── */
+  .shell { display: grid; gap: 14px; padding: 14px 16px; align-items: start;
+           grid-template-columns: 208px minmax(0, 1fr) 380px; }
+  .col { min-width: 0; }
+  .col.side { position: sticky; top: 56px;
+              max-height: calc(100vh - 72px); overflow: auto; }
+  @media (max-width: 1180px) {
+    .shell { grid-template-columns: 1fr; }
+    .col.side { position: static; max-height: none; }
+  }
+
   .card { background: var(--panel); border: 1px solid var(--line);
-          border-radius: 8px; padding: 16px; }
-  .card h2 { font-size: 13px; margin: 0 0 12px; color: var(--dim);
-             text-transform: uppercase; letter-spacing: 1px; }
-  .kv { display: flex; justify-content: space-between; padding: 3px 0;
+          border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+  .card h2 { font-size: 12px; margin: 0 0 10px; color: var(--dim);
+             text-transform: uppercase; letter-spacing: 1px;
+             display: flex; align-items: center; gap: 6px; }
+  .card h2 .n { color: var(--acc); text-transform: none; letter-spacing: 0; }
+
+  .kv { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0;
         border-bottom: 1px dashed var(--line); }
-  .kv span:last-child { font-variant-numeric: tabular-nums; }
+  .kv span:last-child { font-variant-numeric: tabular-nums; text-align: right; }
   .badge { padding: 1px 8px; border-radius: 10px; font-size: 12px; }
   .ok { background: rgba(63,185,80,.15); color: var(--ok); }
   .bad { background: rgba(248,81,73,.15); color: var(--bad); }
   .warn { background: rgba(210,153,34,.15); color: var(--warn); }
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
   th { color: var(--dim); font-weight: 500; }
+  tbody tr.click { cursor: pointer; }
+  tbody tr.click:hover { background: rgba(88,166,255,.08); }
+  tbody tr.sel { background: rgba(88,166,255,.16); }
   .tree { font-family: ui-monospace, Menlo, monospace; font-size: 12px;
           white-space: pre; overflow-x: auto; color: var(--dim); }
   .tree b { color: var(--acc); font-weight: 600; }
@@ -60,10 +103,30 @@
   .bar { flex: 1; background: var(--acc); border-radius: 2px 2px 0 0;
          min-height: 2px; opacity: .85; }
   .bar.zero { background: var(--bad); opacity: .5; }
-  footer { padding: 12px 24px; color: var(--dim); font-size: 11px;
+  footer { padding: 10px 16px; color: var(--dim); font-size: 11px;
            border-top: 1px solid var(--line); }
   code { background: rgba(110,118,129,.2); padding: 1px 5px; border-radius: 3px; }
-  /* ── 可操作面板 ───────────────────────────────────────────── */
+
+  /* ── 导航 ────────────────────────────────────────────────── */
+  nav a { display: flex; align-items: center; gap: 8px; padding: 5px 8px;
+          color: var(--fg); text-decoration: none; border-radius: 6px;
+          font-size: 13px; }
+  nav a:hover { background: rgba(88,166,255,.10); }
+  nav a .ic { width: 16px; text-align: center; color: var(--dim); }
+  nav a.hot { color: var(--bad); }
+
+  /* ── 文件树 ──────────────────────────────────────────────── */
+  #ftree { font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+           max-height: 46vh; overflow: auto; }
+  .fn { padding: 1px 4px; border-radius: 4px; cursor: pointer; white-space: nowrap;
+        overflow: hidden; text-overflow: ellipsis; }
+  .fn:hover { background: rgba(88,166,255,.12); }
+  .fn.sel { background: rgba(88,166,255,.22); }
+  .fn .t { color: var(--dim); margin-right: 4px; }
+  .fn.dir { color: var(--acc); }
+  .fn .sz { color: #586069; margin-left: 6px; font-size: 11px; }
+
+  /* ── 可操作面板 ──────────────────────────────────────────── */
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
          margin-bottom: 8px; }
   select, input[type=text], textarea {
@@ -71,145 +134,271 @@
     border-radius: 6px; padding: 6px 8px; font-size: 13px; }
   textarea { width: 100%; min-height: 74px; font-family: ui-monospace, Menlo, monospace;
              font-size: 12px; resize: vertical; }
-  select { min-width: 200px; }
+  select { min-width: 180px; }
   button { background: var(--acc); color: #06121f; border: 0; border-radius: 6px;
-           padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+           padding: 5px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
   button:disabled { background: var(--line); color: var(--dim); cursor: not-allowed; }
   button.ghost { background: transparent; color: var(--acc);
                  border: 1px solid var(--line); font-weight: 500; }
   pre.out { background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
-            padding: 10px; font-size: 12px; max-height: 260px; overflow: auto;
+            padding: 10px; font-size: 12px; max-height: 240px; overflow: auto;
             white-space: pre-wrap; word-break: break-all; margin: 8px 0 0; }
   .cli { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
   .cli code { flex: 1; overflow-x: auto; white-space: nowrap; padding: 6px 8px; }
+
+  /* ── 检视器 ──────────────────────────────────────────────── */
+  .tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+  .tabs button.on { background: var(--acc); color: #06121f; }
+  .tabs button { background: transparent; color: var(--dim);
+                 border: 1px solid var(--line); font-weight: 500; }
+  #pv-body { background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+             padding: 10px; font: 12px/1.55 ui-monospace, Menlo, monospace;
+             max-height: 58vh; overflow: auto; white-space: pre-wrap;
+             word-break: break-all; }
+  .dl { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .dl .a { color: var(--ok); } .dl .d { color: var(--bad); } .dl .c { color: var(--warn); }
+
+  /* ── 详略三档（对齐 Harness 的 UI 详略调节）───────────────── */
+  body[data-detail="compact"] .lv-std,
+  body[data-detail="compact"] .lv-verb { display: none !important; }
+  body[data-detail="standard"] .lv-verb { display: none !important; }
+  /* ⛔ 中断横幅**任何档位都要看得见**：它说的是"下面这些数不可信" */
+  #render-err { display: none; background: rgba(248,81,73,.12);
+                border: 1px solid var(--bad); border-radius: 8px;
+                padding: 10px 14px; margin: 12px 16px 0; font-size: 13px; }
 </style>
 </head>
-<body>
+<body data-detail="standard">
 <header>
   <h1>V6 · AETHER</h1>
-  <span class="sub">可验证的自进化智能体 · 控制台（只读）</span>
+  <span class="sub">可验证的自进化智能体 · 工作台</span>
   <span id="chain" class="badge">…</span>
+  <span class="spacer"></span>
+  <!-- ⛔ 详略三档只改**显示**，不改取数口径：三档拿的都是同一份 /api/status，
+       紧凑档把"解释性"面板收起来，把能翻转结论的读数留下。 -->
+  <span class="sub">详略</span>
+  <span class="seg" id="detail-seg">
+    <button data-level="compact">紧凑</button>
+    <button data-level="standard" class="on">标准</button>
+    <button data-level="verbose">详细</button>
+  </span>
   <span class="sub" id="updated"></span>
+  <span class="sub" id="render-stamp" title="这个时间戳不走而不更新，就说明渲染断了"></span>
 </header>
 
-<main>
-  <!-- ⛔ 告警区：账本（事实源）与投影（视图）对不上时必须**在控制台上**可见。
-       2026-10-13 实测：投影丢掉 89.7% 的执行历史，而控制台只显示"运行记录 51"
-       —— 事故在账本里可见、在观测侧不可见，等于没被看见。 -->
-  <section class="card" id="alert-card" style="display:none;border-color:var(--bad)">
-    <h2 style="color:var(--bad)">⚠️ 读数不可信</h2>
-    <div id="alert-body" class="sub"></div>
-  </section>
+<!-- ⛔ 渲染中断横幅：见文件头注释。load() 里任何一处抛错都会写到这里。 -->
+<div id="render-err"></div>
 
-  <section class="card">
-    <h2>系统状态</h2>
-    <div id="stats"></div>
-  </section>
+<div class="shell">
 
-  <section class="card">
-    <h2>每轮平均 reward（发展集）</h2>
-    <div id="bars"></div>
-    <div class="sub" id="bars-note">按 harness 分组，红条=全 0</div>
-  </section>
-
-  <section class="card">
-    <h2>进化树（harness 血缘）</h2>
-    <div class="tree" id="tree">…</div>
-    <div class="sub" id="tree-note"></div>
-  </section>
-
-  <section class="card">
-    <h2>事件流（最近 20 条）</h2>
-    <table id="events"><thead><tr><th>#</th><th>kind</th><th>摘要</th></tr></thead>
-      <tbody></tbody></table>
-  </section>
-
-  <section class="card">
-    <h2>闸门裁决（非回归闸）</h2>
-    <table id="gates"><thead><tr><th>capsule</th><th>闸</th><th>冻结任务</th><th>回归</th><th>结论</th></tr></thead>
-      <tbody></tbody></table>
-  </section>
-
-  <!-- ⛔ 泛化闸是 V6 的核心判据：发展集涨了但 held-out 没涨 ⇒ 判 overfit。
-       控制台原先根本没有这张表，只有一张"优势"列恒为 — 的空壳。 -->
-  <section class="card">
-    <h2>泛化闸（发展集涨 ≠ 变强）</h2>
-    <table id="gen"><thead><tr><th>capsule</th><th>dev 增益</th><th>held-out 增益</th><th>裁决</th><th>held-out 判别力</th></tr></thead>
-      <tbody></tbody></table>
-  </section>
-
-  <!-- ── 可操作：能力调用（UCI）──────────────────────────────────
-       ⛔ 这里每个按钮都打真端点。做成"看起来能点、其实没接"的按钮
-       就是假仪表 —— 所以调用结果会把 status / verified / 超时落差
-       全部原样显示，包括失败。 -->
-  <section class="card">
-    <h2>能力调用 · UCI（真 POST /api/invoke）</h2>
-    <div class="row">
-      <select id="cap-sel"><option>（装载中…）</option></select>
-      <span class="sub" id="cap-meta"></span>
+  <!-- ═══ 左栏：导航 + Workspace ═══════════════════════════════ -->
+  <aside class="col side">
+    <div class="card">
+      <h2>导航</h2>
+      <nav id="nav">
+        <a href="#c-alert"><span class="ic">⚠</span>读数告警<span class="spacer"></span><span id="nav-alert-n" class="badge bad" style="display:none"></span></a>
+        <a href="#c-status"><span class="ic">◧</span>系统状态</a>
+        <a href="#c-reward"><span class="ic">▤</span>reward</a>
+        <a href="#c-tree"><span class="ic">⑃</span>进化谱系</a>
+        <a href="#c-events"><span class="ic">≡</span>事件流</a>
+        <a href="#c-gates"><span class="ic">⛨</span>闸门裁决</a>
+        <a href="#c-gen"><span class="ic">⇄</span>泛化闸</a>
+        <a href="#c-caps"><span class="ic">⚡</span>能力调用</a>
+        <a href="#c-hot"><span class="ic">⟳</span>能力热装载</a>
+        <a href="#c-cli"><span class="ic">›_</span>命令行</a>
+      </nav>
     </div>
-    <div class="row">
-      <span class="sub">args（JSON）</span>
-      <button class="ghost" id="cap-fill">填入示例</button>
-    </div>
-    <textarea id="cap-args">{}</textarea>
-    <div class="row" style="margin-top:8px">
-      <button id="cap-run">调用</button>
-      <span class="sub" id="cap-cost"></span>
-    </div>
-    <pre class="out" id="cap-out">（未调用）</pre>
-  </section>
 
-  <section class="card">
-    <h2>能力热装载</h2>
-    <div class="sub" id="hot-state">…</div>
-    <div class="row" style="margin-top:8px">
-      <input type="text" id="hot-path" placeholder="清单绝对路径，如 /tmp/my.json"
-             style="flex:1;min-width:220px" />
-      <button id="hot-run">装载</button>
+    <!-- ⛔ Workspace 是**只读且限定在仓库内**的：GET /api/files 只接受相对
+         路径，resolve() 之后还要判是否在仓库根内（挡 `..` 与符号链接逃逸）。
+         这里不是文件服务器：没有写、没有上传、没有任意路径。 -->
+    <div class="card lv-std">
+      <h2>Workspace <span class="n" id="ftree-path">.</span></h2>
+      <div id="ftree"><span class="sub">（装载中…）</span></div>
+      <div class="sub" style="margin-top:6px">
+        点目录展开、点文件在右栏预览。<br />
+        ⛔ 以下目录被服务端<b>整棵跳过</b> ⇒ <b>看不见 ≠ 不存在</b>：
+        <span id="ftree-skip">（装载中…）</span>
+      </div>
     </div>
-    <pre class="out" id="hot-out">（未装载）</pre>
-    <!-- ⛔ 默认关闭是**设计**（热装载 = 运行时改变本进程能力集）。
-         不给"一键开启"的按钮：那等于让浏览器替你放宽信任边界。 -->
-    <div class="sub" style="margin-top:8px">
-      默认关闭（服务端须 <code>--caps-hot</code> 启动）。理由与命令行一致：
-      热装载比 invoke 更靠近信任边界 —— 清单里的 <code>python</code>
-      形态是任意代码进本进程。
-    </div>
-  </section>
+  </aside>
 
-  <!-- ⛔ 没有 HTTP 端点的动作**不做按钮**：进化与知识摄入只能走 CLI。
-       给命令而不是给假按钮 —— 点了没反应的按钮比没有按钮更误导。 -->
-  <section class="card">
-    <h2>命令行（无端点 ⇒ 不做按钮）</h2>
-    <div class="sub">以下动作没有对应 HTTP 端点，复制命令在终端执行：</div>
-    <div class="cli"><code>python -m aether.cli evolve --rounds 3 --parallel 4</code>
-      <button class="ghost" data-copy="python -m aether.cli evolve --rounds 3 --parallel 4">复制</button></div>
-    <div class="cli"><code>python -m aether.cli memory ingest knowledge.json</code>
-      <button class="ghost" data-copy="python -m aether.cli memory ingest knowledge.json">复制</button></div>
-    <div class="cli"><code>python -m aether.cli verify-chain</code>
-      <button class="ghost" data-copy="python -m aether.cli verify-chain">复制</button></div>
-    <div class="cli"><code>python -m aether.cli rebuild</code>
-      <button class="ghost" data-copy="python -m aether.cli rebuild">复制</button></div>
-    <div class="sub" style="margin-top:8px">
-      <code>--parallel 4</code> 只并行 runner 计算，run_id 与账本写入仍串行
-      （顺序漂移 ⇒ 账本不可复现）。
+  <!-- ═══ 中栏：工作区面板 ═════════════════════════════════════ -->
+  <main class="col">
+
+    <!-- ⛔ 告警区：账本（事实源）与投影（视图）对不上时必须**在控制台上**可见。
+         2026-10-13 实测：投影丢掉 89.7% 的执行历史，而控制台只显示"运行记录 51"
+         —— 事故在账本里可见、在观测侧不可见，等于没被看见。 -->
+    <section class="card" id="c-alert" style="display:none;border-color:var(--bad)">
+      <h2 style="color:var(--bad)">⚠️ 读数不可信</h2>
+      <div id="alert-body" class="sub"></div>
+    </section>
+
+    <section class="card" id="c-status">
+      <h2>系统状态</h2>
+      <div id="stats"></div>
+    </section>
+
+    <section class="card lv-std" id="c-reward">
+      <h2>每轮平均 reward（发展集）</h2>
+      <div id="bars"></div>
+      <div class="sub" id="bars-note">按 harness 分组，红条=全 0</div>
+    </section>
+
+    <section class="card lv-std" id="c-tree">
+      <h2>进化树（harness 血缘）</h2>
+      <div class="tree" id="tree">…</div>
+      <div class="sub" id="tree-note"></div>
+    </section>
+
+    <section class="card" id="c-events">
+      <h2>事件流 <span class="n" id="events-note"></span></h2>
+      <table id="events"><thead><tr><th>#</th><th>kind</th><th>摘要</th></tr></thead>
+        <tbody></tbody></table>
+    </section>
+
+    <section class="card" id="c-gates">
+      <h2>闸门裁决（非回归闸）</h2>
+      <table id="gates"><thead><tr><th>capsule</th><th>闸</th><th>冻结任务</th><th>回归</th><th>结论</th></tr></thead>
+        <tbody></tbody></table>
+    </section>
+
+    <!-- ⛔ 泛化闸是 V6 的核心判据：发展集涨了但 held-out 没涨 ⇒ 判 overfit。 -->
+    <section class="card" id="c-gen">
+      <h2>泛化闸（发展集涨 ≠ 变强）</h2>
+      <table id="gen"><thead><tr><th>capsule</th><th>dev 增益</th><th>held-out 增益</th><th>裁决</th><th>held-out 判别力</th></tr></thead>
+        <tbody></tbody></table>
+    </section>
+
+    <!-- ── 可操作：能力调用（UCI）──────────────────────────────────
+         ⛔ 这里每个按钮都打真端点。做成"看起来能点、其实没接"的按钮
+         就是假仪表 —— 所以调用结果会把 status / verified / 超时落差
+         全部原样显示，包括失败。 -->
+    <section class="card" id="c-caps">
+      <h2>能力调用 · UCI（真 POST /api/invoke）</h2>
+      <div class="row">
+        <select id="cap-sel"><option>（装载中…）</option></select>
+        <span class="sub" id="cap-meta"></span>
+      </div>
+      <div class="row">
+        <span class="sub">args（JSON）</span>
+        <button class="ghost" id="cap-fill">填入示例</button>
+      </div>
+      <textarea id="cap-args">{}</textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="cap-run">调用</button>
+        <span class="sub" id="cap-cost"></span>
+      </div>
+      <pre class="out" id="cap-out">（未调用）</pre>
+    </section>
+
+    <section class="card lv-verb" id="c-hot">
+      <h2>能力热装载</h2>
+      <div class="sub" id="hot-state">…</div>
+      <div class="row" style="margin-top:8px">
+        <input type="text" id="hot-path" placeholder="清单绝对路径，如 /tmp/my.json"
+               style="flex:1;min-width:220px" />
+        <button id="hot-run">装载</button>
+      </div>
+      <pre class="out" id="hot-out">（未装载）</pre>
+      <!-- ⛔ 默认关闭是**设计**（热装载 = 运行时改变本进程能力集）。
+           不给"一键开启"的按钮：那等于让浏览器替你放宽信任边界。 -->
+      <div class="sub" style="margin-top:8px">
+        默认关闭（服务端须 <code>--caps-hot</code> 启动）。理由与命令行一致：
+        热装载比 invoke 更靠近信任边界 —— 清单里的 <code>python</code>
+        形态是任意代码进本进程。
+      </div>
+    </section>
+
+    <!-- ⛔ 没有 HTTP 端点的动作**不做按钮**：进化与知识摄入只能走 CLI。
+         给命令而不是给假按钮 —— 点了没反应的按钮比没有按钮更误导。 -->
+    <section class="card lv-std" id="c-cli">
+      <h2>命令行（无端点 ⇒ 不做按钮）</h2>
+      <div class="sub">以下动作没有对应 HTTP 端点，复制命令在终端执行：</div>
+      <div class="cli"><code>python -m aether.cli evolve --rounds 3 --parallel 4</code>
+        <button class="ghost" data-copy="python -m aether.cli evolve --rounds 3 --parallel 4">复制</button></div>
+      <div class="cli"><code>python -m aether.cli memory ingest knowledge.json</code>
+        <button class="ghost" data-copy="python -m aether.cli memory ingest knowledge.json">复制</button></div>
+      <div class="cli"><code>python -m aether.cli verify-chain</code>
+        <button class="ghost" data-copy="python -m aether.cli verify-chain">复制</button></div>
+      <div class="cli"><code>python -m aether.cli rebuild</code>
+        <button class="ghost" data-copy="python -m aether.cli rebuild">复制</button></div>
+      <div class="sub" style="margin-top:8px">
+        <code>--parallel 4</code> 只并行 runner 计算，run_id 与账本写入仍串行
+        （顺序漂移 ⇒ 账本不可复现）。
+      </div>
+    </section>
+
+    <!-- 详细档：事件 kind 分布（读数而不是"看起来很忙"） -->
+    <section class="card lv-verb">
+      <h2>事件 kind 分布</h2>
+      <div id="kinds"></div>
+    </section>
+  </main>
+
+  <!-- ═══ 右栏：检视器 ═════════════════════════════════════════ -->
+  <aside class="col side">
+    <div class="card">
+      <h2>检视器</h2>
+      <div class="tabs">
+        <button data-tab="file" class="on">文件</button>
+        <button data-tab="event">事件</button>
+        <button data-tab="diff">差异</button>
+      </div>
+
+      <!-- 文件预览：来自 GET /api/file（只读、仓库内、限 512KB、只认文本后缀） -->
+      <div id="tab-file">
+        <div class="sub" id="pv-meta">（点左栏的文件）</div>
+        <pre id="pv-body">（无内容）</pre>
+      </div>
+
+      <!-- 事件详情：点中栏事件流的某一行 -->
+      <div id="tab-event" style="display:none">
+        <div class="sub" id="ev-meta">（点事件流的某一行）</div>
+        <pre class="out" id="ev-body">（无内容）</pre>
+      </div>
+
+      <!-- 差异：与**同 kind 的上一条**事件逐键对拍 -->
+      <div id="tab-diff" style="display:none">
+        <div class="sub" id="df-meta">（点事件流的某一行）</div>
+        <div class="dl" id="df-body"></div>
+      </div>
     </div>
-  </section>
-</main>
+  </aside>
+</div>
 
 <footer>
-  数据来源：<code>GET /api/status</code> · 唯一事实源 = <code>data/ledger.jsonl</code>
-  （内容寻址 + 哈希链，改一条即断链）· 只读面板不写状态；
+  数据来源：<code>GET /api/status</code>（唯一事实源 = <code>data/ledger.jsonl</code>，
+  内容寻址 + 哈希链，改一条即断链）· 文件面板 <code>GET /api/files</code> /
+  <code>GET /api/file</code>（只读，限定仓库内）· 只读面板不写状态；
   「能力调用 / 热装载」是<b>真写</b>，受服务端三道闸约束
 </footer>
 
 <script type="module">
 const API = location.origin.includes(":8611") ? "/api/status?limit=300"
                                               : "http://127.0.0.1:8611/api/status?limit=300";
+const BASE = location.origin.includes(":8611") ? "" : "http://127.0.0.1:8611";
 
 const el = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? "").replace(/[<>]/g, (c) => (c === "<" ? "&lt;" : "&gt;"));
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
+  (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const detail = () => document.body.dataset.detail;
+
+/* ⛔⛔ 渲染中断必须可见（2026-10-14 事故）：`load()` 内部抛错会变成
+      unhandled rejection 而**页面毫无变化**（卡片标题是静态 HTML、占位符
+      是 "…" ⇒ 9 个面板空着也看不出来）。这两条 handler 让它死在脸上。 */
+function fatal(where, e) {
+  const box = el("render-err");
+  box.style.display = "";
+  box.innerHTML = `<b style="color:var(--bad)">⛔ 渲染中断（${esc(where)}）</b><br />`
+    + `<code>${esc(e && (e.stack || e.message || String(e)))}</code><br />`
+    + `<span class="sub">页面上的读数从这一刻起<b>不可信</b>：`
+    + `下方面板可能是上一轮残留，也可能从未渲染。修好之前别拿它下结论。</span>`;
+}
+window.addEventListener("error", (ev) => fatal("window.onerror", ev.error ?? ev.message));
+window.addEventListener("unhandledrejection", (ev) => fatal("unhandledrejection", ev.reason));
+
+let LATEST = null;   // 最近一次成功的 /api/status 全量数据（检视器用）
 
 async function load() {
   let data;
@@ -225,6 +414,12 @@ async function load() {
     return;
   }
 
+  /* ⛔⛔ `EVS` 必须在这里就声明：下面「系统状态」的 IIFE 会引用它。
+       曾把它放在 stats 之后（`const evs = data.events ?? []`）⇒ stats 里的
+       IIFE 触发 TDZ ⇒ load() 整段死掉，而页面看起来一切正常。 */
+  const EVS = data.events ?? [];
+  LATEST = data;
+
   const led = data.ledger ?? {};
   const chain = el("chain");
   chain.textContent = led.chain_ok ? "账本链 ✅ 完整" : "账本链 ❌ 断裂";
@@ -236,28 +431,29 @@ async function load() {
   const cons = data.consistency ?? {};
   const kinds = led.by_kind ?? {};
   const mem0 = data.memory ?? {};
-  el("stats").innerHTML = [
-    ["事件总数", led.count ?? 0],
-    ["账本头 hash", (led.head ?? "—").slice(0, 12)],
-    ["harness 快照", st.n_snapshots ?? 0],
+  // 每项第三位 = 最低可见档位（0=紧凑也显示，1=标准，2=详细）
+  const rows = [
+    ["事件总数", led.count ?? 0, 0],
+    ["账本头 hash", (led.head ?? "—").slice(0, 12), 0],
+    ["harness 快照", st.n_snapshots ?? 0, 0],
     // ⛔ 不再单独显示"运行记录"：脱离账本条数它会变成假读数
     //    （实测 51 条 vs 账本 495 条）。两个数必须**并排**出现。
     ["账本判定 / 投影记录",
-      `${cons.ledger_verdicts ?? "?"} / ${cons.projection_runs ?? st.n_runs ?? 0}`],
-    ["投影一致性", cons.ok === undefined ? "—" : (cons.ok ? "✅ 一致" : "❌ 不一致")],
-    ["同键覆盖次数", cons.overwrite_count ?? 0],
+      `${cons.ledger_verdicts ?? "?"} / ${cons.projection_runs ?? st.n_runs ?? 0}`, 0],
+    ["投影一致性", cons.ok === undefined ? "—" : (cons.ok ? "✅ 一致" : "❌ 不一致"), 0],
+    ["同键覆盖次数", cons.overwrite_count ?? 0, 1],
     // ⛔ 提前终止必须看得见：否则"只跑了 3 轮"会被当成崩了，而它其实是
     //    "连续无事可做 ⇒ 正常收敛"（实测 10 轮里后 9 轮是同一轮重复）。
     ["演化状态", (() => {
-      const stop = [...evs].reverse().find((e) => e.kind === "evolution.stopped");
+      const stop = [...EVS].reverse().find((e) => e.kind === "evolution.stopped");
       if (stop) {
         const p = stop.payload ?? {};
         return `⏹ 已停 @r${p.round_no ?? "?"}/${p.rounds_requested ?? "?"} · `
           + `${String(p.reason ?? "").split("（")[0] || "无事可做"}`;
       }
-      const cm = [...evs].reverse().find((e) => e.kind === "harness.commit");
+      const cm = [...EVS].reverse().find((e) => e.kind === "harness.commit");
       return cm ? "▶ 运行中" : "—";
-    })()],
+    })(), 0],
     // ⛔ 记忆也是因果链的一环（跨运行继承、直接喂给提议器）：库里有几条、
     //    其中几条在账本里查得到写入记录，必须并排显示 —— 只显示"有 11 条"
     //    会把"这 11 条是谁写的、完全没有证据"藏起来（2026-10-13 实测）。
@@ -265,26 +461,29 @@ async function load() {
       `${mem0.total ?? 0} / ${mem0.ledger_write_events ?? 0}`
       + (mem0.ledger_trace === "complete" ? " ✅" :
          mem0.ledger_trace === "pre_ledger" ? " ⚠️账本化前" :
-         mem0.ledger_trace === "partial" ? " ❌对不上" : "")],
+         mem0.ledger_trace === "partial" ? " ❌对不上" : ""), 0],
     ["层归因（成功/失败）",
-      `${kinds["attribution.layer"] ?? 0} / ${kinds["attribution.unavailable"] ?? 0}`],
+      `${kinds["attribution.layer"] ?? 0} / ${kinds["attribution.unavailable"] ?? 0}`, 1],
     // ⛔ 判定的**可信度**取决于它是在哪一层隔离下产出的：
     //    process = 只到进程层（env 已净化/资源受限），文件系统**未隔离**。
     //    只看 reward 会把"通过"当成绝对的，而它可能来自未被隔离的执行。
     ["执行沙箱", (() => {
-      const v = [...evs].reverse().find(
+      const v = [...EVS].reverse().find(
         (e) => e.kind === "eval.verdict"
                && (e.payload?.evidence?.sandbox?.tier));
       const s = v?.payload?.evidence?.sandbox;
       if (!s) return "—";
       return `${s.tier}${s.fs_isolated ? " · fs已隔离" : " · ⚠️fs未隔离"}`;
-    })()],
-    ["平均 reward", st.avg_reward ?? 0],
-    ["harness.commit", kinds["harness.commit"] ?? 0],
-    ["harness.revert", kinds["harness.revert"] ?? 0],
-    ["gate.result", kinds["gate.result"] ?? 0],
-    ["evolve.noop", kinds["evolve.noop"] ?? 0],
-  ].map(([k, v]) => `<div class="kv"><span>${k}</span><span>${esc(v)}</span></div>`).join("");
+    })(), 0],
+    ["平均 reward", st.avg_reward ?? 0, 0],
+    ["harness.commit", kinds["harness.commit"] ?? 0, 2],
+    ["harness.revert", kinds["harness.revert"] ?? 0, 2],
+    ["gate.result", kinds["gate.result"] ?? 0, 2],
+    ["evolve.noop", kinds["evolve.noop"] ?? 0, 2],
+  ];
+  const lvl = { compact: 0, standard: 1, verbose: 2 }[detail()];
+  el("stats").innerHTML = rows.filter(([, , lv]) => lv <= lvl)
+    .map(([k, v]) => `<div class="kv"><span>${k}</span><span>${esc(v)}</span></div>`).join("");
 
   // ── 告警：投影与账本对不上 ⇒ 上面的读数全都不可信 ──────────────
   const alerts = [];
@@ -316,7 +515,7 @@ async function load() {
   // ⛔ 沙箱只到进程层是**环境级**事实：被执行代码仍可能越界读写/fork。
   //    不写进告警的话，"沙箱"这个词会让人以为已经隔离了。
   {
-    const sv = [...evs].reverse().find(
+    const sv = [...EVS].reverse().find(
       (e) => e.kind === "eval.verdict" && e.payload?.evidence?.sandbox?.tier);
     const s = sv?.payload?.evidence?.sandbox;
     if (s && s.fs_isolated === false) {
@@ -327,24 +526,31 @@ async function load() {
     }
   }
   const renderAlerts = () => {
-    el("alert-card").style.display = alerts.length ? "" : "none";
+    el("c-alert").style.display = alerts.length ? "" : "none";
     el("alert-body").innerHTML = alerts.map((a) => `<div>· ${esc(a)}</div>`).join("");
+    const n = el("nav-alert-n");
+    n.style.display = alerts.length ? "" : "none";
+    n.textContent = String(alerts.length);
+    const a0 = document.querySelector('#nav a[href="#c-alert"]');
+    if (a0) a0.classList.toggle("hot", alerts.length > 0);
   };
   renderAlerts();
 
-  const evs = data.events ?? [];
-
-  // ── 事件流 ──────────────────────────────────────────────────
-  el("events").querySelector("tbody").innerHTML = evs.slice(-20).reverse().map((e) => {
+  // ── 事件流（条数随详略档变化：紧凑 8 / 标准 20 / 详细 40）──────
+  const nEvents = { compact: 8, standard: 20, verbose: 40 }[detail()];
+  const evs = EVS;
+  const view = evs.slice(-nEvents).reverse();
+  el("events-note").textContent = `最近 ${view.length} / 共 ${evs.length} 条（点一行看详情）`;
+  el("events").querySelector("tbody").innerHTML = view.map((e) => {
     const p = e.payload ?? {};
     const summary = (p.task_id ? p.task_id + " " : "")
       + (p.capsule ? p.capsule + " " : "")
       + (p.reason ? p.reason : "")
       + (typeof p.reward === "number" ? "r=" + p.reward : "")
       + (p.regressions?.length ? " 回归:" + p.regressions.length : "");
-    return `<tr><td>${e.seq}</td><td>${esc(e.kind)}</td>
-            <td>${esc(summary).slice(0, 90)}</td></tr>`;
-  }).join("");
+    return `<tr data-seq="${e.seq}" class="click"><td>${e.seq}</td>`
+      + `<td>${esc(e.kind)}</td><td>${esc(summary).slice(0, 90)}</td></tr>`;
+  }).join("") || '<tr><td colspan="3" class="sub">（无事件）</td></tr>';
 
   // ── reward 曲线（按 harness 分组）────────────────────────────
   const byH = new Map();
@@ -356,21 +562,19 @@ async function load() {
     if (!byH.has(k)) byH.set(k, []);
     byH.get(k).push(Number(p.reward ?? 0));
   }
-  const rows = [...byH.entries()];
+  const hrows = [...byH.entries()];
   // ⛔ 标题写的是"平均 reward"，高度就必须是 reward —— 上一版高度用的是
   //    **判定条数**：reward 恒 0 的一堆判定会把柱子撑到最高，看起来"很活跃"。
   //    这就是假仪表最典型的形态：读数真实，含义是假的。
-  el("bars").innerHTML = rows.map(([k, v]) => {
+  el("bars").innerHTML = hrows.map(([k, v]) => {
     const avg = v.reduce((a, b) => a + b, 0) / v.length;
     return `<div class="bar ${avg === 0 ? "zero" : ""}"
               style="height:${Math.max(3, avg * 100)}%"
               title="${k}: ${v.length} 条, 均值 ${avg.toFixed(2)}"></div>`;
   }).join("") || '<div class="sub">暂无 dev 判定</div>';
-  el("bars-note").textContent = `${rows.length} 个 harness 变体 · 高度=平均 reward · 红=均值 0`;
+  el("bars-note").textContent = `${hrows.length} 个 harness 变体 · 高度=平均 reward · 红=均值 0`;
 
   // ── 进化树 ──────────────────────────────────────────────────
-  const byId = new Map();
-  for (const s of (data.snapshots ?? [])) byId.set(s.harness_id, s);
   const children = new Map();
   for (const s of (data.snapshots ?? [])) {
     const par = s.parent_id || "#root";
@@ -396,8 +600,7 @@ async function load() {
     : (snapTotal ? `共 ${snapTotal} 个快照（完整）` : "");
 
   // ── 非回归闸裁决 ────────────────────────────────────────────
-  //    ⛔ 上一版有一列"优势"恒为 `—`（账本里根本没有这个值）⇒ 假列。
-  //    改成账本里真有的字段：冻结任务数 / 回归数 / 口径原因。
+  //    ⛔ 这里没有"优势"列（账本里根本没有那个值 ⇒ 假列）。
   const gates = evs.filter((e) => e.kind === "gate.result").map((e) => e.payload);
   el("gates").querySelector("tbody").innerHTML = gates.slice(-12).map((g) => {
     const ok = !!g.passed;
@@ -445,12 +648,28 @@ async function load() {
       + `（critical，见 supervisor PASS_WITHOUT_DISCRIMINATION）`);
   }
   renderAlerts();
+
+  // ── 详细档：kind 分布 ───────────────────────────────────────
+  el("kinds").innerHTML = Object.entries(kinds).sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><span>${v}</span></div>`).join("")
+    || '<div class="sub">（无）</div>';
+
+  el("render-stamp").textContent = "· 渲染 ok " + new Date().toLocaleTimeString();
+}
+
+/* ⛔ 包一层：load() 内部任何一处抛错都会写进顶部横幅，而不是静默。
+      这是 2026-10-14 那条事故的直接产物。 */
+async function render_once() {
+  try { await load(); }
+  catch (e) {
+    const box = el("render-err");
+    box.style.display = "";
+    box.innerHTML = `<b style="color:var(--bad)">⛔ 渲染中断（load）</b><br />`
+      + `<code>${esc(e && (e.stack || e.message || String(e)))}</code>`;
+  }
 }
 
 // ── 可操作面板：能力调用 / 热装载 ──────────────────────────────
-// ⛔ BASE 与上面 `API` 同源推导：控制台可能被 serve 托管（同源），
-//    也可能被直接以 file:// 打开（那时请求 8611）。两种情况都要能用。
-const BASE = location.origin.includes(":8611") ? "" : "http://127.0.0.1:8611";
 const caps = { list: [], byId: new Map() };
 
 async function jfetch(path, opts) {
@@ -564,9 +783,209 @@ for (const b of document.querySelectorAll("[data-copy]")) {
   });
 }
 
-load();
-loadCaps();
-setInterval(load, 15000);
+// ── 详略三档 ──────────────────────────────────────────────────
+function applyDetail(level) {
+  document.body.dataset.detail = level;
+  for (const b of el("detail-seg").querySelectorAll("button")) {
+    b.classList.toggle("on", b.dataset.level === level);
+  }
+  try { localStorage.setItem("aether.detail", level); } catch (_) { /* file:// 下可能不可用 */ }
+  render_once();     // 档位会改变"取多少条 / 显示哪些行"，必须重渲染
+}
+for (const b of el("detail-seg").querySelectorAll("button")) {
+  b.addEventListener("click", () => applyDetail(b.dataset.level));
+}
+try {
+  const saved = localStorage.getItem("aether.detail");
+  if (saved) applyDetail(saved);
+} catch (_) { /* 忽略 */ }
+
+// ── 左栏：Workspace 文件树（只读 GET /api/files）────────────────
+const treeState = new Map();     // path -> entries
+const openDirs = new Set(["."]);
+
+async function fetchDir(p) {
+  if (treeState.has(p)) return treeState.get(p);
+  const { status, body } = await jfetch("/api/files?path=" + encodeURIComponent(p));
+  if (status !== 200) {
+    treeState.set(p, { error: body?.error ?? `HTTP ${status}` });
+  } else {
+    treeState.set(p, body);
+  }
+  return treeState.get(p);
+}
+
+function renderTree() {
+  const box = el("ftree");
+  // ⛔ 跳过名单**从服务端给的** `skipped_dirs` 渲染，不在页面上抄一份：
+  //    两处各写一份 ⇒ 服务端改了名单而页面还在说旧名字 ⇒ 假读数。
+  const skip = treeState.get(".")?.skipped_dirs;
+  if (skip?.length) {
+    el("ftree-skip").innerHTML = skip.map((d) => `<code>${esc(d)}</code>`).join(" ");
+  } else if (skip !== undefined) {
+    el("ftree-skip").textContent = "（无）";
+  }
+  const lines = [];
+  const emit = (p, depth) => {
+    const d = treeState.get(p);
+    if (!d) return;
+    if (d.error) {
+      lines.push(`${"  ".repeat(depth)}<span style="color:var(--bad)">⚠ ${esc(d.error)}</span>`);
+      return;
+    }
+    for (const e of d.entries) {
+      const cp = p === "." ? e.name : `${p}/${e.name}`;
+      const isDir = e.kind === "dir";
+      const open = openDirs.has(cp);
+      const sel = cp === selectedFile ? " sel" : "";
+      lines.push(`<div class="fn${sel}" data-p="${esc(cp)}" data-dir="${isDir ? 1 : 0}"`
+        + ` style="padding-left:${4 + depth * 12}px">`
+        + `<span class="t">${isDir ? (open ? "▾" : "▸") : "·"}</span>`
+        + `<span class="${isDir ? "dir" : ""}">${esc(e.name)}</span>`
+        + (isDir ? "" : `<span class="sz">${e.size}</span>`) + `</div>`);
+      if (isDir && open) emit(cp, depth + 1);
+    }
+    if (d.truncated) {
+      lines.push(`${"  ".repeat(depth)}<span class="sub">… 还有更多（单目录上限 500）</span>`);
+    }
+  };
+  emit(".", 0);
+  box.innerHTML = lines.join("") || '<span class="sub">（空）</span>';
+  for (const n of box.querySelectorAll(".fn")) {
+    n.addEventListener("click", async () => {
+      const p = n.dataset.p;
+      if (n.dataset.dir === "1") {
+        if (openDirs.has(p)) openDirs.delete(p);
+        else { openDirs.add(p); await fetchDir(p); }
+        renderTree();
+      } else {
+        selectedFile = p;
+        renderTree();
+        await previewFile(p);
+        showTab("file");
+      }
+    });
+  }
+}
+
+let selectedFile = null;
+
+// ⛔ 预览内容一律 `textContent`：文件名/内容都来自仓库，innerHTML 就是 XSS 入口。
+async function previewFile(p) {
+  const { status, body } = await jfetch("/api/file?path=" + encodeURIComponent(p));
+  const meta = el("pv-meta");
+  const out = el("pv-body");
+  if (status !== 200) {
+    meta.innerHTML = `<span style="color:var(--bad)">HTTP ${status}</span> · ${esc(p)}`;
+    out.textContent = (body?.error ?? "读取失败")
+      + (body?.previewable ? `\n\n可预览的后缀：${body.previewable.join(" ")}` : "")
+      + (body?.hint ? `\n\n${body.hint}` : "");
+    return;
+  }
+  meta.innerHTML = `${esc(body.path)} · ${body.bytes} B · `
+    + `<code>sha256 ${esc(String(body.sha256).slice(0, 16))}…</code>`;
+  out.textContent = body.content;
+}
+
+async function initTree() {
+  await fetchDir(".");
+  renderTree();
+}
+
+// ── 右栏：检视器（文件 / 事件 / 差异）───────────────────────────
+function showTab(name) {
+  for (const b of document.querySelectorAll(".tabs button")) {
+    b.classList.toggle("on", b.dataset.tab === name);
+  }
+  el("tab-file").style.display = name === "file" ? "" : "none";
+  el("tab-event").style.display = name === "event" ? "" : "none";
+  el("tab-diff").style.display = name === "diff" ? "" : "none";
+}
+for (const b of document.querySelectorAll(".tabs button")) {
+  b.addEventListener("click", () => showTab(b.dataset.tab));
+}
+
+let selectedSeq = null;
+
+el("events").querySelector("tbody").addEventListener("click", (ev) => {
+  const tr = ev.target.closest("tr[data-seq]");
+  if (!tr) return;
+  const seq = Number(tr.dataset.seq);
+  selectedSeq = seq;
+  for (const r of el("events").querySelectorAll("tr[data-seq]")) {
+    r.classList.toggle("sel", Number(r.dataset.seq) === seq);
+  }
+  inspectEvent(seq);
+});
+
+function inspectEvent(seq) {
+  const evs = LATEST?.events ?? [];
+  const e = evs.find((x) => x.seq === seq);
+  if (!e) return;
+  el("ev-meta").innerHTML = `#${e.seq} · <code>${esc(e.kind)}</code> · ${esc(e.ts ?? "")}`;
+  el("ev-body").textContent = JSON.stringify(e, null, 2);
+
+  // ⛔ 与**同 kind 的上一条**比：跨 kind 比是拿苹果比橘子 —— 字段集合
+  //    本来就不同，diff 出来的一片红只是"它们是两种事件"。
+  const idx = evs.findIndex((x) => x.seq === seq);
+  let prev = null;
+  for (let i = idx - 1; i >= 0; i--) if (evs[i].kind === e.kind) { prev = evs[i]; break; }
+  renderDiff(e, prev, evs.length);
+}
+
+function diffLines(a, b, prefix, depth, out) {
+  const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+  const keys = new Set([...Object.keys(a ?? {}), ...Object.keys(b ?? {})]);
+  for (const k of [...keys].sort()) {
+    const av = a?.[k], bv = b?.[k];
+    if (isObj(av) || isObj(bv)) {
+      if (!isObj(av) || !isObj(bv)) {
+        out.push(["~", prefix + k, JSON.stringify(av), JSON.stringify(bv)]);
+      } else if (depth < 3) {
+        diffLines(av, bv, prefix + k + ".", depth + 1, out);
+      } else if (JSON.stringify(av) !== JSON.stringify(bv)) {
+        out.push(["~", prefix + k, "{…}", "{…}"]);
+      }
+    } else if (JSON.stringify(av) !== JSON.stringify(bv)) {
+      out.push([av === undefined ? "+" : (bv === undefined ? "-" : "~"),
+                prefix + k, av, bv]);
+    }
+  }
+  return out;
+}
+
+function renderDiff(cur, prev, windowN) {
+  const meta = el("df-meta"), box = el("df-body");
+  if (!prev) {
+    meta.innerHTML = `#${cur.seq} · <code>${esc(cur.kind)}</code>`;
+    // ⛔ 找不到上一条时，必须区分「真的是第一条」与「只是不在窗口里」
+    //    （/api/status?limit=300 只取最近 300 条）⇒ 否则会把"没取到"读成"没有变化"。
+    box.innerHTML = `<div class="sub">窗口内（最近 ${windowN} 条）没有同 kind 的更早事件`
+      + ` ⇒ 既可能是它本来就是第一条，也可能是更早的没取到。`
+      + `别把它读成"没有变化"。</div>`;
+    return;
+  }
+  const all = diffLines(prev.payload ?? {}, cur.payload ?? {}, "", 0, []);
+  const CAP = 60;
+  meta.innerHTML = `#${prev.seq} → #${cur.seq} · <code>${esc(cur.kind)}</code>`
+    + ` · 共 <b>${all.length}</b> 处 payload 差异` + (all.length > CAP ? `（显示前 ${CAP}）` : "");
+  const short = (v) => { const s = JSON.stringify(v); return s.length > 60 ? s.slice(0, 57) + "…" : s; };
+  box.innerHTML = (all.length
+    ? all.slice(0, CAP).map(([t, k, av, bv]) => {
+        const cls = t === "+" ? "a" : (t === "-" ? "d" : "c");
+        const txt = t === "+" ? `${k}: ${short(bv)}（新增）`
+                  : t === "-" ? `${k}: ${short(av)}（消失）`
+                  : `${k}: ${short(av)} → ${short(bv)}`;
+        return `<div class="${cls}">${t} ${esc(txt)}</div>`;
+      }).join("")
+    : `<div class="sub">与同 kind 上一条（#${prev.seq}）的 payload 完全一致</div>`);
+}
+
+// ── 启动 ──────────────────────────────────────────────────────
+await render_once();
+await loadCaps();
+await initTree();
+setInterval(render_once, 15000);
 </script>
 </body>
 </html>

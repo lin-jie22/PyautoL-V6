@@ -23,3 +23,6 @@ _sandbox.sb
 _sandbox.json
 node_modules/
 .DS_Store
+
+#: REA 桥的全量输出落盘（运行时投影，不是源）
+data/rea/

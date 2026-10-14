@@ -54,8 +54,10 @@
 """
 from __future__ import annotations
 
+import hashlib
 import http.client
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -599,6 +601,131 @@ S.Handler.caps_hot = False
 S.Handler.gateway = None
 S.Handler.caps_src = ""
 S.Handler.caps_reload_count = 0
+srv.close()
+
+print("=" * 68)
+print("J 组 · 文件浏览/预览（`/api/files` `/api/file`）—— 只读，且只许看仓库内")
+
+#: 为什么单独一组：这两个端点是"控制台能看文件"这条需求的实现，它们把
+#: **文件系统**接到了 HTTP 上。只读端点的风险不是"被写坏"，是"被读穿"
+#: —— 少一条约束就是任意文件读取。
+srv = _Server()
+
+_data = srv.dir / "data"          #: `_Server` 已经建好了
+(srv.dir / "README.md").write_text("# hello\n", encoding="utf-8")
+(_data / "aether.db").write_bytes(b"\x00\x01binary-not-previewable")
+(srv.dir / "bad.md").write_bytes(b"\xff\xfe\x00 not utf8")     #: 后缀可预览，内容不是 UTF-8
+(srv.dir / "big.md").write_text("x" * (S.MAX_FILE_BYTES + 1024), encoding="utf-8")
+#: 三个"整棵跳过"的目录：列根目录时不得出现
+for d in (".git", "node_modules", "__pycache__"):
+    (srv.dir / d).mkdir(exist_ok=True)
+    (srv.dir / d / "junk.txt").write_text("junk", encoding="utf-8")
+
+#: J1 列根目录：200，`n` 跟随实际条目数
+code, _, b = srv.get("/api/files?path=.")
+ck("J1 /api/files 列根目录 200 且 n == len(entries)",
+   code == 200 and b.get("n") == len(b.get("entries", [])), f"{code} {b.get('n')}")
+#: J2 ⛔ `n` 不得是"目录里有多少"：超上限时必须 `truncated`，否则前端把
+#:    "还有更多"读成"就这些"
+many = srv.dir / "many"
+many.mkdir()
+for i in range(S.MAX_LIST_ENTRIES + 10):
+    (many / f"f{i:04d}.txt").write_text("x", encoding="utf-8")
+code, _, b = srv.get("/api/files?path=many")
+ck("J2 超 500 条 ⇒ truncated=True 且 n 跟随实际（不是目录总数）",
+   code == 200 and b.get("truncated") is True
+   and b.get("n") == S.MAX_LIST_ENTRIES
+   and len(b.get("entries", [])) == S.MAX_LIST_ENTRIES,
+   f"{code} n={b.get('n')} truncated={b.get('truncated')}")
+#: J3 跳过名单**由服务端给出**（前端不许自己抄一份 ⇒ 改了一处另一处说谎）
+code, _, b = srv.get("/api/files?path=.")
+ck("J3 响应带 skipped_dirs（前端从这里渲染，不硬编码名单）",
+   ".git" in (b.get("skipped_dirs") or [])
+   and "node_modules" in (b.get("skipped_dirs") or []),
+   f"{b.get('skipped_dirs')}")
+names = [e["name"] for e in b.get("entries", [])]
+ck("J4 跳过目录不出现在列举里（.git / node_modules / __pycache__）",
+   not ({"\.git", "node_modules", "__pycache__"} & set(names)), f"{names}")
+
+#: J5–J7 三条路径闸：**少一条就是任意文件读取**
+code, _, b = srv.get("/api/files?path=../../..")
+#: ⛔ 必须区分"被闸拦下"与"本来就不存在"：两者都可能是 4xx，但含义相反。
+ck("J5 `..` 逃出仓库根 ⇒ 400（且说清是逃出，不是'不存在'）",
+   code == 400 and "逃出" in json.dumps(b, ensure_ascii=False), f"{code} {b}")
+code, _, _ = srv.get("/api/files?path=/etc")
+ck("J6 绝对路径 ⇒ 400", code == 400, f"{code}")
+code, _, _ = srv.get("/api/files?path=~/Library")
+ck("J7 `~` ⇒ 400", code == 400, f"{code}")
+#: J8 缺 path ⇒ 当作仓库根（不是 400）—— 这是**设计**，端点得能用
+code, _, b = srv.get("/api/files")
+ck("J8 缺 path ⇒ 按仓库根处理（200，不是报错）",
+   code == 200 and b.get("path") == ".", f"{code} {b.get('path')}")
+#: J9 列**文件**（不是目录）⇒ 400，别拿"空列表"糊过去
+code, _, b = srv.get("/api/files?path=README.md")
+ck("J9 对文件列目录 ⇒ 400（明确说'不是目录'）",
+   code == 400 and "不是目录" in json.dumps(b, ensure_ascii=False), f"{code} {b}")
+
+#: J10 正常预览 + sha256 必须与内容对得上（否则"看的是哪份"说不清）
+code, _, b = srv.get("/api/file?path=README.md")
+want = hashlib.sha256(b"# hello\n").hexdigest()
+ck("J10 /api/file 文本预览 200 且 sha256 与内容一致",
+   code == 200 and b.get("sha256") == want and b.get("bytes") == 8,
+   f"{code} {b.get('sha256')}")
+for label, p, want_code, hint in [
+    ("J11 绝对路径 /etc/passwd", "/etc/passwd", 400, ""),
+    ("J12 `..` 穿越", "../../etc/passwd", 400, ""),
+    ("J13 二进制后缀（.db）", "data/aether.db", 415, "previewable"),
+    ("J14 后缀可预览但内容非 UTF-8", "bad.md", 415, ""),
+    ("J15 超 512KB", "big.md", 413, "hint"),
+]:
+    code, _, b = srv.get("/api/file?path=" + p.replace("/", "/"))
+    ok = code == want_code and (not hint or hint in b)
+    ck(f"{label} ⇒ {want_code}", ok, f"{code} {str(b)[:120]}")
+#: J16 415 时必须给出"哪些能预览" —— 只说"不支持"等于让人猜
+code, _, b = srv.get("/api/file?path=data/aether.db")
+ck("J16 415 时列出可预览后缀（不给名单 = 让人猜）",
+   ".md" in (b.get("previewable") or []), f"{b.get('previewable')}")
+
+#: J17 ⛔ **符号链接逃逸**（`..` 与绝对路径都挡住了，软链是第三条路）：
+#:    仓库里一个指向外部的软链本身不是漏洞，**跟随它**才是。
+_out = Path(tempfile.mkdtemp(prefix="v6outside_"))
+(out_file := _out / "secret.md").write_text("OUTSIDE-SECRET", encoding="utf-8")
+os.symlink(out_file, srv.dir / "escape.md")
+code, _, b = srv.get("/api/file?path=escape.md")
+ck("J17 符号链接指向仓库外 ⇒ 400（先 resolve 再判，不是先拼后判）",
+   code == 400, f"{code} {str(b)[:120]}")
+
+#: J18 反证：把 `_safe_repo_path` 换成"先拼后判字符串前缀"的旧写法
+#:    ⇒ 同一个软链请求必须**放行**（200 且读到仓库外内容）。
+#:    ⛔ 没有这条，J17 可能是"请求本身就打不到那个分支"的恒绿。
+_orig_safe = S._safe_repo_path
+
+
+def _naive_safe(root, raw):                       # noqa: ANN001
+    """旧写法：拼完直接判字符串前缀，既**不 normalize** 也**不 resolve**
+    —— `..` 与软链都能穿过去。
+
+    ⛔ 反证版必须形神兼备：这里若对 root 先 `resolve()`，macOS 上 `/var`
+       是 `/private/var` 的软链 ⇒ 前缀判断自己就把请求挡了 ⇒ 反证假红
+       （看着像"闸有效"，其实是"反证没造对"）。
+    """
+    from pathlib import Path as _P
+    p = _P(root) / (raw or ".")
+    if not str(p).startswith(str(_P(root))):
+        return None, "逃出"
+    return p, None
+
+
+S._safe_repo_path = _naive_safe
+try:
+    code_naive, _, b_naive = srv.get("/api/file?path=escape.md")
+finally:
+    S._safe_repo_path = _orig_safe
+ck("J18 反证：去掉 resolve ⇒ 同一软链请求读到仓库外内容（证明 J17 有牙）",
+   code_naive == 200 and "OUTSIDE-SECRET" in b_naive.get("content", ""),
+   f"{code_naive} {str(b_naive)[:120]}")
+
+shutil.rmtree(_out, ignore_errors=True)
 srv.close()
 
 print("=" * 68)
