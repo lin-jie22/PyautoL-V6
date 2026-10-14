@@ -3,12 +3,22 @@
   V6 · AETHER 控制台（零构建：纯静态 HTML + 原生 ES module）。
 
   为什么不上 Vite/React：控制台的价值是"能随时打开看账本"，引入构建链
-  会让它变成另一个需要维护的服务。它只读 API（`aether/serve.py`），
-  不写任何状态 —— 与监督器一样遵循"只读"原则。
+  会让它变成另一个需要维护的服务。它由 `aether/serve.py` 同源托管
+  （`/` 与 `/console/`）⇒ 没有 CORS，也没有第二个服务要维护。
+
+  ⛔ 面板分两类，**必须区分**：
+    · 只读面板（状态 / 事件流 / 闸 / 泛化）—— 只 GET；
+    · 可操作面板（能力调用 / 热装载）—— 真 POST `/api/invoke`、
+      `/api/capabilities/reload`。它们**不是只读**，但都受服务端三道闸
+      约束（未注册 ⇒ unavailable；内联实现 ⇒ 400；热装载默认关闭 ⇒ 403）。
+
+  ⛔ UI **不提供**"跑进化 / 摄入知识"的按钮：那两个动作没有对应的 HTTP
+     端点，硬做假按钮 = 假仪表。这里给出可复制的 CLI 命令（见「命令行」卡）。
 
   用法：
-      python -m aether.serve --console console      # 起 API + 静态托管
-      打开 http://127.0.0.1:8611/console/
+      python -m aether.ui                     # 一键起服务并打开桌面窗口
+      python -m aether.serve --console console --caps capabilities.example.json
+      打开 http://127.0.0.1:8611/
 -->
 <html lang="zh-CN">
 <head>
@@ -53,6 +63,25 @@
   footer { padding: 12px 24px; color: var(--dim); font-size: 11px;
            border-top: 1px solid var(--line); }
   code { background: rgba(110,118,129,.2); padding: 1px 5px; border-radius: 3px; }
+  /* ── 可操作面板 ───────────────────────────────────────────── */
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+         margin-bottom: 8px; }
+  select, input[type=text], textarea {
+    background: var(--bg); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 8px; font-size: 13px; }
+  textarea { width: 100%; min-height: 74px; font-family: ui-monospace, Menlo, monospace;
+             font-size: 12px; resize: vertical; }
+  select { min-width: 200px; }
+  button { background: var(--acc); color: #06121f; border: 0; border-radius: 6px;
+           padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  button:disabled { background: var(--line); color: var(--dim); cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--acc);
+                 border: 1px solid var(--line); font-weight: 500; }
+  pre.out { background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+            padding: 10px; font-size: 12px; max-height: 260px; overflow: auto;
+            white-space: pre-wrap; word-break: break-all; margin: 8px 0 0; }
+  .cli { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+  .cli code { flex: 1; overflow-x: auto; white-space: nowrap; padding: 6px 8px; }
 </style>
 </head>
 <body>
@@ -108,11 +137,71 @@
     <table id="gen"><thead><tr><th>capsule</th><th>dev 增益</th><th>held-out 增益</th><th>裁决</th><th>held-out 判别力</th></tr></thead>
       <tbody></tbody></table>
   </section>
+
+  <!-- ── 可操作：能力调用（UCI）──────────────────────────────────
+       ⛔ 这里每个按钮都打真端点。做成"看起来能点、其实没接"的按钮
+       就是假仪表 —— 所以调用结果会把 status / verified / 超时落差
+       全部原样显示，包括失败。 -->
+  <section class="card">
+    <h2>能力调用 · UCI（真 POST /api/invoke）</h2>
+    <div class="row">
+      <select id="cap-sel"><option>（装载中…）</option></select>
+      <span class="sub" id="cap-meta"></span>
+    </div>
+    <div class="row">
+      <span class="sub">args（JSON）</span>
+      <button class="ghost" id="cap-fill">填入示例</button>
+    </div>
+    <textarea id="cap-args">{}</textarea>
+    <div class="row" style="margin-top:8px">
+      <button id="cap-run">调用</button>
+      <span class="sub" id="cap-cost"></span>
+    </div>
+    <pre class="out" id="cap-out">（未调用）</pre>
+  </section>
+
+  <section class="card">
+    <h2>能力热装载</h2>
+    <div class="sub" id="hot-state">…</div>
+    <div class="row" style="margin-top:8px">
+      <input type="text" id="hot-path" placeholder="清单绝对路径，如 /tmp/my.json"
+             style="flex:1;min-width:220px" />
+      <button id="hot-run">装载</button>
+    </div>
+    <pre class="out" id="hot-out">（未装载）</pre>
+    <!-- ⛔ 默认关闭是**设计**（热装载 = 运行时改变本进程能力集）。
+         不给"一键开启"的按钮：那等于让浏览器替你放宽信任边界。 -->
+    <div class="sub" style="margin-top:8px">
+      默认关闭（服务端须 <code>--caps-hot</code> 启动）。理由与命令行一致：
+      热装载比 invoke 更靠近信任边界 —— 清单里的 <code>python</code>
+      形态是任意代码进本进程。
+    </div>
+  </section>
+
+  <!-- ⛔ 没有 HTTP 端点的动作**不做按钮**：进化与知识摄入只能走 CLI。
+       给命令而不是给假按钮 —— 点了没反应的按钮比没有按钮更误导。 -->
+  <section class="card">
+    <h2>命令行（无端点 ⇒ 不做按钮）</h2>
+    <div class="sub">以下动作没有对应 HTTP 端点，复制命令在终端执行：</div>
+    <div class="cli"><code>python -m aether.cli evolve --rounds 3 --parallel 4</code>
+      <button class="ghost" data-copy="python -m aether.cli evolve --rounds 3 --parallel 4">复制</button></div>
+    <div class="cli"><code>python -m aether.cli memory ingest knowledge.json</code>
+      <button class="ghost" data-copy="python -m aether.cli memory ingest knowledge.json">复制</button></div>
+    <div class="cli"><code>python -m aether.cli verify-chain</code>
+      <button class="ghost" data-copy="python -m aether.cli verify-chain">复制</button></div>
+    <div class="cli"><code>python -m aether.cli rebuild</code>
+      <button class="ghost" data-copy="python -m aether.cli rebuild">复制</button></div>
+    <div class="sub" style="margin-top:8px">
+      <code>--parallel 4</code> 只并行 runner 计算，run_id 与账本写入仍串行
+      （顺序漂移 ⇒ 账本不可复现）。
+    </div>
+  </section>
 </main>
 
 <footer>
   数据来源：<code>GET /api/status</code> · 唯一事实源 = <code>data/ledger.jsonl</code>
-  （内容寻址 + 哈希链，改一条即断链）· 本页不写任何状态
+  （内容寻址 + 哈希链，改一条即断链）· 只读面板不写状态；
+  「能力调用 / 热装载」是<b>真写</b>，受服务端三道闸约束
 </footer>
 
 <script type="module">
@@ -358,7 +447,125 @@ async function load() {
   renderAlerts();
 }
 
+// ── 可操作面板：能力调用 / 热装载 ──────────────────────────────
+// ⛔ BASE 与上面 `API` 同源推导：控制台可能被 serve 托管（同源），
+//    也可能被直接以 file:// 打开（那时请求 8611）。两种情况都要能用。
+const BASE = location.origin.includes(":8611") ? "" : "http://127.0.0.1:8611";
+const caps = { list: [], byId: new Map() };
+
+async function jfetch(path, opts) {
+  const r = await fetch(BASE + path, opts);
+  let body = null;
+  try { body = await r.json(); } catch (_) { body = { _raw: "(非 JSON 响应)" }; }
+  return { status: r.status, body };
+}
+
+async function loadCaps() {
+  const { status, body } = await jfetch("/api/capabilities");
+  const sel = el("cap-sel");
+  if (status !== 200) {
+    sel.innerHTML = `<option>（未装载能力）</option>`;
+    el("cap-meta").textContent = `${status} ${body?.error ?? ""} · 启动加 --caps <清单>`;
+    el("cap-run").disabled = true;
+    return;
+  }
+  caps.list = body.capabilities ?? [];
+  caps.byId = new Map(caps.list.map((c) => [c.id, c]));
+  sel.innerHTML = caps.list.length
+    ? caps.list.map((c) => `<option value="${esc(c.id)}">${esc(c.id)}`
+        + ` · ${esc(c.kind ?? "?")}${c.trusted ? "" : " · 不可信"}</option>`).join("")
+    : `<option>（清单里没有能力）</option>`;
+  el("cap-run").disabled = caps.list.length === 0;
+  // ⛔ 「跑的到底是哪份清单」必须是读数：热装载存在时磁盘清单 ≠ 进程清单。
+  el("cap-meta").innerHTML = `n=${body.n}/${body.n_total} · fp `
+    + `<code>${esc(String(body.fingerprint ?? "").slice(0, 10))}</code> · 源 `
+    + `<code>${esc(String(body.source ?? "—").split("/").pop() || "—")}</code>`
+    + ` · 热装载 <b>${body.hot_reload ? "开" : "关"}</b>(${body.reload_count ?? 0})`;
+
+  const hot = el("hot-run");
+  hot.disabled = !body.hot_reload;
+  el("hot-state").innerHTML = body.hot_reload
+    ? `已开启（已装载 ${body.reload_count ?? 0} 次）`
+    : `未开启 ⇒ 装载会被服务端 <b>403</b> 拒绝（须用 <code>--caps-hot</code> 启动）`;
+}
+
+function exampleArgs(c) {
+  const ins = (c && c.inputs) || {};
+  const out = {};
+  for (const [k, v] of Object.entries(ins)) {
+    out[k] = v.type === "number" ? 1 : (v.type === "bool" ? true : "示例");
+  }
+  return out;
+}
+
+el("cap-sel").addEventListener("change", () => {
+  const c = caps.byId.get(el("cap-sel").value);
+  el("cap-args").value = JSON.stringify(exampleArgs(c), null, 2);
+  el("cap-out").textContent = "（未调用）";
+});
+el("cap-fill").addEventListener("click", () => {
+  const c = caps.byId.get(el("cap-sel").value);
+  el("cap-args").value = JSON.stringify(exampleArgs(c), null, 2);
+});
+
+el("cap-run").addEventListener("click", async () => {
+  const id = el("cap-sel").value;
+  let args = {};
+  try { args = JSON.parse(el("cap-args").value || "{}"); }
+  catch (e) { el("cap-out").textContent = "args 不是合法 JSON：" + e.message; return; }
+  const c = caps.byId.get(id);
+  el("cap-run").disabled = true;
+  const t0 = performance.now();
+  try {
+    const { status, body } = await jfetch("/api/invoke", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ capability: id, args }),
+    });
+    const dt = (performance.now() - t0).toFixed(0);
+    // ⛔ 结果**原样**展示，包括失败与落差读数。只显示"成功/失败"
+    //    会把 r29 抓到的「声明 0.5s 实跑 1.5s 却 status=ok」藏起来。
+    el("cap-out").textContent =
+      `HTTP ${status}  ·  ${dt}ms\n` +
+      `status      : ${body.status}\n` +
+      `verified    : ${body.verified}${c && !c.checker ? "  （清单接入的能力无 checker，判据由下游给）" : ""}\n` +
+      `transport   : ${body.transport} / 超时${body.timeout_enforced}\n` +
+      `声明 vs 实际 : ${body.timeout_declared_s}s`
+      + (body.timeout_declared_but_unenforced
+         ? `  ⚠️ 声明了但没兑现（实跑更久）` : "") + `\n` +
+      `output      : ${JSON.stringify(body.output, null, 2)}\n` +
+      (body.error ? `error       : ${body.error}\n` : "") +
+      (body.checks?.length ? `checks      : ${JSON.stringify(body.checks)}\n` : "");
+    el("cap-cost").textContent = `${dt}ms · ${body.status}`;
+  } catch (e) {
+    el("cap-out").textContent = "请求失败：" + e.message;
+  } finally {
+    el("cap-run").disabled = false;
+  }
+});
+
+el("hot-run").addEventListener("click", async () => {
+  const p = el("hot-path").value.trim();
+  if (!p) { el("hot-out").textContent = "先填清单的绝对路径"; return; }
+  const { status, body } = await jfetch("/api/capabilities/reload", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ manifest: p }),
+  });
+  el("hot-out").textContent = `HTTP ${status}\n` + JSON.stringify(body, null, 2);
+  // ⛔ 装载 0 条 ⇒ 服务端 409 且**不替换**；这里同步刷新列表让"没换成"
+  //    变成可见读数（而不是让人以为换了）。
+  await loadCaps();
+});
+
+for (const b of document.querySelectorAll("[data-copy]")) {
+  b.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(b.dataset.copy);
+          b.textContent = "已复制"; setTimeout(() => (b.textContent = "复制"), 1500); }
+    catch (_) { b.textContent = "复制失败"; }
+  });
+}
+
 load();
+loadCaps();
 setInterval(load, 15000);
 </script>
 </body>

@@ -2323,3 +2323,81 @@ r27 堵住了 `ctypes.dlopen`，当时的结论是"原生 syscall 通道已封"�
 ⛔ 摄入**不产生判据**：reward 只来自 `Verdict.reward`（RLVR），learner 写
 进去的知识只是候选上下文 —— 它要变"有效"必须被 harness 真正用到并在执行
 里拿到 reward。这一条由分层结构保证（learner 只能写 L3/L4）。
+
+
+---
+
+### 23.5 并发评估：先取证，再并行（2026-10-14 第 31 轮）
+
+盘点把"并发调度"列为缺口之后，**没有直接动手**——先写
+`scripts/probe_parallel_feasibility.py` 回答四个问题（常驻）：
+
+| 问题 | 实测结论 |
+|---|---|
+| 单次 runner 多贵？ | **~99 ms**（`run_in_sandbox` 走 `subprocess.Popen`，每次都是真进程开销） |
+| 并行划算吗？ | 4 workers 下 **1.74–2.05x**（只作读数，不作断言——依赖宿主核数/负载） |
+| 结果会变吗？ | 逐条一致（`(reward, passed)` 全等）。⛔ 取证特意混入未破坏源码（reward=1.0）与变异任务（reward=0.0），否则"全 0 比全 0"是一致性断言的**恒真陷阱** |
+| 账本扛得住吗？ | 多线程并发 append 60 条 ⇒ seq 唯一连续 + 哈希链完整（`flock` 生效） |
+
+⇒ 于是实现 `EvolutionConfig.parallel_workers`（**默认 0 = 串行**）与唯一的
+并行点 `EvolutionLoop._eval_many`。
+
+⛔⛔ **并行只包住 runner 计算**；`run_id` 分配、`_runs.append`、
+`store.save_run`、`ledger.append` 一律在外面串行。三条理由：
+  · `_run_seq += 1` **不是原子操作** ⇒ 并发下 run_id 可能重复 ⇒ 唯一 run_id
+    这条不变量当场失效（2026-10-13 已因 run_id 冲突丢过 444 条执行记录）；
+  · 账本 append 虽然安全，但**事件顺序**会随完成顺序漂移 ⇒ 账本不再逐条
+    可复现，而"账本是唯一事实源"正是靠可复现撑着；
+  · `budget.spend` 也不是线程安全的累加。
+
+⛔ 结果**按输入序归位**（`ThreadPoolExecutor.map` 保序）：顺序错位 ⇒
+`zip(dev_suite, vs)` 把 reward 记到别人头上 —— 这比慢更糟。
+
+⛔ **默认串行**（`--parallel 0`）是刻意选择，与预算闸同源：改默认口径会让
+历史账本不可比。此外还有一条**真实边界**：任务若逼近 `timeout_s`，并行下的
+CPU/IO 竞争可能把它挤成 timeout ⇒ **结果会变** ⇒ 要可比就用默认串行。
+
+⛔ 读数 `rep.parallel = {configured, batches, runs}` 记的是**本轮增量**，且
+由 `run_round` 的薄包装统一填写 —— 不是写在 `_run_round` 末尾：它有 6 处
+提前 return（无弱点 / 到顶 / 预算耗尽 / 受保护层…），写在末尾 ⇒ 恰恰在最
+需要它的那些轮次读到 `None`。**读数必须在所有返回路径上都有值**。
+
+⛔ 契约 H 组钉四件事：① 探针实测**最大并发度 > 1**（只断言"走了并行分支"
+不够 —— 配了 worker 却仍串行在读数上完全看不出来）；② 并行与串行结果逐条
+一致；③ 并行下 run_id 仍唯一；④ 账本里 `eval.verdict` 的任务顺序与串行
+完全一致。另有一条**判别力自检**：探针内部抛异常会被 `error_verdict` 吞掉
+⇒ 整组变成"全 error_verdict 比全 error_verdict" ⇒ 一致性近乎恒真。
+
+---
+
+### 23.6 桌面控制台：可操作，但不做假按钮（2026-10-14 第 32 轮）
+
+`console/index.html` 从**只读仪表盘**升级为工作台，新增
+`python -m aether.ui`（一键：起 API + 同源托管 + 开桌面窗口）。
+
+⛔ 由 `aether.serve` **同源托管**（`/` 与 `/console/`）：另开一个静态服务
+⇒ CORS；用 `file://` 打开 ⇒ fetch localhost 直接被拒。同源托管最省事也最
+不容易错。
+
+⛔ "桌面窗口"用 Chrome / Edge 的 `--app=<url>` 模式（独立窗口、无地址栏），
+找不到就退化成默认浏览器。**不引入 Electron** —— 那会多出一条要维护的
+构建链，与控制台"零构建"的初衷相反。
+
+⛔⛔ **代理坑**：本机有 `HTTP_PROXY` 时浏览器会把 `127.0.0.1` 也走代理 ⇒
+白屏而服务端明明是好的 ⇒ 显式传 `--proxy-bypass-list=<-loopback>`。
+
+⛔ 面板分两类，UI 上必须能分辨：
+  · **只读**（状态 / 事件流 / 闸 / 泛化）—— 只 GET；
+  · **真写**（能力调用 `/api/invoke`、热装载 `/api/capabilities/reload`）。
+
+⛔ **没有端点的动作不做按钮**：跑进化、知识摄入只有 CLI 入口。给出可复制
+的命令，而不是"点了没反应"的按钮 —— 那比没有按钮更误导（假仪表）。
+热装载按钮在服务端未开 `--caps-hot` 时**禁用并写明会被 403**（不给"一键
+放宽信任边界"的入口）。
+
+⛔ 调用结果**原样**展示 `status / verified / timeout_declared_s /
+timeout_declared_but_unenforced`：只显示"成功/失败"会把 §23.1 抓到的
+「声明 0.5s 实跑 1.5s 而 status=ok」重新藏起来。
+
+⛔ 端口被占 ⇒ **顺延**，不复用：连到别人的服务上、页面却显示本仓库的账本
+= "读数看着正常其实是别人家"。

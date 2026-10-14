@@ -768,7 +768,12 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                          caliber=caliber, heldout=heldout,
                          dev_difficulty=dev_difficulty,
                          on_round_end=_remember_round,
-                         config=EvolutionConfig(group_size=int(args.group)))
+                         config=EvolutionConfig(
+                             group_size=int(args.group),
+                             #: ⛔ 默认 0 = 串行（与历史基线同口径）。并行只
+                             #:    包住 runner 计算，记账仍串行（见 §23.5）。
+                             parallel_workers=int(
+                                 getattr(args, "parallel", "0") or 0)))
 
     #: ⛔ 初始 harness 必须**先进账本**再落投影：只写库的话，从账本重建会
     #:    丢掉它（实测 7 个快照重建只剩 6 个）⇒ "账本是唯一事实源"被违反。
@@ -1015,10 +1020,30 @@ def main(argv: Optional[List[str]] = None) -> int:
     e.add_argument("--llm-model", default="", help="真模型名（默认 Qwen3.5-4B:latest）")
     e.add_argument("--heldout-floor", default="0.0",
                    help="held-out 增益地板（低于它判 overfit）")
+    e.add_argument("--parallel", default="0",
+                   help="并发评估线程数。0/1=串行（**默认**，与历史基线同口径）。\n"
+                        "⛔ 并行只包住 runner 计算，run_id 分配与账本写入仍串行\n"
+                        "（顺序漂移 ⇒ 账本不可复现）。⛔ 任务若逼近 timeout，\n"
+                        "并行下的资源竞争可能把它挤成 timeout ⇒ 结果会变 ⇒\n"
+                        "要可比就用默认串行。")
     e.add_argument("--embedder", default="hash", choices=["hash", "auto", "ollama"],
                    help="嵌入器：hash（默认，离线）/ auto|ollama（须过选型闸）")
 
+    u = sub.add_parser("ui", help="起 API + 控制台，并打开桌面窗口")
+    u.add_argument("--port", type=int, default=8611)
+    u.add_argument("--caps", default="capabilities.example.json")
+    u.add_argument("--caps-hot", action="store_true",
+                   help="开能力热装载（默认关 —— 宪法第 52 条）")
+    u.add_argument("--no-open", action="store_true", help="只起服务，不开窗口")
+
     args = ap.parse_args(argv)
+    if args.cmd == "ui":
+        from .ui import main as ui_main
+        return ui_main(["--port", str(args.port),
+                        "--root", str(args.root),
+                        "--caps", args.caps]
+                       + (["--caps-hot"] if args.caps_hot else [])
+                       + (["--no-open"] if args.no_open else []))
     return {
         "status": cmd_status,
         "verify-chain": cmd_verify_chain,

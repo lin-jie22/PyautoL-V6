@@ -174,6 +174,10 @@ class RoundReport:
     #: 本轮末的**全局预算读数**（None = 没装预算 = 无止损）。
     #: ⛔ 每轮都记：只在 run() 末尾记一次 ⇒ 看不到预算是怎么烧掉的。
     budget: Optional[Dict[str, Any]] = None
+    #: 本轮的**并行读数**。⛔ 记的是"真的并行跑了多少"，不是"配了几个
+    #: worker"：配置存在但一次没走并行分支（`parallel_batches=0`）= 空账，
+    #: 与「落点要兑现」同一条纪律。
+    parallel: Optional[Dict[str, Any]] = None
 
     @property
     def improved(self) -> bool:
@@ -190,7 +194,8 @@ class RoundReport:
                 "layer_credit": self.layer_credit,
                 "step_credit": self.step_credit,
                 "saturated": self.saturated, "saturation": self.saturation,
-                "idle": self.idle, "budget": self.budget}
+                "idle": self.idle, "budget": self.budget,
+                "parallel": self.parallel}
 
 
 @dataclass
@@ -218,6 +223,15 @@ class EvolutionConfig:
     #: 连续这么多轮"无事可做"就停。⛔ 用**连续**而不是累计：偶尔一轮
     #: 没事做（比如刚提交完、新 harness 还没暴露失败）是正常的。
     stop_after_idle_rounds: int = 2
+    #: 并发评估的线程数。**0 / 1 = 串行**（默认，与历史行为完全一致）。
+    #: ⛔ 为什么默认不开：并行不改变结果（实测逐条一致），但把"结果可复现"
+    #:    押在 runner 的线程安全性上 ⇒ 默认串行是**保守且可比**的选择，
+    #:    要加速请显式开（`evolve --parallel N`）。
+    #: ⛔ 并行**只包住 runner 计算**：run_id 分配与账本写入一律串行
+    #:    （2026-10-14 实测：`_run_seq += 1` 在多线程下不保证原子；
+    #:    账本 append 有 flock 安全，但**事件顺序**必须保持确定性 ⇒
+    #:    顺序漂移会让账本不可复现，而账本是唯一事实源）。
+    parallel_workers: int = 0
 
 
 @dataclass
@@ -360,6 +374,11 @@ class EvolutionLoop:
         #:    组合的第二次执行会 `INSERT OR REPLACE` 掉第一次 ⇒ 账本 495 条
         #:    执行、投影只剩 51 条。锚在账本 seq 上 ⇒ 跨运行也不重置。
         self._run_seq: int = int(getattr(self.ledger, "seq", 0) or 0)
+        #: ⛔ 并行**可达性**计数：不记这两个数，"配了 parallel_workers=4"和
+        #:    "真的并行跑了"在外部完全等价 —— 落点要兑现，不只是存在
+        #:    （`grep` 到参数只证明写过，不证明被调用过）。
+        self.parallel_batches: int = 0     # 走了并行分支的批次次数
+        self.parallel_runs: int = 0        # 并行分支里跑掉的 runner 次数
         #: 死路账的**增量缓存**。⛔ 它是"能从账本重建出来的派生量"，不是事实
         #: 源 —— 任何时候丢了都要能靠全量重扫拿回同一个值（有测试盯这点）。
         self._deadend_cache: Optional[Dict[str, Any]] = None
@@ -381,13 +400,13 @@ class EvolutionLoop:
            复用会掺进候选评估的中间态 ⇒ 尺子不统一。
         """
         from .aging import ProbeResult, RoundTrace
-        probes: List[ProbeResult] = []
-        for t in self.aging_probes:
-            try:
-                r = float(self.runner(h, t.spec).reward)
-            except Exception:                                # noqa: BLE001
-                r = 0.0
-            probes.append(ProbeResult(task_id=t.task_id, reward=r))
+        #: ⛔ 与 `evaluate_dev` 走**同一个**并行点（`_eval_many`）：两处各写
+        #:    一份并行 ⇒ 一边串行一边并行 ⇒ 老化读数和评估读数不可比。
+        #:    ⛔ 探针必须**按输入序**归位：老化要的是"同一批题跨轮逐条可比"，
+        #:    顺序错位 ⇒ 跨轮 Δ 变成噪声。
+        vs = self._eval_many(h, self.aging_probes, prefix="aging/")
+        probes = [ProbeResult(task_id=t.task_id, reward=float(v.reward))
+                  for t, v in zip(self.aging_probes, vs)]
 
         trace = RoundTrace(
             round_no=rep.round_no, harness_id=h.harness_id,
@@ -432,20 +451,48 @@ class EvolutionLoop:
                                      accepted=True, round_no=0)
 
     # ── 评估 ──────────────────────────────────────────────────────
+    def _eval_many(self, h: Harness, tasks: List[Any],
+                   prefix: str = "dev/") -> List[Verdict]:
+        """跑一批 runner 调用。**唯一**的并行点。
+
+        ⛔⛔ 并行**只包住 runner 计算**，`run_id` 分配 / 落库 / 账本 append
+        一律留在外面串行做。三条理由，每条都是实测：
+          · `_run_seq += 1` 不是原子操作 ⇒ 并发下 run_id 可能重复 ⇒ 唯一
+            run_id 这条不变量当场失效（2026-10-13 已因 run_id 冲突丢过
+            444 条执行记录，同形态的坑不踩第二次）；
+          · 账本 append 有 `flock`（安全），但**事件顺序**会随完成顺序漂移
+            ⇒ 账本不再逐条可复现，而"账本是唯一事实源"正是靠可复现撑着；
+          · `budget.spend` / `_runs.append` 都不是线程安全的累加。
+
+        ⛔ 结果**按输入序归位**（`ThreadPoolExecutor.map` 保序）：顺序变了
+        ⇒ `zip(dev_suite, vs)` 错位 ⇒ reward 记到别人头上 —— 这比慢更糟。
+        """
+        from .verifier import error_verdict
+
+        def _one(t: Any) -> Verdict:
+            try:
+                return self.runner(h, t.spec)
+            except Exception as e:  # noqa: BLE001 —— 记账，不吞
+                return error_verdict(f"{prefix}{t.task_id}", e)
+
+        workers = int(getattr(self.cfg, "parallel_workers", 0) or 0)
+        if workers > 1 and len(tasks) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            self.parallel_batches += 1
+            self.parallel_runs += len(tasks)
+            with ThreadPoolExecutor(max_workers=min(workers, len(tasks))) as ex:
+                return list(ex.map(_one, tasks))
+        return [_one(t) for t in tasks]
+
     def evaluate_dev(self, h: Harness, tag: str = "") -> Tuple[float, List[Verdict]]:
         """在**发展集**上评估（与非回归闸用的冻结套件**不是**同一批任务）。
 
         ⛔ 两个方向必须分开：冻结套件回答"有没有变坏"，发展集回答
         "有没有变好"。混在一张表里 ⇒ 用新任务的收益掩盖旧任务的回归。
         """
-        vs: List[Verdict] = []
-        for t in self.dev_suite:
-            try:
-                v = self.runner(h, t.spec)
-            except Exception as e:  # noqa: BLE001 —— 记账，不吞
-                from .verifier import error_verdict
-                v = error_verdict(f"dev/{t.task_id}", e)
-            vs.append(v)
+        #: ⛔ 计算可以并行，下面的 run_id / 落库 / 账本**必须**串行。
+        vs: List[Verdict] = self._eval_many(h, self.dev_suite, prefix="dev/")
+        for t, v in zip(self.dev_suite, vs):
             #: ⛔ run_id 必须唯一（见 `next_run_id`），且**同一份**写进账本
             #:    —— 两处不同一个 id ⇒ 投影无法从账本重建 ⇒ "库只是视图"
             #:    就成了无法验证的声明（2026-10-13 实测）。
@@ -834,6 +881,24 @@ class EvolutionLoop:
 
     # ── 单轮 ──────────────────────────────────────────────────────
     def run_round(self, h: Harness, round_no: int = 0) -> RoundReport:
+        """`_run_round` 的薄包装：只负责**并行读数**。
+
+        ⛔ 为什么不写在 `_run_round` 末尾：它有 **6 处提前 return**（无弱点 /
+        到顶 / 预算耗尽 / 受保护层…），写在末尾 ⇒ 那些轮次 `parallel=None`
+        ⇒ "这一轮并行了多少次"在最需要它的轮次（提前停）反而读不到。
+        读数必须在**所有**返回路径上都有值 —— 否则它就是一个会选择性
+        失明的仪表。
+        """
+        _p0 = (self.parallel_batches, self.parallel_runs)
+        rep = self._run_round(h, round_no)
+        rep.parallel = {
+            "configured": int(getattr(self.cfg, "parallel_workers", 0) or 0),
+            "batches": self.parallel_batches - _p0[0],
+            "runs": self.parallel_runs - _p0[1],
+        }
+        return rep
+
+    def _run_round(self, h: Harness, round_no: int = 0) -> RoundReport:
         rep = RoundReport(round_no=round_no)
 
         # 1) 基线探测 —— **必须放在挖掘之前**。

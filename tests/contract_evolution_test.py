@@ -16,6 +16,7 @@ V5 的纪律：先证明机制跑得通，再谈模型好不好。所以本文�
 """
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path("/Users/linshaojie/V6")
@@ -282,6 +283,110 @@ def main():
     #: G10 `limited` 读数：没装预算时必须是 False（否则是假仪表）
     ck("G10 ⛔ 未装预算 ⇒ limited=False（'有没有止损'必须可读，不能靠猜）",
        RunBudget().limited is False and RunBudget(max_rounds=1).limited is True)
+
+    # ── H 组：并发评估（r31 · 默认执行）────────────────────────
+    print("H 组：并发评估 —— 只并行计算，run_id / 账本必须串行")
+
+    import threading as _th
+
+    class _Probe:
+        """包装 runner，记录**真实并发度**。
+
+        ⛔ 为什么需要它：`parallel.batches>0` 只证明"走了并行分支"，不证明
+        "真的并发跑了"。配了 worker 却仍然串行（比如池大小写死 1）在
+        读数上完全看不出来 —— 与「落点要兑现」同一条纪律。
+        """
+
+        def __init__(self, inner):
+            self.inner = inner
+            self.lock = _th.Lock()
+            self.cur = 0
+            self.max = 1
+            self.n = 0
+            self.errors = 0
+
+        def __call__(self, h, spec):
+            with self.lock:
+                self.cur += 1
+                self.max = max(self.max, self.cur)
+                self.n += 1
+            try:
+                time.sleep(0.08)          #: 撑开并发窗口，让并发度可观测
+                return self.inner(h, spec)
+            except Exception:             # noqa: BLE001
+                #: ⛔ 吞异常会让 H4 变成"全 error_verdict 比全 error_verdict"
+                #:    ⇒ 一致性断言近乎恒真（与 B2 同款）。所以**记账**。
+                with self.lock:
+                    self.errors += 1
+                raise
+            finally:
+                with self.lock:
+                    self.cur -= 1
+
+    def _mk(workers, r, name):
+        from aether.evolution import EvolutionLoop, EvolutionConfig
+        return EvolutionLoop(
+            Ledger(tmp / name), gate, dev, r,
+            TemplateProposer(skills={"restore_from_baseline": "恢复到基线"}),
+            store=None, caliber=CAL,
+            config=EvolutionConfig(group_size=2, parallel_workers=workers))
+
+    ps = _Probe(runner)
+    lp_s = _mk(0, ps, "hs.jsonl")
+    rep_s = lp_s.run_round(h, round_no=1)
+    ck("H1 ⛔ 默认串行 ⇒ parallel.batches=0（配了 worker 却一次没并行 = 空账）",
+       rep_s.parallel["configured"] == 0 and rep_s.parallel["batches"] == 0,
+       str(rep_s.parallel))
+    ck("H1b 探针自证：串行下最大并发度 == 1（否则探针本身是坏的，"
+       "H3 的 >1 就没有判别力）",
+       ps.max == 1, f"max={ps.max}")
+
+    pp = _Probe(runner)
+    lp_p = _mk(4, pp, "hp.jsonl")
+    rep_p = lp_p.run_round(h, round_no=1)
+    ck("H2 开 4 workers ⇒ 走了并行分支（batches>0, runs>0）",
+       rep_p.parallel["configured"] == 4 and rep_p.parallel["batches"] > 0
+       and rep_p.parallel["runs"] > 0, str(rep_p.parallel))
+    ck("H3 ⛔ **真并发**：最大并发度 > 1（不是'进了分支但仍串行'）",
+       pp.max > 1, f"max={pp.max} n={pp.n}")
+
+    ck("H3b ⛔ 判别力自检：探针内部**没抛异常**（否则本组是在 "
+       "error_verdict 上对拍 ⇒ H4 的一致性近乎恒真）",
+       ps.errors == 0 and pp.errors == 0,
+       f"ser_err={ps.errors} par_err={pp.errors}")
+
+    ck("H4 ⛔ 并行与串行**结果一致**（基线分 / 逐候选 reward / 是否提交）",
+       abs(rep_p.baseline_reward - rep_s.baseline_reward) < 1e-12
+       and [c.reward for c in rep_p.candidates]
+       == [c.reward for c in rep_s.candidates]
+       and (rep_p.committed is not None) == (rep_s.committed is not None),
+       f"ser={rep_s.baseline_reward}/{[c.reward for c in rep_s.candidates]} "
+       f"par={rep_p.baseline_reward}/{[c.reward for c in rep_p.candidates]}")
+
+    ids = [r.run_id for r in lp_p._runs]
+    ck("H5 ⛔ 并行下 run_id 仍唯一（`_run_seq += 1` 非原子 ⇒ 分配必须串行）",
+       len(ids) == len(set(ids)) and len(ids) > 0,
+       f"{len(ids)} 条 / 去重后 {len(set(ids))} 条")
+
+    def _task_seq(lp):
+        return [e.payload.get("task_id")
+                for e in lp.ledger.events() if e.kind == "eval.verdict"]
+
+    ck("H6 ⛔ 账本里 eval.verdict 的**任务顺序**与串行完全一致"
+       "（顺序漂移 ⇒ 账本不再逐条可复现，而它是唯一事实源）",
+       _task_seq(lp_p) == _task_seq(lp_s) and len(_task_seq(lp_s)) > 0,
+       f"ser={_task_seq(lp_s)} par={_task_seq(lp_p)}")
+
+    #: 边界：workers=1 与 0 同义（不该建线程池）
+    p1 = _Probe(runner)
+    lp_1 = _mk(1, p1, "h1.jsonl")
+    rep_1 = lp_1.run_round(h, round_no=1)
+    ck("H7 workers=1 ⇒ 与串行同义（batches=0，不建池）",
+       rep_1.parallel["batches"] == 0 and p1.max == 1,
+       f"{rep_1.parallel} max={p1.max}")
+
+    print(f"  ℹ️  并发读数：串行 {ps.n} 次调用 max={ps.max} / "
+          f"并行 {pp.n} 次调用 max={pp.max}（加速比依赖宿主，不作断言）")
 
     print("\n" + "=" * 60)
     if FAILS:
