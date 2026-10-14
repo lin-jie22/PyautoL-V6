@@ -34,6 +34,7 @@ V6 相对这些工作多做的三件事（来自 V5 的硬教训 + 2026 文献�
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -170,6 +171,9 @@ class RoundReport:
     idle: bool = False
     #: 饱和读数：dev 通过数 / 总数，以及 held-out 基线分（None = 未测）
     saturation: Optional[Dict[str, Any]] = None
+    #: 本轮末的**全局预算读数**（None = 没装预算 = 无止损）。
+    #: ⛔ 每轮都记：只在 run() 末尾记一次 ⇒ 看不到预算是怎么烧掉的。
+    budget: Optional[Dict[str, Any]] = None
 
     @property
     def improved(self) -> bool:
@@ -186,7 +190,7 @@ class RoundReport:
                 "layer_credit": self.layer_credit,
                 "step_credit": self.step_credit,
                 "saturated": self.saturated, "saturation": self.saturation,
-                "idle": self.idle}
+                "idle": self.idle, "budget": self.budget}
 
 
 @dataclass
@@ -216,6 +220,79 @@ class EvolutionConfig:
     stop_after_idle_rounds: int = 2
 
 
+@dataclass
+class RunBudget:
+    """跨轮**全局**预算：进化循环的止损线。
+
+    ⛔ 为什么需要它：`interop.Budget` 只管**单次** UCI 调用（超时 / 输出
+    字节），而进化循环此前**没有任何**总量约束 —— 轮数、挂钟、评估次数
+    全靠调用方传参，跑多久花多少完全不可控。真接上 LLM proposer 后，
+    一次 `propose` 就是一次付费调用，没有止损等于把预算交给循环自己。
+
+    ⛔ **默认 `None` = 不限**：全 None 时行为与加预算之前**完全一致**
+    （历史账本可比）。这是一条刻意的选择：改默认口径会让旧基线不可比
+    （V5 纪律：改口径必须单独跑一轮，不可与修复混在一张表里）。
+    ⇒ 生产接真 LLM 时**必须显式设**，见 `budget_limited`。
+
+    ⛔ 四个维度，任一耗尽即停：
+      · `max_rounds`        —— 轮数
+      · `max_seconds`       —— 挂钟（**轮末**检查）
+      · `max_propose_calls` —— 提议器调用次数（真 LLM 时 = 付费调用数）
+      · `max_eval_runs`     —— 发展集评估任务次数（= runner 跑了几遍）
+
+    ⛔ 耗尽 ⇒ **停并记账**，不是"静默截断"：静默少跑几轮会把"预算用完"
+    伪装成"跑完了但没提升"，与「空转记成努力过」同形态。
+    """
+
+    max_rounds: Optional[int] = None
+    max_seconds: Optional[float] = None
+    max_propose_calls: Optional[int] = None
+    max_eval_runs: Optional[int] = None
+
+    #: ── 计量（只读，由 `spend` 累加）────────────────────────────
+    rounds: int = 0
+    seconds: float = 0.0
+    propose_calls: int = 0
+    eval_runs: int = 0
+
+    def spend(self, *, rounds: int = 0, propose_calls: int = 0,
+              eval_runs: int = 0, seconds: Optional[float] = None) -> None:
+        self.rounds += rounds
+        self.propose_calls += propose_calls
+        self.eval_runs += eval_runs
+        if seconds is not None:
+            self.seconds = seconds
+
+    def exhausted(self) -> Optional[str]:
+        """返回耗尽原因（如 `rounds>=3`），未耗尽返回 None。"""
+        for name, cap, used in (
+                ("rounds", self.max_rounds, self.rounds),
+                ("seconds", self.max_seconds, self.seconds),
+                ("propose_calls", self.max_propose_calls, self.propose_calls),
+                ("eval_runs", self.max_eval_runs, self.eval_runs)):
+            if cap is not None and used >= cap:
+                return f"{name}:{used}>={cap}"
+        return None
+
+    @property
+    def limited(self) -> bool:
+        """是否真的装了预算（False = 无止损，调用方应知情）。"""
+        return any(x is not None for x in (self.max_rounds, self.max_seconds,
+                                           self.max_propose_calls,
+                                           self.max_eval_runs))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"limited": self.limited,
+                "max": {"rounds": self.max_rounds, "seconds": self.max_seconds,
+                        "propose_calls": self.max_propose_calls,
+                        "eval_runs": self.max_eval_runs},
+                "used": {"rounds": self.rounds,
+                         "seconds": round(self.seconds, 3),
+                         "propose_calls": self.propose_calls,
+                         "eval_runs": self.eval_runs},
+                "exhausted": self.exhausted()}
+
+
 class EvolutionLoop:
     """Self-Harness 进化循环。
 
@@ -230,6 +307,10 @@ class EvolutionLoop:
     """
     _deadend_cache: Optional[Dict[str, Any]] = None
     _deadend_stats: Optional[Dict[str, Any]] = None
+    #: ⛔ 类级兜底（与 `_deadend_cache` 同形态）：对象可能经 `__new__` /
+    #:    pickle 构造，拿不到 `__init__` 的赋值 ⇒ 访问 `self.budget` 会
+    #:    AttributeError。默认 None = **不限**（保持旧行为与旧基线可比）。
+    budget: Optional[RunBudget] = None
 
     def __init__(self, ledger: Ledger, gate: NonRegressionGate,
                  dev_suite: List[FrozenTask], runner: Runner,
@@ -239,7 +320,8 @@ class EvolutionLoop:
                  heldout: Optional[Any] = None,
                  dev_difficulty: Optional[Dict[str, str]] = None,
                  on_round_end: Optional[Callable[[Any], None]] = None,
-                 aging_probes: Optional[List[FrozenTask]] = None):
+                 aging_probes: Optional[List[FrozenTask]] = None,
+                 budget: Optional[RunBudget] = None):
         self.ledger = ledger
         self.gate = gate
         self.dev_suite = dev_suite
@@ -266,6 +348,8 @@ class EvolutionLoop:
         #: ⛔ 不在这里猜 —— 记忆不在 loop 手里，猜出来的事件会让老化
         #:    信号指向一个不存在的因（V5：记账方式变了 ⇒ Δ 要拆账）。
         self.aging_events: Dict[str, Any] = {}
+        #: 全局预算（None = 不限，行为与加预算前一致）。
+        self.budget = budget
         #: 跨轮纵向读数（老化检测的事实源，可投影到账本）。
         self.aging_traces: List[RoundTrace] = []
         #: 内存态 run 账（**不依赖 store**）：机制正确性不该依赖外部存储存在。
@@ -389,6 +473,11 @@ class EvolutionLoop:
                 "split": "dev", "tag": tag,
                 "verdict": v.to_dict(), "caliber": self.caliber,
             }, actor="evolution")
+        #: ⛔ 预算计量挂在**唯一评估入口**上：`evaluate_dev` 是所有发展集
+        #:    评估的咽喉。逐个调用点各记一次 ⇒ 迟早漏一处 ⇒ 预算少算
+        #:    ⇒ 止损形同虚设（V5："有机制 ≠ 这条路被走到"）。
+        if self.budget is not None:
+            self.budget.spend(eval_runs=len(vs))
         if not vs:
             return 0.0, vs
         return sum(v.reward for v in vs) / len(vs), vs
@@ -787,7 +876,20 @@ class EvolutionLoop:
             actor="evolution").seq)
 
         # 3) PROPOSE + 构造候选
+        #: ⛔ 提议预算**在调用之前**查：真 LLM 时一次 propose = 一次付费
+        #:    调用，调用完再查等于钱已经花出去了（止损必须发生在花钱前）。
+        if self.budget is not None and self.budget.exhausted():
+            rep.revert_reason = (f"budget_exhausted（{self.budget.exhausted()}"
+                                 f" ⇒ 不再提议）")
+            rep.ledger_seqs.append(self.ledger.append(
+                "evolution.budget_stop", {
+                    "round_no": round_no, "harness_id": h.harness_id,
+                    "reason": rep.revert_reason, "budget": self.budget.to_dict()},
+                actor="evolution").seq)
+            return rep
         capsules = self.proposer.propose(w.to_dict(), h, n=self.cfg.group_size)
+        if self.budget is not None:
+            self.budget.spend(propose_calls=1)
         #: 死路账：**从账本读**（事实源），不是进程内状态 —— 否则换一次
         #:    运行就"忘了"这条死路，冷却形同虚设。
         deadend = self._deadend_map()
@@ -1068,9 +1170,13 @@ class EvolutionLoop:
         reports: List[RoundReport] = []
         cur = h
         idle_streak = 0
+        t0 = time.time()
         for i in range(rounds):
             rep = self.run_round(cur, round_no=i + 1)
             reports.append(rep)
+            if self.budget is not None:
+                self.budget.spend(rounds=1, seconds=time.time() - t0)
+                rep.budget = self.budget.to_dict()
             if self.on_round_end is not None:
                 try:
                     self.on_round_end(rep)
@@ -1101,6 +1207,23 @@ class EvolutionLoop:
                     {"round_no": rep.round_no, "rounds_requested": rounds,
                      "idle_streak": idle_streak, "reason": rep.revert_reason,
                      "note": "连续无事可做 ⇒ 提前终止（不是失败）"},
+                    actor="evolution")
+                break
+
+            #: ⛔ 预算耗尽 ⇒ 停并**记账**。与"无事可做"是**两种原因**，
+            #:    混在一起会把"钱花完了"记成"没有可做的"（后者是能力问题，
+            #:    前者是预算问题，修法完全不同）。
+            #: ⛔ 只在**轮末**检查挂钟：中途打断会留下半截账本（一轮写到
+            #:    一半的账本读不出因果）。这是刻意取舍 —— 单轮耗时上限
+            #:    由 UCI 的 `timeout_s` 管，不由这里管。
+            why = self.budget.exhausted() if self.budget is not None else None
+            if why:
+                self.ledger.append(
+                    "evolution.budget_stop",
+                    {"round_no": rep.round_no, "rounds_requested": rounds,
+                     "rounds_done": len(reports), "reason": why,
+                     "budget": self.budget.to_dict(),
+                     "note": "预算耗尽 ⇒ 提前终止（不是失败，也不是空转）"},
                     actor="evolution")
                 break
         return cur, reports

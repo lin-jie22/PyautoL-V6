@@ -197,6 +197,92 @@ def main():
         ck("F3 有技能 ⇒ 修好（reward 1，来自真执行）", v_good.reward == 1.0)
         ck("F4 判定带真实证据", "n_passed" in v_good.evidence)
 
+    # ── G 组：全局预算闸（r30 · 默认执行，不进 E2E）──────────────
+    print("G 组：全局预算闸")
+
+    #: ⛔ 每轮**恒有弱点** ⇒ 不会被"无事可做"提前终止，于是"少跑了轮次"
+    #:    只可能是预算干的 —— 否则 G2 的"只跑 1 轮"会被 idle 提前终止
+    #:    冒充（两种停止原因混在一起 = 分诊方向全错）。
+    def runner_always_fail(h, spec):
+        return mk(False)
+
+    def _run(budget, rounds=3):
+        from aether.evolution import EvolutionLoop, EvolutionConfig
+        l = Ledger(tmp / f"lb_{abs(hash(str(budget))) % 99999}.jsonl")
+        lp = EvolutionLoop(l, gate, dev, runner_always_fail,
+                           TemplateProposer(skills={"restore_from_baseline": "x"}),
+                           store=None, caliber=CAL,
+                           config=EvolutionConfig(group_size=2), budget=budget)
+        return lp, lp.run(h, rounds=rounds)
+
+    from aether.evolution import RunBudget  # noqa: E402
+
+    #: G1 反证底座：**不装预算** ⇒ 跑满 3 轮（既有行为不变，旧基线可比）
+    lp0, (_, reps0) = _run(None)
+    ck("G1 ⛔ 不装预算 ⇒ 跑满 3 轮（默认 None=不限，旧行为不变）",
+       len(reps0) == 3 and lp0.budget is None,
+       f"{len(reps0)} 轮 budget={lp0.budget}")
+
+    #: G2 轮次预算：真停
+    lp1, (_, reps1) = _run(RunBudget(max_rounds=1))
+    ck("G2 ⛔ max_rounds=1 ⇒ 只跑 1 轮（预算真生效）",
+       len(reps1) == 1, f"{len(reps1)} 轮")
+
+    #: G3 对照组：放宽到 10 ⇒ 跑满 3（证明 G2 的"1 轮"不是循环本就只能跑 1）
+    lp2, (_, reps2) = _run(RunBudget(max_rounds=10))
+    ck("G3 对照组：max_rounds=10 ⇒ 跑满 3 轮（不是循环本身跑不动）",
+       len(reps2) == 3, f"{len(reps2)} 轮")
+
+    #: G4 评估预算：dev 有 2 个任务 ⇒ 一轮 base 就用光 2 次
+    lp3, (_, reps3) = _run(RunBudget(max_eval_runs=2))
+    ck("G4 ⛔ max_eval_runs=2 ⇒ 第 1 轮 base 评估后就停",
+       len(reps3) == 1 and lp3.budget.eval_runs >= 2,
+       f"{len(reps3)} 轮 eval={lp3.budget.eval_runs}")
+
+    #: G5 挂钟预算：max_seconds=0 ⇒ 轮末 seconds>=0 必然耗尽
+    lp4, (_, reps4) = _run(RunBudget(max_seconds=0.0))
+    ck("G5 ⛔ max_seconds=0 ⇒ 第 1 轮后停（挂钟维度真被检查）",
+       len(reps4) == 1, f"{len(reps4)} 轮")
+
+    #: G6 提议预算维度：第 1 轮提议 1 次后即耗尽 ⇒ 1 轮（轮末也查得到）
+    lp5, (_, reps5) = _run(RunBudget(max_propose_calls=1))
+    ck("G6 ⛔ max_propose_calls=1 ⇒ 第 1 轮提议后就停",
+       len(reps5) == 1 and lp5.budget.propose_calls == 1,
+       f"{len(reps5)} 轮 propose={lp5.budget.propose_calls}")
+
+    #: G6b ⛔ **花钱之前**就停：base 评估排在 propose **之前**，所以预算
+    #:    在轮内就被评估花光 ⇒ 走到"propose 前检查"分支 ⇒ 本轮**根本不提议**。
+    #:    （真 LLM 时一次 propose = 一次付费调用，调用完再查钱已经花了。）
+    lp6, (_, reps6) = _run(RunBudget(max_eval_runs=2))
+    ck("G6b ⛔ 轮内耗尽 ⇒ 在 propose **之前**停（candidates 为空，"
+       "不是提议完才停）",
+       len(reps6) >= 1
+       and "budget_exhausted" in (reps6[0].revert_reason or "")
+       and not reps6[0].candidates,
+       f"reason={reps6[0].revert_reason!r} cands={len(reps6[0].candidates)}")
+
+    #: G7 停止必须**记账**，且与"无事可做"是两个原因
+    l1 = lp1.ledger
+    stops = [e for e in l1.events() if e.kind == "evolution.budget_stop"]
+    ck("G7 ⛔ 预算耗尽进账本（不是静默少跑几轮 —— 那会被读成'跑完没提升'）",
+       len(stops) == 1 and "budget_exhausted" not in
+       (stops[0].payload.get("note", "")),
+       f"{len(stops)} 条 {stops[0].payload if stops else ''}")
+    ck("G8 账本里写明是**预算**停止，不是 idle 停止（两种原因修法不同）",
+       bool(stops) and "预算耗尽" in (stops[0].payload.get("note", ""))
+       and "rounds" in (stops[0].payload.get("reason", "")),
+       str(stops[0].payload.get("reason")) if stops else "无事件")
+
+    #: G9 每轮报告都带预算读数（只在末尾记一次 ⇒ 看不到预算怎么烧掉的）
+    ck("G9 每轮报告带 budget 读数且 used 单调递增",
+       all(r.budget is not None for r in reps2)
+       and [r.budget["used"]["rounds"] for r in reps2] == [1, 2, 3],
+       f"{[r.budget['used']['rounds'] if r.budget else None for r in reps2]}")
+
+    #: G10 `limited` 读数：没装预算时必须是 False（否则是假仪表）
+    ck("G10 ⛔ 未装预算 ⇒ limited=False（'有没有止损'必须可读，不能靠猜）",
+       RunBudget().limited is False and RunBudget(max_rounds=1).limited is True)
+
     print("\n" + "=" * 60)
     if FAILS:
         print(f"❌ {len(FAILS)} 项未通过：")

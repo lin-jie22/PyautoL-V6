@@ -155,6 +155,68 @@ def cmd_memory(args: argparse.Namespace) -> int:
                   f"「此刻库里有它」，不证明它当初是这么写进来的）")
         return 0 if after.get("ledger_trace") in ("complete", "pre_ledger") else 1
 
+    if args.memory_cmd == "ingest":
+        #: ⛔ 外部知识摄入的**唯一 CLI 入口**。它不自己实现去重/判据 —— 那些
+        #:    闸在 `MemoryOS._write_raw`，learner 只做编排 + 计量 + 记账 +
+        #:    可达性取证（V5 教训：learner 自搞一套 ⇒ 39x 重复且报表说成功）。
+        from .embeddings import HashingEmbedder
+        from .learner import KnowledgeItem, KnowledgeLearner
+        led = Ledger(p["ledger"])
+        mem, _ = MemoryOS.load(p["memory"], HashingEmbedder(dim=256),
+                               min_content_len=60)
+        mem.attach_ledger(led)
+        src = Path(getattr(args, "file", "") or "")
+        if not src.is_file():
+            print(f"[memory] 找不到清单：{src}", file=sys.stderr)
+            return 2
+        try:
+            data = json.loads(src.read_text(encoding="utf-8"))
+        except Exception as e:  # noqa: BLE001
+            print(f"[memory] 清单不是合法 JSON：{e}", file=sys.stderr)
+            return 2
+        rows = data.get("items") if isinstance(data, dict) else data
+        if not isinstance(rows, list):
+            print("[memory] 清单需要 items 数组", file=sys.stderr)
+            return 2
+        lr = KnowledgeLearner(mem, ledger=led,
+                              max_items=int(getattr(args, "max_items", 200)))
+        rep = lr.ingest([KnowledgeItem(
+            content=str(r.get("content", "")),
+            source=str(r.get("source", src.name)),
+            tier=str(r.get("tier", "L3") or "L3"),
+            keywords=tuple(r.get("keywords", ()) or ()),
+            tags=tuple(r.get("tags", ()) or ()),
+            trust=float(r.get("trust", 0.5))) for r in rows
+            if isinstance(r, dict)])
+        mem.save(p["memory"])
+        #: ⛔⛔ **持久化往返取证**：进程内的 `written / retrievable` 只证明
+        #:    "内存里有"，证不了"存下来还能读回来"。实测反例：摄入 2 条短
+        #:    知识 ⇒ 进程内 `written=2 / retrievable=True`，而
+        #:    `save → load` 后 **2 条全被 `rejected_unverified`（内容过短）
+        #:    拒载** ⇒ 知识根本没留下。不看这一段，"摄入成功"就是假仪表。
+        _, reload_rep = MemoryOS.load(p["memory"], HashingEmbedder(dim=256),
+                                      min_content_len=60)
+        out = rep.to_dict()
+        out["persist_probe"] = {
+            "loaded": int((reload_rep or {}).get("loaded", 0)),
+            "rejected_unverified": int(
+                (reload_rep or {}).get("rejected_unverified", 0)),
+            "notes_after_reload": len(
+                MemoryOS.load(p["memory"], HashingEmbedder(dim=256),
+                              min_content_len=60)[0].notes),
+            "note": "写入侧放行 ≠ 加载侧放行；这里查的是 save→load 之后"
+                    "真正还在库里的条数",
+        }
+        lost = out["persist_probe"]["rejected_unverified"]
+        if lost:
+            print(f"[memory] ⚠️ {lost} 条写完但重载时被拒（多半是内容过短，"
+                  f"见 n_below_min_content={rep.n_below_min_content}）"
+                  f"⇒ 这些知识**没有真正留下**", file=sys.stderr)
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        #: ⛔ 退出码诚实：被拒 / 被截断 / 检索不到 / 重载后丢了 ⇒ 非 0。
+        #:    否则"摄入命令跑成功"会被当成"知识都进去了"。
+        return 0 if (rep.ok and rep.retrievable is not False and not lost) else 1
+
     if args.memory_cmd == "prune":
         #: ⛔⛔ **默认只报数，不删**。剪枝不可逆，而"产物增殖闸"要的是
         #:    **看得见**（库在增殖 ⇒ 有人该决定怎么办），不是自动删。
@@ -908,6 +970,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     mr = ms.add_parser("reindex", help="换 embedder 后的唯一合法恢复路径")
     mr.add_argument("--to", default="hash", choices=["hash", "ollama"],
                     help="目标嵌入器")
+    mi = ms.add_parser("ingest", help="摄入外部知识（learner 通道，只写 L3/L4）")
+    mi.add_argument("file", help="知识清单 JSON（数组，或 {items:[...]}）")
+    mi.add_argument("--max-items", default="200", help="单次摄入配额")
     mp = ms.add_parser("prune", help="产物增殖闸：默认只报数，加 --apply 才真删")
     mp.add_argument("--apply", action="store_true",
                     help="真的删除（默认 dry-run：只算不删）")
