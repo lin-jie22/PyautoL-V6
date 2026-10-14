@@ -28,6 +28,9 @@ import sys
 import time
 from pathlib import Path
 
+from .logging_setup import get_logger
+_log = get_logger("aether.ui")         # ⛔ 显式名，理由见 cli.py 同位置
+
 ROOT = Path(__file__).resolve().parent.parent
 CONSOLE = ROOT / "console"
 
@@ -93,15 +96,29 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--caps-hot", action="store_true",
                     help="开能力热装载（默认关 —— 见 README 宪法第 52 条）")
     ap.add_argument("--no-open", action="store_true", help="只起服务，不开窗口")
+    ap.add_argument("--log-level", default="INFO",
+                    choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                    help="诊断输出级别（会**透传给子进程 serve**）")
+    ap.add_argument("--log-json", action="store_true",
+                    help="诊断输出改成每行一个 JSON（同样透传）")
     args = ap.parse_args(argv)
 
+    #: ⛔ 父子进程都配：父进程的「端口被占」「服务没起来」是**父进程**的
+    #:    诊断，走子进程的日志是看不到的（那是两个进程）。
+    try:
+        from .logging_setup import setup as _setup
+        _setup(level=args.log_level, json_output=args.log_json)
+    except ValueError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 2
+
     if not (CONSOLE / "index.html").is_file():
-        print(f"❌ 找不到控制台页面：{CONSOLE / 'index.html'}", file=sys.stderr)
+        _log.error(f"❌ 找不到控制台页面：{CONSOLE / 'index.html'}")
         return 1
 
     port = _free_port(args.port)
     if port != args.port:
-        print(f"⚠️  {args.port} 被占用 ⇒ 改用 {port}")
+        _log.warning(f"⚠️  {args.port} 被占用 ⇒ 改用 {port}")
 
     caps = args.caps
     if caps and not Path(caps).is_file() and (ROOT / caps).is_file():
@@ -114,13 +131,18 @@ def main(argv: list[str] | None = None) -> int:
         cmd += ["--caps", caps]
     if args.caps_hot:
         cmd += ["--caps-hot"]
+    #: ⛔ 日志口径**透传**给子进程：父子各配一套却级别不同 = 父进程说
+    #:    「WARNING 以上」、子进程把所有 INFO 都打出来 ⇒ 开关形同虚设。
+    cmd += ["--log-level", args.log_level]
+    if args.log_json:
+        cmd += ["--log-json"]
 
     proc = subprocess.Popen(cmd, cwd=str(ROOT))
     url = f"http://127.0.0.1:{port}/"
     print(f"① API + 控制台：{url}   （pid {proc.pid}）")
     if not _wait_up(port):
-        print("❌ 服务没能在 15s 内应答；完整启动命令：\n   "
-              + " ".join(cmd), file=sys.stderr)
+        _log.error("服务没能在 15s 内应答；完整启动命令：\n   "
+                   + " ".join(cmd))
         proc.terminate()
         return 1
 

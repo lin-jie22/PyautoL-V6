@@ -41,6 +41,7 @@ import hashlib
 import json
 import os
 import shutil
+import tarfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,7 +56,7 @@ BACKUP_TARGETS: Tuple[Tuple[str, str], ...] = (
 )
 
 __all__ = ["BACKUP_TARGETS", "BackupError", "Manifest", "create", "verify",
-           "restore", "report"]
+           "restore", "report", "archive", "unarchive"]
 
 
 class BackupError(Exception):
@@ -82,11 +83,15 @@ class Manifest:
     chain_ok: Optional[bool] = None       # 副本的账本链是否完整（None=未测）
     chain_reason: str = ""
     format: int = 1
+    #: ⛔ 这份备份**落在哪**（r35）。此前 manifest 记了内容却没记位置
+    #:    ⇒ 事后拿到一份 manifest，还要靠人记得它当初拷到哪个目录去了。
+    path: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {"format": self.format, "created_at": self.created_at,
                 "root": self.root, "files": self.files,
-                "chain_ok": self.chain_ok, "chain_reason": self.chain_reason}
+                "chain_ok": self.chain_ok, "chain_reason": self.chain_reason,
+                "path": self.path}
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Manifest":
@@ -98,7 +103,8 @@ class Manifest:
                    root=str(d.get("root", "")), files=list(d["files"]),
                    chain_ok=d.get("chain_ok"),
                    chain_reason=str(d.get("chain_reason", "")),
-                   format=int(d.get("format", 1)))
+                   format=int(d.get("format", 1)),
+                   path=str(d.get("path", "")))
 
 
 def create(root: str | Path, dest: str | Path,
@@ -125,7 +131,8 @@ def create(root: str | Path, dest: str | Path,
         shutil.copy2(src, dst)
         files.append({"rel": rel, "kind": kind, "missing": False,
                       "size": dst.stat().st_size, "sha256": _sha256(dst)})
-    m = Manifest(created_at=time.time(), root=str(root_p), files=files)
+    m = Manifest(created_at=time.time(), root=str(root_p), files=files,
+                 path=str(out))
     #: ⛔ 备份完**立刻**验副本的链：不验的话，"拷成功了"会被当成
     #:   "备份可用"，而半截拷贝在恢复的那一刻才发现（假仪表）。
     led_copy = out / "data__ledger.jsonl"
@@ -147,6 +154,40 @@ def create(root: str | Path, dest: str | Path,
     (out / "manifest.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return m
+
+
+def archive(backup_dir: str | Path) -> Path:
+    """把一份备份目录打成**单个** `.tar.gz`（便于传输 / 异地留存）。
+
+    ⛔ 刻意**薄**：解压出来就是原备份目录，`restore` 照常吃。这里不重新
+       实现一遍校验 —— 那会造出第二份判据（"打包格式对不对"与
+       "备份内容对不对"是两件事，各有一份就够了）。
+    """
+    d = Path(backup_dir)
+    if not d.is_dir():
+        raise BackupError(f"不是备份目录：{d}")
+    tar_path = d.with_suffix(".tar.gz") if d.suffix != ".tar.gz" else d
+    with tarfile.open(tar_path, "w:gz") as tf:
+        tf.add(d, arcname=d.name)
+    return tar_path
+
+
+def unarchive(tar_path: str | Path, dest: str | Path) -> Path:
+    """解回目录，返回该目录路径（供 `verify` / `restore` 直接消费）。
+
+    ⛔ 防路径穿越（tar 里可能带 `../`）：解压前逐条检查目标是否仍在
+       `dest` 之内 —— 归档文件是**数据**，不是可信代码。
+    """
+    tp = Path(tar_path)
+    out_root = Path(dest)
+    out_root.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(tp, "r:gz") as tf:
+        for m in tf.getmembers():
+            target = (out_root / m.name).resolve()
+            if not str(target).startswith(str(out_root.resolve())):
+                raise BackupError(f"归档里含越界路径：{m.name}")
+        tf.extractall(out_root)
+    return out_root / tp.name.replace(".tar.gz", "")
 
 
 def verify(path: str | Path) -> Tuple[bool, List[str], Optional[Manifest]]:

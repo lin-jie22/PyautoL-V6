@@ -2459,3 +2459,119 @@ checkpoint 是派生量（写失败不中断但必须记账）。
   `aether.__version__`，`serve` 侧改为读取而非重写。
 - 28 个契约此前没有统一 runner（README 里是一句 shell `for` 循环）⇒
   `scripts/run_contracts.py`（汇总 + 诚实退出码 + 可选并行）。
+
+---
+
+## 32. 判据同源 · 日志分级 · 实验记账（2026-10-14 · r35）
+
+这一章的四项都不改变"单次运行对不对"，只决定这套系统**能不能被信任、
+被交接、被复盘**。它们的共同形状是：把散在两处（或只活在终端里）的东西
+收成一个唯一来源。
+
+### 32.1 基因 target：两处同形 = 两处都会漏
+
+`providers.TemplateProposer` 手搓 `Gene(op="set", target=f"L3.skills.{n}")`，
+`genome.gene_add_skill` 等四个构造器写了**同形的一份**。
+
+危险之处不在于重复，而在于**漏的那处不报错**：`apply_gene` 对未知层抛错，
+但对"已知层的错误子键"放行 ⇒ 产物落在没人看的地方，测试全绿。
+
+⇒ 收敛为 `genome._t_skill / _t_route / _t_tools / _t_policy` 四个唯一构造点，
+提议器改为复用构造器。
+
+⛔ **保留语义差异**：`gene_route` 是 `op="set"`，提议器要用的是
+`op="append"`（路由是链，set 会整条覆盖）。所以新增 `gene_route_append`，
+**不是**让提议器改用 `gene_route`：
+
+- 实测（2026-10-14）：提议器用 set ⇒ 装一个新技能就顶掉旧的 ⇒ 两个通用
+  能力维度互斥 ⇒ dev 分层的 easy 从 +1.0 掉到 −1.0 ⇒ 候选永远过不了闸
+  ⇒ 闭环停滞。append 之后能力可叠加。
+
+契约 `tests/contract_genome_source_test.py` 三组：
+
+- **A 组静态闸**：AST 扫 `aether/*.py` 的代码字符串（跳过 docstring 与注释），
+  target 字面量只允许出现在 `_t_*` 里。⛔ 用 AST 而不是正则扫文本 ——
+  正则会把注释里的说明当成实现（"断言行为，不断言文案"）。
+- **B 组行为闸**：提议器产出的 target 与构造器产物逐字相同。
+- **C 组反证**：短路 `_t_skill` ⇒ 提议器产物必须跟着变（证明真同源，
+  不是两边恰好写得一样）。
+
+⛔ **验收用旧版对拍**：`git archive <改动前>` 取出旧 aether，导出提议器
+产物逐字 diff（实测零变化）—— 只跑新测试不足以证明"行为未变"。
+
+### 32.2 日志：诊断走 stderr 且可分级，结果走 stdout
+
+收口前 `aether/` 里 `import logging` **零次**，46 处诊断是
+`print(..., file=sys.stderr)`（集中在 cli / serve / ui 三个入口；
+库层几乎没有诊断输出 —— 早先按 `print(` 计数得到的"82 处"有一大半是
+`fingerprint(` 的子串误命中）。
+
+`aether/logging_setup.py` 的四条约束：
+
+1. ⛔ **库层不装 handler**（与 `checkpoint_path` 默认 None 同理）：装 handler
+   是进程级副作用，不该由 import 触发；只由 cli / serve / ui 显式 `setup()`。
+2. ⛔ **`setup()` 幂等**：重复调用替换掉自己的 `_aether_owned` handler，
+   不叠加（否则每条日志打两遍），也不误删别人装的 handler。
+3. ⛔ **logger 名显式传 `"aether.cli"`**，不用 `__name__` —— `python -m` 时
+   `__name__` 是 `"__main__"` ⇒ 三个进程的日志全叫 __main__，分不清谁打的
+   （契约 C2 实测抓到）。
+4. ⛔ **默认 INFO 而非 WARNING**：改造前这些诊断全部可见，默认 WARNING 会让
+   💾/ℹ 那几条凭空消失 ⇒ 静默改了用户可见行为。
+
+契约 `tests/contract_logging_test.py` 的关键判据：
+
+- **stdout 里不能出现日志行**（带 ts+级别+`│`，或 JSON 的 `"level"`）。
+  ⛔ 第一版写成"stdout 必须是纯 JSON"⇒ 误红：`status` 本来就在 stdout
+  给人类可读摘要（"账本链：✅ 完整"），那是**产物**不是污染。
+- **级别真能过滤**并带反证：ERROR 时看不到 ⇒ INFO 时必须重新出现（证明
+  是过滤生效，不是这条日志根本没打）。
+- **反证**：换掉 formatter ⇒ 输出必须变成探针字样（证明命中的是我们的
+  handler）。
+
+### 32.3 实验参数进账本（可复现性）
+
+`evolve` 的命令行参数此前**只活在终端里**。账本能回答"改了什么"，却回答不了
+"是用什么口径跑出来的" ⇒ 同一份代码跑出不同结果时，无从分辨是随机性还是
+参数变了。
+
+⇒ 跑之前写一条 `evolution.run_config` 事件（seed / rounds / group /
+max_tasks / depth / kinds / capsules / proposer / dev_env / heldout_env /
+heldout / heldout_floor / parallel / embedder / budget / checkpoint /
+resumed_from），同时出现在 stdout 输出里（同源，不各写一遍）。
+
+⛔ `resumed_from` 记 `0` 而不是 `None`：None 分不清"不是续跑"和"忘了记"。
+
+契约 `tests/contract_repro_test.py` 端到端跑真 CLI + 读真账本：
+
+- 账本里的 `seed` 与 stdout 同源；12 项关键参数齐全。
+- **记的是实际传入值**：`--seed 7` 不能记成默认的 0（否则记常量也能变绿）。
+- **反证**：换个不存在的 kind 必须查不到（证明查询本身有效）。
+  ⛔ `Ledger.events()` 返回的是 **`Event` dataclass** 不是 dict ——
+  按 dict 取会抛 `AttributeError` 而被 except 吞掉 ⇒ 断言变假绿。
+
+### 32.4 归档：不重造判据，且当数据不当代码
+
+`backup --archive` 打成单个 `.tar.gz`（便于传输 / 异地留存）；
+`restore --from x.tar.gz` 先解包，之后走**完全相同**的恢复流程。
+
+⛔ 不另写一份"归档校验"：打包格式对不对与备份内容对不对是两件事，
+各一份判据就够（与 §32.1 同一条纪律）。契约断言的是"解出来的备份
+过得了原有的 `verify()`"。
+
+⛔ **防路径穿越**：归档里可能带 `../`，解压前逐条检查目标仍在 dest 之内
+（归档是**数据**，不是可信代码）。契约 G 组用手工构造的恶意包实测。
+
+⛔ manifest 补 `path` 字段：此前记了内容却没记位置 ⇒ 事后拿到 manifest
+还要靠人记得它当初拷到哪个目录去了。
+
+### 32.5 本轮修掉的一条**假红**
+
+`contract_ops_test.py` 的 E6（"5 次探活 < 1 次 status"）红了。
+
+先取证再动手：放大账本后实测 **status 单次 115.9ms vs health 单次 0.3ms
+（385x）** ⇒ health 本身确实是 O(1)，红的真正原因是**测试账本只有 3 条**，
+两者都在亚毫秒级（1.8ms vs 0.9ms），差异完全淹没在冷启动噪声里 ⇒
+断言时红时绿。
+
+修法是**放大账本 + 预热**（让信噪比足够），不是放宽判据 —— 判据方向没变，
+并补了一条"放大后差距必须 >10x"守住信噪比。

@@ -564,18 +564,56 @@ def blast_radius(before: Harness, after: Harness) -> Dict[str, Any]:
 # ──────────────────────────────────────────────────────────────────
 # 内置基因库（mined 出来的"已知有用"的原子编辑，可被 capsule 组合）
 # ──────────────────────────────────────────────────────────────────
+#: ──────────────────────────────────────────────────────────────────
+#: ⛔ `target` 路径格式**只准写在这四个函数里**。
+#:    此前 genome（构造器）与 providers（提议器）各写一份 f-string ——
+#:    两处同形但**互不相干**：改层名/改路径格式时必漏一处，且漏的那处
+#:    不会报错，只会静默写到错误的层上（`apply_gene` 对未知层是抛错，
+#:    但对**已知层的错误子键**是放行 ⇒ 产物落在没人看的地方）。
+#:    收敛后：`grep -rn "L3.skills\.\|L1.routing\.\|L4.memory_policy\."
+#:    aether/` 只应命中本段（由 contract_genome_source_test.py 守住）。
+#: ──────────────────────────────────────────────────────────────────
+def _t_skill(name: str) -> str:
+    return f"L3.skills.{name}"
+
+
+def _t_route(kind: str) -> str:
+    return f"L1.routing.{kind}"
+
+
+def _t_tools() -> str:
+    return "L2.tools"
+
+
+def _t_policy(key: str) -> str:
+    return f"L4.memory_policy.{key}"
+
+
 def gene_add_skill(name: str, body: str, rationale: str = "") -> Gene:
-    return Gene(op="set", target=f"L3.skills.{name}", value=body,
+    return Gene(op="set", target=_t_skill(name), value=body,
                 rationale=rationale or f"新增技能 {name}")
 
 
 def gene_route(kind: str, skill: str, rationale: str = "") -> Gene:
-    return Gene(op="set", target=f"L1.routing.{kind}", value=skill,
+    return Gene(op="set", target=_t_route(kind), value=skill,
                 rationale=rationale or f"{kind} → {skill}")
 
 
+def gene_route_append(kind: str, skill: str, rationale: str = "") -> Gene:
+    """把技能**追加**到现有路由链尾（`op="append"`），与 `gene_route` 的
+    `op="set"` 是两回事 —— 不要互相替换。
+
+    ⛔ 为什么必须存在：路由是**链**（`a;b;c`），`set` 会整条覆盖。
+    实测（2026-10-14）：提议器用 set ⇒ 装一个新技能就顶掉旧的 ⇒
+    两个通用能力维度互斥 ⇒ dev 的 easy 从 +1.0 掉到 −1.0 ⇒ 候选永远
+    过不了闸 ⇒ 闭环停滞。改成 append 后能力可叠加。
+    """
+    return Gene(op="append", target=_t_route(kind), value=skill,
+                rationale=rationale or f"{kind} → {skill}（追加到链尾）")
+
+
 def gene_tool(name: str, rationale: str = "") -> Gene:
-    return Gene(op="append", target="L2.tools", value=name,
+    return Gene(op="append", target=_t_tools(), value=name,
                 rationale=rationale or f"开放工具 {name}")
 
 
@@ -586,5 +624,5 @@ def gene_tune(key: str, delta: Any, rationale: str = "") -> Gene:
     if not isinstance(delta, (int, float)) or isinstance(delta, bool):
         raise ValueError(
             f"gene_tune 的 delta 必须是数字，实得 {type(delta).__name__}")
-    return Gene(op="tune", target=f"L4.memory_policy.{key}", value=delta,
+    return Gene(op="tune", target=_t_policy(key), value=delta,
                 rationale=rationale or f"调参 {key} {delta:+}")

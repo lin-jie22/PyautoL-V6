@@ -19,6 +19,7 @@
 """
 import json
 import sys
+import tarfile
 import tempfile
 from pathlib import Path
 
@@ -149,6 +150,75 @@ def main():
     ck("E4 ⛔ 只带已知清单，不做目录通配（临时文件不被带走）",
        all("huge.tmp" not in f["rel"] for f in m2.files),
        str([f["rel"] for f in m2.files]))
+
+    #: ── F 组：单文件归档（r35）────────────────────────────────
+    #: ⛔ 刻意**复用** verify，不另造一份校验 —— "打包格式对不对"与
+    #:    "备份内容对不对"是两件事，各有一份判据就够了。
+    print("\n[F] 单文件归档（--archive）：解出来必须能被同样的闸接住")
+    m3 = B.create(root, tmp / "bk3", note="归档测试")
+    ck("F1 manifest 记了备份落在哪（path）",
+       bool(m3.path) and Path(m3.path).is_dir(), m3.path)
+    try:
+        tar_p = B.archive(m3.path)
+        ck("F2 打成单个 .tar.gz", tar_p.is_file() and tar_p.suffixes[-2:] ==
+           [".tar", ".gz"], str(tar_p))
+        ck("F2b 归档非空（空包 ⇒ 解压后什么都没有，却报打包成功）",
+           tar_p.stat().st_size > 0, f"{tar_p.stat().st_size}B")
+    except Exception as e:                                   # noqa: BLE001
+        ck("F2 打成单个 .tar.gz", False, f"{type(e).__name__}: {e}")
+        tar_p = None
+
+    if tar_p is not None:
+        ex_dir = Path(tempfile.mkdtemp(prefix="v6_unarc_"))
+        got = B.unarchive(tar_p, ex_dir)
+        ck("F3 解出来的目录里有 manifest.json",
+           (got / "manifest.json").is_file(), str(got))
+        ok_a, probs_a, m_a = B.verify(got)
+        ck("F4 ⛔ 解出来的备份**过得了原有的闸**（复用 verify，不另造）",
+           ok_a, f"{probs_a[:2]}")
+        ck("F5 解压后 manifest 与原始逐字一致（打包没改内容）",
+           m_a is not None and m_a.files == m3.files,
+           "一致" if m_a and m_a.files == m3.files else "不一致")
+
+        #: ⛔ 反证：改解压后副本里的一个字节 ⇒ verify 必须翻红。
+        #:    否则"F4 通过"可能只是 verify 恒真。
+        #: ⛔ kind 取值以 `BACKUP_TARGETS` 为准（"source"/"projection"），
+        #:    不是 "ledger" —— 照猜写筛选条件会让反证组静默变空集。
+        victim = [f for f in m3.files
+                  if not f.get("missing") and f["rel"].endswith("ledger.jsonl")]
+        if victim:
+            vf = got / victim[0]["rel"].replace("/", "__")
+            if vf.is_file():
+                vf.write_text(vf.read_text(encoding="utf-8") + "\n",
+                              encoding="utf-8")
+                ok_b, probs_b, _ = B.verify(got)
+                ck("F6 ⛔ 反证：动一个字节 ⇒ verify 必须翻红"
+                   "（证明 F4 不是恒真）",
+                   not ok_b and bool(probs_b), f"{probs_b[:1]}")
+            else:
+                ck("F6 ⛔ 反证：动一个字节 ⇒ verify 必须翻红", False,
+                   f"找不到 {vf}")
+        else:
+            ck("F6 ⛔ 反证：动一个字节 ⇒ verify 必须翻红", False, "没有账本文件")
+
+    #: ⛔ 路径穿越：归档是**数据**，不该被当成可信代码执行/落盘。
+    print("\n[G] ⛔ 归档里的越界路径必须被拒")
+    evil_dir = Path(tempfile.mkdtemp(prefix="v6_evil_"))
+    evil_tar = evil_dir / "evil.tar.gz"
+    payload = evil_dir / "payload.txt"
+    payload.write_text("pwned", encoding="utf-8")
+    with tarfile.open(evil_tar, "w:gz") as tf:
+        tf.add(payload, arcname="../ESCAPED.txt")
+    try:
+        B.unarchive(evil_tar, evil_dir / "out")
+        ck("G1 含 ../ 的归档 ⇒ 拒绝解包（不许落到 dest 之外）", False,
+           "居然解包成功了")
+    except B.BackupError as e:
+        ck("G1 含 ../ 的归档 ⇒ 拒绝解包（不许落到 dest 之外）", True,
+           str(e)[:60])
+    except Exception as e:                                   # noqa: BLE001
+        ck("G1 含 ../ 的归档 ⇒ 拒绝解包", False,
+           f"抛的不是 BackupError：{type(e).__name__}: {e}")
 
     print()
     if FAILS:

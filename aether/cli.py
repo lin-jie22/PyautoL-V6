@@ -13,9 +13,26 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from .logging_setup import LEVELS, get_logger, setup as _log_setup
+#: ⛔ 显式传名，不用 `__name__`：`python -m aether.cli` 时 `__name__` 是
+#:    `"__main__"` ⇒ 多进程日志（CLI + 常驻 serve + UI 父进程）里三家的
+#:    logger 全叫 __main__，分不清哪行是谁打的（契约 C2 实测抓到）。
+_log = get_logger("aether.cli")
+
+
+def _setup_logging(level: str, json_output: bool = False) -> None:
+    """⛔ 只由 `main()` 调一次。非法级别在这里就退出（rc=2），
+    而不是让它在 `setup()` 里抛栈 —— 命令行参数错是**用法错**，不是崩溃。"""
+    try:
+        _log_setup(level=level, json_output=json_output)
+    except ValueError as e:
+        print(f"❌ {e}", file=sys.stderr)   # logger 还没配上，只能用 print
+        raise SystemExit(2) from None
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -167,16 +184,16 @@ def cmd_memory(args: argparse.Namespace) -> int:
         mem.attach_ledger(led)
         src = Path(getattr(args, "file", "") or "")
         if not src.is_file():
-            print(f"[memory] 找不到清单：{src}", file=sys.stderr)
+            _log.warning(f"[memory] 找不到清单：{src}")
             return 2
         try:
             data = json.loads(src.read_text(encoding="utf-8"))
         except Exception as e:  # noqa: BLE001
-            print(f"[memory] 清单不是合法 JSON：{e}", file=sys.stderr)
+            _log.warning(f"[memory] 清单不是合法 JSON：{e}")
             return 2
         rows = data.get("items") if isinstance(data, dict) else data
         if not isinstance(rows, list):
-            print("[memory] 清单需要 items 数组", file=sys.stderr)
+            _log.warning("[memory] 清单需要 items 数组")
             return 2
         lr = KnowledgeLearner(mem, ledger=led,
                               max_items=int(getattr(args, "max_items", 200)))
@@ -245,7 +262,7 @@ def cmd_memory(args: argparse.Namespace) -> int:
                          ensure_ascii=False, indent=2))
         #: ⛔ 剪了却没留痕 ⇒ 明知有事故也要报出来（不是"删成功就完事"）
         if err:
-            print(f"❌ 已剪 {len(victims)} 条，但**没留痕**：{err}", file=sys.stderr)
+            _log.error(f"❌ 已剪 {len(victims)} 条，但**没留痕**：{err}")
             return 1
         print(f"✅ 已剪 {len(victims)} 条并逐条留痕（remaining={rep['remaining']}）")
         return 0
@@ -253,28 +270,28 @@ def cmd_memory(args: argparse.Namespace) -> int:
     # ── reindex ──────────────────────────────────────────────────
     before = memory_report(p["memory"])
     if not before.get("present"):
-        print(f"❌ 没有可重算的记忆库（{p['memory']}）", file=sys.stderr)
+        _log.error(f"❌ 没有可重算的记忆库（{p['memory']}）")
         return 1
     emb: Any = HashingEmbedder(dim=256)
     if args.to != "hash":
         try:
             cand, probe = resolve_embedder(args.to)
             if probe.get("chosen") != "ollama" and args.to == "ollama":
-                print(f"❌ 目标嵌入不可用：{probe}", file=sys.stderr)
+                _log.error(f"❌ 目标嵌入不可用：{probe}")
                 return 1
             emb = cand
         except Exception as e:  # noqa: BLE001
-            print(f"❌ 目标嵌入不可用（{type(e).__name__}: {e}）", file=sys.stderr)
+            _log.error(f"❌ 目标嵌入不可用（{type(e).__name__}: {e}）")
             return 1
     mem, rep = MemoryOS.load_for_reindex(p["memory"], emb, min_content_len=60)
     if not rep["loaded"]:
-        print(f"❌ 没有可重算的条目：{rep.get('note')}", file=sys.stderr)
+        _log.error(f"❌ 没有可重算的条目：{rep.get('note')}")
         return 1
     r = mem.reindex(emb, from_label=f"{rep.get('from_embedder')}:{rep.get('from_dim')}")
     out = {"before": before, "load": rep, "reindex": r}
     if r.get("rolled_back"):
         print(json.dumps(out, ensure_ascii=False, indent=2))
-        print(f"❌ reindex 失败已回滚：{r.get('error')}", file=sys.stderr)
+        _log.error(f"❌ reindex 失败已回滚：{r.get('error')}")
         return 1
     #: ⛔ 有条目没算出来 ⇒ 不落盘（落盘 = 把 embed_missing 固化成"正常库"）
     if r.get("failed"):
@@ -321,7 +338,7 @@ def cmd_rebuild(args: argparse.Namespace) -> int:
 
     if args.check:
         if not p["db"].exists():
-            print(f"❌ 没有投影库可校验（{p['db']}）", file=sys.stderr)
+            _log.error(f"❌ 没有投影库可校验（{p['db']}）")
             return 1
         s = Store(p["db"])
         rep = s.consistency_report(evs)
@@ -513,7 +530,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     #:    实测：宪法说"事实只有一份"，记忆却在账本之外另存一份）。
     mem.attach_ledger(led)
     if mem_load.get("note"):
-        print(f"💾 记忆装载：{mem_load['note']}", file=sys.stderr)
+        _log.info(f"💾 记忆装载：{mem_load['note']}")
     runner = _default_runner(envs, memory=mem)
 
     # ⛔ 种子 harness **必须先建**：冻结基线要用它跑。
@@ -698,7 +715,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                 skill_vocab=tuple(sorted(pool)),
                 env_ids=tuple(sorted(envs)),
                 heldout_note=ho_note)
-            print(f"🧠 proposer=llm（{model}）", file=sys.stderr)
+            _log.warning(f"🧠 proposer=llm（{model}）")
         except Exception as e:  # noqa: BLE001
             print(f"⚠️ 真模型不可用（{type(e).__name__}: {e}）⇒ 回退模板提议器",
                   file=sys.stderr)
@@ -754,7 +771,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
             made = mem.consolidate(min_access=0)
         except Exception as _e:                        # noqa: BLE001
             made = []
-            print(f"⚠️ 巩固失败：{type(_e).__name__}: {_e}", file=sys.stderr)
+            _log.warning(f"⚠️ 巩固失败：{type(_e).__name__}: {_e}")
         _consolidated_total += len(made)
         loop.aging_events["consolidated"] = len(made)
         #: 剪枝**只报数不删** —— 不可逆 ⇒ 该不该剪由人拍板。
@@ -814,12 +831,12 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     resumed_from = None
     if getattr(args, "resume", False):
         if not cp_path:
-            print("❌ --resume 需要配合 --checkpoint <路径>", file=sys.stderr)
+            _log.error("❌ --resume 需要配合 --checkpoint <路径>")
             return 2
         try:
             cpx, h_start = loop.load_checkpoint(cp_path)
         except Exception as e:      # noqa: BLE001 —— 拒绝原因要原样给人看
-            print(f"❌ 无法续跑：{e}", file=sys.stderr)
+            _log.error(f"❌ 无法续跑：{e}")
             return 2
         if cpx.rounds_left <= 0:
             print(f"✅ checkpoint 显示 {cpx.rounds_total} 轮已全部跑完"
@@ -833,6 +850,33 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         #: ⛔ 初始 harness 必须**先进账本**再落投影：只写库的话，从账本重建
         #:    会丢掉它（实测 7 个快照重建只剩 6 个）⇒ "唯一事实源"被违反。
         loop.register_root(h0)
+
+    #: ⛔ **实验可复现性**（r35）：跑之前先把"这次用的什么参数"写进账本。
+    #:    此前命令行参数只活在终端里 —— 一周后回看账本，能看见改了什么、
+    #:    却**看不出是用什么口径跑出来的** ⇒ 同样的代码跑出不同结果时
+    #:    无从分辨是随机性还是参数变了。账本是唯一事实源，实验配置就该
+    #:    是它的一部分（与 harness / 事件同级，不是散落在 shell history）。
+    run_config = {
+        "seed": args.seed, "rounds": args.rounds, "group": args.group,
+        "max_tasks": args.max_tasks, "depth": args.depth,
+        "kinds": args.kinds, "capsules": args.capsules,
+        "proposer": args.proposer, "dev_env": args.dev_env,
+        "heldout_env": args.heldout_env, "heldout": args.heldout,
+        "heldout_floor": args.heldout_floor,
+        "parallel": getattr(args, "parallel", "0"),
+        "embedder": args.embedder,
+        "budget": {k: (getattr(args, k, "") or "")
+                   for k in ("max_rounds", "max_seconds", "max_propose",
+                             "max_eval_runs")},
+        "checkpoint": cp_path or None,
+        #: ⛔ 记 `0` 而不是 `None`：None 分不清「不是续跑」和「忘了记」。
+        #:    （与 checkpoint 的 `n_below_min_content` 同源纪律：读数要么
+        #:    是确认过的值，要么带原因，不许用空值冒充"已确认没有"。）
+        "resumed_from": resumed_from if resumed_from is not None else 0,
+    }
+    led.append("evolution.run_config", run_config, actor="cli")
+
+    if resumed_from is None:
         mem.write("L0", h0.meta_rules, channel="curated",
                   source="seed-harness")
 
@@ -897,7 +941,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     diag = proposer.diagnostics() if hasattr(proposer, "diagnostics") else \
         {"name": "template", "error": "", "rejects": []}
     if diag.get("error"):
-        print(f"ℹ️ proposer 诊断：{diag}", file=sys.stderr)
+        _log.info(f"ℹ️ proposer 诊断：{diag}")
     out = {
         "dev_env": dev_name,
         "heldout_env": ho_name if heldout is not None else None,
@@ -916,6 +960,9 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "rounds": [r.to_dict() for r in reports],
         "final_harness_id": final.harness_id,
         "seed_harness_id": h0.harness_id,
+        #: ⛔ 参数**同时**出现在输出里：账本用于事后审计，输出用于当场
+        #:    贴进实验记录。两者同源（就是上面那一份），不各写一遍。
+        "run_config": run_config,
         "improved": any(r.improved for r in reports),
         "cost_s": round(time.time() - t0, 2),
         #: ⛔ 续跑读数必须可见：不打印，"开了 --checkpoint"与"进度真的
@@ -973,7 +1020,7 @@ def cmd_caps(args) -> int:
     from .interop import load_manifest
     gw, rep = _caps_gateway(getattr(args, "caps", "") or "")
     for s in rep.skipped:
-        print(f"[caps] ⚠️ 跳过 {s.get('id')}：{s.get('reason')}", file=sys.stderr)
+        _log.warning(f"[caps] ⚠️ 跳过 {s.get('id')}：{s.get('reason')}")
     reg = gw.registry
     cmd = getattr(args, "caps_cmd", "list")
 
@@ -985,7 +1032,7 @@ def cmd_caps(args) -> int:
     if cmd == "show":
         spec = reg.get(args.id)
         if spec is None:
-            print(f"[caps] 未注册：{args.id}", file=sys.stderr)
+            _log.warning(f"[caps] 未注册：{args.id}")
             return 2
         print(json.dumps(spec.to_dict(), ensure_ascii=False, indent=2))
         return 0
@@ -997,17 +1044,17 @@ def cmd_caps(args) -> int:
         try:
             call_args = json.loads(args.json or "{}")
         except Exception as e:  # noqa: BLE001
-            print(f"[caps] --json 不是合法 JSON：{e}", file=sys.stderr)
+            _log.warning(f"[caps] --json 不是合法 JSON：{e}")
             return 2
         if not isinstance(call_args, dict):
-            print("[caps] --json 必须是对象", file=sys.stderr)
+            _log.warning("[caps] --json 必须是对象")
             return 2
         res = gw.invoke(args.id, call_args, actor="cli")
         print(json.dumps(res.to_dict(), ensure_ascii=False, indent=2,
                          default=str))
         #: ⛔ 退出码必须诚实：脚本要靠它判成败，全返回 0 就是把失败藏起来
         return 0 if res.status == "ok" else 1
-    print(f"[caps] 未知子命令 {cmd}", file=sys.stderr)
+    _log.warning(f"[caps] 未知子命令 {cmd}")
     return 2
 
 
@@ -1018,11 +1065,19 @@ def cmd_backup(args) -> int:
     m = B.create(args.root, dest, note=args.note or "")
     out = {"dest": dest, "manifest": m.to_dict(),
            "chain_ok": m.chain_ok, "chain_reason": m.chain_reason}
+    #: `--archive`：再打成**单个** .tar.gz（便于传输 / 异地留存）。
+    #: ⛔ 顺序：先备份、再打包 —— 打包失败不该把已经拷好的备份说成没有。
+    if getattr(args, "archive", False):
+        try:
+            out["archive"] = str(B.archive(m.path))
+        except Exception as e:      # noqa: BLE001
+            _log.warning(f"[backup] 打包失败（备份本身已成功）：{e}")
+            out["archive"] = ""
     print(json.dumps(out, ensure_ascii=False, indent=2, default=str))
     #: ⛔ 退出码必须诚实：链验出来是断的 ⇒ 这份备份**不可信**，必须报失败
     #:    （否则"备份成功"会被当成"有退路"，而它其实没有）。
     if m.chain_ok is False:
-        print(f"❌ 备份副本的账本链是断的：{m.chain_reason}", file=sys.stderr)
+        _log.error(f"❌ 备份副本的账本链是断的：{m.chain_reason}")
         return 1
     return 0
 
@@ -1031,17 +1086,26 @@ def cmd_restore(args) -> int:
     """恢复：fail-closed，且恢复前先给当前状态留一份。"""
     from . import backup as B
     src = args.src
+    #: `--from` 直接指向 `.tar.gz` 也能恢复：先解到一个临时目录，
+    #: 之后的流程与"从目录恢复"**完全相同** —— 不另走一条校验路径。
+    if str(src).endswith(".tar.gz"):
+        tmpd = tempfile.mkdtemp(prefix="v6_unarchive_")
+        try:
+            src = str(B.unarchive(src, tmpd))
+        except B.BackupError as e:
+            _log.error(f"❌ 解包失败：{e}")
+            return 2
     ok, problems, m = B.verify(src)
     if not ok:
-        print("❌ 备份校验不通过 ⇒ 拒绝恢复：", file=sys.stderr)
+        _log.error("❌ 备份校验不通过 ⇒ 拒绝恢复：")
         for p_ in problems:
-            print(f"   - {p_}", file=sys.stderr)
+            _log.warning(f"   - {p_}")
         return 2
     assert m is not None
     print(f"将用 {src}（{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(m.created_at))}）"
           f" 覆盖 {args.root} 的账本/记忆/投影。")
     if m.chain_ok is False:
-        print(f"⚠️ 这份备份的账本链是断的：{m.chain_reason}", file=sys.stderr)
+        _log.warning(f"⚠️ 这份备份的账本链是断的：{m.chain_reason}")
     #: ⛔ 恢复是不可逆的覆盖写 ⇒ 默认**不**自动执行，必须显式 --yes。
     #:    （"备份时留了当前状态"是第二道保险，不是让人随手执行的理由。）
     if not args.yes:
@@ -1050,7 +1114,7 @@ def cmd_restore(args) -> int:
     try:
         rep = B.restore(src, args.root)
     except B.BackupError as e:
-        print(f"❌ 恢复失败：{e}", file=sys.stderr)
+        _log.error(f"❌ 恢复失败：{e}")
         return 2
     print(json.dumps(rep, ensure_ascii=False, indent=2, default=str))
     return 0
@@ -1081,6 +1145,14 @@ def cmd_doctor(args) -> int:
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="aether", description="V6 · AETHER CLI")
     ap.add_argument("--root", default=str(ROOT), help="V6 根目录")
+    #: ⛔ 默认 INFO 而非 WARNING：改造前这些诊断是 `print(file=sys.stderr)`，
+    #:    **全部可见**。默认 WARNING 会让 💾/ℹ 那几条凭空消失 ⇒ 静默改了
+    #:    用户可见行为。要安静请显式 `--log-level WARNING`。
+    ap.add_argument("--log-level", default="INFO", choices=list(LEVELS),
+                    help="诊断输出级别（默认 INFO = 与改造前可见性一致）")
+    ap.add_argument("--log-json", action="store_true",
+                    help="诊断输出改成每行一个 JSON（供脚本消费；"
+                         "**结果输出始终走 stdout，不受影响**）")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("status", help="账本 + 库统计 + 投影一致性")
@@ -1088,6 +1160,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     bk = sub.add_parser("backup", help="备份账本/记忆/投影（自带校验和）")
     bk.add_argument("--to", default="", help="备份存放目录（默认 <root>/backups）")
     bk.add_argument("--note", default="", help="给这份备份写一句备注")
+    bk.add_argument("--archive", action="store_true",
+                    help="顺便打成单个 .tar.gz（便于传输；备份本身照常保留）")
     rs = sub.add_parser("restore", help="从备份恢复（默认只演练，--yes 才执行）")
     rs.add_argument("--from", dest="src", required=True, help="备份目录")
     rs.add_argument("--yes", action="store_true",
@@ -1202,6 +1276,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                         "--caps", args.caps]
                        + (["--caps-hot"] if args.caps_hot else [])
                        + (["--no-open"] if args.no_open else []))
+
+    #: ⛔ `ui` 会把控制权交给子进程（它自己会再 setup 一次），这里不重复配。
+    _setup_logging(getattr(args, "log_level", "INFO"),
+                   getattr(args, "log_json", False))
     return {
         "status": cmd_status,
         "verify-chain": cmd_verify_chain,

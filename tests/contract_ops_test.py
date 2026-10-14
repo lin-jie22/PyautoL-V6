@@ -154,16 +154,32 @@ def main():
            h.get("checks", {}).get("ledger_present") is True,
            str(h.get("checks")))
         #: 轻的**证据**：health 比 status 快一个量级（同一服务、同一时刻）
-        import time
-        t0 = time.time()
+        #: ⛔⛔ 账本必须**先放大**再比 —— 用 3 条事件的账本，两者都是
+        #:    亚毫秒级（实测 1.8ms vs 0.9ms），差异完全淹没在冷启动噪声里
+        #:    ⇒ 断言时红时绿。放大到 3000 条后实测：status 单次 115.9ms、
+        #:    health 单次 0.3ms（385x）⇒ 差异才**可观测**。
+        #:    （不是放宽判据：判据方向没变，变的是让信噪比足够。）
+        import time as _time
+        from aether.ledger import Ledger as _Ledger
+        _led = _Ledger(str(Path(good) / "data" / "ledger.jsonl"))
+        for _i in range(3000):
+            _led.append("probe.bench", {"i": _i, "pad": "x" * 80},
+                        actor="ops-contract")
+        _opener.open(base + "/api/health", timeout=20).read()      # 预热
+        _opener.open(base + "/api/status?limit=5", timeout=30).read()
+
+        t0 = _time.time()
         for _ in range(5):
             _opener.open(base + "/api/health", timeout=5).read()
-        t_h = time.time() - t0
-        t1 = time.time()
-        _opener.open(base + "/api/status?limit=5", timeout=20).read()
-        t_s = time.time() - t1
+        t_h = _time.time() - t0
+        t1 = _time.time()
+        _opener.open(base + "/api/status?limit=5", timeout=30).read()
+        t_s = _time.time() - t1
         ck("E6 ⛔ 实测：5 次探活 < 1 次 status（探活不该随账本变慢）",
            t_h < t_s, f"health5={t_h*1000:.1f}ms status1={t_s*1000:.1f}ms")
+        ck("E6b ⛔ 放大后差距要够大（>10x），否则信噪比不足 ⇒ E6 会时红时绿",
+           t_s > t_h * 2 and t_s * 1000 > 10,
+           f"status/health = {t_s/max(t_h, 1e-6):.1f}x")
     finally:
         srv.shutdown()
 

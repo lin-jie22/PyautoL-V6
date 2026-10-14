@@ -23,7 +23,8 @@ from dataclasses import dataclass, field, replace
 from typing import (Any, Callable, Dict, List, Optional, Protocol, Sequence,
                     Tuple)
 
-from .genome import Capsule, Gene, Harness, parse_route
+from .genome import (Capsule, Gene, Harness, gene_add_skill, gene_route_append,
+                     gene_tool, gene_tune, parse_route)
 from .runtime import Trajectory
 
 
@@ -307,31 +308,32 @@ class TemplateProposer:
                 #    只加技能 ⇒ 路由没接通 ⇒ 技能不可达 ⇒ reward 不变
                 #    ⇒ 过不了能力地板。这正是 Capsule 存在的理由，
                 #    由 tests/contract_agent_test.py 的 L1 组实测守住。
+                #: ⛔ target 路径**不在这里写**（2026-10-14 收口）：此前这里
+                #:    手写 f"L3.skills.{sname}"，与 genome 的构造器各写一份。
+                #:    两处同形却互不相干 ⇒ 改格式必漏一处，且漏的那处不报错。
                 out.append(Capsule(
                     name=f"add_skill:{sname}",
-                    genes=(Gene(op="set", target=f"L3.skills.{sname}",
-                                value=body, rationale=f"弱点={kind}"),
-                           Gene(op="append", target=f"L1.routing.{self.route_key}",
-                                value=sname,
-                                rationale=f"新技能**追加**到现有链 {list(cur)} 尾"
-                                          f"（按任务类别 {self.route_key} 路由，"
-                                          f"不按环境名；不覆盖已有能力）")),
+                    genes=(gene_add_skill(sname, body, rationale=f"弱点={kind}"),
+                           gene_route_append(
+                               self.route_key, sname,
+                               rationale=f"新技能**追加**到现有链 {list(cur)} 尾"
+                                         f"（按任务类别 {self.route_key} 路由，"
+                                         f"不按环境名；不覆盖已有能力）")),
                     rationale=f"补技能 {sname} 并接通路由", origin="mined"))
 
         if kind == "missing_tool":
             tool = str(weakness.get("tool", "read_file"))
             out.append(Capsule(name=f"tool:{tool}",
-                               genes=(Gene(op="append", target="L2.tools",
-                                           value=tool, rationale="工具不可达"),),
+                               genes=(gene_tool(tool, rationale="工具不可达"),),
                                rationale=f"开放工具 {tool}", origin="mined"))
 
         if kind == "recall_miss":
             out.append(Capsule(
                 name="tune:recall",
-                genes=(Gene(op="tune", target="L4.memory_policy.recall_topk",
-                            value=2, rationale="召回不足 ⇒ 扩大 topk"),
-                       Gene(op="tune", target="L4.memory_policy.min_content_len",
-                            value=-20, rationale="下限过高挡住了短知识")),
+                genes=(gene_tune("recall_topk", 2,
+                                 rationale="召回不足 ⇒ 扩大 topk"),
+                       gene_tune("min_content_len", -20,
+                                 rationale="下限过高挡住了短知识")),
                 rationale="调记忆召回参数", origin="mined"))
 
         if not out:

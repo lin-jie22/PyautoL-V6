@@ -29,6 +29,12 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 import hmac
 import threading
+
+#: ⛔ 与 CLI 同一套日志：常驻进程的诊断**必须**带 ts/level/logger，否则
+#:    连跑几天的日志分不清哪行是哪次请求、哪个级别（r35）。
+from .logging_setup import LEVELS, get_logger, setup as _log_setup
+
+_log = get_logger("aether.serve")      # ⛔ 显式名，理由见 cli.py 同位置
 from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -798,15 +804,27 @@ def main(argv: Optional[list] = None) -> int:
                          "本服务暴露账本原文与能力调用端点，"
                          "--host 0.0.0.0 + 无 token = 裸奔。\n"
                          "也可用环境变量 V6_API_TOKEN 传（不写进命令行历史）。")
+    ap.add_argument("--log-level", default="INFO", choices=list(LEVELS),
+                    help="诊断输出级别（默认 INFO = 与改造前可见性一致）")
+    ap.add_argument("--log-json", action="store_true",
+                    help="诊断输出改成每行一个 JSON（常驻进程建议开）")
     args = ap.parse_args(argv)
+
+    #: ⛔ 先配日志再鉴权 —— 否则「拒绝启动」这条最该被看到的诊断，
+    #:    恰恰走的是还没配好的通道。
+    try:
+        _log_setup(level=args.log_level, json_output=args.log_json)
+    except ValueError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 2
 
     #: ── 鉴权（fail-closed）─────────────────────────────────────
     token = (args.api_token or os.environ.get("V6_API_TOKEN") or "").strip()
     if not token and args.host not in _LOOPBACK_HOSTS:
-        print(f"❌ 拒绝启动：--host {args.host} 不是回环地址，但没有设置"
-              f" API 令牌 ⇒ 账本原文 / 记忆正文 / 能力调用端点将对网络裸奔。\n"
-              f"   出路：加 --api-token <token>（或环境变量 V6_API_TOKEN），"
-              f"或改回 --host 127.0.0.1。", file=sys.stderr)
+        _log.error("拒绝启动：--host %s 不是回环地址，但没有设置 API 令牌"
+                   " ⇒ 账本原文 / 记忆正文 / 能力调用端点将对网络裸奔。"
+                   " 出路：加 --api-token <token>（或环境变量 V6_API_TOKEN），"
+                   "或改回 --host 127.0.0.1。", args.host)
         return 2
     Handler.api_token = token
 
