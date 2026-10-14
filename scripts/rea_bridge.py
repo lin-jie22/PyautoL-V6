@@ -376,6 +376,20 @@ def main() -> int:
         "engines": {k: os.path.basename(v)
                     for k, v in _engine_env().items()},
     }
+    #: ⛔⛔ `ok=true` **只表示"拿到结果了"，不表示"引擎齐全"**（2026-10-14 实测）。
+    #:    `rea doctor` 在 Ghidra / IDA / Hopper 全缺的情况下**照样**返回一份
+    #:    结构完整的信封，只是里面 `healthy=false`、`environment_healthy=false`。
+    #:    若不把它单独暴露，调用方看到 `ok=true` 就会读成"引擎都在" ⇒ 假仪表。
+    #:    ⇒ 有这个字段就**原样**搬出来（只搬 REA 自己给的布尔，不推断、不兜底）。
+    if isinstance(result, dict) and "healthy" in result:
+        env["rea_self_check"] = {
+            "healthy": result.get("healthy"),
+            "environment_healthy": result.get("environment_healthy"),
+        }
+        if result.get("healthy") is False:
+            missing = [c.get("name") for c in (result.get("checks") or [])
+                       if isinstance(c, dict) and c.get("ok") is False]
+            env["rea_self_check"]["failing_checks"] = missing
     if degraded:
         env["degraded"] = degraded
     if parse_err:

@@ -182,6 +182,22 @@ def main() -> int:
                or "code" in (out.get("degraded") or {}),
                str(out.get("degraded"))[:160])
 
+    #: ⛔⛔ 这条是**独立读数**，不是 B1 的推论：`rea doctor` 在
+    #:    Ghidra/IDA/Hopper 全缺时**照样**返回结构完整的信封（healthy=false）
+    #:    ⇒ 桥的 `ok=true` 只代表"拿到结果了"。若没有 `rea_self_check`，
+    #:       调用方会把 `ok=true` 读成"引擎都在"（假仪表）。
+    rc_d, out_d, err_d = run_bridge(["--command", "doctor"], {})
+    ck("B7 doctor 拿得到结果", rc_d == 0, f"rc={rc_d} err={err_d[:200]}")
+    if isinstance(out_d, dict) and out_d.get("ok"):
+        sc = out_d.get("rea_self_check")
+        ck("B8 ⛔ ok=true 时仍原样暴露 REA 自己的 healthy（布尔，不是推断）",
+           isinstance(sc, dict) and isinstance(sc.get("healthy"), bool),
+           f"rea_self_check={json.dumps(sc, ensure_ascii=False)[:200]}")
+        if isinstance(sc, dict) and sc.get("healthy") is False:
+            ck("B9 不健康时列出失败项（否则只知道坏了不知道缺什么）",
+               bool(sc.get("failing_checks")),
+               str(sc.get("failing_checks"))[:200])
+
     # ── C 组：经 V6 的 Gateway 调用（不是绕过 V6 自己调脚本）────────
     print()
     print("== C 组：走 mount_capabilities + invoke ==")
