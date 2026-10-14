@@ -253,12 +253,27 @@ _AUDIT_PATH_EVENTS = (
     "os.truncate", "os.utime", "os.access", "shutil.copyfile",
     "shutil.copytree", "shutil.move", "shutil.rmtree",
 )
-#: audit hook **一律拒绝**的事件（沙箱里不该起进程、不该联网）。
+#: audit hook **一律拒绝**的事件（沙箱里不该起进程、不该联网、
+#: 不该加载原生库）。
+#:
+#: ⛔⛔ ctypes 这一段是 2026-10-14 补的（`scripts/probe_boundary_audit.py`
+#:    A6 实测）。补它之前，`os.system` / `subprocess` / `socket` 全被拦着，
+#:    而 `ctypes.CDLL(None)`、`ctypes.CDLL('/usr/lib/libSystem.B.dylib')`、
+#:    `ctypes.util.find_library('c')` **三种方式全部成功**，且 `denied=[]`。
+#:    也就是说：Python 层的限制一应俱全，而**原生 syscall 通道是敞开的**
+#:    —— 不可信代码只要 `dlopen` 一下，前面拦的所有东西都可以绕过。
+#:    这是"沙箱"这个词最容易被高估的地方：拦住了 Python 侧的入口，
+#:    不等于拦住了进程能做的事。
+#:
+#:    CPython 3.13 实测到的事件名只有这三个（`ctypes.dlopen` 由 CDLL 触发，
+#:    `ctypes.dlsym` 由取符号触发）—— ⛔ 别照抄文档猜事件名，要实测。
 _AUDIT_DENY_EVENTS = (
     "os.system", "os.exec", "os.execv", "os.execve", "os.execvp",
     "os.execvpe", "os.spawn", "os.spawnv", "os.spawnve", "os.posix_spawn",
     "os.fork", "os.forkpty", "subprocess.Popen", "os.popen",
     "socket.connect", "socket.bind", "socket.create_connection",
+    #: 原生 syscall 通道（见上）：加载库 / 解析符号 / 造可写原生缓冲区
+    "ctypes.dlopen", "ctypes.dlsym", "ctypes.create_string_buffer",
 )
 
 

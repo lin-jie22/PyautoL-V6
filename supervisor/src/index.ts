@@ -10,8 +10,10 @@
  * ⛔ 监督器**只读**：它不写账本、不改任何状态。写只有一条路径
  * （Python 侧 ledger.append），否则监督者也会变成被监督对象。
  */
-import { readLedger, verifyChain, type Event } from "./ledger.ts";
-import { detect, summarize, exitCode, DEFAULT_CONFIG, type Finding } from "./anomaly.ts";
+import { readLedgerIter, createChainVerifier, type Event,
+         type ReadStats } from "./ledger.ts";
+import { createDetector, summarize, exitCode, DEFAULT_CONFIG,
+         type Finding } from "./anomaly.ts";
 import { existsSync, statSync } from "node:fs";
 
 interface Args {
@@ -36,18 +38,39 @@ function parseArgs(argv: string[]): Args {
   return a;
 }
 
+/**
+ * ⛔⛔ 2026-10-14：这里原来是 `readLedger(path)` 把**全量**事件读成数组
+ * （1.72 MB 账本 ⇒ 堆增量 5.57 MB），再交给链校验与异常检测各扫一遍。
+ *
+ * 现在**一次遍历同时喂两个消费者**：链校验器与异常扫描器都是增量的
+ * ⇒ 内存里同时只有一个块 + 当前行 + 扫描器的有界窗口。
+ *
+ * ⛔ 为什么不是"读两遍"（各拿一个 generator）：两次读之间账本可能被
+ *    Python 侧追加 ⇒ 链校验与异常检测看到的不是同一个快照 ⇒ 会出现
+ *    "链说完好、检测却在说另一份数据"这种无法解释的结论。一次遍历
+ *    喂两个消费者，两边**必然**看到同一份事实。
+ */
 function inspect(path: string) {
-  const events: Event[] = readLedger(path);
-  const chain = verifyChain(events);
-  const findings: Finding[] = detect(events, DEFAULT_CONFIG);
-  if (!chain.ok) {
+  const stats: ReadStats = { lines: 0, bad: 0 };
+  const chain = createChainVerifier();
+  const detector = createDetector(DEFAULT_CONFIG);
+  let n = 0;
+  for (const ev of readLedgerIter(path, undefined, stats)) {
+    n++;
+    chain.push(ev);
+    detector.push(ev);
+  }
+  const chainResult = chain.finish();
+  const findings: Finding[] = detector.finish();
+  if (!chainResult.ok) {
     findings.unshift({
       code: "LEDGER_CHAIN_BROKEN",
       severity: "critical",
-      detail: `账本哈希链断裂 @seq=${chain.firstBadSeq}：${chain.reason}`,
+      detail: `账本哈希链断裂 @seq=${chainResult.firstBadSeq}：${chainResult.reason}`,
     });
   }
-  return { events, chain, findings, stats: summarize(findings) };
+  return { n, chain: chainResult, findings, stats: summarize(findings),
+           read: stats };
 }
 
 function main(): number {
@@ -58,12 +81,13 @@ function main(): number {
   }
 
   const once = (): number => {
-    const { events, chain, findings, stats } = inspect(args.ledger);
+    const { n, chain, findings, stats, read } = inspect(args.ledger);
     const mtime = statSync(args.ledger).mtimeMs;
     const report = {
       ledger: args.ledger,
       mtime: new Date(mtime).toISOString(),
-      events: events.length,
+      events: n,
+      read,                       // ⛔ 坏行数必须能被看见，不能静默吞掉
       chain_ok: chain.ok,
       chain_reason: chain.reason,
       findings,
@@ -73,7 +97,7 @@ function main(): number {
       console.log(JSON.stringify(report, null, 2));
     } else if (!args.quiet) {
       console.log(`V6 监督器 · 账本 ${args.ledger}`);
-      console.log(`  事件 ${events.length} 条 | 哈希链 ${chain.ok ? "✅ 完整" : "❌ 断裂 " + chain.reason}`);
+      console.log(`  事件 ${n} 条 | 哈希链 ${chain.ok ? "✅ 完整" : "❌ 断裂 " + chain.reason}`);
       for (const f of findings) {
         const tag = f.severity === "critical" ? "❌" : f.severity === "warn" ? "⚠️ " : "ℹ️ ";
         console.log(`  ${tag} [${f.code}] ${f.detail}`);

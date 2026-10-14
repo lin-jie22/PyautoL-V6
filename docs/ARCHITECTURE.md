@@ -129,7 +129,11 @@ run_round(h, n):
    实测本机 nomic-embed-text 在英文上 recall@1 0.20→0.50（放行），  
    在中文上 0.40→0.10（拒绝）。⛔ 换嵌入必须 `reindex()` 全量重算。
 5. **不训练权重**：这是刻意的定位选择（见 `FRONTIER_2026.md` §5）。
-6. **沙箱是 subprocess + 超时**，不是容器级隔离。跑不可信代码前需要加强。
+6. **沙箱是「进程层 + audit 层」**，不是容器级隔离（2026-10-14 复核）。  
+   进程层：env 净化 + rlimit + 输出封顶；audit 层（`sys.addaudithook`）：
+   文件系统越界、`os.system`/`subprocess`/`fork`、socket、**ctypes 原生
+   加载**全部拦住并记账。⛔ 仍不等于容器：OS 层（`sandbox-exec`）在
+   本环境不可用（`os_isolated=false`），原生扩展不受 audit 管辖。
 7. **账本里有 495 条历史事件不带 `run_id`**（本轮改动之前写的）。重建时
    它们用派生键 `rebuilt:{seq}` 补齐 ⇒ 条数能对上、可溯源，但**无法与当年
    那次运行用的键对上** ⇒ 这 495 条不参与键比对（只参与条数比对）。
@@ -900,12 +904,36 @@ env 白名单必须是**白名单**而不是黑名单 —— 黑名单拦不住�
 （第一版因 `repr()` 输出单引号导致 `json.loads` 失败 ⇒ payload 为空 ⇒
 "吃到 0 MB" 被误判成"已拦住"，是个假绿灯）。
 
-### 仍保留的边界（如实）
+### 2026-10-14 复核：上面两条**已不成立**（清单过期比缺口更危险）
 
-- **文件系统未隔离**：越界读/写、fork 子进程仍可能。堵住它必须靠 OS 层，
-  而 OS 层在部分环境不可用 ⇒ `fs_isolated=false` 会写进每个 Verdict 的
-  evidence，并在控制台与 CLI 各提示一次（环境级属性，不每次刷屏）。
-- **内存没有有效限制**：只剩 timeout 兜底。
+边界声明有个特有的失效方式：**它被悄悄修掉了，而没人回头改文档**。
+2026-10-14 用 `scripts/probe_boundary_audit.py` 逐条实测，结果：
+
+| 原声明 | 实测（今天） |
+|---|---|
+| 文件系统未隔离 | ❌ 已不成立：越界读 `/etc/hosts`、写 `/tmp` 均被 audit 层 deny 并记账 |
+| fork 子进程 | ❌ 已不成立：`os.system` / `subprocess.Popen` 均被 deny |
+| 内存没有有效限制 | ❌ 已不成立：进程内守卫 `mem_guard` 实测生效（`mem_watchdog.usable`） |
+
+⛔ 而清单里**没写**的那条才是真缺口 —— **ctypes**：
+`os.system` / `subprocess` / `socket` 全被拦着，而
+`ctypes.CDLL(None)`、`ctypes.CDLL('/usr/lib/libSystem.B.dylib')`、
+`ctypes.util.find_library('c')` **三种方式全部成功**且 `denied=[]`。
+Python 层的入口一应俱全，**原生 syscall 通道却是敞开的** ——
+不可信代码只要 `dlopen` 一下，前面拦的东西全都可以绕过去。
+
+⇒ 已把 `ctypes.dlopen` / `ctypes.dlsym` / `ctypes.create_string_buffer`
+   加入 `_AUDIT_DENY_EVENTS`（事件名是实测出来的，不是照文档抄的），
+   正常 `import math/heapq/json` 零误伤。
+
+### 仍保留的边界（如实，复核后）
+
+- **OS 层仍不可用**：`sandbox-exec` 在已沙箱化的宿主里一律
+  `Operation not permitted` ⇒ `os_isolated=false` 写进每个 Verdict。
+  现在 fs 隔离靠 audit 层（`fs_audit=true`），**不等于**容器级隔离：
+  原生扩展（C 写的模块）不在 audit 覆盖范围内。
+- **rlimit 内存限制仍然失败**：`RLIMIT_AS/DATA/RSS` 三条全抛
+  `ValueError` ⇒ 靠进程内守卫 + 父进程看门狗，`rlimits_applied` 如实记账。
 
 ### 反证组（`tests/contract_sandbox_test.py`）
 
@@ -1990,3 +2018,81 @@ ALE（Agent Lifespan Engineering, 2026）研究的正是后者：压缩、干扰
 ⚠️ `assign_credit` 的 turn-level 归因**仍然恒不可用**（生产没有
 `replay_fn`），这是刻意的 —— 不可重放就不给数字。想读"哪一层真正起
 作用"用 `attribution.attribute_layers()` 的反事实消融。
+
+---
+
+## 29. 边界兑现审计：清单会过期，缺口会藏在清单外（2026-10-14 · r27）
+
+### 29.1 起因：照着一份过期清单去"修边界"，会重修已修好的、漏掉没写的
+
+`§5` 与 `§14` 的"已知边界（诚实清单）"是某个时刻的快照。它有两个特有的
+失效方向，而这两个方向**都会让人白干**：
+
+| 方向 | 后果 |
+|---|---|
+| 边界**已被修掉**，文档没改 | 照清单重修一遍已修好的东西 |
+| 真缺口**不在清单里** | 一直没人管（ctypes 正是如此） |
+
+所以本轮没有"凭记忆挑几条来修"，而是先写
+`scripts/probe_boundary_audit.py`（常驻，20 项含反证）逐条实测，
+只问一句话：**这条边界，今天还成立吗**。
+
+### 29.2 实测结论
+
+- **已过期的**：文件系统未隔离、fork 子进程、内存无限制 —— 三条**均已
+  修好**（audit 层 / mem_guard），文档已同步更正。
+- **清单外的真缺口**：`ctypes`（原生 syscall 通道），已堵。
+- **仍成立的**：`os_isolated=false`（OS 层不可用）、rlimit 内存失败。
+- **两项空账**：`assign_credit` 的 turn-level 恒不可用；观测侧持全量
+  `Event[]`。
+
+### 29.3 修复一：ctypes（原生 syscall 通道）
+
+`_AUDIT_DENY_EVENTS` 增加 `ctypes.dlopen` / `ctypes.dlsym` /
+`ctypes.create_string_buffer`。
+
+⛔ **事件名是实测出来的**（`addaudithook` 打印 `ctypes.*`），不是照文档抄。
+⛔ **判据要能被证伪**：要断言"拦不住"，得先证明关掉 deny 后**同一段代码
+   能跑通**（`X4` / `A3` 对照组）。少了这一条，"没跑成"可能是代码本身
+   写错了 —— 本轮审计自己就先踩了一次（攻击代码缩进错 ⇒ 没编译 ⇒
+   看起来像"被拦住了"）。
+
+### 29.4 修复二：step 级信用分配（`replay_fn`）
+
+`runtime.assign_credit` 的 turn-level 此前在端到端里被调用 **0 次**，
+原因是生产从没有 `replay_fn`。而 agent 是确定性规则执行体 ⇒
+**它天然可重放** ⇒ 这不是物理限制，是没接线。
+
+- `HarnessAgent.replay_fn(h, spec)`：先做**可重放性自检**（同 harness 同
+  spec 连跑两次 reward 必须一致），不一致 ⇒ 返回 `None` ⇒ 归因保持
+  `available=False`（不可重放时给数字 = 编造）。
+- 消融粒度是**步**不是层：`ABLATABLE_STEPS = {L3/apply, L4/recall}`。
+  ⛔ 判据/结构步（L1/L2/L5）**不参与**消融 —— 去掉判据 reward 就没有定义，
+  得的 Δ 是"换了台机器"。对它们返回 baseline（贡献 0）是**定义**不是近似。
+- ⛔ **消融必须留占位步**：少一步 ⇒ 后续 `(layer, action, occ)` 整体前移
+  ⇒ 第二次 leave-one-out 就对不上号 ⇒ 归因静默错位。
+- 实测：链 `fix_control_flow|fix_literals` 上，`per_step` 指出第二项
+  贡献 1.0、第一项贡献 0 —— 这正是路由链落地后最想知道的"链上谁真的有用"。
+
+### 29.5 修复三：观测侧不再物化全量事件
+
+`supervisor/src/anomaly.ts` 原签名 `detect(events: Event[])` 要求先把整份
+账本读成数组（1.72 MB ⇒ 堆增量 5.57 MB），内部又 `events.filter()` 了
+**9 次**（9 遍扫描 + 9 份中间数组）。
+
+改为 `createDetector()`（push/finish）+ 单次遍历 + 有界窗口；`index.ts`
+**一次遍历同时喂两个消费者**（链校验器 + 异常扫描器）—— 读两遍会看到
+不同快照（账本可能被 Python 侧追加），一次遍历两边必然看到同一份事实。
+
+⛔⛔ **计数与 evidence 必须分开存**（本轮对拍抓到 5 处全中招）：
+`detail` 里的 `${arr.length}` 是**真实总数**（"37 组不可判定"），而
+`evidence` 只展示几条。把两者合成一个有界数组 ⇒ 计数被窗口截断
+（37 ⇒ 5）—— 那不是省内存，是**改了读数**。一律 `xxxCount++` + 有界窗口。
+
+对拍方式：从 git 取旧版 `anomaly.ts`，17 组合成场景 + 真实账本 2271 条
+逐条 diff。唯一残留差异是 `capsule` 缺失时旧版打印 `"undefined"`、
+新版打印空串 —— 这是**刻意的**（旧版是显示瑕疵），显式记录在此。
+
+⛔ 它**仍然不是 O(1)**：commits × probes 的配对要判断"被拦的候选后来
+   有没有被提交"，两侧都得看完才知道 ⇒ 这部分是 O(#commits + #probes)
+   的**精简记录**。把这条硬说成 O(1) 就是假仪表。

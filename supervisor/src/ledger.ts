@@ -281,25 +281,53 @@ export interface ChainResult {
  *    —— 对 `Iterable` 而言总数在读完前不可知，谎称总数就得先物化。
  *    ⇒ 校验中断时 `count` = 断在那一条之前校验过的条数（不是数组长度）。
  */
-export function verifyChain(events: Iterable<Event>): ChainResult {
+/**
+ * **增量**哈希链校验器（push/finish）。
+ *
+ * ⛔ 为什么需要它：链校验与异常检测要读**同一份**账本。若各自拿一个
+ *    generator 去读，就是读两遍文件，而两次读之间账本可能被追加 ⇒
+ *    两边看到的不是同一个快照（链说完好、检测说的却是另一份数据）。
+ *    有了增量版，`index.ts` 就能**一次遍历同时喂两个消费者**。
+ * ⛔ 失败后继续 push 不得改变结论（fail-fast 语义与原 `verifyChain` 一致）。
+ */
+export interface ChainVerifier {
+  push(ev: Event): void;
+  finish(): ChainResult;
+}
+
+export function createChainVerifier(): ChainVerifier {
   let prev = GENESIS_HASH;
   let count = 0;
-  for (const ev of events) {
-    count++;
-    if (ev.prev_hash !== prev) {
-      return {
-        ok: false, firstBadSeq: ev.seq, count,
-        reason: `prev_hash 不连续 @${ev.seq}（期望 ${prev.slice(0, 12)}… 实得 ${ev.prev_hash.slice(0, 12)}…）`,
-      };
-    }
-    const want = contentHash(identity(ev));
-    if (ev.hash !== want) {
-      return {
-        ok: false, firstBadSeq: ev.seq, count,
-        reason: `hash 不匹配 @${ev.seq}（payload 被改过？实得 ${ev.hash.slice(0, 12)}… 应为 ${want.slice(0, 12)}…）`,
-      };
-    }
-    prev = ev.hash;
-  }
-  return { ok: true, firstBadSeq: null, reason: "", count };
+  let bad: ChainResult | null = null;
+  return {
+    push(ev: Event): void {
+      if (bad) return;                     // 已断 ⇒ 结论不再变
+      count++;
+      if (ev.prev_hash !== prev) {
+        bad = {
+          ok: false, firstBadSeq: ev.seq, count,
+          reason: `prev_hash 不连续 @${ev.seq}（期望 ${prev.slice(0, 12)}… 实得 ${ev.prev_hash.slice(0, 12)}…）`,
+        };
+        return;
+      }
+      const want = contentHash(identity(ev));
+      if (ev.hash !== want) {
+        bad = {
+          ok: false, firstBadSeq: ev.seq, count,
+          reason: `hash 不匹配 @${ev.seq}（payload 被改过？实得 ${ev.hash.slice(0, 12)}… 应为 ${want.slice(0, 12)}…）`,
+        };
+        return;
+      }
+      prev = ev.hash;
+    },
+    finish(): ChainResult {
+      return bad ?? { ok: true, firstBadSeq: null, reason: "", count };
+    },
+  };
+}
+
+export function verifyChain(events: Iterable<Event>): ChainResult {
+  const v = createChainVerifier();
+  for (const ev of events) v.push(ev);
+  return v.finish();
 }

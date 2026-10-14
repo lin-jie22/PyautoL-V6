@@ -159,6 +159,11 @@ class RoundReport:
     generalization: Optional[Dict[str, Any]] = None
     #: 提交后的**反事实层归因**（None = 没提交 / 未启用）
     layer_credit: Optional[Dict[str, Any]] = None
+    #: step 级信用分配（`runtime.assign_credit` 的 turn-level）。
+    #: ⛔ 与 `layer_credit` 是**两个粒度**：层 = 5 层，步 = 轨迹上的每一步
+    #:    （链上每个链项各一步）。合并成一个字段会让"哪个链项真的有用"
+    #:    这个问题重新变得无从回答。
+    step_credit: Optional[Dict[str, Any]] = None
     #: 本轮是否判定为「发展集已到顶」（best 为空的唯一可接受解释之一）
     saturated: bool = False
     #: 本轮是否"无事可做"（无失败证据 / 到顶）。连续发生 ⇒ 停止循环。
@@ -179,6 +184,7 @@ class RoundReport:
                 "ledger_seqs": self.ledger_seqs,
                 "generalization": self.generalization,
                 "layer_credit": self.layer_credit,
+                "step_credit": self.step_credit,
                 "saturated": self.saturated, "saturation": self.saturation,
                 "idle": self.idle}
 
@@ -969,10 +975,12 @@ class EvolutionLoop:
         # 9) 反事实层归因 —— **提交之后**才算，且**绝不参与选择**。
         #    ⛔ 顺序与 held-out 同理：归因一旦进入 group_relative 或 best
         #    排序，它就变成了第二张发展集，进化会去讨好归因本身。
+        _attr_specs: List[Dict[str, Any]] = []
         if self.cfg.attribute_layers:
             from .attribution import attribute_layers
             try:
                 specs = self._pick_attribution_specs(new_h)
+                _attr_specs = list(specs)
                 lc = attribute_layers(self.runner, new_h, specs)
                 rep.layer_credit = lc.to_dict()
                 self.ledger.append("attribution.layer", {
@@ -992,6 +1000,61 @@ class EvolutionLoop:
                         "error": f"{type(e).__name__}: {e}",
                     }, actor="evolution")
                 except Exception:  # noqa: BLE001 —— 记账本身也不拖垮提交
+                    pass
+
+        # 9b) step 级信用分配（`assign_credit` 的 turn-level）。
+        #     ⛔⛔ 2026-10-14 兑现审计实测：它在端到端 evolve 里被调 **0 次**
+        #     —— 不是"算错了"，是**从来没被接线**（生产没有 replay_fn）。
+        #     现在由 `HarnessAgent.replay_fn` 提供**真**反事实重放。
+        #     ⛔ 拿不到可重放的 agent ⇒ 记 unavailable，**不给近似值**：
+        #        编出来的归因比不归因更有害（V5）。
+        #     ⛔ 与 9) 一样在提交之后、一样不参与选择。
+        if self.cfg.attribute_layers and _attr_specs:
+            try:
+                from .runtime import assign_credit
+                ag = getattr(self.runner, "agent", None)
+                if ag is None or not hasattr(ag, "replay_fn"):
+                    rep.step_credit = {
+                        "available": False,
+                        "reason": ("runner 不是可重放的 HarnessAgent ⇒ "
+                                   "turn-level 归因不可用（不给近似值）")}
+                    self.ledger.append("attribution.step_unavailable", {
+                        "round_no": round_no,
+                        "harness_id": new_h.harness_id,
+                        "reason": rep.step_credit["reason"]},
+                        actor="evolution")
+                else:
+                    spec0 = _attr_specs[0]
+                    rf = ag.replay_fn(new_h, spec0)
+                    if rf is None:
+                        rep.step_credit = {
+                            "available": False,
+                            "reason": ("环境不可重放（同一 harness 两次 "
+                                       "reward 不一致）⇒ 不给归因数字")}
+                        self.ledger.append("attribution.step_unavailable", {
+                            "round_no": round_no,
+                            "harness_id": new_h.harness_id,
+                            "reason": rep.step_credit["reason"]},
+                            actor="evolution")
+                    else:
+                        res = ag.run(new_h, spec0)
+                        cr = assign_credit(res.trajectory, replay_fn=rf)
+                        rep.step_credit = cr.to_dict()
+                        self.ledger.append("attribution.step", {
+                            "round_no": round_no,
+                            "harness_id": new_h.harness_id,
+                            **cr.to_dict()}, actor="evolution")
+            except Exception as e:  # noqa: BLE001 —— 归因失败不得影响提交
+                rep.step_credit = {"available": False,
+                                   "reason": f"{type(e).__name__}: {e}"}
+                try:
+                    self.ledger.append("attribution.step_unavailable", {
+                        "round_no": round_no,
+                        "harness_id": new_h.harness_id,
+                        "error": f"{type(e).__name__}: {e}"},
+                        actor="evolution")
+                except Exception:  # noqa: BLE001
+                    pass
                     pass
         return rep
 

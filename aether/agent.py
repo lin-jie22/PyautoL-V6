@@ -143,6 +143,20 @@ _STEP_KIND: Dict[Tuple[str, str], str] = {
 #: 也不能把环境观测算成策略产出 —— 后者会让 reward 看起来来自模型）。
 _UNKNOWN_STEP_KIND = "observation"
 
+#: ⛔ **可消融**的层动作 = 真正会改变源码、且去掉它 reward 仍有定义的那些。
+#:   只有它们能参与 step 级反事实重放（见 `make_replay_fn`）。
+#:   - `L3/apply` —— 链上的每一项修法（最有价值的一条：链上谁真的有用）
+#:   - `L4/recall`—— 记忆通路
+#:   ⛔ 反过来，**不**在里面的是"消融了就没有 reward 定义"的步骤：
+#:     `L5` 验证是判据本身（去掉它 reward 无从产生）、`L1/L2/L0` 是结构性
+#:     步骤（去掉它们等于换了个 harness，不是"去掉一步"）。
+#:     把它们算进 leave-one-out ⇒ 得到的 Δ 是"换了台机器"，不是"这一步的贡献"
+#:     ⇒ 编出来的归因比不归因更有害（V5）。
+#:   ⛔ 这份集合是 agent 注入点与轨迹记账的**共同唯一来源**：两边各写一份
+#:     迟早漂移（一侧说可消融、另一侧根本没实现跳过 ⇒ 消融静默失效）。
+ABLATABLE_STEPS: FrozenSet[Tuple[str, str]] = frozenset(
+    {("L3", "apply"), ("L4", "recall")})
+
 
 def trajectory_from_steps(task_id: str, harness_id: str,
                           steps: Sequence[AgentStep],
@@ -152,14 +166,40 @@ def trajectory_from_steps(task_id: str, harness_id: str,
     ⛔ 为什么在**返回前**一次性折算，而不是每步各记一次：
        两处记账迟早会漂移（V5：同一份事实被两个地方写 ⇒ 必有一个是假的）。
        这里 steps 是唯一事实源，Trajectory 是它的**投影**。
+
+    每一步都会带上身份 `(layer, action, occ)` 写进 `Step.meta` ——
+    这是 step 级反事实重放能定位"去掉了哪一步"的唯一依据。
     """
     t = Trajectory(task_id=task_id, harness_id=harness_id)
+    occ: Dict[Tuple[str, str], int] = {}
     for s in steps:
         kind = _STEP_KIND.get((s.layer, s.action), _UNKNOWN_STEP_KIND)
-        t.add(kind, f"{s.layer}/{s.action}: {s.detail}")
+        key = (s.layer, s.action)
+        k = occ.get(key, 0)
+        occ[key] = k + 1
+        t.add(kind, f"{s.layer}/{s.action}: {s.detail}",
+              layer=s.layer, action=s.action, occ=k,
+              ablatable=(key in ABLATABLE_STEPS))
     if verdict is not None:
         t.verdict = verdict
     return t
+
+
+def step_identities(steps: Sequence[Any]) -> List[Tuple[str, str, int]]:
+    """从轨迹步里取出身份序列（与 `trajectory_from_steps` 写入端同源）。
+
+    ⛔ 判据必须与被测对象同源：这里读的是 `Step.meta` 里**写入端写下的**
+       字段，不另抄一份词表。
+    """
+    out: List[Tuple[str, str, int]] = []
+    for s in steps:
+        m = getattr(s, "meta", None) or {}
+        layer = m.get("layer")
+        action = m.get("action")
+        if not layer or action is None:
+            continue
+        out.append((str(layer), str(action), int(m.get("occ", -1))))
+    return out
 
 
 class HarnessAgent:
@@ -189,9 +229,23 @@ class HarnessAgent:
         self.gateway = gateway
 
     # ── 主流程 ──────────────────────────────────────────────────
-    def run(self, h: Any, spec: Dict[str, Any]) -> AgentResult:
+    def run(self, h: Any, spec: Dict[str, Any],
+            skip: Sequence[Tuple[str, str, int]] = ()) -> AgentResult:
+        """跑一次任务。`skip` 是**反事实消融**：跳过指定的层动作。
+
+        ⛔ 为什么消融必须**留下占位步**（记录 ok=False 而不是不记录）：
+           leave-one-out 靠 `(layer, action, occ)` 定位"去掉了哪一步"。
+           少一步 ⇒ 后续所有 occ 整体前移 ⇒ 第二次消融就对不上号了
+           ⇒ 归因静默错位。占位步让 steps 数量恒定，occ 才稳定。
+
+        ⛔ `skip` 只对 `ABLATABLE_STEPS` 生效。试图消融判据步（L5）或
+           结构步（L1/L2/L0）**不会**真的跳过任何东西 —— 那不是"这一步
+           没贡献"，是"去掉它 reward 就没有定义了"。对它们返回 baseline
+           reward（贡献 0）是**定义**，不是近似。
+        """
         tid = str(spec.get("task_id") or spec.get("env_id") or "task")
         hid = str(getattr(h, "harness_id", "") or "")
+        skip = frozenset(tuple(x) for x in (skip or ()))
         env = self.envs.get(str(spec.get("env_id", "")))
         if env is None:
             _s: Tuple[AgentStep, ...] = (
@@ -258,13 +312,29 @@ class HarnessAgent:
         active = tuple(s for s in chain if s in h.skills and s not in banned)
 
         # ── L4 记忆通路（技能不可达时的第二条路）────────────────
+        #: ⛔ 消融记账器：每 append 一个**可消融**步就要消耗一次 occ，
+        #:    这样 run 里的序号与 `trajectory_from_steps` 写下的 meta 完全
+        #:    一致（两者是同一份事实的两个视角，不能各数各的）。
+        occ: Dict[Tuple[str, str], int] = {}
+
+        def _consume(layer: str, action: str) -> bool:
+            """消耗一个 (layer, action) 的序号，返回这一步是否**被消融**。"""
+            k = occ.get((layer, action), 0)
+            occ[(layer, action)] = k + 1
+            return (layer, action, k) in skip
+
         strategy = "|".join(active)
         if not active and self.memory is not None:
             used.append("L4")
             topk = int(h.memory_policy.get("recall_topk", 0) or 0)
             if topk <= 0:
+                _consume("L4", "recall")     # 无行为可跳，但要占住序号
                 steps.append(AgentStep("L4", "recall", False,
                                        "recall_topk<=0 ⇒ 记忆通路关闭"))
+            elif _consume("L4", "recall"):
+                steps.append(AgentStep(
+                    "L4", "recall", False,
+                    "消融：反事实重放跳过召回 ⇒ 不走记忆通路（占位步）"))
             else:
                 notes = self.memory.search(
                     f"{env.env_id} repair_hint 修法经验", top_k=topk)
@@ -296,6 +366,13 @@ class HarnessAgent:
         applied: List[str] = []
         for s in plan:
             prev = fixed
+            if _consume("L3", "apply"):
+                #: ⛔ 占位步：**必须** append，否则后续 occ 整体前移，
+                #:    leave-one-out 第二次消融就对不上号（归因静默错位）。
+                steps.append(AgentStep(
+                    "L3", "apply", False,
+                    f"链项 {s}：消融（反事实重放跳过，不应用）"))
+                continue
             new_fixed, applicable = self._apply_one(s, prev, env, spec, steps)
             if applicable:
                 fixed = new_fixed
@@ -305,6 +382,7 @@ class HarnessAgent:
                 f"链项 {s}：changed={applicable and new_fixed != prev}"
                 + ("" if applicable
                    else f"（对 {env.env_id} 不适用 ⇒ 该项跳过，链继续）")))
+        _consume("L3", "apply")            # 汇总步也占一个序号
         steps.append(AgentStep(
             "L3", "apply", bool(applied),
             f"链={list(plan) or ['none']} 生效={applied} 总 changed={fixed != src}"))
@@ -418,4 +496,61 @@ class HarnessAgent:
     def as_runner(self) -> Callable[[Any, Dict[str, Any]], Verdict]:
         def runner(h: Any, spec: Dict[str, Any]) -> Verdict:
             return self.run(h, spec).verdict
+        #: ⛔ 挂上 agent 引用：**反事实重放的唯一入口**。
+        #:    Runner 协议只有 `(harness, spec) -> Verdict`，光有它无法
+        #:    "去掉某一步再跑一次" ⇒ step 级信用分配永远拿不到 replay_fn
+        #:    ⇒ `assign_credit` 在生产上恒为 turn-level 不可用（实测 0 次）。
+        #:    这里显式带上宿主对象，让消费方能 `getattr(runner, "agent")`。
+        runner.agent = self            # type: ignore[attr-defined]
         return runner
+
+    # ── 反事实重放：让 step 级信用分配**真的可用** ────────────────
+    def replay_fn(self, h: Any, spec: Dict[str, Any]
+                  ) -> Optional[Callable[[str, List[Any]], float]]:
+        """为 `runtime.assign_credit` 造一个**真** replay_fn。
+
+        ⛔ 先做**可重放性自检**：同一个 harness + 同一个 spec 连跑两次，
+           reward 必须完全一致。不一致 ⇒ 差值里混着环境噪声 ⇒ 返回 `None`
+           ⇒ `assign_credit` 保持 `available=False`。
+           （不可重放时给数字 = 编造归因，比不归因更有害 —— V5。）
+
+        ⛔ 为什么这不是"层归因的近似"：`attribution.attribute_layers` 消融的
+           是**层**（5 个），这里消融的是**步**（链上每一项各自一步），
+           而且每一步都是一次完整重跑，reward 只来自 verifier。
+        """
+        try:
+            r1 = self.run(h, spec)
+            r2 = self.run(h, spec)
+        except Exception:  # noqa: BLE001
+            return None
+        if abs(float(r1.reward) - float(r2.reward)) > 1e-9:
+            return None                      # 不可重放 ⇒ 不给数字
+        traj = r1.trajectory
+        if traj is None or not getattr(traj, "steps", None):
+            return None
+        base_ids = step_identities(traj.steps)
+        base_reward = float(r1.reward)
+        stats: Dict[str, int] = {"calls": 0, "non_ablatable": 0,
+                                 "ablatable": 0}
+
+        def replay(task_id: str, ablated: List[Any]) -> float:
+            stats["calls"] += 1
+            present = set(step_identities(ablated))
+            missing = [i for i in base_ids if i not in present]
+            if not missing:
+                return base_reward
+            real = [i for i in missing if (i[0], i[1]) in ABLATABLE_STEPS]
+            if not real:
+                #: 消融的是判据步/结构步 ⇒ 去掉它 reward 就没有定义。
+                #: 贡献记 0 是**定义**，不是"测出来它没用"。
+                stats["non_ablatable"] += 1
+                return base_reward
+            stats["ablatable"] += 1
+            try:
+                return float(self.run(h, spec, skip=tuple(real)).reward)
+            except Exception:  # noqa: BLE001
+                return base_reward
+
+        replay.stats = stats            # type: ignore[attr-id]
+        replay.base_reward = base_reward  # type: ignore[attr-id]
+        return replay

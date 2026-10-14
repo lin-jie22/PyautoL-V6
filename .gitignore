@@ -12,8 +12,11 @@ docs/demo_report_*.md
 docs/ab_generalization_*.md
 #: 取证脚本的**中间产物**（每次跑都生成一份，只留最新那份进库）
 docs/probe_frontier_audit_*.json
+docs/probe_boundary_*.json
 docs/probe_boolop_dimension_*.json
 docs/probe_growth_ceiling_*.json
 docs/probe_residual_diag_*.json
+data/_probe_store.jsonl-shm
+data/_probe_store.jsonl-wal
 node_modules/
 .DS_Store

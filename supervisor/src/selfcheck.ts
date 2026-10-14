@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readLedger, readLedgerIter, verifyChain, canonicalJson, contentHash,
          identity, type ReadStats } from "./ledger.ts";
-import { detect, exitCode } from "./anomaly.ts";
+import { detect, createDetector, exitCode } from "./anomaly.ts";
 
 const FAILS: string[] = [];
 function ck(name: string, cond: boolean, detail = ""): void {
@@ -443,6 +443,40 @@ print(L.session)
     ck("E5 与旧读法（整份 split）逐条同值",
        JSON.stringify(a) === JSON.stringify(oldWay),
        `new=${a.length} old=${oldWay.length}`);
+  }
+
+  // ── F 组：增量扫描器的两条纪律 ────────────────────────────────
+  //     ⛔ 2026-10-14 把 `detect(Event[])` 改写成增量扫描器时，**5 处**
+  //     全踩了同一个坑：把"计数"和"evidence 窗口"合成一个有界数组
+  //     ⇒ detail 里的总数被窗口截断（真实账本 37 组 ⇒ 显示 5 组）。
+  //     那不是省内存，是**改了读数**。这两条把坑钉死。
+  console.log("F 组：增量扫描器（计数 vs 窗口 / 增量 ≡ 批量）");
+  {
+    const many: any[] = Array.from({ length: 11 }, (_, i) => ({
+      seq: i + 1, ts: 1, kind: "eval.verdict", actor: "e",
+      payload: { task_id: `t${i}`, reward: 1,
+                 verdict: { checks: [], evidence: {} } },
+      prev_hash: "", hash: "",
+    }));
+    const f = detect(many);
+    const hack = f.find((x) => x.code === "REWARD_HACKING_SUSPECTED");
+    ck("F1 计数**不被** evidence 窗口截断（11 条 ⇒ detail 写 11 不是 8）",
+       !!hack && hack.detail.includes("11"), hack ? hack.detail : "未报");
+    ck("F1b 但 evidence 本身仍是有界的（≤8）⇒ 内存收益是真的",
+       !!hack && (hack.evidence ?? []).length <= 8,
+       `evidence=${(hack?.evidence ?? []).length}`);
+
+    // ⛔ 增量与批量两条路必须同结果 —— 否则其中一条是没人走的死代码
+    const d = createDetector();
+    for (const e of many) d.push(e);
+    ck("F2 createDetector(push/finish) ≡ detect(数组)",
+       JSON.stringify(d.finish()) === JSON.stringify(f));
+
+    const real2 = readLedger(join(ROOT, "data", "ledger.jsonl"));
+    const d2 = createDetector();
+    for (const e of real2) d2.push(e);
+    ck(`F3 真实账本 ${real2.length} 条：增量 ≡ 批量`,
+       JSON.stringify(d2.finish()) === JSON.stringify(detect(real2)));
   }
 
   console.log("\n" + "=".repeat(60));
