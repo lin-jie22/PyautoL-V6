@@ -32,12 +32,20 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import (Any, Dict, Iterable, List, Optional, Tuple, Union)
 
 from .ledger import content_hash
 from .verifier import Verdict, all_of, error_verdict
 
 PY = sys.executable or "python3"
+
+#: 寻址指纹前缀长度（hex 字符数）。
+#: ⛔ 与 `genome._ID_PREFIX` / `nongression._ID_PREFIX` 保持同值。
+#:    `[:16]`（64 位）在 append-only、永不删的账本上长期会碰撞；
+#:    `Environment.fingerprint`（跨轮对比锚点）与 `TaskInstance.fingerprint`
+#:    （追踪源码版本）都是**寻址键**，不是人眼比对。
+_ID_PREFIX = 32
+
 
 # 沙箱内执行器：读源码 + 测试 spec，输出 JSON。
 # ⛔ 它**不判断**"好不好"，只报"每个断言的实际结果"——判断在 verifier 里。
@@ -50,12 +58,17 @@ import json, sys, io, os, traceback, contextlib
 #    环境用不了（实测 macOS 宿主里 `deny default` 一律 Operation not
 #    permitted），这一层是**唯一能跨平台生效的文件系统闸门**。
 _SB = {"audit": False, "denied": [], "error": "", "mem_guard": False}
-_cfg = {}
 try:
-    try:
-        _cfg = json.loads(open(sys.argv[2], encoding="utf-8").read())
-    except Exception:
-        _cfg = {}
+    #: 🔴 修复二：配置加载失败 ⇒ **raise**（不静默降级为 `_cfg={}`）。
+    #:    原版内层 `except: _cfg = {}` ⇒ 允许为空 ⇒ `addaudithook(_hook)`
+    #:    照常执行、`_SB["audit"] = True`，但 hook 是空操作 ⇒ 父进程读到
+    #:    `fs_audit_applied=True` 而实际**任何越界读写都不被拦**。
+    #:    这是安全层的**假仪表**：安全层说它装上了，比它说没装上危险得多。
+    #:    类型不对也 raise（防止 JSON 里是 list/str 被当作 dict 用）。
+    _cfg = json.loads(open(sys.argv[2], encoding="utf-8").read())
+    if not isinstance(_cfg, dict):
+        raise ValueError(
+            f"config 必须是 dict，实得 {type(_cfg).__name__}")
     _allow = [os.path.realpath(p) for p in (_cfg.get("allow") or [])]
     _path_events = set(_cfg.get("path_events") or [])
     _deny_events = set(_cfg.get("deny_events") or [])
@@ -98,7 +111,9 @@ try:
     sys.addaudithook(_hook)
     _SB["audit"] = True
 except Exception as _e:
-    _SB["error"] = f"{type(_e).__name__}: {_e}"
+    #: ⛔ 配置加载或 hook 安装失败 ⇒ `audit=False` 且 `error` 非空。
+    #:    **绝不**降级成"无隔离但报 audit=True"。
+    _SB["error"] = f"config_or_setup_failed: {type(_e).__name__}: {_e}"
 
 # ── 内存守卫（进程内自限）────────────────────────────────────────────
 # ⛔⛔ 2026-10-13 实测：macOS 上 RLIMIT_AS / RLIMIT_DATA / RLIMIT_RSS
@@ -188,12 +203,25 @@ class Environment:
 
     @property
     def fingerprint(self) -> str:
+        #: 🟠 修复三：`[:16]` → `[:32]` —— 与 `genome._ID_PREFIX` 同值。
+        #:    `env_fingerprint` 是"两轮口径是否相同"的对比锚点，寻址键
+        #:    不能用 64 位（append-only 账本会长期碰撞）。
         return content_hash({"env_id": self.env_id, "source": self.source,
-                             "tests": list(self.tests)})[:16]
+                             "tests": list(self.tests)})[:_ID_PREFIX]
 
     @staticmethod
     def from_dir(root: str | Path, env_id: str = "") -> "Environment":
-        """从目录构建：读 `task.py` + `tests.json`。"""
+        """从目录构建：读 `task.py` + `tests.json`。
+
+        ⛔ `env_id` 默认为 `root.name`：若两个不同 root 下恰好有同名目录
+            （`tasks/a/textscore` 与 `tasks/b/textscore`），`env_id` 相同
+            ⇒ 日志/账本里"env_id=textscore"无法区分是哪一个 root。
+            ⛔ 但 `Environment.fingerprint` 已经含 `source` + `tests`
+            ⇒ 只要内容不同，指纹就不同，下游按指纹对齐的判定**不受影响**。
+            ⛔ **不做默认改写**（如 `parent/name`）：会破坏既有 harness_id
+            与冻结基线的可比性。需要跨 root 唯一标识时，调用方**显式**传
+            `env_id`。
+        """
         root = Path(root)
         src = (root / "task.py").read_text(encoding="utf-8")
         tests = json.loads((root / "tests.json").read_text(encoding="utf-8"))
@@ -348,9 +376,10 @@ def build_child_env(workdir: str) -> Dict[str, str]:
         "HOME": workdir,
         "TMPDIR": workdir,
         "PYTHONHASHSEED": "0",          # 可复现（hash 随机化会让结果漂移）
+        #: 🔵 修复十三：原版 `PYTHONDONTWRITEBYTECODE` 在字面量里**写了两次**
+        #:    （字典字面量里重复键，最后一个生效）。去掉重复。
         "PYTHONDONTWRITEBYTECODE": "1",  # 不往磁盘写 .pyc
         "PYTHONNOUSERSITE": "1",        # 不加载用户 site-packages
-        "PYTHONDONTWRITEBYTECODE": "1",
     })
     env.pop("PYTHONPATH", None)         # ⛔ 路径注入的口子，必须掐掉
     env.pop("PYTHONSTARTUP", None)
@@ -418,20 +447,64 @@ def _child_limits(timeout: float, report_path: str) -> Any:
     return _apply
 
 
-def _read_capped(path: Path, cap: int) -> Tuple[str, bool]:
+def _read_capped(path: Union[str, os.PathLike], cap: int) -> Tuple[str, bool]:
     """读文件但**最多** cap 字节，返回 (内容, 是否被截断)。
 
     ⛔ 截断必须**可见**：静默截断会让"输出巨大"伪装成"输出正常"，
        而解析失败时调用方会误以为是 runner 坏了。
+
+    ⛔🟠 修复五：原版吞**所有** Exception 并返回 `("", False)` —— 会把
+        `PermissionError` / `MemoryError` / `OSError` 伪装成"没有输出"。
+        只吞 `FileNotFoundError`，其他异常如实抛。
     """
     try:
-        with path.open("rb") as f:
+        with Path(path).open("rb") as f:
             data = f.read(cap + 1)
-    except Exception:  # noqa: BLE001
+    except FileNotFoundError:
         return "", False
     if len(data) > cap:
         return data[:cap].decode("utf-8", "replace"), True
     return data.decode("utf-8", "replace"), False
+
+
+def _sb_str(s: str) -> str:
+    """Seatbelt profile 里的字符串字面量（转义，避免路径注入 profile）。
+
+    🟡 修复九：原版只转义 `\\` 与 `"` —— 一个带**换行**的路径就能往
+        profile 里注入新规则（`...\n(allow file-read* ...)`）。
+        加 `\\n` / `\\r` 转义。
+    """
+    return '"' + (s.replace("\\", "\\\\")
+                  .replace('"', '\\"')
+                  .replace("\n", "\\n")
+                  .replace("\r", "\\r")) + '"'
+
+
+def _seatbelt_profile(workdir: str) -> str:
+    """Seatbelt profile 的**唯一构造处**。
+
+    🟠 修复四：`_os_sandbox_usable`（探测）与 `_os_sandbox_cmd`（真实调用）
+        必须用**同一份** profile —— 原版两处各写一份，探测用的少一条
+        `/private/tmp`。两条路径判定的"能不能用"就不在同一把尺子上：
+        探测用更严格的 profile ⇒ 假阴性（真实可用但探测说不可用）
+        ⇒ seatbelt 被**无谓关闭**。
+    """
+    return (
+        "(version 1)\n"
+        "(deny default)\n"
+        "(allow process-exec)\n"
+        "(allow process-fork)\n"
+        "(allow signal (target self))\n"
+        "(allow sysctl-read)\n"
+        "(allow file-read* (subpath \"/usr/lib\"))\n"
+        "(allow file-read* (subpath \"/usr/local\"))\n"
+        "(allow file-read* (subpath \"/opt/homebrew\"))\n"
+        "(allow file-read* (subpath \"/Library\"))\n"
+        "(allow file-read* (subpath \"/System/Library\"))\n"
+        "(allow file-read* (subpath \"/private/tmp\"))\n"
+        f"(allow file-read* (subpath {_sb_str(workdir)}))\n"
+        f"(allow file-write* (subpath {_sb_str(workdir)}))\n"
+    )
 
 
 def _os_sandbox_cmd(workdir: str) -> Optional[Tuple[List[str], str]]:
@@ -451,25 +524,10 @@ def _os_sandbox_cmd(workdir: str) -> Optional[Tuple[List[str], str]]:
         exe = shutil.which("sandbox-exec")
         if not exe:
             return None
-        profile = (
-            "(version 1)\n"
-            "(deny default)\n"
-            "(allow process-exec)\n"
-            "(allow process-fork)\n"
-            "(allow signal (target self))\n"
-            "(allow sysctl-read)\n"
-            "(allow file-read* (subpath \"/usr/lib\"))\n"
-            "(allow file-read* (subpath \"/usr/local\"))\n"
-            "(allow file-read* (subpath \"/opt/homebrew\"))\n"
-            "(allow file-read* (subpath \"/Library\"))\n"
-            "(allow file-read* (subpath \"/System/Library\"))\n"
-            "(allow file-read* (subpath \"/private/tmp\"))\n"
-            f"(allow file-read* (subpath {_sb_str(workdir)}))\n"
-            f"(allow file-write* (subpath {_sb_str(workdir)}))\n"
-        )
         pf = Path(workdir) / "_sandbox.sb"
         try:
-            pf.write_text(profile, encoding="utf-8")
+            #: 🟠 修复四：用共用的 `_seatbelt_profile` 构造 profile
+            pf.write_text(_seatbelt_profile(workdir), encoding="utf-8")
         except Exception:  # noqa: BLE001
             return None
         # ⛔ **先自探测一次**：profile 在这个环境到底能不能 apply，
@@ -492,11 +550,6 @@ def _os_sandbox_cmd(workdir: str) -> Optional[Tuple[List[str], str]]:
             continue
         return None  # ⛔ 未实测过 ⇒ 不启用（不声明没验证过的隔离）
     return None
-
-
-def _sb_str(s: str) -> str:
-    """Seatbelt profile 里的字符串字面量（转义，避免路径注入 profile）。"""
-    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 #: OS 层沙箱**可用性**的探测缓存（2026-10-14 · r28）。
@@ -524,19 +577,10 @@ def _os_sandbox_usable(exe: str) -> Tuple[bool, str]:
         #:    `(deny default)`：那个连 Python 自己的标准库都读不了 ⇒
         #:    必然失败 ⇒ 会永远把 seatbelt 判成不可用（假的"没有"）。
         #:    判"能用"和判"不能用"用的是同一把尺子，才叫探测。
+        #:    🟠 修复四：profile 从 `_seatbelt_profile` 取，与真实调用同源。
         with tempfile.TemporaryDirectory(prefix="v6osb_") as td:
             pf = Path(td) / "_probe.sb"
-            pf.write_text(
-                "(version 1)\n(deny default)\n"
-                "(allow process-exec)\n(allow process-fork)\n"
-                "(allow signal (target self))\n(allow sysctl-read)\n"
-                '(allow file-read* (subpath "/usr/lib"))\n'
-                '(allow file-read* (subpath "/usr/local"))\n'
-                '(allow file-read* (subpath "/opt/homebrew"))\n'
-                '(allow file-read* (subpath "/Library"))\n'
-                '(allow file-read* (subpath "/System/Library"))\n'
-                f'(allow file-read* (subpath {_sb_str(td)}))\n',
-                encoding="utf-8")
+            pf.write_text(_seatbelt_profile(td), encoding="utf-8")
             chk = subprocess.run([exe, "-f", str(pf), PY, "-c", "print(1)"],
                                  capture_output=True, text=True, timeout=10)
         if chk.returncode != 0 or "1" not in (chk.stdout or ""):
@@ -630,6 +674,10 @@ def _mem_watchdog(proc: Any, cap_bytes: int, stop: Dict[str, bool],
 
     ⛔ 这层是**补充不是替代**：进程内守卫不依赖 ps、响应更快；看门狗能在
        子进程完全不配合时兜底。两层都记账，缺哪一层外部都看得见。
+
+    🟡 修复七：轮询间隔从 **0.2s 改 1.0s** —— 每次 `ps` 都是一个子进程；
+       10s 执行 spawn 50 个 `ps`，合成任务会跑成百上千次 ⇒ 数万个 `ps`。
+       内存杀进程对秒级执行不敏感，1s 就够。
     """
     cap_kb = cap_bytes // 1024
     peak = 0
@@ -649,7 +697,7 @@ def _mem_watchdog(proc: Any, cap_bytes: int, stop: Dict[str, bool],
             except Exception:  # noqa: BLE001
                 pass
             return
-        time.sleep(0.2)
+        time.sleep(1.0)
 
 
 def run_in_sandbox(source: str, tests: List[Dict[str, Any]],
@@ -770,11 +818,20 @@ def run_in_sandbox(source: str, tests: List[Dict[str, Any]],
         #: ⛔ 被杀的进程**没有输出** ⇒ 子进程自报的那几个 applied 字段会是
         #:    None。别让 None 被读成"守卫没启用"（那是假仪表）：死法本身
         #:    就是证据，这里显式记一层"谁动的手"。
+        #:
+        #: 🟡 修复八：原版 unknown 分支把所有未归因的 rc==137 混成一类
+        #:    （OS OOM killer / seatbelt deny / 其他信号）。加 sandbox_deny
+        #:    分支 + 未归因时保留 stderr tail 供上游分析。
         if rc == 137:
-            sandbox["mem_killed"] = ("watchdog" if wd.get("killed")
-                                     else "in_process_guard"
-                                     if "V6_MEMGUARD_KILL" in (err or "")
-                                     else "unknown")
+            if wd.get("killed"):
+                sandbox["mem_killed"] = "watchdog"
+            elif "V6_MEMGUARD_KILL" in (err or ""):
+                sandbox["mem_killed"] = "in_process_guard"
+            elif "V6_SANDBOX_DENY" in (err or ""):
+                sandbox["mem_killed"] = "sandbox_deny"
+            else:
+                sandbox["mem_killed"] = "unknown"
+                sandbox["mem_killed_stderr_tail"] = (err or "")[-200:]
         #: ⛔ **实测**生效了什么，与上面的"意图"分开记。两者不一致
         #:    ⇒ 声明的限制是假的（实测 macOS 上 AS 就设不上）。
         try:
@@ -830,12 +887,21 @@ def verify_source(env: Environment, source: Optional[str] = None,
         _warn_fs_not_isolated_once()
 
     if ex.rc != 0 or ex.import_error:
-        return Verdict(passed=False, checks=(), error=ex.import_error or ex.stderr[:200],
-                       evidence={"rc": ex.rc, "stderr": ex.stderr[:200],
+        #: 🟠 修复六：rc != 0 时**一并记 stdout tail** —— runner 被打断时
+        #:    可能已算出一半 results；丢掉它无法区分"全崩"与"跑到一半崩"。
+        #:    用 tail 不用 head（Python traceback 末尾才是错误本身）。
+        return Verdict(passed=False, checks=(),
+                       error=ex.import_error or ex.stderr[:200],
+                       evidence={"rc": ex.rc,
+                                 "stdout_tail": ex.stdout[-400:],
+                                 "stderr_tail": ex.stderr[-400:],
                                  "sandbox": sb},
                        env_fingerprint=env.fingerprint, cost_s=ex.cost_s)
 
-    checks = [(r["name"], bool(r["passed"]), str(r.get("evidence", "")))
+    #: ⛔ `bool(r["passed"])` 会**架空** `all_of` 的类型校验（`bool("false")
+    #:    == True` ⇒ 一个非 bool 的结果被静默翻成"通过"）。原样传下去，
+    #:    让 `all_of` 的 `_coerce_pass` 在构造处抛错。
+    checks = [(r["name"], r["passed"], str(r.get("evidence", "")))
               for r in ex.results]
     v = all_of(env.env_id, checks)
     return Verdict(passed=v.passed, checks=v.checks,
@@ -871,8 +937,30 @@ _FLIP_OPS = {
 }
 
 
+class _ConstantCollector(ast.NodeVisitor):
+    """按 `NodeTransformer` 的 **DFS 序**收集数值常量。
+
+    🔴 修复一：不用 `ast.walk` —— 它是 **BFS**，与 `_Mutator` 的 DFS 序在
+        嵌套表达式下不一致（`ast.walk((1+2)+3)` 得到 `[3, 1, 2]`，
+        而 `_Mutator` 得到 `[1, 2, 3]`）⇒ `which` 编号与
+        `numeric_literals` 的索引错位 ⇒ 修法把本来正确的常量改坏
+        （比"修不好"更糟，它污染没坏的地方）。
+        `NodeVisitor` 默认 DFS，与 `NodeTransformer.generic_visit` 序一致。
+    """
+    def __init__(self) -> None:
+        self.out: List[ast.Constant] = []
+
+    def visit_Constant(self, node: ast.Constant):
+        #: ⛔ **包含 bool** —— 与 `_Mutator.visit_Constant` 同口径。
+        #:    `isinstance(True, int)` 为真 ⇒ bool 自动命中。
+        #:    两边**同一套判定** ⇒ 序列长度相同、顺序相同 ⇒ 索引对齐。
+        if isinstance(node.value, (int, float)):
+            self.out.append(node)
+        #: 常量无子节点，无需 generic_visit
+
+
 def numeric_literals(tree: ast.AST) -> List[ast.Constant]:
-    """按 `ast.walk` 序收集**数值字面量**节点 —— 变异与修法的共同选点口径。
+    """按 `ast.NodeTransformer` 的 **DFS 序**收集数值字面量节点。
 
     ⛔ 入参是**已解析的树**，不是源码字符串：调用方要拿这些节点**就地改值**
        再 `unparse`。若这里内部重新 `ast.parse`，返回的是**另一棵树**的节点
@@ -890,7 +978,7 @@ def numeric_literals(tree: ast.AST) -> List[ast.Constant]:
 
         选点口径必须**只有一个来源**，否则"修法"就退化成"随机改写器"。
 
-    ⛔ 为什么最终选**包含 bool** 而不是两边都排除：
+    ⛔ 最终实现**包含 bool**（与变异器同口径）：
         · 包含 bool **不丢任务**：bool 变异题仍能被造出来、也能被修好；
         · 那个"把 `if x` 变 `if 1`"的担忧不成立 —— 对齐只发生在
           broken 与 base 的**同一遍历序**之间，而两边树形一致
@@ -900,10 +988,17 @@ def numeric_literals(tree: ast.AST) -> List[ast.Constant]:
         · ⛔ 反方向也不行：把变异器改成排除 bool 会**缩小任务空间**
           （bool 不再是变异点），而 `which` 的编号含义也会变
           ⇒ 既有账本与基线不可比。所以动修法侧，不动变异器。
+
+    ⛔⛔ **顺序必须与 `_Mutator` 同源（DFS）**：`ast.walk` 是 BFS，
+        对嵌套表达式（如 `(1+2)+3`）会产出与 DFS **不同**的常量序
+        ⇒ `which` 是 DFS 序编号，`numeric_literals` 的索引却是 BFS 序
+        ⇒ 前面那个自洽性 bug **原样复现**（触发条件从"bool 是否算入"
+        变成"表达式是否嵌套"）。
+        `_ConstantCollector` 用 `NodeVisitor`（DFS），真正同源。
     """
-    return [n for n in ast.walk(tree)
-            if isinstance(n, ast.Constant)
-            and isinstance(n.value, (int, float))]
+    c = _ConstantCollector()
+    c.visit(tree)
+    return c.out
 
 
 #: ⛔ 默认变异种类**刻意不变**：`which` 是按遍历序的全局编号，加一种算子
@@ -919,6 +1014,12 @@ class _Mutator(ast.NodeTransformer):
 
     def __init__(self, which: int = 0,
                  kinds: Iterable[str] = DEFAULT_MUTATION_KINDS):
+        #: 🔵 修复十四：字符串会被 `set()` 拆成单个字符 ⇒ 静默变成
+        #:    "所有 kind 都没启用"（每个字母一个 kind，都不匹配）。
+        if isinstance(kinds, str):
+            raise TypeError(
+                f"kinds 应是 Iterable[str]（如 ('compare', 'binop')），"
+                f"实得 str {kinds!r} —— set(str) 会拆成单个字符")
         self.which = which
         self.kinds = set(kinds)
         self.seen = 0
@@ -1043,6 +1144,16 @@ class SynthesisReport:
     rejected_no_failure: int = 0
     rejected_error: int = 0
     tasks: List[TaskInstance] = field(default_factory=list)
+    #: 🔵 修复十三（附）：失败样本（最多保留 5 条）—— 审计者需要看到
+    #:    **为什么**合成失败。原版只计数不记因，"yield 低"时无从下手。
+    error_samples: List[str] = field(default_factory=list)
+
+    def note_error(self, where: str, exc: BaseException) -> None:
+        """记一次合成失败 —— 计数 + 保留样本（最多 5 条）。"""
+        self.rejected_error += 1
+        if len(self.error_samples) < 5:
+            self.error_samples.append(
+                f"{where}: {type(exc).__name__}: {exc}")
 
     @property
     def yield_rate(self) -> float:
@@ -1052,7 +1163,9 @@ class SynthesisReport:
         return {"attempted": self.attempted, "valid": self.valid,
                 "rejected_no_failure": self.rejected_no_failure,
                 "rejected_error": self.rejected_error,
-                "yield_rate": round(self.yield_rate, 4)}
+                "yield_rate": round(self.yield_rate, 4),
+                #: ⛔ 失败样本进 dict —— 观测侧能直接看到
+                "error_samples": list(self.error_samples)}
 
 
 def synthesize_tasks(env: Environment, max_n: int = 8,
@@ -1080,8 +1193,9 @@ def synthesize_tasks(env: Environment, max_n: int = 8,
         rep.attempted += 1
         try:
             after = verify_source(env, source=attempted_src, timeout=timeout)
-        except Exception:                                       # noqa: BLE001
-            rep.rejected_error += 1
+        except Exception as e:                                  # noqa: BLE001
+            #: 🔵 修复十三：用 `note_error` 记账 + 保留样本
+            rep.note_error(task_id, e)
             return False
         after_names = {c.name for c in after.checks if c.passed}
         broken = tuple(sorted(before_names - after_names))
@@ -1093,15 +1207,17 @@ def synthesize_tasks(env: Environment, max_n: int = 8,
         rep.tasks.append(TaskInstance(
             task_id=task_id, env_id=env.env_id,
             broken_source=attempted_src, desc=desc,
-            fingerprint=content_hash(attempted_src)[:16],
+            #: 🟠 修复三：`[:16]` → `[:32]`（寻址键）
+            fingerprint=content_hash(attempted_src)[:_ID_PREFIX],
             fail_to_pass=broken))
         return True
 
     for i in range(max_n):
         try:
             src1, desc1 = mutate_source(env.source, which=i, kinds=kinds)
-        except Exception:                                       # noqa: BLE001
-            rep.rejected_error += 1
+        except Exception as e:                                  # noqa: BLE001
+            #: 🔵 修复十三：用 `note_error` 记账 + 保留样本
+            rep.note_error(f"m{i}", e)
             continue
         if depth < 2:
             _add(src1, desc1, f"{env.env_id}::m{i}")

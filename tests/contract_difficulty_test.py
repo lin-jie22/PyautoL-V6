@@ -45,13 +45,18 @@ def ck(name, cond, detail=""):
 
 
 def _ok(tid):
-    return Verdict(passed=True, checks=(Check(tid, True, "got=1"),),
-                   evidence={"env": tid})
+    #: ⛔ `Check.name` 必须是**非空字符串**（本轮 verifier 把这条从口头约定
+    #:    提升为构造校验）。这里原本直接传 `spec.get("i")`（int）⇒ 每个
+    #:    verdict 都在构造处抛 ValueError ⇒ 被 `evaluate` 记成 error verdict
+    #:    （reward=0）⇒ **候选分永远为 0** ⇒ C/D/F/H 组 13 项一起红，
+    #:    而现场看起来像"泛化闸坏了"（读数是 0，不是异常）。
+    return Verdict(passed=True, checks=(Check(str(tid), True, "got=1"),),
+                   evidence={"env": str(tid)})
 
 
 def _bad(tid):
-    return Verdict(passed=False, checks=(Check(tid, False, "got=0"),),
-                   evidence={"env": tid})
+    return Verdict(passed=False, checks=(Check(str(tid), False, "got=0"),),
+                   evidence={"env": str(tid)})
 
 
 ENVS = {n: Environment.from_dir(ROOT / "tasks" / n)

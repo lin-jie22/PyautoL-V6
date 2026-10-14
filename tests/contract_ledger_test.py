@@ -26,6 +26,10 @@ sys.path.insert(0, str(ROOT))
 
 FAILS = []
 
+#: 并发组轮数。⛔ 单轮不足以暴露竞态（r33 实测：1/8 概率），
+#:    但也别把契约测试拖成压力测试 —— 4 轮足够高地把概率打出来。
+_CONC_TRIALS = 4
+
 
 def ck(name, cond, detail=""):
     print(f"  {'PASS' if cond else 'FAIL'} {name} {detail if not cond else ''}")
@@ -90,28 +94,51 @@ def main():
     ck("C3 删中间一行 ⇒ 链断裂（不是静默少一条）", not ok3, f"seq={seq3}")
 
     # ── D 组：并发不分叉 ──────────────────────────────────────────
-    print("D 组：并发追加")
-    p2 = tmp / "conc.jsonl"
-    p2.write_text("", encoding="utf-8")
+    #    ⛔⛔ r33 实测事故：这一段原来**只跑一轮**，而失败是概率性的
+    #       （重载下实测 1/8）。根因是 `append()` 用 `(size, mtime_ns)`
+    #       判断"文件没变"⇒ 重载下误判 ⇒ 沿用过期 `_last_hash` ⇒ 写出
+    #       `prev_hash=0000…` ⇒ 账本分叉。修法：判据只用
+    #       ⇒ 撤掉快路径（见 `Ledger.append` 与 `Ledger.__init__` 的实测记录）。
+    #    ⛔ 所以这里必须**多轮**（单轮绿说明不了问题）+ 检查子进程退出码
+    #       （原版不看 rc：子进程崩了会伪装成"链断了"，排障方向全错）。
+    print(f"D 组：并发追加（{_CONC_TRIALS} 轮，单轮绿说明不了并发问题）")
     n_proc, n_each = 4, 5
-    procs = []
-    for k in range(n_proc):
-        code = (f"import sys; sys.path.insert(0, {str(ROOT)!r});"
-                f"from aether.ledger import Ledger;"
-                f"L=Ledger({str(p2)!r});\n"
-                f"for i in range({n_each}): L.append('conc', {{'p': {k}, 'i': i}}, actor='p{k}')")
-        procs.append(subprocess.Popen([sys.executable, "-c", code],
-                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                      cwd=str(ROOT)))
-    for pr in procs:
-        pr.communicate(timeout=60)
-    led3 = Ledger(p2)
-    ok4, _, why4 = led3.verify_chain()
-    ck(f"D1 {n_proc} 进程并发 ⇒ 链完整", ok4, why4)
-    ck(f"D2 事件一条不丢（{n_proc * n_each} 条）",
-       len(led3.events()) == n_proc * n_each, f"实得 {len(led3.events())}")
-    ck("D3 seq 严格递增无重复",
-       [e.seq for e in led3.events()] == list(range(1, n_proc * n_each + 1)))
+    n_total = n_proc * n_each
+    conc_bad = []
+    for trial in range(_CONC_TRIALS):
+        p2 = tmp / f"conc{trial}.jsonl"
+        p2.write_text("", encoding="utf-8")
+        procs = []
+        for k in range(n_proc):
+            code = (f"import sys; sys.path.insert(0, {str(ROOT)!r});"
+                    f"from aether.ledger import Ledger;"
+                    f"L=Ledger({str(p2)!r});\n"
+                    f"for i in range({n_each}): L.append('conc', {{'p': {k}, 'i': i}}, actor='p{k}')")
+            procs.append(subprocess.Popen([sys.executable, "-c", code],
+                                          stdout=subprocess.PIPE,
+                                          stderr=subprocess.PIPE,
+                                          cwd=str(ROOT)))
+        for k, pr in enumerate(procs):
+            _o, e = pr.communicate(timeout=60)
+            if pr.returncode != 0:
+                conc_bad.append(f"trial{trial} p{k} rc={pr.returncode}: "
+                                f"{e.decode('utf-8', 'replace')[-160:]}")
+        led3 = Ledger(p2)
+        ok4, _, why4 = led3.verify_chain()
+        seqs = [e.seq for e in led3.events()]
+        if not ok4:
+            conc_bad.append(f"trial{trial} 链断：{why4}")
+        elif seqs != list(range(1, n_total + 1)):
+            conc_bad.append(f"trial{trial} seq 异常：n={len(seqs)}"
+                            f" 头部={seqs[:3]} 尾部={seqs[-3:]}")
+    ck(f"D1 {_CONC_TRIALS} 轮 × {n_proc} 进程并发 ⇒ 链完整且 seq 无重复",
+       not conc_bad, f"{len(conc_bad)} 轮异常：{conc_bad[:3]}")
+    ck("D1b 子进程全部正常退出（rc≠0 不得被读成『链断了』）",
+       not any("rc=" in s for s in conc_bad),
+       str([s for s in conc_bad if "rc=" in s][:2]))
+    ck(f"D2 事件一条不丢（每轮 {n_total} 条）",
+       all(len(Ledger(tmp / f"conc{i}.jsonl").events()) == n_total
+           for i in range(_CONC_TRIALS)))
 
     # ── E 组：投影可由账本重建（**双向比对**，不是"跑通就行"）────
     #    ⛔⛔ 2026-10-13 实测：这一组原本是 `n >= 0` / `n_runs >= 0` ——
@@ -397,6 +424,81 @@ def main():
     except Exception as e:  # noqa: BLE001
         ck("H 组可执行（data/ledger.jsonl 可读且 _collect 能跑）",
            False, f"{type(e).__name__}: {e}")
+
+    # ── I 组：跨语言舍入契约（写入端自己守，不靠"碰巧不在 TS 侧跑"）──
+    #    ⛔ 2026-10-13 实测事故：`ts*1000` 恰为半整数时 Python `int(round())`
+    #       （取偶，…736）与 JS `Math.round`（half-up，…737）不同 ⇒ 1028 条
+    #       命中 1 条 ⇒ 监督器把完好账本判成"payload 被改"。
+    #       修法是 TS 侧实现 `roundHalfEven` 对齐 Python。
+    #    ⛔⛔ 2026-10-14（r33）又出一次反向事故：有人把 Python 侧"改成
+    #       half-up"以求"与 Math.round 一致" —— 而我们真正对拍的是
+    #       `roundHalfEven`（取偶）⇒ 改动反而**制造**了漂移。
+    #       本组把这条契约钉在 Python 侧：改这里必须同步改
+    #       `supervisor/src/ledger.ts` 的 `roundHalfEven` 与 selfcheck。
+    print("I 组：跨语言舍入契约（半整数毫秒必须取偶）")
+    _e = Event(seq=1, ts=1791871960736.5 / 1000.0, kind="t", actor="a",
+               payload={}, prev_hash="")
+    ck("I1 ts*1000 为半整数 ⇒ 取偶（与 TS roundHalfEven 一致，非 half-up）",
+       _e.identity()["ts"] == 1791871960736,
+       f"got={_e.identity()['ts']} expect=1791871960736"
+       f"（half-up 会得 1791871960737 ⇒ 监督器判链被篡改）")
+    _odd = Event(seq=1, ts=1791871960737.5 / 1000.0, kind="t", actor="a")
+    ck("I2 取偶是双向的（奇数半整数进位，不是恒向下取整）",
+       _odd.identity()["ts"] == 1791871960738,
+       f"got={_odd.identity()['ts']} expect=1791871960738")
+    _int = Event(seq=1, ts=1791871960736.0 / 1000.0, kind="t", actor="a")
+    ck("I3 整数毫秒不受舍入规则影响（改动前的历史 hash 不失效）",
+       _int.identity()["ts"] == 1791871960736)
+
+    # ── J 组：并发安全 > 微优化（这条判据是拿实测数据换来的）──────────
+    #    ⛔ r33 实测：`append()` 里"文件没变就跳过重读尾巴"的快路径，
+    #       在重载下 24 轮 × 4 进程并发中有 **1 轮分叉**（两个进程都在
+    #       seq=6 写出指向同一个 seq=5 的 `prev_hash`），而它只省
+    #       **0.068 ms/条**（0.153 → 0.085 ms，2000 条账本实测）。
+    #       ⇒ 撤掉快路径，改成**锁内无条件重读尾巴**（仍是 O(尾巴)，不是 O(n)）。
+    #    ⛔ 本组守的就是这条决定本身：谁再把"跳过重读"加回来，必须同时
+    #       拿出并发证据，否则这里会红。
+    print("J 组：锁内无条件重读尾巴（正确性优先于 0.068 ms）")
+    pj = tmp / "always_read.jsonl"
+    pj.write_text("", encoding="utf-8")
+    Lj = Ledger(pj)
+    reads = {"n": 0}
+    _orig_read = Ledger._read_tail_event
+
+    def _counted(self):                                        # noqa: ANN001
+        reads["n"] += 1
+        return _orig_read(self)
+
+    #: ⛔ 反证组：把"跳过重读"的缓存加回来 ⇒ J2 必须转红。
+    Ledger._read_tail_event = _counted
+    try:
+        for i in range(4):
+            Lj.append("t", {"i": i})
+        n_reads = reads["n"]
+    finally:
+        Ledger._read_tail_event = _orig_read
+    ck("J1 每次 append 都在锁内重读尾巴（4 次 append ⇒ ≥4 次读）",
+       n_reads >= 4, f"reads={n_reads}")
+    ck("J2 且链完整、seq 连续（重读不是白读）",
+       Lj.verify_chain()[0]
+       and [e.seq for e in Lj.events()] == list(range(1, 5)))
+    #: 反证：**别的写者**写过之后必须能看见（这是分叉的直接防线）
+    reads["n"] = 0
+    other = Ledger(pj)
+    other_ev = other.append("t", {"who": "other"})
+    Ledger._read_tail_event = _counted
+    try:
+        ev = Lj.append("t", {"i": 4})
+    finally:
+        Ledger._read_tail_event = _orig_read
+    #: ⛔ 对照物必须用**它返回的 Event**，不能回头 `other.events()[-1]` ——
+    #:    那是一次新读，读到的是我们后面又写进去的那条 ⇒ 断言恒等（空真）。
+    ck("J3 反证：别的写者写过 ⇒ 本次 prev_hash 指向**它**（不是旧尾巴）",
+       ev.prev_hash == other_ev.hash, f"{ev.prev_hash[:12]}")
+    ck("J4 别的写者写完之后链依然完整（J3 不是恒真）",
+       Lj.verify_chain()[0]
+       and [e.seq for e in Lj.events()] == list(range(1, 7)),
+       f"{[e.seq for e in Lj.events()]}")
 
     print("\n" + "=" * 60)
     if FAILS:

@@ -56,8 +56,11 @@ $PY scripts/probe_sandbox_audit.py  # 沙箱是"真隔离"还是"只是 subproce
 $PY scripts/probe_memory_audit.py   # 一次 _collect 的内存峰值花在哪（含投影库场景）
 
 # TypeScript 监督器（Node ≥22 原生跑 TS，无需 npm install）
-cd supervisor && node src/selfcheck.ts                     # 含跨语言一致性验证
-node src/index.ts --ledger ../data/ledger.jsonl --watch 30
+# ⛔ 本机 `node` 不在 PATH 上；项目约定用 workbuddy 的二进制（契约测试的
+#    `_find_node()` 会按同一顺序查找，找不到就明确报红而不是静默跳过）
+NODE=/Users/linshaojie/.workbuddy/binaries/node/versions/22.22.2-6/bin/node
+cd supervisor && $NODE src/selfcheck.ts                    # 含跨语言一致性验证
+$NODE src/index.ts --ledger ../data/ledger.jsonl --watch 30
 
 # 控制台
 $PY -m aether.serve --console console     # → http://127.0.0.1:8611/console/
@@ -97,7 +100,7 @@ V6/
 │   ├── eventflow/          事件流聚合（会话切分 / 滑动窗口 / 分位数）
 │   ├── stateflow/          状态机（转移 / 合法性 / 可达性 / 路径计数）
 │   └── scheduler/          区间调度（冲突 / 最大并发 / 贪心 / 区间合并）
-├── tests/                  16 个契约测试（RED→GREEN + 反证组）
+├── tests/                  24 个契约测试（RED→GREEN + 反证组；默认与 --e2e 两种模式都要跑）
 ├── supervisor/             TypeScript 外部监督器（只读账本 + 异常检测）
 ├── console/                零构建的只读可视化控制台
 ├── scripts/demo_evolve.py  端到端 demo + 报告
@@ -126,7 +129,7 @@ V6/
 
 ## 5. 系统如何自证（判据清单）
 
-这五十四条是 V6 的"宪法"。每条都有对应的契约测试守着：
+这 54+6 条是 V6 的"宪法"（第 55–59 条见 §5-bis）。每条都有对应的契约测试守着：
 
 1. **事实只有一份**：账本（hash 链）。SQLite 是投影，`rebuild_from_ledger()` 可重建。
    ⛔⛔ 实测（2026-10-13）：投影曾**丢掉 89.7% 的执行历史** —— 账本 495 条
@@ -618,6 +621,106 @@ V6/
     ⛔ **没有端点的动作不做按钮**（进化/摄入只给 CLI 命令）；热装载未开时
     按钮禁用并写明会 403。⛔ 调用结果原样展示超时落差读数（只显示成功/失败
     会把它藏起来）。⛔ 端口被占**顺延**不复用（否则连到别人的服务上）。
+
+---
+
+## 5-bis. 第 55 条起：r33 收口（2026-10-14）
+
+这一轮的形状与前几轮不同：工作区里躺着 **7 个核心文件、+1572/−369 行**的
+修改，测试是红的，而**没有任何测试、账本或文档记录它**。收口它比继续找新
+缺口更值钱 —— 因为"改到一半的代码 + 红的测试"是最危险的状态：它看起来像
+新功能，实际是**未验证的破坏**。
+
+### 55. **改到一半的改动必须按"结论"收口，而不是按"意图"**
+
+14 组编号改动里，有 3 组是**方向错的**，而它们的注释都写得很自信：
+
+- **舍入（ledger）**：注释说"Python `round()` 是银行家舍入，JS `Math.round`
+  是 half-up，两端 hash 不同"，于是把 Python 改成 `floor(x+0.5)`。
+  **前提是错的**：本仓库对拍的 TS 实现是 `roundHalfEven`（取偶），
+  `supervisor/src/selfcheck.ts` 里就有 `...736.5 ⇒ ...736` 的断言。
+  ⇒ 改动**制造**了它声称要消除的漂移（2026-10-13 已实测修好过一次）。
+  撤回到 `round()`，并把这条契约钉进 Python 侧（`contract_ledger_test` I 组），
+  这样"只在 Python 侧跑测试"也能发现它 —— 原来唯一的守护在 TS 侧。
+  ⛔ 教训：**改跨语言契约前必须读对端实现**，不能按语言常识推断
+  （JS `Math.round` 确实 half-up，但我们比对的不是它）。
+- **`Capsule(genes=())` 不得为空**：新加的构造校验，理由是"胶囊不该没有基因"。
+  但空 genes 是**良定义的生产哨兵** —— `TemplateProposer.propose` 在
+  "无可用变异"时就返回它，而 `evolution._run_round` 对 `propose` 的调用
+  **没有 try/except** ⇒ 技能全部接通时进化循环当场炸。
+  ⇒ 撤回该校验，并补 C7 组把哨兵语义（恒等应用 / 零爆炸半径 / 两条可达
+  路径）钉住。⛔ 构造期校验只能守**真的从不成立**的不变量。
+- **`replay_fn` 3 元签名**：调用侧（`runtime.assign_credit`）改成
+  `(task_id, harness_id, steps)`，生产者（`agent.replay_fn` 的闭包）没跟上
+  ⇒ 每一步都 TypeError ⇒ 整份归因降级 `available=False`。改的是**代码**
+  （生产者）而不是测试；同时把 `harness_id` 真正消费掉（与闭包捕获的 id
+  不一致即拒绝：那是"换 harness 重考"，不是归因）。
+  ⛔ 残留的同形态漂移（2 元 lambda）会让断言变成**空真**（`per_step=[]`
+  时 `not any(...)` 恒真）—— 已一并修掉。
+
+### 56. **"修了"不等于"生效"：假校验比缺校验更坏**
+
+`verifier` 里三处校验**写了但永远不会触发**：
+
+- `_coerce_pass(name, bool(p))` —— 调用点先把 `p` 转成 `bool`，
+  `isinstance(p, bool)` 因此恒真 ⇒ 类型闸是死的。实测
+  `all_of("n", [("c","false","ev")])` 不抛错且 `passed=True`，
+  与它自己的 docstring 正好相反；
+- `check_verdict` 对 `checks[*].passed` 严格、对**顶层 `passed`** 仍走
+  `bool()` ⇒ 账本里一条 `{"passed": "false"}` 被读成 `reward=1.0`（双标）；
+- `Verdict.__post_init__` 的 `evidence=None` 归一化分支写的是普通赋值，
+  而 `Verdict` 是 `frozen=True` ⇒ 实测直接 `FrozenInstanceError`
+  （同一个函数里其他字段都用了 `object.__setattr__`，只有这一行漏了）；
+- `all_of/any_of` 不传 `caliber` 时指纹从 `env_fingerprint([names])` 退化成
+  **空串** ⇒ 口径闸静默失效（而唯一生产调用点恰好不传）。
+
+⇒ 四处全部补齐，并加 G 组：**每条校验都必须有一条"不抛就是死的"的反证**，
+外加"合法输入照样通过"（闸不是恒红）。⛔ 缺代码会被发现，假校验不会 ——
+它让"非 bool 的 passed 被静默翻成通过"这件事继续存在，而读数看起来很干净。
+
+### 57. **并发正确性不做微优化交换**（实测数据说话）
+
+`Ledger.append()` 里加过一个"文件没变就跳过重读尾巴"的快路径
+（`(size, mtime_ns)` 缓存）。实测：重载下 24 轮 × 4 进程并发 **1 轮分叉**
+（现场：两个进程都在 `seq=6` 写出指向同一个 `seq=5` 的 `prev_hash`，
+链从那里断开），而它省下 **0.068 ms/条**（0.153 → 0.085 ms，2000 条账本）。
+⇒ **撤掉快路径**，锁内无条件重读尾巴（仍是 O(尾巴) 而非 O(n)）。
+
+⛔ 中间还试过"长度 + 本进程已写字节数"这个更严的判据：它**仍然分叉**
+（同样的概率）。这排除了"时间戳粒度"这一种解释，说明问题在
+"用一个可失真的快照去代替锁内的真实读"这个**形态**本身。
+⛔ 契约侧同时补了三件事：并发组从 1 轮加到 4 轮（单轮绿证明不了并发）、
+检查子进程退出码（原版不看 rc：子进程崩了会伪装成"链断了"）、
+J 组用**反证**钉住"别的写者写过之后本次 `prev_hash` 必须指向它"
+（对照物必须用对方 `append` 返回的 Event，回头再读会读到我们自己写的那条
+⇒ 断言空真）。
+
+### 58. **测试助手也要跟着契约走**（否则红的是判据、坏的是助手）
+
+`contract_difficulty` 一次性红了 **13 项**，现场看起来像"泛化闸坏了"：
+`by_difficulty` 全空、候选分恒为 0。真因是测试助手
+`_ok(tid)` 把**整数**当 `Check.name` 传，而本轮新增的"name 必须是非空
+字符串"校验让每个 verdict 在构造处抛 `ValueError` ⇒ 被 `evaluate` 记成
+error verdict（reward=0）⇒ **候选分永远是 0**，而异常轨迹里只有一行
+`error_verdict`，不显眼。
+同形态还有：`MemNote` 冻结后测试里 `n.tags = ...` 抛
+`FrozenInstanceError`；`prune` 的测试夹具漏了 CLI 有的 `attach_ledger`
+⇒ 留痕前置条件挡住全部删除 ⇒ 真剪恒 0，**连带 A2/A5 变成空真**。
+⇒ 助手与夹具一律改成与被测对象同形；`prune_dryrun` 也补上
+`will_delete` / `blocked_by`，让"报的数 == 真剪会做的数"可被断言
+（原版报 `n=2` 而真剪 0 条）。
+⛔ 同族还抓到一处**静默归零**：`cli.py` 读 `prune_dryrun()["victims"]`
+（当时根本不返回该键）⇒ `aging_events["pruned"]` **恒 0** ⇒ 老化读数对
+"库在增殖"永久失明。
+
+### 59. **节点不在 PATH 也不许静默变绿**
+
+`contract_traceability` 的跨语言对拍直接 `node src/index.ts`，而本机
+`node` **不在 PATH 上** ⇒ `FileNotFoundError` 把整份契约打死，
+E2–E5（监督器误报、严重度统计）**一条都没跑**。⇒ 加 `_find_node()`：
+PATH → 项目约定路径（`~/.workbuddy/binaries/node/versions/*/bin/node`，
+与 `scripts/demo_evolve.py` 同源）→ 常见前缀；真找不到就**明确报红**
+并说清原因。"跑不了"与"跑过了没问题"必须能分辨。
 
 ---
 

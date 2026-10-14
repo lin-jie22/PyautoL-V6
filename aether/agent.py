@@ -508,7 +508,7 @@ class HarnessAgent:
 
     # ── 反事实重放：让 step 级信用分配**真的可用** ────────────────
     def replay_fn(self, h: Any, spec: Dict[str, Any]
-                  ) -> Optional[Callable[[str, List[Any]], float]]:
+                  ) -> Optional[Callable[[str, str, List[Any]], float]]:
         """为 `runtime.assign_credit` 造一个**真** replay_fn。
 
         ⛔ 先做**可重放性自检**：同一个 harness + 同一个 spec 连跑两次，
@@ -519,6 +519,18 @@ class HarnessAgent:
         ⛔ 为什么这不是"层归因的近似"：`attribution.attribute_layers` 消融的
            是**层**（5 个），这里消融的是**步**（链上每一项各自一步），
            而且每一步都是一次完整重跑，reward 只来自 verifier。
+
+        🟠 契约：闭包签名为 `(task_id, harness_id, ablated) -> reward`，
+           与 `runtime.assign_credit` 的调用侧同源（见该处 docstring）。
+           ⛔ 原实现只收 `(task_id, ablated)` ⇒ 调用侧传 3 个 ⇒ **每一次**
+              重放都 `TypeError` ⇒ 整份报告降级 `available=False`
+              （r33 实测：boundary B5/B6/B7 三连红）。两个生产者
+              （`attribution` 层消融走 `evolution`、`runtime` 步消融）里
+              只有一个改了签名 ⇒ 静默只坏一半，是最难发现的那种。
+           ⛔ `harness_id` **必须被消费**，不能只是个占位参数：闭包捕获的
+              `h` 与调用方声明的 `harness_id` 若不同，说明调用方在拿
+              **另一个** harness 的轨迹来消融 —— 那种差值不是归因，是
+              换人重考。空串视为"未声明"（历史轨迹可能没有 id），放行。
         """
         try:
             r1 = self.run(h, spec)
@@ -532,11 +544,24 @@ class HarnessAgent:
             return None
         base_ids = step_identities(traj.steps)
         base_reward = float(r1.reward)
+        #: 闭包捕获的 harness 身份（与 `h.harness_id` 同源）；取不到就退回
+        #: 轨迹上的 id ⇒ 校验只在**两边都非空**时才生效（不制造假红灯）。
+        try:
+            closed_over_id = str(getattr(h, "harness_id", "") or "")
+        except Exception:  # noqa: BLE001
+            closed_over_id = ""
         stats: Dict[str, int] = {"calls": 0, "non_ablatable": 0,
-                                 "ablatable": 0}
+                                 "ablatable": 0, "id_mismatch": 0}
 
-        def replay(task_id: str, ablated: List[Any]) -> float:
+        def replay(task_id: str, harness_id: str, ablated: List[Any]) -> float:
             stats["calls"] += 1
+            #: ⛔ 调用方声明的 harness 必须就是闭包捕获的那一个（见 docstring）。
+            declared = str(harness_id or "")
+            if declared and closed_over_id and declared != closed_over_id:
+                stats["id_mismatch"] += 1
+                raise ValueError(
+                    f"replay 的 harness_id={declared[:32]} 与闭包捕获的 "
+                    f"{closed_over_id[:32]} 不一致 ⇒ 这不是归因，是换 harness 重考")
             present = set(step_identities(ablated))
             missing = [i for i in base_ids if i not in present]
             if not missing:

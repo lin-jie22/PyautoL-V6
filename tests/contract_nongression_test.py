@@ -130,9 +130,13 @@ def main():
     #    都被拦 ⇒ 永远无法进化（与难度分层的自指死锁同形态）。
     #    它与"套件为空"是两件事：套件非空时闸跑得起来（崩溃会被 errors 抓），
     #    只是"没有可回归的东西" ⇒ 判据照跑，**标注**判别力为零即可。
+    #    ⛔ 构造必须与 suite **键集一致**：`{"t1","t2"}` 会撞上新的
+    #       suite_mismatch 闸（那是**另一条**纪律：判据集必须自洽），
+    #       拦下来的原因就不是"基线全 0"了 ⇒ 本条测的东西会静默换掉。
     g_nobase = NonRegressionGate(
         suite, Baseline(caliber=CAL, verdicts={"t1": mk_verdict(False),
-                                               "t2": mk_verdict(False)}))
+                                               "t2": mk_verdict(False),
+                                               "t3": mk_verdict(False)}))
     r6 = g_nobase.evaluate(Harness(), runner_all_green, CAL)
     ck("G3 基线全 0 但套件非空 ⇒ 放行（不得自指死锁，否则永远无法进化）",
        r6.passed, f"{r6.to_dict()}")
@@ -140,6 +144,35 @@ def main():
        any("baseline_all_red" in w for w in r6.warnings), f"{r6.warnings}")
     ck("G5 基线全 0 时 runner 崩溃 ⇒ 仍然拦（闸不是被标注成摆设）",
        not g_nobase.evaluate(Harness(), runner_boom, CAL).passed)
+
+    # ── G7 组：判据集自洽（suite 与 baseline 键集必须一致）──────────
+    #    ⛔ 与"空套件 fail-closed"同一条纪律：不一致时"没变坏"**无法被证明**。
+    #       两个方向各自的危害不同，所以断言要分别守：
+    #         · suite 多出 baseline 没有的 task ⇒ 该 task 执行了但裁决里
+    #           静默丢弃（跑了不算数）；
+    #         · suite 少了 baseline 里的 task ⇒ 那个 task 的判定"缺失"，
+    #           会被记成回归（读起来像 runner 挂了，其实是指纹漂了）。
+    print("G7 组：suite 与 baseline 键集不一致 ⇒ fail-closed")
+    g_missing = NonRegressionGate(
+        suite, Baseline(caliber=CAL, verdicts={"t1": mk_verdict(True)}))
+    r7 = g_missing.evaluate(Harness(), runner_all_green, CAL)
+    ck("G7 suite 多出 baseline 没有的 task ⇒ 拦（跑了不算数）",
+       not r7.passed and any("suite_mismatch" in e for e in r7.errors),
+       f"{r7.to_dict()}")
+    g_extra = NonRegressionGate(
+        suite[:2], Baseline(caliber=CAL,
+                            verdicts={t.task_id: mk_verdict(True)
+                                      for t in suite}))
+    r8 = g_extra.evaluate(Harness(), runner_all_green, CAL)
+    ck("G8 baseline 多出 suite 没有的 task ⇒ 拦（缺失被误读成回归）",
+       not r8.passed and any("suite_mismatch" in e for e in r8.errors),
+       f"{r8.to_dict()}")
+    ck("G9 键集一致 ⇒ 同一条闸放行（G7/G8 不是恒红）",
+       NonRegressionGate(
+           suite, Baseline(caliber=CAL,
+                           verdicts={t.task_id: mk_verdict(True)
+                                     for t in suite})
+       ).evaluate(Harness(), runner_all_green, CAL).passed)
 
     #: 反证：套件非空 + 基线有通过项 ⇒ 同一个闸**必须**放行（不是恒红）
     ck("G6 反证：正常套件 + 全绿 runner ⇒ 放行（闸不是被改成恒红）",

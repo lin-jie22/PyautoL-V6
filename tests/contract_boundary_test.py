@@ -170,7 +170,10 @@ def group_b() -> None:
         dropped = [s for s in r1.trajectory.steps
                    if (s.meta.get("layer"), s.meta.get("action"),
                        s.meta.get("occ")) != non_ablatable[0]]
-        got = rf("t", dropped)
+        #: ⛔ 闭包契约是 `(task_id, harness_id, ablated)`（同
+        #:    `runtime.assign_credit` 的调用侧）；`harness_id=""` = 未声明
+        #:    ⇒ 放行。原测试只传 2 个参数 —— 与生产代码同形态的签名漂移。
+        got = rf("t", "", dropped)
         ck("B", "B8 消融判据/结构步 ⇒ 返回 baseline（贡献 0 = 定义）",
            abs(got - float(r1.reward)) < 1e-9,
            f"got={got} base={r1.reward}")
@@ -283,11 +286,17 @@ def group_f() -> None:
     spec = {"env_id": "scheduler", "broken_source": broken,
             "task_class": "repair"}
     r = ag.run(h, spec)
+    #: ⛔ 事故版 replay 的签名必须与**真契约**一致：`(task_id, harness_id,
+    #:    ablated)`。写成 2 元 lambda 时 `assign_credit` 每步都 TypeError
+    #:    ⇒ 降级 `available=False / per_step=[]` ⇒ 下面那条 `not any(...)`
+    #:    变成**空真**（它不再验证"恒 baseline 会被 B6 抓成无判别力"，
+    #:    只验证了"replay 抛错"）。空真断言比红断言更危险。
     flat = assign_credit(r.trajectory,
-                         replay_fn=lambda tid, steps: float(r.reward))
+                         replay_fn=lambda tid, hid, steps: float(r.reward))
     ck("F", "F2 事故版（replay 恒返回 baseline）⇒ per_step 全 0 ⇒ 判据可辨",
-       not any(abs(p) > 1e-9 for p in flat.per_step),
-       "恒 baseline 的 replay 会被 B6 抓成『无判别力』")
+       flat.available and len(flat.per_step) == len(r.trajectory.steps)
+       and not any(abs(p) > 1e-9 for p in flat.per_step),
+       f"available={flat.available} per_step={flat.per_step}")
 
     #: F3 可重放性检查本身必须有效：造一个"两次不一致"的 runner ⇒ None
     class Flaky(HarnessAgent):

@@ -234,7 +234,10 @@ def group_b() -> None:
     cr = assign_credit(t1)
     ck("B", "B6 无 replay_fn ⇒ available=False 且给理由",
        cr.available is False and bool(cr.reason), str(cr.to_dict())[:200])
-    cr2 = assign_credit(t1, replay_fn=lambda tid, steps: 1.0)
+    #: ⛔ 签名必须是 3 元 `(task_id, harness_id, ablated)`：写成 2 元 lambda
+    #:    时 `assign_credit` 每步都 TypeError ⇒ 降级 available=False
+    #:    ⇒ 下面这条断言**永远为假**（探针静默失效，不是报错）。
+    cr2 = assign_credit(t1, replay_fn=lambda tid, hid, steps: 1.0)
     ck("B", "B6b 有 replay_fn ⇒ 可用（leave-one-out）", cr2.available)
 
     # B7 自述混入 evidence ⇒ 判定作废

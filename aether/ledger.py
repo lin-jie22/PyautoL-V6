@@ -31,6 +31,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import math
 import os
 import time
 import uuid
@@ -72,6 +73,11 @@ def _norm(obj: Any, _path: str = "$") -> Any:
         ⛔ 只拦**原始 int**：整数值的 float（如 `1e308` ⇒ 309 位整数）
         不拦 —— 那个值本来就是某个 float 的精确十进制展开，TS 侧
         `BigInt(x).toString()` 能精确往返（3014 个随机 float 实测全一致）。
+
+    ⛔⛔ **NaN / Infinity ⇒ 抛错**：JSON 规范里没有 NaN/Infinity，
+        `json.dumps(float('nan'))` 产出 `NaN`（**不是合法 JSON**），
+        TS 侧 `JSON.parse("NaN")` 直接抛 ⇒ 一条事件就能让监督器
+        **整条链读不了**。与超范围 int 是同一条纪律（见上）。
     """
     #: ⛔ `bool` 是 `int` 的子类，必须先排除，否则 `True` 会被当整数检查
     if isinstance(obj, bool):
@@ -83,12 +89,22 @@ def _norm(obj: Any, _path: str = "$") -> Any:
             f"跨语言不安全：{_path} 的 int {obj} 超出 JS 安全整数范围 "
             f"(±{JS_MAX_SAFE_INT})，TS 监督器 JSON.parse 会丢精度 ⇒ 两端 "
             f"hash 必然不同。改用字符串或毫秒（纳秒时间戳 1.79e18 也会命中）。")
+    if isinstance(obj, float):
+        #: 🔴 修复一：NaN/Infinity 拦在序列化之前 —— 让 `json.dumps` 抛
+        #:    的话错误信息会丢失 `_path`（只在最后一层看到"Out of range
+        #:    float values are not JSON compliant"），定位成本极高。
+        if math.isnan(obj) or math.isinf(obj):
+            raise ValueError(
+                f"跨语言不安全：{_path} 的 float {obj!r} 无法序列化为 JSON "
+                f"（NaN/Infinity 不是合法 JSON 值），TS 监督器 JSON.parse "
+                f"会抛 ⇒ 整条链读不了")
+        if obj.is_integer():
+            return int(obj)
+        return obj
     if isinstance(obj, dict):
         return {k: _norm(v, f"{_path}.{k}") for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [_norm(v, f"{_path}[{i}]") for i, v in enumerate(obj)]
-    if isinstance(obj, float) and obj.is_integer():
-        return int(obj)
     return obj
 
 
@@ -99,7 +115,7 @@ def canonical_json(obj: Any) -> str:
     规则重算 hash 来校验链。任何一端格式漂移都会被 `verify_chain` 抓到。
     """
     return json.dumps(_norm(obj), sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=False, default=str)
+                      ensure_ascii=False, default=str, allow_nan=False)
 
 
 def content_hash(obj: Any) -> str:
@@ -122,11 +138,31 @@ class Event:
 
         ⛔ ts 用**毫秒整数**：浮点时间戳在不同语言里序列化不一致
         （`1.0` vs `1`），会直接破坏跨语言链校验。
+
+        ⛔⛔ **舍入规则必须与 TS 侧 `roundHalfEven` 逐位一致**。
+        Python 内置 `round()` 是 banker's rounding（round-half-to-even：
+        `round(0.5)=0`、`round(2.5)=2`）；JS `Math.round` 是
+        half-away-from-zero（`Math.round(0.5)=1`）。两端**确实**不同 ——
+        所以 TS 侧刻意实现了 `roundHalfEven`（`supervisor/src/ledger.ts`），
+        并在 `supervisor/src/selfcheck.ts` 断言 `...736.5 ⇒ ...736`。
+
+        🔴 修复二（**撤回**）：原改动把这里从 `round()` 换成
+        `math.floor(x + 0.5)`，理由是"`Math.round` 是 half-up，Python
+        `round()` 取偶，两者不一致"。**前提错了**：与本仓库对拍的那个 TS
+        实现是 `roundHalfEven`（取偶），不是 `Math.round`。
+        ⇒ 改动方向正好相反，它**制造**了它声称要消除的漂移：实测
+        `ts*1000` 为半整数时 Python 得 `...737`、TS 得 `...736`
+        ⇒ 监督器把完好账本判成"payload 被改"（2026-10-13 实测 1/1028）。
+        ⛔ 教训：改跨语言契约前必须**读对端实现**，不能按"常识"推断
+        （JS `Math.round` 确实 half-up，但我们对拍的不是它）。
+        ⛔ 撤回不产生历史 hash 变化：恢复的正是 HEAD 的行为。
         """
+        #: 🔴 修复二（撤回）：恢复 `round()` = 与 TS `roundHalfEven` 同语义。
+        ts_ms = round(self.ts * 1000)
         return {
             "v": LEDGER_VERSION,
             "seq": self.seq,
-            "ts": int(round(self.ts * 1000)),
+            "ts": int(ts_ms),
             "kind": self.kind,
             "actor": self.actor,
             "payload": self.payload,
@@ -138,14 +174,31 @@ class Event:
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "Event":
+        #: 🔵 修复九：空 hash ⇒ 这不是账本原生产物（人工编辑 / 损坏）。
+        #:    静默接受会让它进入 `_last_hash` 链 —— 下一次 append 写出
+        #:    `prev_hash=""` 的事件，链从这一刻分叉，而断点看不出成因。
+        #:    调用方（`_read_tail_event` / `_hydrate_full` / `iter_events`）
+        #:    都是 `except: continue`，会正确跳过；`verify_chain` 也因此
+        #:    不会误把空 hash 当合法。
+        h = str(d.get("hash", ""))
+        if not h:
+            raise ValueError(
+                f"事件 seq={d.get('seq')} 缺 hash 字段 ⇒ 非账本原生产物"
+                f"（人工编辑或损坏）")
+        #: 🟠 修复三：`payload or {}` 会把 `[]` / `""` / `0` / `False`
+        #:    **静默替换成 {}**。它们是不同的 payload，替换后会算出不同
+        #:    的 hash ⇒ 这条事件永远校验不通过，而真因极难排查。
+        #:    只对"完全缺失 or None"用 {}。
+        raw_payload = d.get("payload")
+        payload = raw_payload if raw_payload is not None else {}
         return Event(
             seq=int(d.get("seq", 0)),
             ts=float(d.get("ts", 0.0)),
             kind=str(d.get("kind", "")),
             actor=str(d.get("actor", "")),
-            payload=d.get("payload") or {},
+            payload=payload,
             prev_hash=str(d.get("prev_hash", "")),
-            hash=str(d.get("hash", "")),
+            hash=h,
         )
 
 
@@ -164,6 +217,18 @@ class Ledger:
         self._lock_path = self.path.with_suffix(self.path.suffix + ".lock")
         self._last_hash = self.GENESIS_HASH
         self._seq = 0
+        #: ⛔⛔ 这里**故意没有**任何"文件没变就跳过重读"的缓存。
+        #:    修复八（r33）曾加过一个 `(size, mtime_ns)` 快路径，理由是
+        #:    "append() 每次重读 64 KB 尾巴太贵"。实测证明这个交换不成立：
+        #:      · 重载下 24 轮 × 4 进程并发，**1 轮分叉**（现场：两个进程
+        #:        都在 seq=6 写出 `prev_hash` 指向同一个 seq=5 ⇒ 链从这里
+        #:        断开）。根因就是"判断没变"的依据（时间戳 / 长度快照）
+        #:        在真实并发下会失真，于是沿用了**过期的 `_last_hash`**；
+        #:      · 而它省下的时间是 **0.068 ms/条**（0.153 → 0.085 ms，
+        #:        2000 条账本上实测），一轮进化总共 append 20 余次。
+        #:    ⇒ 用"唯一事实源可能分叉（不可逆）"换 1.5 毫秒/轮，是坏交易。
+        #:    append 的读仍是 **O(尾巴)** 不是 O(n)（见 `_hydrate`）：
+        #:    这是本仓库原本就有的性质，不靠缓存也成立。
         #: ⛔ 会话归属：`round_no` **每次进程启动都从 1 重新数**，
         #:    没有它，"同一轮"会把跨小时、跨运行的事件串成一对 ——
         #:    监督器那条"泛化闸被绕过"的规则曾因此把 8 条合法提交
@@ -176,8 +241,8 @@ class Ledger:
         self._hydrate()
 
     # ── 内部 ──────────────────────────────────────────────────────
-    def _hydrate(self) -> None:
-        """冷启动：拿到最新 seq 与 hash。空文件不算错。
+    def _hydrate(self, if_changed: bool = False) -> None:
+        """冷启动 / 并发重读：拿到最新 seq 与 hash。空文件不算错。
 
         ⛔⛔ 只读**尾部**，不全扫。账本 append-only 且写入在独占锁内串行
         ⇒ 最新事件必然在文件末尾；为了两个字段去全量解析一遍，在
@@ -190,6 +255,12 @@ class Ledger:
         · 缓冲区里一个可解析的都没有 ⇒ **退回全扫**，绝不返回"看起来正常
           的旧 hash"（那是把缺失伪装成存在）；
         · 跨边界截断：偏移非 0 时丢掉第一段（它可能是半截行）。
+
+        `if_changed=True`（append 路径）/ `False`（`__init__` 路径）现在
+        **都是无条件重读** —— 这个参数只保留调用方语义，不再跳过任何东西。
+        原因见 `__init__` 里的实测记录：任何"文件没变"的缓存判据
+        （mtime / 长度快照 / 自己的写入量）在真实并发下都会失真，而失真的
+        后果是**账本分叉**（不可逆），它省下的只有 0.068 ms/条。
         """
         last = self._read_tail_event()
         if last is not None:
@@ -210,7 +281,10 @@ class Ledger:
         offset = max(0, size - HYDRATE_TAIL_BYTES)
         with self.path.open("rb") as f:
             f.seek(offset)
-            chunk = f.read(HYDRATE_TAIL_BYTES + (1 if offset else 0))
+            #: 🟡 修复五：去掉多余的 `+1`。`offset > 0` 时读窗口恰好是
+            #:    HYDRATE_TAIL_BYTES 字节；原写法读多一字节后截到 EOF，
+            #:    无害但会让人以为存在边界问题。
+            chunk = f.read(HYDRATE_TAIL_BYTES)
         try:
             text = chunk.decode("utf-8")
         except UnicodeDecodeError:      # 尾巴正好切断多字节字符
@@ -223,28 +297,50 @@ class Ledger:
             if not line:
                 continue
             try:
-                return Event.from_dict(json.loads(line))  # type: ignore[return-value]
+                return Event.from_dict(json.loads(line))
             except Exception:  # noqa: BLE001 —— 坏行就往回退
                 continue
         return None
 
     def _hydrate_full(self) -> None:
-        """全扫版（保底路径）。语义与改造前的 `_hydrate` 逐字相同。"""
+        """全扫版（保底路径）。语义与改造前的 `_hydrate` 逐字相同。
+
+        ⛔ 用**二进制**打开 + 手动 decode（与 `iter_events` 一致）：原版
+        用 `open("r", encoding="utf-8")` 遇坏字节会抛 `UnicodeDecodeError`
+        —— 保底路径理应更宽容，不是更严格。
+        """
         if not self.path.exists():
             return
         last = None
-        with self.path.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
+        with self.path.open("rb") as f:
+            for raw in f:
+                try:
+                    line = raw.decode("utf-8").strip()
+                except UnicodeDecodeError:
+                    continue
                 if not line:
                     continue
                 try:
                     last = Event.from_dict(json.loads(line))
                 except Exception:  # noqa: BLE001 —— 坏行不拖垮冷启动
                     continue
-        if last is not None:
-            self._seq = last.seq
-            self._last_hash = last.hash
+        if last is None:
+            #: 🟠 修复四：文件非空但一条都解析不出 ⇒ **账本损坏**，
+            #:    不是"空账本"。静默回到 genesis ⇒ 下一次 append 会写出
+            #:    `prev_hash=GENESIS` 的事件，与已有的损坏行形成**分叉链**。
+            #:    这与 docstring 承诺的"绝不把缺失伪装成存在"直接冲突。
+            #:    宁可在冷启动时明确报错，不可在下一次 append 时分叉。
+            try:
+                size = self.path.stat().st_size
+            except OSError:
+                size = 0
+            if size > 0:
+                raise RuntimeError(
+                    f"账本 {self.path} 非空（{size} 字节）但无可解析事件 "
+                    f"⇒ 文件损坏；拒绝以 genesis 状态继续（会造出分叉链）")
+            return
+        self._seq = last.seq
+        self._last_hash = last.hash
 
     def _acquire(self):
         self._lock_path.touch(exist_ok=True)
@@ -260,10 +356,13 @@ class Ledger:
         ⛔ 先加锁再重算 `_last_hash`：并发会话可能已经在文件里写了新行，
         直接沿用内存里的旧 hash 会造出分叉链（V5 踩过同形态的坑：
         热进程回写覆盖文件修改）。
+        ⛔⛔ 锁内**无条件**重读尾巴。修复八（r33）曾在这里加过"没变就跳过
+        重读"的快路径，实测在真实并发下 24 轮里 1 轮分叉，而它只省
+        0.068 ms/条 —— 账本是唯一事实源，分叉不可逆，这个交换不划算。
         """
         fh = self._acquire()
         try:
-            self._hydrate()                      # 重读，防并发分叉
+            self._hydrate(if_changed=True)
             seq = self._seq + 1
             #: 会话归属写进 payload（⛔ 不是新增 Event 字段 —— 那会改跨语言
             #: hash 契约，TS 侧必须同步才能校验链；payload 是本就参与 hash
@@ -332,14 +431,21 @@ class Ledger:
                 try:
                     line = raw.decode("utf-8").strip()
                 except UnicodeDecodeError:
-                    #: 坏编码行：与坏 JSON 行同等处理（跳过，不污染整份读）
+                    #: ⛔ 坏编码行：与坏 JSON 行同等处理（跳过，不污染整份读）。
+                    #:    **不推进 progress["offset"]** —— 坏行跳过 ⇒ 下次会
+                    #:    重读它。宁可重读一条坏行，不可跳过一条可能只是
+                    #:    "读太快"（半截写入）的好行。
                     continue
                 if not line:
+                    #: 空行（crash 期间的半截写入）同理：不推进 offset。
                     continue
                 try:
                     ev = Event.from_dict(json.loads(line))
                 except Exception:  # noqa: BLE001
                     continue
+                #: 🟡 修复七：**只在事件完整解析之后**推进 offset ⇒
+                #:    offset 永远停在行边界上。上面两条 `continue` 处的
+                #:    注释也解释了为什么坏行/空行不推进。
                 if progress is not None:
                     progress["offset"] = f.tell()
                 yield ev
@@ -348,7 +454,13 @@ class Ledger:
         return list(self.iter_events())
 
     def iter_lines(self) -> Iterator[str]:
-        """给跨语言消费者用：直接吐原始行（TS 侧自己解析）。"""
+        """给跨语言消费者用：直接吐原始行（TS 侧自己解析）。
+
+        ⛔ 这里**不**过滤坏行（只滤空行）。与 `iter_events` 的口径**故意**
+        不同：TS 监督器需要**看见**坏行才能报告（它会自己抛 `JSON.parse`
+        错）。如果这里也 `continue` 坏行，TS 侧会看到"账本突然变短了"
+        而**没有任何错误** —— 静默丢事件比显式报错更危险。
+        """
         if not self.path.exists():
             return
         with self.path.open("r", encoding="utf-8") as f:
@@ -382,7 +494,8 @@ class Ledger:
         return self._seq
 
     # ── 校验 ──────────────────────────────────────────────────────
-    def verify_chain(self, events: Optional[Iterable[Event]] = None
+    def verify_chain(self, events: Optional[Iterable[Event]] = None,
+                     *, expected_prev_hash: Optional[str] = None
                      ) -> Tuple[bool, Optional[int], str]:
         """校验整条哈希链。
 
@@ -400,8 +513,18 @@ class Ledger:
         ⛔ 链推进逻辑在 `_chain_feed`（唯一事实源）。这里保留**提前
         break**（断链后不再校验后续）—— 与改造前逐字同行为；`stats()`
         不 break 是为了把 `by_kind` 数全，**不是**另一套判据。
+
+        ⛔⛔ `expected_prev_hash`：`events` 是**尾部窗口**（如 `tail(20)`）
+        时的起点声明。默认 `None` ⇒ 从 `GENESIS_HASH` 起 —— 那**只对
+        完整事件流成立**。传尾部窗口却不传 `expected_prev_hash` ⇒ 第一条
+        事件的 `prev_hash` 必然不等于 GENESIS ⇒ 校验立即失败，理由却是
+        `prev_hash 不连续`，看起来像"账本坏了"。调用方**必须**显式声明
+        起点：`led.verify_chain(led.tail(20), expected_prev_hash=...已知起点)`。
         """
         state = _new_chain_state()
+        #: 🟡 修复六：允许调用方声明起点。
+        if expected_prev_hash is not None:
+            state["prev"] = expected_prev_hash
         for ev in (self.iter_events() if events is None else events):
             _chain_feed(state, ev)
             if state["bad"] is not None:
@@ -498,7 +621,9 @@ class LedgerStatsAgg:
     字符串**，不再是 Event 对象 + payload 全量。
     """
 
-    def __init__(self, path: str = "", head: str = ""):
+    def __init__(self, path: str, head: str = ""):
+        #: 🔵 修复十一：去掉 `path: str = ""` 默认值 —— 唯一的调用方
+        #:    `Ledger.stats_agg()` 永远传实路径；空默认值只会掩盖漏传。
         self.path = path
         #: ⛔ `head` 由调用方给（`Ledger._last_hash`），**不在这里重读文件**：
         #:    重读就意味着又开一遍文件、又可能读到不同时刻的末尾。

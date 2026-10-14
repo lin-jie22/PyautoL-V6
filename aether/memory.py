@@ -42,7 +42,23 @@ CHANNEL_WRITABLE: Dict[str, Tuple[str, ...]] = {
     "system": ("L4",),
 }
 
+#: 寻址指纹前缀长度（hex 字符数）。
+#: ⛔ 与 `genome._ID_PREFIX` / `nongression._ID_PREFIX` / `environment._ID_PREFIX`
+#:    / `runtime._ID_PREFIX` 保持同值。`MemNote.fingerprint` 是**去重键**
+#:    （`_by_fp` 的 key）；`[:16]`（64 位）在长期累积的记忆库上会碰撞 ⇒
+#:    两条不同内容被当成同一条合并。
+_ID_PREFIX = 32
+
 _WORD = re.compile(r"[\u4e00-\u9fff]|[A-Za-z_][A-Za-z0-9_]*|\d+")
+
+#: `_WORD` 切出来的"单字符 CJK token"识别（查询侧兜底用）。
+#: ⛔ 范围必须与 `_WORD` 的正则一致 —— 两处各写一份范围就会漂移
+#:    （同族教训见 `runtime._CJK_RANGES` 的注释）。
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def _is_cjk_token(t: str) -> bool:
+    return bool(t) and _CJK_RE.fullmatch(t) is not None
 
 #: ⛔ **唯一事实源**：记忆内容的"可信度"词表。
 #: 跨运行持久化之后，上一轮的**自述 / 占位 / 未验证**条目会跟着库一起
@@ -74,12 +90,21 @@ def memory_purity(note: "MemNote", min_len: int = 40) -> Tuple[bool, str]:
 # 嵌入：见 aether/embeddings.py（此处 re-export 保持旧引用可用）
 # ──────────────────────────────────────────────────────────────────
 __all__ = ["hash_embedding", "cosine", "MemoryOS", "MemNote", "TIERS",
-           "CHANNEL_WRITABLE"]
+           "CHANNEL_WRITABLE", "memory_purity"]
 
 
-@dataclass
+@dataclass(frozen=True)
 class MemNote:
-    """统一记忆单元（MemCube 式：带来源、使用史、可迁移）。"""
+    """统一记忆单元（MemCube 式：带来源、使用史、可迁移）。
+
+    ⛔ **冻结** —— 修改一律走 `dataclasses.replace()`。原版未 frozen ⇒
+        `note.content = "..."` 是合法的，而它**不会**同步 `_by_fp` 去重表
+        ⇒ 去重键与内容脱钩 ⇒ 去重**静默失效**（同样的新内容被写两次）。
+        `frozen=True` 让这类赋值抛 `FrozenInstanceError`。
+        ⛔ 已知边界：`embedding` 是 list，浅冻结不改其内部元素可改性
+        （`note.embedding.append(...)` 仍合法）。要完全冻结需 tuple，
+        但那会破坏 `cosine_or_none` 的接口契约（期望 list）。
+    """
     note_id: str = ""
     tier: str = "L3"
     content: str = ""
@@ -95,14 +120,17 @@ class MemNote:
     last_access: float = 0.0
     supersedes: str = ""
     #: 建这条记忆时用的嵌入器（名字+dim）。⛔ 它是**可查的事实**：
-    #  换模型后旧笔记的 embedder 不匹配 ⇒ integrity() 会点名。
+    #: 换模型后旧笔记的 embedder 不匹配 ⇒ integrity() 会点名。
     embedder: str = ""
 
     @property
     def fingerprint(self) -> str:
-        """内容指纹：写入侧去重用（**不含** tier/时间，同内容即同一条）。"""
+        """内容指纹：写入侧去重用（**不含** tier/时间，同内容即同一条）。
+
+        ⛔ 用 `[:32]`（128 位）—— 与 `_ID_PREFIX` 保持一致。
+        """
         return content_hash({"content": self.content.strip(),
-                             "keywords": list(self.keywords)})[:16]
+                             "keywords": list(self.keywords)})[:_ID_PREFIX]
 
     @property
     def has_embedding(self) -> bool:
@@ -110,6 +138,8 @@ class MemNote:
         return bool(self.embedding) and any(x != 0.0 for x in self.embedding)
 
     def to_dict(self) -> Dict[str, Any]:
+        #: ⛔ 依赖 `__dict__`（frozen=True 仍保留 `__dict__`；加 `slots=True`
+        #:    会破坏这里）。将来若加 slots，改成显式字段列表。
         d = {k: v for k, v in self.__dict__.items() if k != "embedding"}
         d["has_embedding"] = self.has_embedding
         d["dim"] = len(self.embedding)
@@ -132,6 +162,9 @@ class MemoryOS:
     last_consolidation: Optional[Dict[str, Any]] = None
     #: 同上（类级兜底）：上一次真剪枝的分账
     last_prune: Optional[Dict[str, Any]] = None
+    #: 同款类级兜底：最近一次 `search` 的查询侧嵌入失败原因
+    #: （空串 = 上一次查询侧嵌入正常）。
+    _last_search_embed_error: str = ""
 
     def __init__(self, embedder: Any = None, dim: int = 0, link_topk: int = 3,
                  min_content_len: int = 0):
@@ -154,10 +187,17 @@ class MemoryOS:
         self.min_content_len = min_content_len
         self.notes: Dict[str, MemNote] = {}
         self._by_fp: Dict[str, str] = {}
+        #: ⛔ 巩固分账也放进初始 stats —— 原版在 `consolidate()` 里动态加键，
+        #:    导致"跑过巩固"与"没跑过"的 stats 键集**不同** ⇒ 跨运行对比
+        #:    需要先判断"这个键是否存在"。初始全零，键集固定。
         self.stats = {"written": 0, "deduped": 0, "rejected_channel": 0,
                       "rejected_empty": 0, "promoted": 0, "refuted": 0,
                       "rejected_dim_mismatch": 0, "rejected_embed_error": 0,
-                      "search_dim_mismatch": 0, "ledger_failed": 0}
+                      "search_embed_error": 0,
+                      "search_dim_mismatch": 0, "ledger_failed": 0,
+                      "consolidated_made": 0, "consolidated_deduped": 0}
+        #: 实例级 shadow 掉类级默认值
+        self._last_search_embed_error = ""
 
     # ── 账本挂载（事实源收敛）────────────────────────────────────
     def attach_ledger(self, ledger: Any) -> "MemoryOS":
@@ -210,7 +250,7 @@ class MemoryOS:
                 "tier": tier, "channel": channel, "source": source,
                 "disposition": disposition,
                 "note_id": getattr(note, "note_id", "") or "",
-                "content_hash": content_hash((content or "").strip())[:16],
+                "content_hash": content_hash((content or "").strip())[:_ID_PREFIX],
                 "inherited": "inherited" in tuple(getattr(note, "tags", ()) or ()),
             }, actor="memory")
         except Exception as e:  # noqa: BLE001
@@ -218,23 +258,24 @@ class MemoryOS:
             self._ledger_error = f"{type(e).__name__}: {e}"
 
     def _write_raw(self, tier: str, content: str, *, source: str = "",
-              channel: str = "learner", keywords: Optional[Iterable[str]] = None,
-              tags: Optional[Iterable[str]] = None, trust: float = 1.0,
-              now: Optional[float] = None) -> Tuple[MemNote, str]:
+                   channel: str = "learner",
+                   keywords: Optional[Iterable[str]] = None,
+                   tags: Optional[Iterable[str]] = None, trust: float = 1.0,
+                   now: Optional[float] = None) -> Tuple[MemNote, str]:
         """真正的写入（不含记账）—— `write()` 是它 + 记账的包装。
 
         拆开是为了让**巩固/装载**等内部路径也走同一套闸，而不是各抄一份。
-        """
-        """写一条记忆。返回 (note, 处置)。处置 ∈ {written, deduped, rejected_*}。
+
+        返回 (note, 处置)。处置 ∈ {written, deduped, rejected_*}。
 
         ⛔ 三条闸（缺一条就会出现"库越来越大但什么也检索不到"）：
           · 通道闸：learner 不许直接写 L2 事实层（V5：写入权由通道定）；
           · 去重闸：同内容指纹只更新 access 与链接，不新增行；
           · 完整性闸：embedding 为空 ⇒ 拒绝入库（不是"降级成功"）。
 
-        ⛔⛔ 每一次尝试（**含被拒的**）都进账本：只记成功写入的话，
-        "被拒了多少、为什么被拒"在事实源里就不存在，等于把闸的另一半
-        藏起来。`memory.write` 的 `disposition` 就是那另一半。
+        ⛔⛔ 每一次尝试（**含被拒的**）都进账本（由 `write()` 的
+        `_record_write()` 负责）：只记成功写入的话，"被拒了多少、为什么
+        被拒"在事实源里就不存在，等于把闸的另一半藏起来。
         """
         if tier not in TIERS:
             raise ValueError(f"未知 tier {tier}（可选 {TIERS}）")
@@ -307,7 +348,8 @@ class MemoryOS:
                     "source": note.source or "",
                     "disposition": "backfill",
                     "note_id": note.note_id,
-                    "content_hash": content_hash(note.content.strip())[:16],
+                    "content_hash": content_hash(
+                        note.content.strip())[:_ID_PREFIX],
                     "inherited": "inherited" in tuple(note.tags or ()),
                 }, actor="memory")
                 n += 1
@@ -336,13 +378,42 @@ class MemoryOS:
     def search(self, query: str, top_k: int = 5,
                tiers: Optional[Iterable[str]] = None,
                update_access: bool = True,
-               expand_links: bool = True) -> List[MemNote]:
+               expand_links: bool = True,
+               *,
+               max_links_added: Optional[int] = None) -> List[MemNote]:
+        """按 `query` 检索记忆。
+
+        🔴 修复一：查询侧嵌入失败 ⇒ **显式退化为关键词-only 路径**。
+            原版 `q = []` 之后，所有 note 都被 `cosine_or_none([], ...)
+            is None` 挡掉并 `continue` ⇒ 关键词加权那行**永远到不了**
+            ⇒ 实际返回**空列表**，而注释却说"退化为关键词检索"（撒谎）。
+            同时 `search_dim_mismatch` 被掺进了"查询侧嵌入失败"这个
+            完全不同的事件 ⇒ 排障方向指向"库被污染"，而真相是"这次
+            嵌入没跑成"。改用**独立计数器 + 独立分支**。
+            关键词-only 路径的分数量级与余弦无关 ⇒ 仍能按"比大小"选
+            top_k（用**词覆盖率** = 命中关键词 / 该 note 关键词总数）。
+
+        🟡 修复十：`expand_links=True`（默认）时返回条数**可能超过
+            `top_k`** —— 这是链接扩散语义的一部分（原行为）。调用方若
+            需要**严格上界**，传 `max_links_added=0` 或 `expand_links=False`。
+            不改默认行为（保持兼容），但**接口上承认**这个语义。
+        """
+        q: List[float] = []
+        query_embed_failed = False
         try:
             q = self._embed_one(query or "")
-        except Exception:  # noqa: BLE001
-            # 查询侧嵌入失败 ⇒ 记 error verdict 由调用方处理；这里退化为关键词检索
-            self.stats["rejected_embed_error"] += 1
+        except Exception as e:  # noqa: BLE001
+            #: ⛔ 只记**这个**事件，不混进 `search_dim_mismatch`（那是库脏了）。
+            #: ⛔⛔ 也不能复用写侧的 `rejected_embed_error`：写侧那个是
+            #:     "**入库被拒**"，查询侧这个是"**这次检索降级**" —— 同一
+            #:     个键记两件事，读数就无法回答"到底是写入坏了还是检索坏了"。
+            #:     （原注释声称"改用独立计数器"，但代码仍在写共享键 —— 注释
+            #:     与实现不一致本身就是缺陷。现在补上真正的独立计数器。）
+            self.stats["search_embed_error"] += 1
+            self._last_search_embed_error = f"{type(e).__name__}: {e}"
+            query_embed_failed = True
             q = []
+
         allowed = set(tiers) if tiers else None
         scored: List[Tuple[float, MemNote]] = []
         for n in self.notes.values():
@@ -352,27 +423,68 @@ class MemoryOS:
                 continue
             if not n.has_embedding:
                 continue
-            s = cosine_or_none(q, n.embedding)
-            if s is None:
-                # ⛔ 维度不符 = 库脏了。跳过并**计数**，让它可被看见，
-                #    而不是当成"不相关"（那是不可判别与不相关被混为一谈）。
-                self.stats["search_dim_mismatch"] += 1
-                continue
-            # 关键词命中做小幅加权（纯向量对短查询不稳）
-            if any(k and k in (query or "") for k in n.keywords):
-                s += 0.05
+            if query_embed_failed:
+                #: ⛔ 关键词-only 路径：原版无此分支 ⇒ "退化为关键词检索"
+                #:    是**假的**（所有 note 都被 `cosine_or_none([], ...)`
+                #:    挡掉，返回空）。
+                #: ⛔⛔ r33 实测三版都错：① `k in query`（拿 note 的关键词
+                #:    去子串匹配整条 query）⇒ 中文单字关键词永远命中不了；
+                #:    ② 按 `len(t) > 1` 取查询词 ⇒ 中文没有无歧义的分词器，
+                #:    切不出多字词 ⇒ 空表；③ 只认 ASCII 词 ⇒ 中文查询全落空
+                #:    （而本系统的实际查询就是中文）⇒ 空表。
+                #:    口径：查询侧取（长度 ≥2 的词）∪（CJK 单字），
+                #:    与 note 的正文/关键词做**字符包含**匹配。
+                #:    ⛔ 已知边界：字符级匹配会把"非"这种高频字算成相关
+                #:    ⇒ 这是**降级兜底**（嵌入挂了才有这条路，且
+                #:    `search_embed_error` 与 `_last_search_embed_error`
+                #:    都留了痕）。它保证"有候选"而不是"精确"。
+                qwords = set()
+                for t in _WORD.findall(query or ""):
+                    if len(t) > 1:
+                        qwords.add(t.lower())
+                    elif _is_cjk_token(t):
+                        qwords.add(t)
+                if not qwords:
+                    continue
+                hay = (" ".join(n.keywords) + "\n" + n.content).lower()
+                hits_n = sum(1 for w in qwords if w in hay)
+                if not hits_n:
+                    continue
+                #: 用**查询侧命中率**，量级与余弦无关 ⇒ 与余弦结果不混谈
+                s = hits_n / len(qwords)
+            else:
+                s = cosine_or_none(q, n.embedding)
+                if s is None:
+                    # ⛔ 维度不符 = 库脏了。跳过并**计数**，让它可被看见，
+                    #    而不是当成"不相关"（那是不可判别与不相关被混为一谈）。
+                    self.stats["search_dim_mismatch"] += 1
+                    continue
+                # 关键词命中做小幅加权（纯向量对短查询不稳）
+                if any(k and k in (query or "") for k in n.keywords):
+                    s += 0.05
             scored.append((s, n))
         scored.sort(key=lambda x: x[0], reverse=True)
         out = [n for _, n in scored[:top_k]]
 
         if expand_links and out:
+            #: 🟡 修复十：`max_links_added` 给调用方**严格上界**（默认
+            #:    `None` = 无上限 = 原行为）。改**默认行为**会破坏兼容；
+            #:    但**接口**上承认"可能超过 top_k"。
+            budget = (max_links_added if max_links_added is not None
+                      else len(self.notes))
             seen = {n.note_id for n in out}
+            added = 0
             for n in list(out):
+                if added >= budget:
+                    break
                 for lid in n.links:
+                    if added >= budget:
+                        break
                     if lid in seen or lid not in self.notes:
                         continue
                     seen.add(lid)
                     out.append(self.notes[lid])
+                    added += 1
         if update_access:
             ts = time.time()
             for n in out:
@@ -430,6 +542,10 @@ class MemoryOS:
         ⛔ 记账必须分开设：只报一个数字的话，"没有新信息可归纳"与
         "机制坏了"在输出里长得一模一样 —— 典型静默失败。分账见
         `consolidation_report()`：made / deduped / skipped_* 各自独立。
+
+        🟡 修复八：`skipped_empty` 与 `skipped_not_isomorphic` 分家 ——
+            原版从不递增 `skipped_empty`，"归纳为空"与"不同构"混在一起
+            （处置不同：前者是"素材不足/无数字槽位"，后者是"骨架不一致"）。
         """
         ts = now if now is not None else time.time()
         pool = [n for n in self.notes.values()
@@ -457,16 +573,24 @@ class MemoryOS:
             key = (_skeleton(n.source) or "#nosource", len(_slots(n.content)))
             groups.setdefault(key, []).append(n)
 
-        summ = summarizer or _inductive_summary
         made: List[MemNote] = []
         for _skel, grp in groups.items():
             if len(grp) < min_group:
                 rep["skipped_below_min_group"] += len(grp)
                 continue
             rep["groups"] += 1
-            text = summ(grp)
+            #: 🟡 修复八：区分"空"与"不同构" —— 用扩展归纳器拿**原因**。
+            if summarizer is not None:
+                text = summarizer(grp)
+                empty_reason = "" if text.strip() else "custom_summarizer_empty"
+            else:
+                text, empty_reason = _inductive_summary_ex(grp)
             if not text.strip():
-                rep["skipped_not_isomorphic"] += len(grp)
+                if empty_reason in ("insufficient_notes", "no_numeric_slots",
+                                    "custom_summarizer_empty"):
+                    rep["skipped_empty"] += len(grp)
+                else:
+                    rep["skipped_not_isomorphic"] += len(grp)
                 continue
             new, how = self.write("L3", text,
                                   source=f"consolidated:{grp[0].note_id}",
@@ -486,8 +610,9 @@ class MemoryOS:
                 if "consolidated" not in n.tags:
                     self.notes[n.note_id] = replace(
                         n, tags=tuple(n.tags) + ("consolidated",))
-        self.stats["consolidated_made"] = self.stats.get("consolidated_made", 0) + rep["made"]
-        self.stats["consolidated_deduped"] = self.stats.get("consolidated_deduped", 0) + rep["deduped"]
+        #: 🟡 修复九：stats 键已在 `__init__` 初始化 ⇒ 直接 += 即可
+        self.stats["consolidated_made"] += rep["made"]
+        self.stats["consolidated_deduped"] += rep["deduped"]
         return made
 
     def consolidation_report(self) -> Dict[str, Any]:
@@ -535,39 +660,53 @@ class MemoryOS:
         ⛔ L0/L1（元规则与路由索引）**永不剪**。
         ⛔⛔ 它是不可逆的 ⇒ 默认路径请走 `prune_dryrun()`（只报数不删），
         真删由人显式触发（CLI `memory prune --apply`）。
+
+        🟠 修复二：**只删已留痕的**。原版先记账（失败就 `break`）但随后
+            仍**删除全部** `victims` ⇒ "删了 5 条但只有 2 条有账" 直接
+            违反"事实只有一份"。改成逐条记账、逐条删除；一旦记账失败
+            立即停手（余下的不删）。
         """
         ts = now if now is not None else time.time()
         victims, by_reason = self._select_prune_victims(
             max_notes=max_notes, min_trust=min_trust, stale_s=stale_s, ts=ts)
-        #: ⛔⛔ 剪枝是**不可逆**操作 ⇒ 删了什么必须留痕。不留的话，"这条记忆
-        #:    去哪了"在事实源里根本不存在 —— 与 V5 "except 吞异常"同族：
-        #:    静默丢失，且事后无从追究。没挂账本时**照删但记账失败原因**。
-        for nid in victims:
-            n = self.notes.get(nid)
-            if n is None:
-                continue
-            if self.ledger is None:
-                self._ledger_error = "ledger_not_attached（剪枝未留痕）"
-                break
-            try:
-                self.ledger.append(
-                    "memory.pruned",
-                    {"note_id": nid, "tier": n.tier,
-                     "trust": round(float(n.trust), 4),
-                     "access_count": int(n.access_count),
-                     "age_s": round(ts - n.last_access, 1),
-                     "content_hash": content_hash(n.content)},
-                    actor=actor)
-            except Exception as e:  # noqa: BLE001
-                self._ledger_error = f"{type(e).__name__}: {e}"
-                break
-        for nid in victims:
+        #: ⛔⛔ 剪枝是**不可逆**操作 ⇒ 删了什么必须留痕。不留的话，"这条
+        #:    记忆去哪了"在事实源里根本不存在 —— 与 V5 "except 吞异常"同族：
+        #:    静默丢失，且事后无从追究。
+        #:    🟠 修复二：**没记账的不删**。宁可少删几条，不可删了没账。
+        recorded: List[str] = []
+        if self.ledger is None and victims:
+            self._ledger_error = "ledger_not_attached（剪枝未留痕）"
+        else:
+            for nid in victims:
+                n = self.notes.get(nid)
+                if n is None:
+                    continue
+                try:
+                    self.ledger.append(
+                        "memory.pruned",
+                        {"note_id": nid, "tier": n.tier,
+                         "trust": round(float(n.trust), 4),
+                         "access_count": int(n.access_count),
+                         "age_s": round(ts - n.last_access, 1),
+                         "content_hash": content_hash(
+                             n.content)[:_ID_PREFIX]},
+                        actor=actor)
+                    recorded.append(nid)
+                except Exception as e:  # noqa: BLE001
+                    self._ledger_error = f"{type(e).__name__}: {e}"
+                    break
+        for nid in recorded:
             n = self.notes.pop(nid, None)
             if n:
                 self._by_fp.pop(n.fingerprint, None)
-        self.last_prune = {"n": len(victims), "by_reason": by_reason,
-                           "remaining": len(self.notes)}
-        return victims
+        self.last_prune = {"n": len(recorded), "by_reason": by_reason,
+                           "remaining": len(self.notes),
+                           #: 🟠 修复二（附）：让观测侧能区分"留痕完整"与
+                           #:    "留痕只覆盖部分"。缺口大小 = len(victims)
+                           #:    - len(recorded)。
+                           "intended": len(victims),
+                           "ledger_failed": bool(self._ledger_error)}
+        return recorded
 
     def _select_prune_victims(self, *, max_notes: int, min_trust: float,
                               stale_s: float,
@@ -607,14 +746,36 @@ class MemoryOS:
 
         ⛔ 为什么自动路径只报数不删：剪枝不可逆，而"产物增殖闸"要的是
         **看得见**，不是自动删。 evolve 结束时跑这个 ⇒ 该不该剪由人决定。
+
+        🟠 修复三：dry-run 必须把 `prune()` 的**留痕前置条件**一并建模，
+        否则"报的数"不是"真剪会做的数"：
+          · `n`           = 判据命中的条数（判据同源的部分）
+          · `will_delete` = **真跑 `prune()` 会删掉的条数**
+          · `blocked_by`  = 拦住删除的原因（没挂账本 ⇒ `ledger_not_attached`）
+        ⛔ 实测（r33）：没挂账本时原版 `n=2` 而真剪 0 条 —— 报的数字比
+           真删的多，读数看起来"闸在动"，实际一条都没动。两个数字必须
+           分开给，且 `will_delete` 才是诚实的那个。
         """
         ts = now if now is not None else time.time()
         victims, by_reason = self._select_prune_victims(
             max_notes=max_notes, min_trust=min_trust, stale_s=stale_s, ts=ts)
-        return {"n": len(victims), "by_reason": by_reason,
-                "remaining": len(self.notes) - len(victims),
-                "total": len(self.notes),
-                "sample": victims[:10], "applied": False}
+        #: ⛔ 与 `prune()` 的 `if self.ledger is None and victims` **同源**：
+        #:    没账本 ⇒ 一条都不删（宁可少删，不可删了没账）。
+        blocked_by: List[str] = []
+        if self.ledger is None and victims:
+            blocked_by.append("ledger_not_attached")
+        will_delete = 0 if blocked_by else len(victims)
+        note = ""
+        if blocked_by:
+            note = ("未挂账本 ⇒ 真剪一条都不会删（留痕前置条件未满足）；"
+                    "`n` 是判据命中的条数，`will_delete` 才是真剪会做的数")
+        return {"n": len(victims), "will_delete": will_delete,
+                "by_reason": by_reason,
+                "remaining": len(self.notes) - will_delete,
+                "total": len(self.notes), "sample": victims[:10],
+                "victims": victims,
+                "ledger_attached": self.ledger is not None,
+                "blocked_by": blocked_by, "note": note, "applied": False}
 
     def prune_report(self) -> Dict[str, Any]:
         """上一次**真**剪枝的分账。没跑过返回全零表（不给 None）。"""
@@ -636,37 +797,61 @@ class MemoryOS:
         ⛔ 逐条失败 ⇒ 该条标记 `embed_missing`（不删内容），
         **绝不**用零向量占位：零向量能通过 `has_embedding` 之外的检查，
         但它在余弦里恒为 0，等于一条永远召不回的死记录。
+
+        🟠 修复三：`zip(notes, vecs)` 会**静默按短的截断** —— 若
+            embedder 返回的向量数少于 note 数（batch bug / 中途超时），
+            后面 N 条保持**旧向量**，而 `reindex` 报告说"ok=N, bad=0"。
+            库里混进两种 dim ⇒ 检索时维度不符被静默跳过（V5 那 169 条
+            形态原样复现）。这里显式校验长度，不符即整批回滚。
         """
         old_embedder, old_id, old_dim = self.embedder, self.embedder_id, self.dim
         self.embedder = new_embedder
         self.dim = int(getattr(new_embedder, "dim", 0) or self.dim)
         self.embedder_id = str(getattr(
             new_embedder, "embedder_id", getattr(new_embedder, "name", "callable")))
-        ok = bad = 0
+
+        notes_list = list(self.notes.values())
+        texts = [n.content for n in notes_list]
         try:
-            texts = [n.content for n in self.notes.values()]
             vecs = new_embedder.embed(texts) if hasattr(new_embedder, "embed") \
                 else [new_embedder(t) for t in texts]
+            #: 🟠 修复三：长度必须严格匹配。`zip` 会按短的截断 ⇒ 后 N 条
+            #:    静默保留旧向量 ⇒ 库里混进两种 dim ⇒ 检索时维度不符被
+            #:    静默跳过（V5 那 169 条形态）。
+            vecs = list(vecs)
+            if len(vecs) != len(texts):
+                self.embedder, self.dim, self.embedder_id = \
+                    old_embedder, old_dim, old_id
+                return {"ok": 0, "failed": len(notes_list),
+                        "rolled_back": True,
+                        "error": (f"embedder 返回 {len(vecs)} 个向量，"
+                                  f"与 {len(texts)} 条记忆不符 ⇒ "
+                                  f"拒绝重算（长度不符会混库）")}
         except Exception as e:  # noqa: BLE001
             # 库**还没被改**（重算发生在替换之前）⇒ 原样回滚，不产生半吊子状态
             self.embedder, self.dim, self.embedder_id = old_embedder, old_dim, old_id
-            return {"ok": 0, "failed": len(self.notes), "rolled_back": True,
+            return {"ok": 0, "failed": len(notes_list), "rolled_back": True,
                     "error": f"{type(e).__name__}: {e}"}
-        for n, v in zip(list(self.notes.values()), vecs):
+        ok = bad = 0
+        for n, v in zip(notes_list, vecs):
             if not v or len(v) != self.dim or not any(x != 0.0 for x in v):
                 bad += 1
-                self.notes[n.note_id] = replace(n, embedding=[],
-                                                tags=tuple(n.tags) + ("embed_missing",))
+                self.notes[n.note_id] = replace(
+                    n, embedding=[],
+                    tags=tuple(n.tags) + ("embed_missing",))
                 continue
             ok += 1
             self.notes[n.note_id] = replace(
                 n, embedding=list(v), embedder=self.embedder_id,
                 tags=tuple(t for t in n.tags if t != "embed_missing"))
         #: ⛔ `old_id/old_dim` 在被 `load_for_reindex` 装载后已经是**新**值，
-        #    真实来源只能由调用方传进来（否则 "from == to" 是句废话）
-        return {"ok": ok, "failed": bad, "rolled_back": False,
-                "from": from_label or f"{old_id}:{old_dim}",
-                "to": f"{self.embedder_id}:{self.dim}"}
+        #:    真实来源只能由调用方传进来（否则 "from == to" 是句废话）
+        out = {"ok": ok, "failed": bad, "rolled_back": False,
+               "from": from_label or f"{old_id}:{old_dim}",
+               "to": f"{self.embedder_id}:{self.dim}"}
+        if not notes_list:
+            out["note"] = "empty_library"
+        return out
 
     # ── 视图 ──────────────────────────────────────────────────────
     def layer_sizes(self) -> Dict[str, int]:
@@ -730,6 +915,10 @@ class MemoryOS:
 
         ⛔ 旧向量一律丢弃：异维向量混在库里就是 V5 那 169 条的形态
         （写入成功、检索永远搜不到、且没有任何报错）。
+
+        🟡 修复十一：装载后调 `dedup_tags()` —— 与 `load()` 一致。
+            原版漏了这步，`load_for_reindex + reindex + save` 的路径
+            不会清理重复标签（老 `consolidated` × 19 会保留下来）。
         """
         rep: Dict[str, Any] = {"path": str(path), "loaded": 0,
                                "dropped_vectors": 0, "rejected_unverified": 0,
@@ -747,9 +936,9 @@ class MemoryOS:
             rep["note"] = f"unreadable（{type(e).__name__}: {e}）"
             return mem, rep
         #: ⛔ 记账必须说真话：`reindex()` 会拿 `self.embedder_id` 当"来源"，
-        #    而这里 mem 已经指向**新** embedder ⇒ 不记录文件里的真实来源，
-        #    报告就会写成 "from hashing:256 → to hashing:256"（同义反复，
-        #    看起来像什么都没干，实际全量重算过）。
+        #:    而这里 mem 已经指向**新** embedder ⇒ 不记录文件里的真实来源，
+        #:    报告就会写成 "from hashing:256 → to hashing:256"（同义反复，
+        #:    看起来像什么都没干，实际全量重算过）。
         rep["from_embedder"] = str(payload.get("embedder_id") or "unknown")
         rep["from_dim"] = int(payload.get("dim") or 0)
         for raw in (payload.get("notes") or []):
@@ -772,6 +961,8 @@ class MemoryOS:
             mem.notes[note.note_id] = note
             mem._by_fp[note.fingerprint] = note.note_id
             rep["loaded"] += 1
+        #: 🟡 修复十一：与 `load()` 一致 —— 压平重复标签（存量自愈）。
+        rep["tags_deduped"] = mem.dedup_tags()
         rep["note"] = (f"装载 {rep['loaded']} 条内容（丢弃 {rep['dropped_vectors']} "
                        f"条旧向量）⇒ **必须立刻 reindex()**")
         return mem, rep
@@ -853,8 +1044,8 @@ class MemoryOS:
             #    见 `load` 的 docstring —— 继承的记忆只供提议器参考，
             #    不得进入 L4 通路，否则基线会随历史漂移。
             if "inherited" not in note.tags:
-                note.tags = tuple(note.tags) + ("inherited",)
-            note.embedder = mem.embedder_id
+                note = replace(note, tags=tuple(note.tags) + ("inherited",))
+            note = replace(note, embedder=mem.embedder_id)
             mem.notes[note.note_id] = note
             mem._by_fp[note.fingerprint] = note.note_id
             rep["loaded"] += 1
@@ -885,6 +1076,10 @@ def _extractive_summary(notes: List[MemNote]) -> str:
 
     ⛔ 默认绝不用生成式摘要：离线巩固里一次幻觉会永久污染 L2 事实层，
     而 L2 是会被 promote 去影响 harness 的。要生成式就自己传 summarizer。
+
+    ⛔ 保留此函数是**接口兼容**考虑（外部调用方可能仍直接使用它作为
+        `summarizer=`）。`consolidate` 的内部默认走 `_inductive_summary_ex`
+        —— 那是跨条归纳，语义不同于"逐条抽首句"。
     """
     if not notes:
         return ""
@@ -916,8 +1111,12 @@ def _slots(text: str) -> Tuple[str, ...]:
     return tuple(_NUM.findall(text or ""))
 
 
-def _inductive_summary(notes: List[MemNote], max_chars: int = 400) -> str:
-    """跨 note 的抽取式归纳：保留模板骨架 + 枚举每个槽位的取值分布。
+def _inductive_summary_ex(notes: List[MemNote], max_chars: int = 400
+                          ) -> Tuple[str, str]:
+    """跨 note 的抽取式归纳：返回 `(text, empty_reason)`。
+
+    `empty_reason` 在 text 非空时恒为空串；为空时它的取值用来让
+    `consolidate()` **分账**（skipped_empty vs skipped_not_isomorphic）。
 
     ⛔⛔ 巩固的语义是**聚合**，不是逐条复制（2026-10-14 修）：
     旧实现 `for n in pool: summ([n])` 逐条调 `_extractive_summary`，
@@ -931,21 +1130,31 @@ def _inductive_summary(notes: List[MemNote], max_chars: int = 400) -> str:
 
     ⛔ 全程仍是抽取：只搬运原文里**出现过**的数字与句子，不生成新句子
     ⇒ 不会把幻觉带进会被 promote 的 L2/L3。
+
+    ⛔ `empty_reason` 的四个取值：
+        · "insufficient_notes"  —— 少于 2 条（不该发生，`consolidate`
+          会先按 min_group 拦）；
+        · "no_numeric_slots"    —— 没有数字槽位（无法归纳"模式"）；
+        · "slot_count_mismatch" —— 槽位数不一致；
+        · "skeleton_mismatch"   —— 槽位数相同但文字骨架不同（不同代模板）。
+    前两个归 `skipped_empty`，后两个归 `skipped_not_isomorphic`
+    —— 处置完全不同（"素材不足"vs"不同构"）。
     """
     if len(notes) < 2:
-        return ""
+        return "", "insufficient_notes"
     skel = _skeleton(notes[0].content)
     slots = [_slots(n.content) for n in notes]
     nslot = len(slots[0])
-    if nslot == 0 or any(len(s) != nslot for s in slots):
-        #: 槽位数不一致 ⇒ 不同构，归纳出的"模式"不可校验 ⇒ 如实不产出
-        return ""
+    if nslot == 0:
+        return "", "no_numeric_slots"
+    if any(len(s) != nslot for s in slots):
+        return "", "slot_count_mismatch"
     if any(_skeleton(n.content) != skel for n in notes):
         #: ⛔ 槽位数**相同但文字骨架不同**（如 "基线 reward=1，候选 2 个"
         #:    vs "上限 reward=3，阶段 4 个"）：数字个数一样但根本不是同一个
         #:    模板 ⇒ 拿第一条的骨架去归纳会编造出一个两条都不成立的"模式"
         #:    ⇒ 必须拒绝。这是"抽取式"的最后一道闸：宁可不产出，不误导。
-        return ""
+        return "", "skeleton_mismatch"
     cols: List[Tuple[str, ...]] = []
     for j in range(nslot):
         vals: List[str] = []
@@ -961,4 +1170,13 @@ def _inductive_summary(notes: List[MemNote], max_chars: int = 400) -> str:
             shown = "/".join(vals[:8]) + ("..." if len(vals) > 8 else "")
             bits.append(f"槽位{j}取 {len(vals)} 种：{shown}")
     head = f"归纳 {len(notes)} 条同类归档，模板：{skel}"
-    return (head + " | " + "；".join(bits))[:max_chars]
+    return (head + " | " + "；".join(bits))[:max_chars], ""
+
+
+def _inductive_summary(notes: List[MemNote], max_chars: int = 400) -> str:
+    """`_inductive_summary_ex` 的**向后兼容**薄包装（返回纯字符串）。
+
+    ⛔ 保留它是因为 `summarizer=` 的签名是 `Callable[[List[MemNote]], str]`
+        —— 破坏它会让所有外部 summarizer 全不兼容。
+    """
+    return _inductive_summary_ex(notes, max_chars)[0]

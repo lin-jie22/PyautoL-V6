@@ -27,6 +27,8 @@
     .venv/bin/python tests/contract_traceability_test.py
 """
 import json
+import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -35,6 +37,33 @@ ROOT = Path("/Users/linshaojie/V6")
 sys.path.insert(0, str(ROOT))
 
 FAILS = []
+
+
+def _find_node():
+    """找 node 可执行文件：PATH → 项目约定路径 → 常见前缀 → 打包运行时。
+
+    ⛔ 为什么不能直接写 `node`：本机 `node` **不在 PATH 上**（实测
+       `FileNotFoundError`，而 README 里的 `cd supervisor && node ...`
+       因此是跑不通的）。项目自己的约定在 `scripts/demo_evolve.py`：
+       `/Users/linshaojie/.workbuddy/binaries/node/versions/<ver>/bin/node`。
+       ⛔ 这里**只查找、不安装、不降级**：找到才跑，找不到就明确报红 ——
+       "跑不了"与"跑过了没问题"是两件事。
+    """
+    found = shutil.which("node")
+    if found:
+        return found
+    cands = []
+    base = Path.home() / ".workbuddy" / "binaries" / "node" / "versions"
+    if base.is_dir():
+        #: 多版本时取排序后的最后一个（与 `current` 无关，纯确定性）
+        cands += [d / "bin" / "node" for d in sorted(base.iterdir())]
+    cands += [Path("/opt/homebrew/bin/node"), Path("/usr/local/bin/node"),
+              Path("/Applications/DeepSeek Harness.app/Contents/Resources/"
+                   "runtime/primary-runtime/dependencies/node")]
+    for c in cands:
+        if c.is_file() and os.access(c, os.X_OK):
+            return str(c)
+    return None
 
 
 def ck(name, cond, detail=""):
@@ -96,9 +125,16 @@ def main():
     ck("B4 处置字段如实（written / deduped / rejected_*）",
        disps[0] == "written" and disps[1] == "deduped"
        and disps[2].startswith("rejected"), str(disps))
+    #: ⛔ 期望值必须与**被测对象同源**，不能把常量抄成字面量：本轮
+    #:    `memory._ID_PREFIX` 从 16 升到 32（64 位 → 128 位，理由是
+    #:    append-only 账本上 16 位会撞），这里再写死 `== 16` 就会把
+    #:    "寻址键变长"误报成"记忆没记账"。判据读被测模块的常量。
+    from aether.memory import _ID_PREFIX as _MEM_PREFIX
     ck("B5 记 note_id 与 content_hash（可溯源到具体哪一条）",
        mw[0].payload.get("note_id") == n1.note_id
-       and len(mw[0].payload.get("content_hash", "")) == 16)
+       and len(mw[0].payload.get("content_hash", "")) == _MEM_PREFIX,
+       f"hash_len={len(mw[0].payload.get('content_hash', ''))} "
+       f"expect={_MEM_PREFIX}")
     ck("B6 记账失败要计数（不能静默丢账本）", "ledger_failed" in mem.stats)
     ck("B7 未挂载账本时行为完全不变（不强制依赖）",
        MemoryOS(min_content_len=0).write("L3", "x", channel="curated")[1]
@@ -229,7 +265,18 @@ def main():
     # ── E 组：监督器与真实数据同源（跨语言）────────────────────
     print("E 组：监督器规则与真实账本")
     import subprocess
-    node = "node"
+    node = _find_node()
+    if node is None:
+        #: ⛔ 本机 `node` 不在 PATH 上（项目约定用 workbuddy 二进制，
+        #:    见 scripts/demo_evolve.py）⇒ 原来这句直接 `FileNotFoundError`
+        #:    把整份契约打死，E2/E3 的守护**一条都没跑**，而输出看起来像
+        #:    "契约崩了"而不是"跨语言对拍没跑"。
+        #:    `_find_node` 已按 PATH → 项目约定路径 → 常见前缀查找；
+        #:    真找不到就**明确报红**（"跑不了" ≠ "跑过了没问题"）。
+        raise RuntimeError(
+            "找不到 node：跨语言对拍无法执行。把 node 放进 PATH，"
+            "或确认 /Users/linshaojie/.workbuddy/binaries/node/versions/*/"
+            "bin/node 存在")
     r = subprocess.run(
         [node, "src/index.ts", "--ledger", "../data/ledger.jsonl"],
         cwd=str(ROOT / "supervisor"), capture_output=True, text=True,

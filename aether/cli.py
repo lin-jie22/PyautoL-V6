@@ -757,10 +757,15 @@ def cmd_evolve(args: argparse.Namespace) -> int:
             print(f"⚠️ 巩固失败：{type(_e).__name__}: {_e}", file=sys.stderr)
         _consolidated_total += len(made)
         loop.aging_events["consolidated"] = len(made)
-        #: 剪枝**只报数不删** —— 不可逆 ⇒ 该不该剪由人拍板
+        #: 剪枝**只报数不删** —— 不可逆 ⇒ 该不该剪由人拍板。
+        #: ⛔ 读 `will_delete` 而**不是**臆造键名：原版写的是
+        #:    `.get("victims", [])`，而 `prune_dryrun()` 当时从不返回该键
+        #:    ⇒ 表达式恒为 0 ⇒ `aging_events["pruned"]` 恒 0 ⇒ 老化读数
+        #:    对"库在增殖"**永久失明**（一个静默归零的读数比没有读数更坏）。
         try:
-            loop.aging_events["pruned"] = len(
-                mem.prune_dryrun().get("victims", []) or [])
+            dry = mem.prune_dryrun()
+            loop.aging_events["pruned"] = int(dry.get("will_delete", 0))
+            loop.aging_events["prune_candidates"] = int(dry.get("n", 0))
         except Exception:                              # noqa: BLE001
             pass
 

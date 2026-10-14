@@ -57,7 +57,21 @@ def ck(name, cond, detail=""):
 
 
 def fresh():
-    return MemoryOS(embedder=HashingEmbedder(dim=256))
+    """带账本的 MemoryOS —— **与 CLI 同形**。
+
+    ⛔⛔ 原来这里不挂账本，于是 A/E 组测的东西整体失真：
+      · `prune()` 的留痕前置条件（"没记账的不删"）会挡住**全部**删除
+        ⇒ real=0，而 `prune_dryrun()` 报的判据命中数不是 0
+        ⇒ A4/E3 的"报数 == 真删"必然不一致；
+      · 更糟的是 **A2/A5 变成空真**：「L0/L1 永不剪」在"一条都没删"时
+        恒真，「库确实变小」同样恒真 —— 判据看起来在守东西，其实没跑。
+    CLI（`aether/cli.py` apply 路径）是先 `attach_ledger` 再剪的，
+    测试夹具必须同形，否则测的是另一条路径。
+    """
+    m = MemoryOS(embedder=HashingEmbedder(dim=256))
+    m.attach_ledger(Ledger(os.path.join(
+        tempfile.mkdtemp(prefix="v6_prune_fx_"), "ledger.jsonl")))
+    return m
 
 
 NOW = 1_700_000_000.0
@@ -155,12 +169,23 @@ if evs:
 ck("C3 prune_report() 给出分账（不是只返回 id 列表）",
    m5.prune_report()["n"] == 1 and "remaining" in m5.prune_report())
 
-m6 = fresh()          # ⛔ 故意不挂账本
+#: ⛔ 这一条要测的正是"**没挂账本**时不许静默" ⇒ 不能用 `fresh()`
+#:    （它已经与 CLI 同形地挂了账本）。显式构造裸实例。
+m6 = MemoryOS(embedder=HashingEmbedder(dim=256))
 m6.write("L3", "没挂账本时剪枝不能静默：必须报错，而不是装作没事。",
          channel="learner", source="t", trust=0.01, now=NOW)
-m6.prune(min_trust=0.05, now=NOW)
+v6 = m6.prune(min_trust=0.05, now=NOW)
 ck("C4 ⛔ 没挂账本 ⇒ **显式记失败原因**（不留痕的删除是数据事故）",
    bool(getattr(m6, "_ledger_error", "")), repr(getattr(m6, "_ledger_error", "")))
+ck("C4b ⛔ 没挂账本 ⇒ 而且**真的没删**（宁可不剪，不可剪了没账）",
+   len(v6) == 0 and len(m6.notes) == 1,
+   f"victims={len(v6)} notes={len(m6.notes)}")
+#: ⛔ dry-run 必须与真剪**同一个答案**（本轮新增的诚实性判据）：
+#:    没账本时 `will_delete` 必须是 0，而 `n`（判据命中）仍是 1。
+_d6 = m6.prune_dryrun(min_trust=0.05, now=NOW)
+ck("C4c ⛔ dry-run 报的数 == 真剪会做的数（没账本 ⇒ will_delete=0）",
+   _d6["n"] == 1 and _d6["will_delete"] == 0
+   and "ledger_not_attached" in _d6["blocked_by"], f"{_d6}")
 
 # ── G 组：端点真的被走到（不只看组件）──────────────────────────
 print("\nG 组 · CLI 端点（测组件 ≠ 测端点）")
@@ -229,7 +254,12 @@ class NoProtect(MemoryOS):
         return victims + extra, why
 
 
+#: ⛔ 事故版实例**也必须挂账本**：`prune()` 在没账本时一条都不删
+#:    （"宁可不剪，不可剪了没账"）⇒ 反证组会测不到"保护被拆掉"这件事，
+#:    反而以"什么都没删"的名义变绿 —— 反证组自己失去判别力。
 mE = NoProtect(embedder=HashingEmbedder(dim=256))
+mE.attach_ledger(Ledger(os.path.join(
+    tempfile.mkdtemp(prefix="v6_prune_ne_"), "ledger.jsonl")))
 mE.write("L0", "元规则：奖励只来自执行判据，改 L0 需人工审批。",
          channel="curated", source="seed", trust=0.0, now=NOW - 900 * DAY)
 mE.prune(min_trust=0.05, now=NOW)

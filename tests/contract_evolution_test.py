@@ -92,6 +92,49 @@ def main():
     ck("C6 未知错误 ⇒ 保守默认（缺技能），不是 noop",
        classify_error("一些没见过的错误") == "missing_skill")
 
+    # ── C7 组：提议器必须能表达"无可用变异"（空 genes 是哨兵，不是错误）──
+    #    ⛔ 2026-10-14（r33）实测事故：给 `Capsule` 加"genes 不得为空"的构造
+    #       校验，把 `TemplateProposer` 的收尾哨兵 `Capsule(name="noop",
+    #       genes=())` 判成非法 ⇒ 技能已全部接通时 `propose()` 当场抛
+    #       ValueError，而 `evolution._run_round` 对 `propose` 的调用**没有**
+    #       try/except ⇒ 进化循环在最该保守停手时整体炸掉。
+    #    ⛔ 本组守两条：① 空 genes 的 Capsule 语义良定义（恒等应用）；
+    #       ② "没有可用变异"这条路径真的被走到（不是靠巧合不触发）。
+    print("C7 组：空 genes 哨兵（无可用变异）")
+    from aether.genome import Gene as _Gene, apply_capsule as _apply
+    noop_cap = Capsule(name="noop", genes=())
+    ck("C7 空 genes 的 Capsule 可以构造（它是哨兵，不是残缺对象）",
+       noop_cap.genes == () and bool(noop_cap.capsule_id))
+    ck("C7b 空 genes ⇒ 爆炸半径为 0、不碰受保护层",
+       noop_cap.blast_layers() == () and not noop_cap.touches_protected())
+    h_noop = Harness(meta_rules="元规则")
+    ck("C7c 空 genes ⇒ 应用是**恒等**（harness_id 不变）",
+       _apply(h_noop, noop_cap) is h_noop
+       and _apply(h_noop, noop_cap).harness_id == h_noop.harness_id)
+
+    #: 走到哨兵：技能为空时 `if s not in cur` 滤空全部候选（真实可达路径）
+    p_empty = TemplateProposer(skills={})
+    caps_empty = p_empty.propose({"kind": "missing_skill", "topic": "t"},
+                                 Harness())
+    ck("C7d 无可用变异 ⇒ propose 返回 noop 哨兵（不抛异常、不返回空）",
+       [c.name for c in caps_empty] == ["noop"]
+       and caps_empty[0].genes == (), f"{[c.name for c in caps_empty]}")
+    #: 反证：技能**已全部在路由链上**时同样走哨兵（第二条可达路径）。
+    #: ⛔ 判据读的是 `harness.routing[route_key]`（链），不是"L3 里有没有技能"
+    #:    ⇒ 构造必须把技能**接到链上**，否则技能装了但不可达 —— 那正是
+    #:    C4/H 组反复守过的那个坑（技能 + 路由必须一起改）。
+    h_all2 = _apply(Harness(), Capsule(
+        name="wire",
+        genes=(_Gene(op="set", target="L3.skills.s1", value="b"),
+               _Gene(op="append", target="L1.routing.repair", value="s1"))))
+    p_all = TemplateProposer(skills={"s1": "b"})
+    caps_all = p_all.propose({"kind": "missing_skill", "topic": "t"}, h_all2)
+    ck("C7e 反证：技能已在链上 ⇒ 也不重复提，走哨兵（不是恒不提）",
+       [c.name for c in caps_all] == ["noop"], f"{[c.name for c in caps_all]}")
+    ck("C7f 对照：同一条技能**不在**链上时确实会提（C7e 不是恒真）",
+       [c.name for c in p_all.propose({"kind": "missing_skill"}, Harness())]
+       == ["add_skill:s1"])
+
     # ── D 组：循环机制（stub runner，可确定性断言）───────────────
     print("D 组：进化循环机制")
     led = Ledger(tmp / "l.jsonl")

@@ -324,8 +324,14 @@ def main():
                       f"控制流（比较与运算），保守通用修法可修好其中一部分。",
                 channel="curated", source="exec")
         if inherited:
-            for n in list(m.notes.values()):
-                n.tags = tuple(n.tags) + ("inherited",)
+            #: ⛔ `MemNote` 现在是 **frozen**（本轮改动）：直接 `n.tags = ...`
+            #:    抛 FrozenInstanceError。冻结的理由是"内容/标签必须与去重表
+            #:    同源"，所以修改一律走 `dataclasses.replace()`（原对象替换，
+            #:    `note_id` 与 `fingerprint` 都不变，语义与本测试要表达的
+            #:    "把这条记忆标成跨运行继承来的"完全一致）。
+            import dataclasses as _dc
+            for nid, n in list(m.notes.items()):
+                m.notes[nid] = _dc.replace(n, tags=tuple(n.tags) + ("inherited",))
         return HarnessAgent({env.env_id: env}, memory=m).run(
             h_base, SPEC).verdict.reward
 

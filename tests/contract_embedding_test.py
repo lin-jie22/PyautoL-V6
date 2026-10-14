@@ -59,6 +59,35 @@ class _Broken:
         return False, "connection refused"
 
 
+class _FlakyQuery:
+    """**只在查询侧**失败：写入正常、检索时嵌入挂了。
+
+    ⛔ 为什么必须区分《写侧失败》与《查询侧失败》：前者是"库没收下"，
+       后者是"库没问题，只是这次搜索降级了"。共用一个计数键时排障方向
+       会被指向错误的一侧（r33：注释声称已分家，代码仍写共享键）。
+    ⛔ 实现细节：写入阶段会调 embed 两次（指纹/维度自检各一次），所以用
+       "第 1 次成功、之后失败"来表达"写的时候好好的，之后模型挂了"。
+       `probe()` 必须始终 True —— 它只回答"这个嵌入器能不能用"，
+       不是"这次调用成功了没"。
+    """
+
+    name = "flakyquery:256"
+    embedder_id = "flakyquery:256"
+    dim = 256
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def embed(self, texts):
+        self.calls += 1
+        if self.calls > 1:
+            raise RuntimeError("query-side embed down")
+        return [HashingEmbedder(256).embed([t])[0] for t in texts]
+
+    def probe(self):
+        return True, "dim=256"
+
+
 class _SilentlyDegraded:
     """⛔ **反例实现**：真嵌入失败时静默回退 hashing。
 
@@ -131,6 +160,31 @@ ck("B5 真嵌入失败 ⇒ 拒写并记账 rejected_embed_error",
    how.startswith("rejected_embed_error"), how)
 ck("B6 ⛔ 且**没有**静默降级成 hashing（库里不该出现任何条目）",
    len(m2.notes) == 0 and m2.stats["rejected_embed_error"] == 1, str(m2.stats))
+
+# ── B7：**查询侧**嵌入失败与写入侧失败必须分开记账 ────────────────
+#    ⛔ 两者是完全不同的事件：写侧 = "入库被拒"（库没收下），
+#       查询侧 = "这次检索降级为关键词-only"（库没问题）。
+#       共用一个计数键 ⇒ 排障时无法回答"是写入坏了还是检索坏了"
+#       （r33 实测：原注释声称"改用独立计数器"，代码却仍写共享键）。
+m2b = MemoryOS(embedder=_FlakyQuery(), min_content_len=0)
+m2b.write("L3", DOCS[1], channel="curated")
+#: ⛔ 写入路径自己也会嵌入两次（一次建笔记、一次 `_link` 找邻居），而
+#:    `_FlakyQuery` 从第 2 次起就挂 ⇒ 写阶段已经记过一次。
+#:    判据必须看**增量**（查询这一趟只该记 1 次），而不是累计值 ——
+#:    累计值会把"写侧的嵌入失败"算到查询侧头上，正是本条要防的那件事。
+_before = m2b.stats["search_embed_error"]
+hits = m2b.search("非回归闸 冻结套件", top_k=3)
+_after = m2b.stats["search_embed_error"]
+ck("B7 查询侧嵌入失败 ⇒ 只记 1 次 search_embed_error（增量口径）",
+   (_after - _before) == 1
+   and m2b.stats["rejected_embed_error"] == 0
+   and bool(getattr(m2b, "_last_search_embed_error", "")),
+   f"delta={_after - _before} stats={m2b.stats} "
+   f"/ {getattr(m2b, '_last_search_embed_error', '')!r}")
+ck("B7b ⛔ 写侧计数不被查询失败污染（两个事件分家）",
+   m2b.stats["rejected_embed_error"] == 0, str(m2b.stats))
+ck("B8 且真的走了关键词-only 路径（不是静默返回空表）",
+   any(n.content == DOCS[1] for n in hits), f"hits={len(hits)}")
 
 print()
 print("== C 组：⛔ 静默降级为什么必须被闸挡住（事故版复刻）==")

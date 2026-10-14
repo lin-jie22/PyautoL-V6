@@ -104,6 +104,54 @@ def main():
     ck("F2 判定带真实证据", "n_passed" in v.evidence)
     ck("F3 环境指纹非空（跨环境不可比可被发现）", bool(v.env_fingerprint))
 
+    # ── G 组：类型闸必须**真的会响**（"修了但没生效"是假校验）────────
+    #    ⛔ 2026-10-14（r33）实测事故：`all_of` 里的 `_coerce_pass` 被调用点
+    #       写成 `_coerce_pass(name, bool(p))` ⇒ `isinstance(p, bool)` 恒真
+    #       ⇒ 类型校验**永远不会抛**；同一次改动还把不传 `caliber` 时的
+    #       指纹从 `env_fingerprint([names])` 改成 `""` ⇒ 口径闸静默失效。
+    #       `Verdict(evidence=None)` 的归一化分支更是普通赋值，在 frozen
+    #       dataclass 上直接抛 `FrozenInstanceError`。三处都是
+    #       "代码写了、判据从来没跑过" —— 比缺代码更难发现。
+    print("G 组：类型闸真的会响（不响就是假校验）")
+    for label, fn in (
+            ("G1 all_of 收非 bool（'false' 不得被 bool() 翻成 True）",
+             lambda: V.all_of("n", [("c", "false", "ev")])),
+            ("G2 any_of 收非 bool",
+             lambda: V.any_of("n", [("c", 1, "ev")])),
+            ("G3 check_verdict 顶层 passed 非 bool",
+             lambda: V.check_verdict(
+                 {"passed": "false",
+                  "checks": [{"name": "c", "passed": True, "evidence": "e"}]})),
+    ):
+        try:
+            fn()
+            ck(label, False, "没抛错 ⇒ 校验是死的")
+        except (ValueError, TypeError) as e:
+            ck(label, True, f"{type(e).__name__}")
+    #: 反证的另一半：合法输入必须**照常通过**（闸不是恒红）
+    ck("G4 合法 bool ⇒ 正常构造（G1–G3 不是恒红）",
+       V.all_of("n", [("c", True, "ev")]).passed
+       and V.check_verdict({"passed": True,
+                            "checks": [{"name": "c", "passed": True,
+                                        "evidence": "e"}]}).reward == 1.0)
+    #: `evidence=None` 必须走归一化分支，不是抛 FrozenInstanceError
+    try:
+        v_none = V.Verdict(passed=True, evidence=None)
+        ck("G5 Verdict(evidence=None) ⇒ 归一化成空 evidence（不是崩）",
+           dict(v_none.evidence) == {})
+    except Exception as e:                                   # noqa: BLE001
+        ck("G5 Verdict(evidence=None) ⇒ 归一化成空 evidence（不是崩）",
+           False, f"{type(e).__name__}: {e}")
+    #: 指纹不得退化成空串，且必须**区分** check 名集合与 caliber
+    fp_plain = V.all_of("n", [("c", True, "ev")]).env_fingerprint
+    ck("G6 不传 caliber ⇒ 指纹仍非空（口径闸不得静默失效）",
+       len(fp_plain) == 32, f"len={len(fp_plain)}")
+    ck("G7 check 名集合变化 ⇒ 指纹变化",
+       fp_plain != V.all_of("n", [("d", True, "ev")]).env_fingerprint)
+    ck("G8 caliber 参与指纹",
+       fp_plain != V.all_of("n", [("c", True, "ev")],
+                            caliber={"seed": 1}).env_fingerprint)
+
     print("\n" + "=" * 60)
     if FAILS:
         print(f"❌ {len(FAILS)} 项未通过：")

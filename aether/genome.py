@@ -4,13 +4,19 @@
 共同点：agent 的能力不在权重里，而在 **harness**（prompt + 技能 + 工具 +
 记忆策略 + 路由）里，而 harness 是可以被程序改的。谁改得好，谁就进化。
 
-V6 把 harness 建模成 5 层 + 2 类演化算子：
+V6 把 harness 建模成 5 层（+ 一个横切面 prompts）+ 2 类演化算子：
 
     L0  meta_rules     行为约束（最小、最硬，改它需要人工闸门）
     L1  routing        任务 → 能力 的路由表
     L2  tools          允许使用的原语/工具白名单
     L3  skills         可复用技能（内容寻址，带使用账）
     L4  memory_policy  记忆策略参数（保留/遗忘/提升阈值）
+    ─   prompts        提示词片段（不进 L0-L4 编号，但**是**可编辑层）
+
+⛔ `LAYERS` 里显式包含 `prompts`（不是"5 层之外的隐藏第 6 层"）：
+    原版 `LAYERS` 不含它而 `Harness`/`apply_gene` 都支持 ⇒
+    `blast_layers()` 对 `prompts.foo` 返回 `("foo",)`（prompt 名而不是层名）
+    ⇒ 爆炸半径报告出**假层名**。
 
 演化算子（受 Evolver 的 GEP 启发）：
     · Gene     —— 原子编辑（一次只改一处，带 rationale 与爆炸半径）
@@ -35,8 +41,52 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .ledger import canonical_json, content_hash
 
-LAYERS = ("meta_rules", "routing", "tools", "skills", "memory_policy")
+#: 所有可编辑层。⛔ `prompts` 显式包含在内 —— 它不是 L0-L4 编号体系的一员，
+#:    但确实是 harness 的一部分、参与 `harness_id` 计算、可被 `apply_gene`
+#:    编辑 ⇒ 必须能被 `blast_layers()` 识别为"层"，否则爆炸半径报告会把
+#:    `prompts.foo` 报成层名 `"foo"`（prompt 名）。
+LAYERS = ("meta_rules", "routing", "tools", "skills", "memory_policy",
+          "prompts")
 PROTECTED_LAYERS = frozenset({"meta_rules"})   # 触碰 ⇒ 需人工审批
+
+#: 各层允许的 op。⛔ 与 `providers.ALLOWED_OPS` 是**两层闸**：
+#:    `providers.validate_gene` 在**语法闸**拦（LLM 输出），
+#:    这里在**应用层**拦（任何调用方）。
+#:    ⛔⛔ 原版只有语法闸，`apply_gene` 对未知 op 静默按 `set` 处理 ⇒
+#:    "闸放行、应用层乱改"的两套口径。所有层白名单必须显式且对齐。
+_ALLOWED_OPS_BY_LAYER: Dict[str, Tuple[str, ...]] = {
+    "meta_rules":    ("set", "append"),
+    "routing":       ("set", "append", "remove"),
+    "tools":         ("set", "append", "remove"),
+    "skills":        ("set", "append", "remove"),
+    "memory_policy": ("set", "tune", "remove"),
+    "prompts":       ("set", "append", "remove"),
+}
+
+#: 指纹/寻址前缀长度（hex 字符数）。
+#: ⛔ `[:16]`（64 位）在 10⁹ 量级条目下碰撞概率约 2.7% —— 而账本
+#:    append-only、永不删，长期会越过这个规模。`harness_id` / `gene_id`
+#:    / `capsule_id` 是**寻址键**（决定回滚、A/B 对比、账本对账），不是
+#:    人眼比对 ⇒ 用 `[:32]`（128 位）。
+_ID_PREFIX = 32
+
+
+def _split_target(target: str) -> List[str]:
+    """把一个 target 分解成**去掉 L 前缀**的层路径。
+
+    ⛔⛔ 这是 target 解析的**唯一事实源** —— `Gene.blast_layers` /
+        `apply_gene` / 所有以 target 为输入的判定都走它。
+        原版两处各自解析、前缀剥离只在 `apply_gene` 一处做 ⇒
+        不带 `L` 前缀的 `meta_rules` 能**绕过 L0 保护**
+        （`blast_layers` 返回 `("meta_rules",)` 而不是 `("meta_rules",)`，
+         而在某些形态下会返回错位字段名）。L0 触碰即审批是纪律 2，
+        一个可以静默绕过的保护等于没有保护。
+    """
+    parts = target.split(".")
+    if (parts and parts[0].startswith("L") and parts[0][1:].isdigit()
+            and len(parts) > 1):
+        parts = parts[1:]
+    return parts
 
 
 @dataclass(frozen=True)
@@ -47,13 +97,26 @@ class Gene:
     value: Any = None
     rationale: str = ""
 
+    def __post_init__(self) -> None:
+        #: 🔵 基础构造校验（具体 op 白名单按层，留给 `apply_gene`）。
+        if not isinstance(self.op, str) or not self.op:
+            raise ValueError(f"Gene.op 必须是非空字符串，实得 {self.op!r}")
+        if not isinstance(self.target, str) or not self.target.strip():
+            raise ValueError(
+                f"Gene.target 必须是非空字符串，实得 {self.target!r}")
+
     def blast_layers(self) -> Tuple[str, ...]:
-        """这次编辑影响哪些层（用于爆炸半径与审批判定）。"""
-        parts = self.target.split(".")
-        if len(parts) >= 2 and parts[1] in LAYERS:
-            return (parts[1],)
-        if len(parts) >= 2:
-            return (parts[1],)
+        """这次编辑影响哪些层（用于爆炸半径与审批判定）。
+
+        ⛔ 用 `_split_target` 而不是自己 split —— 前缀剥离必须与
+            `apply_gene` **同源**。不同源 ⇒ 一条 `target="meta_rules"`
+            （无 L 前缀）会在这里被判定为"非受保护层"而实际改了 L0。
+        """
+        parts = _split_target(self.target)
+        if not parts:
+            return ()
+        if parts[0] in LAYERS:
+            return (parts[0],)
         return ()
 
     def touches_protected(self) -> bool:
@@ -65,7 +128,7 @@ class Gene:
 
     @property
     def gene_id(self) -> str:
-        return content_hash(self.identity())[:16]
+        return content_hash(self.identity())[:_ID_PREFIX]
 
 
 @dataclass(frozen=True)
@@ -78,20 +141,41 @@ class Capsule:
     name: str
     genes: Tuple[Gene, ...]
     rationale: str = ""
-    origin: str = ""            # mined | human | inherited
+    #: 来源：mined / human / inherited。⛔ 用 Literal 语义（IDE 提示）但不做
+    #: 运行时严格校验 —— 允许未来扩展来源分类而不破坏既有构造。
+    origin: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError(f"Capsule.name 必须是非空字符串，实得 {self.name!r}")
+        if not isinstance(self.genes, tuple):
+            object.__setattr__(self, "genes", tuple(self.genes))
+        #: ⛔⛔ 这里**故意不校验** "genes 不得为空" —— 空 genes 是一个
+        #:    **良定义的哨兵**，不是残缺对象。实测语义：
+        #:      `capsule_id` 可算 / `blast_layers() == ()` /
+        #:      `touches_protected() is False` / `apply_capsule(h, cap) is h`
+        #:      （恒等）且 `harness_id` 不变 ⇒ 含义就是"无操作 / 无可用变异"。
+        #:    ⛔ 它有一个**生产调用点**：`providers.TemplateProposer.propose`
+        #:       的收尾哨兵 `Capsule(name="noop", genes=(), ...)`（无候选时
+        #:       必须返回"什么都没提"，而不是抛异常）。加这条校验 ⇒ 技能
+        #:       已全部接通时提议器当场 ValueError，而 `evolution` 对
+        #:       `propose` 的调用**没有 try/except** ⇒ 进化循环在最需要
+        #:       保守停手的那一刻整体炸掉。
+        #:    ⛔ 教训：构造期校验只能守**真的从不成立**的不变量。凭"看起来
+        #:       不该为空"加闸，会把合法的哨兵/边界值判成错误（r33 实测：
+        #:       contract_causality 的 F 组因此整份契约崩掉）。
 
     @property
     def capsule_id(self) -> str:
         return content_hash({"name": self.name,
-                             "genes": [g.identity() for g in self.genes]})[:16]
+                             "genes": [g.identity() for g in self.genes]})[:_ID_PREFIX]
 
     def blast_layers(self) -> Tuple[str, ...]:
-        out: List[str] = []
+        #: ⛔ sorted 稳定化：返回顺序不依赖 genes 顺序 —— diff/审计显示一致。
+        seen = set()
         for g in self.genes:
-            for l in g.blast_layers():
-                if l not in out:
-                    out.append(l)
-        return tuple(out)
+            seen.update(g.blast_layers())
+        return tuple(sorted(seen))
 
     def touches_protected(self) -> bool:
         return any(g.touches_protected() for g in self.genes)
@@ -110,6 +194,13 @@ class Harness:
     # ── 内容寻址：id 只由**身份字段**决定 ───────────────────────
     @property
     def harness_id(self) -> str:
+        """harness 的内容寻址 id（**寻址键**，不是人眼比对）。
+
+        ⛔ 用 `[:32]`（128 位）—— 原版 `[:16]`（64 位）在 10⁹ 量级条目下
+            碰撞概率约 2.7%，而账本是 append-only、永不删的。碰撞后果：
+            两个**不同** harness 共享 id ⇒ 回滚到 A 实际回到 B，
+            A/B 对比实际比的是同一个。
+        """
         return content_hash({
             "meta_rules": self.meta_rules,
             "routing": self.routing,
@@ -117,7 +208,7 @@ class Harness:
             "skills": self.skills,
             "memory_policy": self.memory_policy,
             "prompts": self.prompts,
-        })[:16]
+        })[:_ID_PREFIX]
 
     def layer(self, name: str) -> Any:
         return getattr(self, name)
@@ -134,18 +225,50 @@ class Harness:
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "Harness":
+        """从 dict 反序列化。
+
+        ⛔ 不用 `or {}` —— `[]` / `""` / `0` / `False` 是**真值**，替换成
+            `{}` 会静默改写语义 ⇒ 同一个磁盘上的 harness 在不同代码路径
+            下算出**不同 harness_id**（一条路径走 `dict(v or {})`，另一条
+            走 `d["x"]`）。类型不对时**抛错**，不静默修补。
+        """
+        def _as_dict(v: Any, field_name: str) -> Dict[str, Any]:
+            if v is None:
+                return {}
+            if not isinstance(v, dict):
+                raise ValueError(
+                    f"Harness.from_dict：{field_name} 期望 dict，"
+                    f"实得 {type(v).__name__}")
+            return dict(v)
+
+        def _as_tuple_str(v: Any) -> Tuple[str, ...]:
+            if v is None:
+                return ()
+            if not isinstance(v, (list, tuple)):
+                raise ValueError(
+                    f"Harness.from_dict：tools 期望 list/tuple，"
+                    f"实得 {type(v).__name__}")
+            return tuple(str(x) for x in v)
+
+        mr_raw = d.get("meta_rules")
         return Harness(
-            meta_rules=str(d.get("meta_rules", "")),
-            routing=dict(d.get("routing", {}) or {}),
-            tools=tuple(d.get("tools", ()) or ()),
-            skills=dict(d.get("skills", {}) or {}),
-            memory_policy=dict(d.get("memory_policy", {}) or {}),
-            prompts=dict(d.get("prompts", {}) or {}),
+            meta_rules=str(mr_raw) if mr_raw is not None else "",
+            routing=_as_dict(d.get("routing"), "routing"),
+            tools=_as_tuple_str(d.get("tools")),
+            skills=_as_dict(d.get("skills"), "skills"),
+            memory_policy=_as_dict(d.get("memory_policy"), "memory_policy"),
+            prompts=_as_dict(d.get("prompts"), "prompts"),
         )
 
     def size(self) -> int:
-        """产物规模（用于**产物增殖闸**：capability floor 之外的膨胀要剪）。"""
-        return len(canonical_json(self.to_dict()))
+        """产物规模（**字节数**，用于产物增殖闸）。
+
+        ⛔ 用 `.encode("utf-8")` 的字节数，不用 `len(str)`：后者是**字符数**，
+            对 CJK 内容**低估 3 倍** ⇒ 加了中文技能的候选看起来比加了英文
+            技能的候选"小"，即使实际字节更大 ⇒ 增殖闸对中文系统**失效**
+            （而不报错 —— 最坏的一种静默）。
+        """
+        return len(canonical_json(self.to_dict()).encode("utf-8"))
 
 
 def parse_route(value: Any) -> Tuple[str, ...]:
@@ -191,6 +314,8 @@ def _route_value(value: Any) -> Any:
         return value
     if isinstance(value, (list, tuple)):
         items = [str(x).strip() for x in value if str(x).strip()]
+        if not items:
+            return ""
         return items[0] if len(items) == 1 else items
     return value
 
@@ -229,91 +354,154 @@ def apply_gene(h: Harness, gene: Gene) -> Harness:
     target 语法：`L3.skills.<name>` / `L4.memory_policy.<key>` /
     `L2.tools` / `L1.routing.<kind>` / `prompts.<name>` / `L0.meta_rules`
 
-    ⛔ 未知 target 直接抛异常 —— 静默忽略会让"编辑没生效但记录了成功"，
-    这正是 V5 反复踩的假成功形态。
+    ⛔ 未知 layer / 未知 op ⇒ **直接抛异常** —— 静默忽略会让"编辑没生效
+    但记录了成功"，这正是 V5 反复踩的假成功形态。每层的 op 白名单见
+    `_ALLOWED_OPS_BY_LAYER`（与 `providers` 的语法闸是两层独立闸）。
     """
-    parts = gene.target.split(".")
+    parts = _split_target(gene.target)
     if not parts:
         raise ValueError(f"非法 target: {gene.target!r}")
-
-    # 兼容 "L3.skills.x" 与 "skills.x" 两种写法
-    if parts[0].startswith("L") and parts[0][1:].isdigit() and len(parts) > 1:
-        parts = parts[1:]
     layer = parts[0]
+    if layer not in LAYERS:
+        raise ValueError(
+            f"未知 layer: {layer}（target={gene.target}，"
+            f"合法层：{LAYERS}）")
+    allowed = _ALLOWED_OPS_BY_LAYER.get(layer, ())
+    if gene.op not in allowed:
+        raise ValueError(
+            f"layer {layer!r} 不支持 op={gene.op!r}"
+            f"（允许：{allowed}）")
 
+    # ── L0 meta_rules ────────────────────────────────────────────
     if layer == "meta_rules":
-        if gene.op not in ("set", "append"):
-            raise ValueError(f"meta_rules 只支持 set/append，实得 {gene.op}")
-        new = h.meta_rules + ("" if gene.op == "set" else "\n") + str(gene.value)
-        return replace(h, meta_rules=new.strip() if gene.op == "set" else new)
+        #: 🔴 修复二：`set` 是**真替换**（原版 `old + "" + value` 实际是拼接
+        #:    ⇒ 同名 op 在 meta_rules 与 skills 上语义不同 ⇒ 调用方会按
+        #:    "替换"理解而得到一个追加）。
+        if gene.op == "set":
+            new = str(gene.value)
+        else:  # append
+            #: 🟡 修复十：原值为空时**不加前导换行**（空 harness 上 append
+            #:    会得到 `"\n规则X"`，污染 harness_id 且让 diff 显示奇怪）。
+            if h.meta_rules:
+                new = h.meta_rules + "\n" + str(gene.value)
+            else:
+                new = str(gene.value)
+        return replace(h, meta_rules=new)
 
+    # ── L3 skills ────────────────────────────────────────────────
     if layer == "skills":
         if len(parts) != 2:
-            raise ValueError(f"skills target 需形如 skills.<name>，实得 {gene.target}")
+            raise ValueError(
+                f"skills target 需形如 skills.<name>，实得 {gene.target}")
         name = parts[1]
         skills = dict(h.skills)
         if gene.op == "remove":
             skills.pop(name, None)
-        else:
-            if gene.op == "append" and name in skills:
-                skills[name] = skills[name] + "\n" + str(gene.value)
-            else:
-                skills[name] = str(gene.value)
+        elif gene.op == "append" and name in skills:
+            skills[name] = skills[name] + "\n" + str(gene.value)
+        else:  # set
+            skills[name] = str(gene.value)
         return replace(h, skills=skills)
 
+    # ── L1 routing ───────────────────────────────────────────────
     if layer == "routing":
         if len(parts) != 2:
-            raise ValueError(f"routing target 需形如 routing.<kind>，实得 {gene.target}")
+            raise ValueError(
+                f"routing target 需形如 routing.<kind>，实得 {gene.target}")
+        kind = parts[1]
         if gene.op == "remove":
-            #: remove 支持"从链上摘掉某一项"，而不是整条路由消失 ——
-            #: 摘掉一个技能不该把别的技能一起带走。
-            cur = list(parse_route(h.routing.get(parts[1])))
-            want = str(gene.value or "")
-            rest = [x for x in cur if x != want] if want else list(cur)
-            routing = route_with(h.routing, parts[1], rest)
+            #: 🟡 修复九：remove 的两种语义必须**显式区分**：
+            #:    · value=None  ⇒ 删**整条路由**（这个 kind 不再有路由）
+            #:    · value=X     ⇒ 从链上摘掉项 X（其他项保留）
+            #:    原版把两者混在一起（`want = str(value or "")`，
+            #:    然后 `[x for x in cur if x != want] if want else cur`）——
+            #:    value=None 时是 no-op，而调用方以为它删了整条路由。
+            if gene.value is None:
+                routing = dict(h.routing)
+                routing.pop(kind, None)
+            else:
+                want = str(gene.value)
+                cur = list(parse_route(h.routing.get(kind)))
+                rest = [x for x in cur if x != want]
+                routing = route_with(h.routing, kind, rest)
         else:
             #: append = **能力叠加**（链尾追加），这是 L1 从"单值"升级成
             #: "链"的关键：装一个新技能不再顶掉旧的。
             #: ⛔ 写入统一走 `route_with` —— 这里不再自己拼 list。
-            routing = route_with(h.routing, parts[1], gene.value,
+            routing = route_with(h.routing, kind, gene.value,
                                  append=(gene.op == "append"))
         return replace(h, routing=routing)
 
+    # ── L2 tools ─────────────────────────────────────────────────
     if layer == "tools":
-        tools = list(h.tools)
+        if len(parts) != 1:
+            raise ValueError(
+                f"tools target 需形如 tools，实得 {gene.target}")
         if gene.op == "remove":
-            tools = [t for t in tools if t != str(gene.value)]
-        elif gene.op in ("set", "append"):
+            tools = [t for t in h.tools if t != str(gene.value)]
+        elif gene.op == "append":
+            tools = list(h.tools)
             if str(gene.value) not in tools:
                 tools.append(str(gene.value))
-        else:
-            raise ValueError(f"tools 不支持 op={gene.op}")
+        else:  # set
+            #: 🔵 修复十一：让 `set` 与 `append` **语义真正不同** ——
+            #:    原版两者都做"如果不在就追加"，导致调用方用 `set` 表达
+            #:    "工具列表**就是** [x]" 时会得到一个追加。`set` 是替换。
+            if isinstance(gene.value, (list, tuple)):
+                tools = [str(x) for x in gene.value]
+            else:
+                tools = [str(gene.value)]
         return replace(h, tools=tuple(tools))
 
+    # ── L4 memory_policy ─────────────────────────────────────────
     if layer == "memory_policy":
         if len(parts) != 2:
-            raise ValueError(f"memory_policy target 需形如 memory_policy.<key>，实得 {gene.target}")
+            raise ValueError(
+                f"memory_policy target 需形如 memory_policy.<key>，"
+                f"实得 {gene.target}")
+        key = parts[1]
         mp = dict(h.memory_policy)
         if gene.op == "remove":
-            mp.pop(parts[1], None)
+            mp.pop(key, None)
         elif gene.op == "tune":
-            cur = mp.get(parts[1])
-            if isinstance(cur, (int, float)) and isinstance(gene.value, (int, float)):
-                mp[parts[1]] = type(cur)(cur) + type(gene.value)(gene.value)
+            cur = mp.get(key)
+            #: ⛔ 同类型才累加：`True` 是 `int` 子类，`bool + bool` 会
+            #:    得到 `int` —— 用 `isinstance(cur, bool)` 排除掉。
+            if (isinstance(cur, (int, float)) and not isinstance(cur, bool)
+                    and isinstance(gene.value, (int, float))
+                    and not isinstance(gene.value, bool)):
+                mp[key] = cur + gene.value
             else:
-                mp[parts[1]] = gene.value
-        else:
-            mp[parts[1]] = gene.value
+                #: 类型不匹配时**退化为 set**（与原行为一致），但调用方
+                #: 通过 tune 表达意图时得到的不是累加 —— 这是"尽力"不是
+                #: "静默降级"：值确实被改了，只是不是累加。
+                mp[key] = gene.value
+        else:  # set
+            mp[key] = gene.value
         return replace(h, memory_policy=mp)
 
+    # ── prompts ──────────────────────────────────────────────────
     if layer == "prompts":
         if len(parts) != 2:
-            raise ValueError(f"prompts target 需形如 prompts.<name>，实得 {gene.target}")
+            raise ValueError(
+                f"prompts target 需形如 prompts.<name>，实得 {gene.target}")
+        name = parts[1]
         prompts = dict(h.prompts)
-        prompts[parts[1]] = str(gene.value)
+        #: 🔴 修复三：原版对**所有** op 都走 `prompts[name] = str(value)`
+        #:    ⇒ `Gene(op="remove", target="prompts.x", value=None)` 会把
+        #:    `prompts["x"]` 设成字符串 `"None"` —— 不是删除，是往 prompt
+        #:    里塞了一句 `"None"`。对 LLM 输出驱动的系统，这意味着模型以为
+        #:    删了、实际改了。
+        if gene.op == "remove":
+            prompts.pop(name, None)
+        elif gene.op == "append" and name in prompts:
+            prompts[name] = prompts[name] + "\n" + str(gene.value)
+        else:  # set
+            prompts[name] = str(gene.value)
         return replace(h, prompts=prompts)
 
-    raise ValueError(f"未知 layer: {layer}（target={gene.target}）")
+    #: 理论上不可达 —— 上面 `layer not in LAYERS` 已经拦过。
+    raise AssertionError(f"未处理的 layer: {layer}（target={gene.target}）")
 
 
 def apply_capsule(h: Harness, cap: Capsule) -> Harness:
@@ -325,21 +513,29 @@ def apply_capsule(h: Harness, cap: Capsule) -> Harness:
 
 
 def diff(a: Harness, b: Harness) -> List[str]:
-    """列出两层之间的差异（人类可读）。用于审计与"这次改了什么"。"""
+    """列出两层之间的差异（人类可读）。用于审计与"这次改了什么"。
+
+    ⛔ 用 `canonical_json` 表示值 —— 原版 `str(va.get(kk))[:40]` 把
+        `None` / `0` / `"0"` 都显示成相似的东西，读者分不清具体类型。
+    """
     out = []
     da, db = a.to_dict(), b.to_dict()
-    for k in da:
-        va, vb = da[k], db[k]
+    for k in sorted(set(da) | set(db)):
+        va, vb = da.get(k), db.get(k)
         if isinstance(va, dict) and isinstance(vb, dict):
             for kk in sorted(set(va) | set(vb)):
                 if va.get(kk) != vb.get(kk):
-                    out.append(f"{k}.{kk}: {str(va.get(kk))[:40]!r} → {str(vb.get(kk))[:40]!r}")
+                    sa = canonical_json(va.get(kk))[:60]
+                    sb = canonical_json(vb.get(kk))[:60]
+                    out.append(f"{k}.{kk}: {sa} → {sb}")
         elif isinstance(va, (list, tuple)) and isinstance(vb, (list, tuple)):
-            sa, sb = set(map(str, va)), set(map(str, vb))
-            if sa != sb:
-                out.append(f"{k}: +{sorted(sb - sa)} -{sorted(sa - sb)}")
+            sa_set, sb_set = set(map(str, va)), set(map(str, vb))
+            if sa_set != sb_set:
+                out.append(
+                    f"{k}: +{sorted(sb_set - sa_set)} -{sorted(sa_set - sb_set)}")
         elif va != vb:
-            out.append(f"{k}: {str(va)[:60]!r} → {str(vb)[:60]!r}")
+            out.append(f"{k}: {canonical_json(va)[:80]} → "
+                       f"{canonical_json(vb)[:80]}")
     return out
 
 
@@ -348,11 +544,15 @@ def blast_radius(before: Harness, after: Harness) -> Dict[str, Any]:
 
     ⛔ 这是**提交前**必须算的：Evolver 用 blast radius 决定回滚成本，
     V5 的教训是"改了才知道影响多大" ⇒ 回滚时已经污染了账本。
+
+    ⛔ 遍历 `set(da) | set(db)` —— 原版只遍历 `da` 的键，如果未来
+        `Harness` 加了新字段（`after` 有、`before` 没有），那一层会被
+        **静默漏报**。
     """
     da, db = before.to_dict(), after.to_dict()
-    touched = [k for k in da if da[k] != db[k]]
+    touched = sorted(k for k in (set(da) | set(db)) if da.get(k) != db.get(k))
     return {
-        "layers_touched": sorted(touched),
+        "layers_touched": touched,
         "n_layers": len(touched),
         "size_delta": after.size() - before.size(),
         "touches_protected": bool(set(touched) & PROTECTED_LAYERS),
@@ -380,5 +580,11 @@ def gene_tool(name: str, rationale: str = "") -> Gene:
 
 
 def gene_tune(key: str, delta: Any, rationale: str = "") -> Gene:
+    #: 🔵 修复十一：`delta` 必须是数字 —— 原版 `rationale or f"调参 {key}
+    #:    {delta:+}"` 里 `{delta:+}` 对字符串抛 `ValueError: Unknown format
+    #:    code '+' for object of type 'str'`。提前校验，报错在调用点。
+    if not isinstance(delta, (int, float)) or isinstance(delta, bool):
+        raise ValueError(
+            f"gene_tune 的 delta 必须是数字，实得 {type(delta).__name__}")
     return Gene(op="tune", target=f"L4.memory_policy.{key}", value=delta,
                 rationale=rationale or f"调参 {key} {delta:+}")
