@@ -259,6 +259,102 @@ ck("F3 反证：append 换成 set ⇒ 旧技能从链上消失"
    parse_route(h_bad.routing.get("repair")) == ("fix_literals",),
    f"{h_bad.routing.get('repair')}")
 
+# ══════════════════════════════════════════════════════════════
+print("\n== G 组：UCI 绑定与 apply_gene 走**同一个写入点** ==")
+from aether.interop import (CapabilitySpec, Gateway, ParamSpec,   # noqa: E402
+                            Registry, bind_capability)
+from aether.verifier import Check                                 # noqa: E402
+
+h0 = H("fix_control_flow")
+h_bind = bind_capability(h0, "ext.litfix", "外部字面量修法",
+                         route_from="repair")
+ck("G1 ⛔ 核心：绑定 UCI 能力 ⇒ **追加**到链尾，不顶掉已有技能",
+   parse_route(h_bind.routing.get("repair"))
+   == ("fix_control_flow", "uci:ext.litfix"),
+   f"{h_bind.routing.get('repair')!r}")
+
+h_bind2 = bind_capability(h_bind, "ext.litfix", "外部字面量修法",
+                          route_from="repair")
+ck("G2 幂等：重复绑同一个能力 ⇒ 链上不出现重复项",
+   parse_route(h_bind2.routing.get("repair"))
+   == ("fix_control_flow", "uci:ext.litfix"),
+   f"{h_bind2.routing.get('repair')!r}")
+
+h_over = bind_capability(h0, "ext.litfix", route_from="repair",
+                         append=False)
+ck("G3 反证：append=False（旧行为）⇒ 旧技能从链上消失"
+   " ⇒ 证明 G1 的追加不是摆设",
+   parse_route(h_over.routing.get("repair")) == ("uci:ext.litfix",),
+   f"{h_over.routing.get('repair')!r}")
+
+#: ⛔ 同源的核心断言：两条写入路径产出的 **routing 值**必须逐字相同。
+#:    各写一份就会在这里分叉。
+#: ⛔ 但**不能**断言 harness_id 相同 —— `bind_capability` 还会把能力写进
+#:    `skills`（绑定 = 声明"这个 harness 有这个技能"），而 `apply_gene`
+#:    的路由基因只改路由。两者本来就不是一个东西，把它们捆成一个断言
+#:    ⇒ 又是一对分不开的孪生故障。
+h_gene = apply_gene(h0, Gene(op="append", target="L1.routing.repair",
+                             value="uci:ext.litfix"))
+ck("G4 ⛔ 同源：bind_capability 与 apply_gene(append) 写出的"
+   "**路由值**逐字相同",
+   h_gene.routing.get("repair") == h_bind.routing.get("repair"),
+   f"gene={h_gene.routing.get('repair')!r} "
+   f"bind={h_bind.routing.get('repair')!r}")
+
+#: 顺序无关：先绑再 append 同一个能力 ⇒ 链不变（幂等可交换）
+h_again = apply_gene(h_bind, Gene(op="append", target="L1.routing.repair",
+                                  value="uci:ext.litfix"))
+ck("G4b 顺序无关：绑过之后再 append 同一能力 ⇒ 链不变（幂等）",
+   parse_route(h_again.routing.get("repair"))
+   == ("fix_control_flow", "uci:ext.litfix"),
+   f"{h_again.routing.get('repair')!r}")
+
+
+def _ext_litfix(source: str, baseline: str) -> str:
+    """外部实现（**刻意不复用** repair.py）：把数值常量按遍历序对齐基线。
+
+    ⛔ 它存在的意义是证明"外部技能"在结构上跟内置技能**平权** ——
+       走同一条链、同一套判据，没有任何特权通道。
+    """
+    import ast as _ast
+    b = _ast.parse(source)
+    g = _ast.parse(baseline)
+
+    def nums(tree):
+        return [n for n in _ast.walk(tree)
+                if isinstance(n, _ast.Constant)
+                and isinstance(n.value, (int, float))
+                and not isinstance(n.value, bool)]
+
+    bo, go = nums(b), nums(g)
+    for i in range(min(len(bo), len(go))):
+        bo[i].value = go[i].value
+    _ast.fix_missing_locations(b)
+    return _ast.unparse(b)
+
+
+reg = Registry()
+reg.register(CapabilitySpec(
+    id="ext.litfix", kind="skill", trusted=True,
+    inputs={"source": ParamSpec("str"), "baseline": ParamSpec("str", False),
+            "spec": ParamSpec("dict", False)},
+    outputs={"source": ParamSpec("str")},
+    checker=lambda a, o: Check("changed", o.get("source") != a["source"],
+                               "源码有改动")),
+    lambda source, baseline="", spec=None: {
+        "source": _ext_litfix(source, baseline)})
+
+h_mix = bind_capability(H("fix_control_flow"), "ext.litfix",
+                        route_from="repair")
+r_g = HarnessAgent({ENV_NAME: ENV}, gateway=Gateway(reg)).run(
+    h_mix, {"env_id": ENV_NAME, "broken_source": HARD[0].broken_source,
+            "topic": ENV_NAME, "task_class": "repair"})
+_applied = (r_g.verdict.evidence or {}).get("applied")
+ck("G5 ⛔ 端到端：链上【内置 + UCI】两项**都真执行** ⇒ 叠加生效",
+   _applied == ["fix_control_flow", "uci:ext.litfix"]
+   and float(r_g.verdict.reward) >= 1.0,
+   f"applied={_applied} reward={r_g.verdict.reward}")
+
 print()
 if FAILS:
     print(f"❌ {len(FAILS)} 条失败：{FAILS}")

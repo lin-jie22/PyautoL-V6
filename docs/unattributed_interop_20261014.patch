@@ -1,0 +1,309 @@
+diff --git a/aether/interop.py b/aether/interop.py
+index 1f8b9c1..1ca5094 100644
+--- a/aether/interop.py
++++ b/aether/interop.py
+@@ -60,6 +60,7 @@ import subprocess
+ import sys
+ import time
+ import uuid
++import warnings
+ from dataclasses import dataclass, field
+ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+ 
+@@ -99,6 +100,14 @@ _TYPES: Dict[str, Tuple[type, ...]] = {
+ class CapabilityError(Exception):
+     """接入层的显性失败。**必须**带 status 与原因，不许裸抛。"""
+     def __init__(self, status: str, message: str, **meta: Any):
++        #: 🟡 修复五：status 必须属于 STATUSES。拼错会污染 Gateway.stats
++        #:    （拼错的键永远计不到数，且永远不会有人发现）。
++        #:    ⛔ 用 ValueError 而不是静默归一 —— 这是**程序员错误**，
++        #:    不属于"运行时 CapabilityError 家族"；`except CapabilityError`
++        #:    不该捕获它。
++        if status not in STATUSES:
++            raise ValueError(
++                f"CapabilityError.status 必须属于 {STATUSES}，实得 {status!r}")
+         super().__init__(message)
+         self.status = status
+         self.message = message
+@@ -217,6 +226,17 @@ class Budget:
+     timeout_s: float = 10.0
+     max_output_bytes: int = 1_000_000
+ 
++    #: 🟡 修复四：非法的 Budget 在**构造时**就该被拒 ——
++    #:    `Budget(timeout_s=0)` / `max_output_bytes=-1` 依赖下游每个适配器
++    #:    自己 max(0.01, ...) 夹取，是碰运气不是纪律。
++    def __post_init__(self) -> None:
++        if float(self.timeout_s) <= 0:
++            raise ValueError(
++                f"Budget.timeout_s 必须 > 0，实得 {self.timeout_s}")
++        if int(self.max_output_bytes) <= 0:
++            raise ValueError(
++                f"Budget.max_output_bytes 必须 > 0，实得 {self.max_output_bytes}")
++
+     def clamped_by(self, spec: CapabilitySpec) -> "Budget":
+         """取 spec 声明与本次预算中**更严**的那个。
+ 
+@@ -236,10 +256,16 @@ class Invocation:
+     budget: Budget = field(default_factory=Budget)
+     actor: str = ""
+     context: Dict[str, Any] = field(default_factory=dict)
++    #: 🔴 修复一：`invocation_id` 必须是**普通字段**，在构造时钉死。
++    #:    之前写成 property ⇒ 每次访问都生成新 UUID ⇒ 同一个 Invocation
++    #:    上访问两次拿到不同 id，任何 `assert inv.invocation_id ==
++    #:    inv.invocation_id` 都永远不通过；调试时 `f"id={inv.invocation_id}"`
++    #:    打两次也不一致。
++    invocation_id: str = ""
+ 
+-    @property
+-    def invocation_id(self) -> str:
+-        return uuid.uuid4().hex[:16]
++    def __post_init__(self) -> None:
++        if not self.invocation_id:
++            self.invocation_id = uuid.uuid4().hex[:16]
+ 
+ 
+ @dataclass
+@@ -417,8 +443,20 @@ class CliAdapter(BaseAdapter):
+             raise CapabilityError(
+                 "failed",
+                 f"CLI 退出码 {p.returncode}：{p.stderr.decode('utf-8', 'replace')[:300]}")
+-        raw = p.stdout[:int(budget.max_output_bytes)]
+-        txt = raw.decode("utf-8", "replace").strip()
++
++        #: 🟠 修复二：**拒绝静默截断**。原先 `p.stdout[:max_output_bytes]`
++        #:    会把超长输出砍成半截 JSON ⇒ 解析失败 ⇒ 返回 `{"_raw": "..."}`
++        #:    ⇒ 调用方拿到一个语法合法但内容残缺的结果，无法区分
++        #:    "CLI 输出的是纯文本" vs "JSON 被截断了"。
++        #:    截断会让错误伪装成成功，与"绝不静默降级"同源。
++        limit = int(budget.max_output_bytes)
++        if len(p.stdout) > limit:
++            raise CapabilityError(
++                "failed",
++                f"CLI 输出 {len(p.stdout)} 字节超过预算 {limit} 字节"
++                f"（截断会产出半截 JSON，错误伪装成成功）")
++
++        txt = p.stdout.decode("utf-8", "replace").strip()
+         if not txt:
+             return None
+         try:
+@@ -432,8 +470,16 @@ class CliAdapter(BaseAdapter):
+         exe = str(self.argv[0]) if self.argv else ""
+         if not exe:
+             return False, "argv 为空"
+-        if not (os.path.isabs(exe) or shutil.which(exe)):
+-            return False, f"找不到可执行文件 {exe!r}"
++        #: 🟠 修复三：绝对路径**不等于**可执行文件存在。原先
++        #:    `os.path.isabs(exe)` 为真就直接判"可用"，实际调时才
++        #:    FileNotFoundError ⇒ 注册时报"已就位"、调用时说"没有这个文件"
++        #:    —— 与"声明超时但杀不掉"同族的假仪表。
++        if os.path.isabs(exe):
++            if not os.path.isfile(exe) or not os.access(exe, os.X_OK):
++                return False, f"路径不可执行或不存在 {exe!r}"
++            return True, ""
++        if not shutil.which(exe):
++            return False, f"PATH 里找不到 {exe!r}"
+         return True, ""
+ 
+ 
+@@ -443,7 +489,7 @@ class HttpAdapter(BaseAdapter):
+ 
+     ⛔ 响应**按字节封顶**（不然一个坏服务能把宿主内存吃光）。
+     ⛔ 超时交给 urlopen（真的会中断）⇒ `timeout_enforced="forced"`。
+-    ⛔ 只走 stdlib urllib（宪���：零第三方依赖）。
++    ⛔ 只走 stdlib urllib（宪法：零第三方依赖）。
+     """
+     url: str = ""
+     method: str = "POST"
+@@ -462,11 +508,25 @@ class HttpAdapter(BaseAdapter):
+         req = request.Request(
+             self.url, data=data, method=self.method,
+             headers={"Content-Type": "application/json", **self.headers})
++        limit = int(budget.max_output_bytes)
+         try:
+-            with request.urlopen(req, timeout=max(0.01, float(budget.timeout_s))) as r:
+-                raw = r.read(int(budget.max_output_bytes))
++            with request.urlopen(
++                    req, timeout=max(0.01, float(budget.timeout_s))) as r:
++                #: 🟠 修复二：`read(limit + 1)` 多读一字节探测是否超限 ——
++                #:    直接 `read(limit)` 会把超长响应悄悄砍到 limit 字节，
++                #:    解析半截 JSON 失败后伪装成 `{"_raw": ...}`。
++                raw = r.read(limit + 1)
++                if len(raw) > limit:
++                    raise CapabilityError(
++                        "failed",
++                        f"HTTP 响应超过预算 {limit} 字节"
++                        f"（截断会产出半截 JSON，错误伪装成成功）")
+         except urlerror.URLError as e:
+             raise CapabilityError("unavailable", f"HTTP 请求失败：{e}")
++        except CapabilityError:
++            #: ⛔ 上面为"超限"主动抛的 CapabilityError 必须**原样透传**，
++            #:    不能被下面的 `except Exception` 当成 HTTP 异常重新包装。
++            raise
+         except Exception as e:  # noqa: BLE001  —— 含 socket.timeout
+             if "timed out" in str(e).lower() or "timeout" in type(e).__name__.lower():
+                 raise CapabilityError("timeout", f"HTTP 超时 {budget.timeout_s}s")
+@@ -497,7 +557,10 @@ def adapt(impl: Any) -> BaseAdapter:
+     tried: List[str] = []
+     if isinstance(impl, BaseAdapter):
+         return impl
+-    if callable(impl):
++    #: 🔵 修复九.1：`pathlib.Path` 在某些 Python 版本上恰好有 `__call__`
++    #:    （或用户自定义了子类）⇒ 会被误判成 callable。PathLike 一律
++    #:    走"路径"分支，不走 callable 分支。
++    if callable(impl) and not isinstance(impl, (str, os.PathLike)):
+         return CallableAdapter(fn=impl)
+     tried.append("callable(函数/lambda)")
+     if isinstance(impl, str) and impl.lower().startswith(("http://", "https://")):
+@@ -563,6 +626,17 @@ class Registry:
+                     f"能力 id {spec.id!r} 已注册且声明不同"
+                     f"（旧指纹 {prev.spec.fingerprint} / 新 {spec.fingerprint}）；"
+                     f"要覆盖请显式 replace=True")
++            #: 🔵 修复九.4：指纹相同但适配器可能不同（同一能力，两个 HTTP
++            #:    endpoint）。原先静默替换 —— 这不是"重装同一个能力"就是
++            #:    "换了实现却忘了改版本"，两种含义完全不同。给出警告，
++            #:    让人有机会分辨。
++            if (type(prev.adapter) is not type(ad)
++                    or prev.adapter.detail != ad.detail):
++                warnings.warn(
++                    f"能力 {spec.id!r} 指纹相同但适配器实现不同 "
++                    f"（{prev.adapter.detail} → {ad.detail}），将覆盖。"
++                    f"若是有意换实现，请同时更新 spec.version。",
++                    UserWarning, stacklevel=2)
+         ok, why = ad.probe()
+         if not ok:
+             raise CapabilityError(
+@@ -684,19 +758,27 @@ def _spec_from(d: Dict[str, Any]) -> CapabilitySpec:
+     kind = str(d.get("kind", "skill"))
+     if kind not in KINDS:
+         raise CapabilityError("rejected", f"{cid}: 未知 kind={kind!r}")
+-    return CapabilitySpec(
+-        id=cid, kind=kind, version=str(d.get("version", "0.0.0")),
+-        summary=str(d.get("summary", "")),
+-        inputs={k: _param(v) for k, v in (d.get("inputs") or {}).items()},
+-        outputs={k: _param(v) for k, v in (d.get("outputs") or {}).items()},
+-        tags=tuple(d.get("tags", ()) or ()),
+-        timeout_s=float(d.get("timeout_s", 10.0)),
+-        sandbox=str(d.get("sandbox", "process")),
+-        #: ⛔ trusted 默认 **False**：清单里导入任意 Python 对象 = 任意代码
+-        #:   执行进本进程 ⇒ 必须是写清单的人的知情选择，不是默认值。
+-        trusted=bool(d.get("trusted", False)),
+-        effects=tuple(d.get("effects", ()) or ()),
+-    )
++    #: 🟡 修复六：`CapabilitySpec.__post_init__` 里的校验（sandbox、timeout_s）
++    #:    抛 `ValueError`。若不转成 `CapabilityError`，`load_manifest` 的
++    #:    `except CapabilityError` 分支接不到 ⇒ 会被归为 `status="failed"`
++    #:    ⇒ 一条**清单写错**（`sandbox: "dockerr"`）看起来像"能力运行出错"，
++    #:    排查方向全反。这是**输入不合法**，应归 `"rejected"`。
++    try:
++        return CapabilitySpec(
++            id=cid, kind=kind, version=str(d.get("version", "0.0.0")),
++            summary=str(d.get("summary", "")),
++            inputs={k: _param(v) for k, v in (d.get("inputs") or {}).items()},
++            outputs={k: _param(v) for k, v in (d.get("outputs") or {}).items()},
++            tags=tuple(d.get("tags", ()) or ()),
++            timeout_s=float(d.get("timeout_s", 10.0)),
++            sandbox=str(d.get("sandbox", "process")),
++            #: ⛔ trusted 默认 **False**：清单里导入任意 Python 对象 = 任意代码
++            #:   执行进本进程 ⇒ 必须是写清单的人的知情选择，不是默认值。
++            trusted=bool(d.get("trusted", False)),
++            effects=tuple(d.get("effects", ()) or ()),
++        )
++    except ValueError as ex:
++        raise CapabilityError("rejected", f"{cid}: {ex}")
+ 
+ 
+ def _adapter_from(d: Dict[str, Any]) -> BaseAdapter:
+@@ -746,7 +828,7 @@ def _adapter_from(d: Dict[str, Any]) -> BaseAdapter:
+ 
+ 
+ def bind_capability(h: Any, cid: str, summary: str = "",
+-                    *, route_from: str = "") -> Any:
++                    *, route_from: str = "", append: bool = True) -> Any:
+     """把一个已注册能力**绑进 harness**（加到 L3.skills，可顺便加 L1 路由）。
+ 
+     ⛔ 为什么必须显式绑定：harness 的技能层是**基因组的一部分**，
+@@ -756,14 +838,31 @@ def bind_capability(h: Any, cid: str, summary: str = "",
+ 
+     `route_from` 给的是**任务类别**（不是环境名）：按环境名路由本身就是
+     定点化，换环境就失效（agent.py 顶部的设计取舍）。
++
++    ⛔⛔ `append`（默认 True）= **把能力追加到链尾，不是顶掉整条链**。
++        2026-10-14 实测：L1.routing 已是**有序技能链**（§26），而这里
++        旧代码写的是 `routing[route_from] = key` ⇒ 绑定一个 UCI 能力会
++        把链上原有技能全部抹掉。两个写入点（这里 / `apply_gene`）语义
++        不一致 ⇒ 同一个 harness 是"能叠加"还是"互斥"，取决于技能是
++        提议器加的还是外部绑的。现在两者都走 `genome.route_with`。
+     """
+     import dataclasses
++
++    from .genome import route_with
+     key = f"uci:{cid}"
+     skills = dict(getattr(h, "skills", {}) or {})
+-    skills[key] = summary or cid
++    want = summary or cid
++    #: 🔵 修复九.2：同名重复绑定会静默替换 summary。只在**真的不同**时
++    #:    警告 —— 幂等地重复绑一次不该刷屏（那会让警告变成噪声而被忽略）。
++    if key in skills and skills[key] != want:
++        warnings.warn(
++            f"能力 {cid!r} 已在 harness 中绑定（key={key!r}），"
++            f"summary 将被覆盖：{skills[key]!r} → {want!r}",
++            UserWarning, stacklevel=2)
++    skills[key] = want
+     routing = dict(getattr(h, "routing", {}) or {})
+     if route_from:
+-        routing[str(route_from)] = key
++        routing = route_with(routing, str(route_from), key, append=append)
+     return dataclasses.replace(h, skills=skills, routing=routing)
+ 
+ 
+@@ -778,7 +877,7 @@ def load_manifest(registry: Registry, src: Union[str, Dict[str, Any]],
+     if isinstance(src, dict):
+         data, source = src, "<dict>"
+     else:
+-        import os
++        #: 🟡 修复七：顶部已 `import os`，此处无需再 import。
+         p = os.fspath(src)
+         source = p
+         try:
+@@ -835,8 +934,10 @@ class Gateway:
+         self.ledger = ledger
+         self.default_budget = (default_budget if default_budget is not None
+                                else Budget())
++        #: 🔵 修复九.3：`invoked` 不是 status。原先与 STATUSES 并列塞进
++        #:    同一个 dict ⇒ "分诊统计"里混入了一个非分诊字段。拆出来。
+         self.stats: Dict[str, int] = {s: 0 for s in STATUSES}
+-        self.stats["invoked"] = 0
++        self.n_invoked: int = 0
+ 
+     # ── 主入口 ────────────────────────────────────────────────
+     def invoke(self, cid: str, args: Optional[Dict[str, Any]] = None,
+@@ -846,7 +947,7 @@ class Gateway:
+         inv = Invocation(capability=str(cid), args=dict(args or {}),
+                          budget=budget or self.default_budget,
+                          actor=actor, context=dict(context or {}))
+-        self.stats["invoked"] += 1
++        self.n_invoked += 1
+         t0 = time.time()
+         res = self._invoke_inner(inv)
+         res.cost_s = time.time() - t0
+@@ -909,6 +1010,20 @@ class Gateway:
+             status="ok", capability=spec.id,
+             capability_fingerprint=spec.fingerprint, output=out,
+             transport=ad.transport, timeout_enforced=ad.timeout_enforced,
++            #: 🟡 修复八：`sandbox` 不能是永远空的 dict（假仪表：让调用方
++            #:    以为沙箱信息可用，读到 {} 却以为是"没沙箱"）。如实填：
++            #:    · `declared`      —— spec 声明了什么
++            #:    · `transport`     —— 实际走什么形态
++            #:    · `enforced`      —— 超时是否真的能中断
++            #:    · `seatbelt_active` —— seatbelt 沙箱是否真的装上了
++            #:    ⛔ 不要用 `transport in ("subprocess","network")` 冒充
++            #:    "沙箱已装上" —— 进程隔离 ≠ seatbelt 沙箱。
++            sandbox={
++                "declared": spec.sandbox,
++                "transport": ad.transport,
++                "enforced": ad.timeout_enforced,
++                "seatbelt_active": False,   # 尚未实现沙箱强制，如实说
++            },
+             invocation_id=inv.invocation_id,
+             meta={"unknown_args": unknown} if unknown else {})
+         missing: List[str] = []

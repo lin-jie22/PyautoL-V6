@@ -1,0 +1,529 @@
+{
+  "generated_at": "2026-10-14T10:31:49",
+  "max_n": 12,
+  "multi_cap": 6,
+  "chain": [
+    "revert_control_flow",
+    "revert_literals"
+  ],
+  "rows": [
+    {
+      "env": "textscore",
+      "n_single": 5,
+      "n_hard": 2,
+      "n_hard_fixed_by_chain": 2,
+      "single": [
+        {
+          "r_control_flow": 1.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "textscore::m2",
+          "desc": "比较符反转 Lt→GtE",
+          "difficulty": "easy"
+        },
+        {
+          "r_control_flow": 1.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "textscore::m3",
+          "desc": "比较符反转 Gt→LtE",
+          "difficulty": "easy"
+        },
+        {
+          "r_control_flow": 1.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "textscore::m5",
+          "desc": "比较符反转 LtE→Gt",
+          "difficulty": "easy"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "textscore::m8",
+          "desc": "常量 1→2",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "textscore::m10",
+          "desc": "常量 1→2",
+          "difficulty": "hard"
+        }
+      ],
+      "n_multi": 5,
+      "n_multi_chain_only": 0,
+      "multi": [
+        {
+          "r_control_flow": 1.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "textscore::m2+m0",
+          "desc": "比较符反转 Lt→GtE + 常量 0.0→1.0",
+          "difficulty": "easy"
+        },
+        {
+          "r_control_flow": 1.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "textscore::m3+m0",
+          "desc": "比较符反转 Gt→LtE + 常量 0.0→1.0",
+          "difficulty": "easy"
+        },
+        {
+          "r_control_flow": 1.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "textscore::m5+m0",
+          "desc": "比较符反转 LtE→Gt + 常量 0.0→1.0",
+          "difficulty": "easy"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "textscore::m8+m0",
+          "desc": "常量 1→2 + 常量 0.0→1.0",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "textscore::m10+m0",
+          "desc": "常量 1→2 + 常量 0.0→1.0",
+          "difficulty": "hard"
+        }
+      ]
+    },
+    {
+      "env": "eventflow",
+      "n_single": 5,
+      "n_hard": 2,
+      "n_hard_fixed_by_chain": 2,
+      "single": [
+        {
+          "r_control_flow": 1.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "eventflow::m3",
+          "desc": "比较符反转 Gt→LtE",
+          "difficulty": "easy"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "eventflow::m6",
+          "desc": "常量 1→2",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 1.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "eventflow::m7",
+          "desc": "运算符替换 Sub→Add",
+          "difficulty": "easy"
+        },
+        {
+          "r_control_flow": 1.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "eventflow::m8",
+          "desc": "比较符反转 LtE→Gt",
+          "difficulty": "easy"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "eventflow::m10",
+          "desc": "常量 0.0→1.0",
+          "difficulty": "hard"
+        }
+      ],
+      "n_multi": 5,
+      "n_multi_chain_only": 0,
+      "multi": [
+        {
+          "r_control_flow": 1.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "eventflow::m3+m0",
+          "desc": "比较符反转 Gt→LtE + 常量 30→31",
+          "difficulty": "easy"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "eventflow::m6+m0",
+          "desc": "常量 1→2 + 常量 30→31",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 1.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "eventflow::m7+m0",
+          "desc": "运算符替换 Sub→Add + 常量 30→31",
+          "difficulty": "easy"
+        },
+        {
+          "r_control_flow": 1.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "eventflow::m8+m0",
+          "desc": "比较符反转 LtE→Gt + 常量 30→31",
+          "difficulty": "easy"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "eventflow::m10+m0",
+          "desc": "常量 0.0→1.0 + 常量 30→31",
+          "difficulty": "hard"
+        }
+      ]
+    },
+    {
+      "env": "stateflow",
+      "n_single": 5,
+      "n_hard": 4,
+      "n_hard_fixed_by_chain": 4,
+      "single": [
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "stateflow::m3",
+          "desc": "常量 0→1",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "stateflow::m4",
+          "desc": "常量 1→2",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "stateflow::m6",
+          "desc": "常量 1→2",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 1.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "stateflow::m8",
+          "desc": "比较符反转 Eq→NotEq",
+          "difficulty": "easy"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "stateflow::m11",
+          "desc": "常量 0→1",
+          "difficulty": "hard"
+        }
+      ],
+      "n_multi": 5,
+      "n_multi_chain_only": 1,
+      "multi": [
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "stateflow::m3+m4",
+          "desc": "常量 0→1 + 常量 1→2",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "stateflow::m4+m3",
+          "desc": "常量 1→2 + 常量 0→1",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "stateflow::m6+m3",
+          "desc": "常量 1→2 + 常量 0→1",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "stateflow::m8+m3",
+          "desc": "比较符反转 Eq→NotEq + 常量 0→1",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "stateflow::m11+m3",
+          "desc": "常量 0→1 + 常量 0→1",
+          "difficulty": "hard"
+        }
+      ]
+    },
+    {
+      "env": "scheduler",
+      "n_single": 11,
+      "n_hard": 8,
+      "n_hard_fixed_by_chain": 8,
+      "single": [
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "scheduler::m0",
+          "desc": "常量 1→2",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "scheduler::m1",
+          "desc": "常量 0→1",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "scheduler::m2",
+          "desc": "常量 1→2",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 1.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "scheduler::m3",
+          "desc": "运算符替换 Sub→Add",
+          "difficulty": "easy"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "scheduler::m4",
+          "desc": "常量 1→2",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 1.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "scheduler::m5",
+          "desc": "比较符反转 Lt→GtE",
+          "difficulty": "easy"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "scheduler::m6",
+          "desc": "常量 1→2",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "scheduler::m7",
+          "desc": "常量 0→1",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 1.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "scheduler::m8",
+          "desc": "比较符反转 LtE→Gt",
+          "difficulty": "easy"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "scheduler::m9",
+          "desc": "常量 1→2",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "scheduler::m11",
+          "desc": "常量 0→1",
+          "difficulty": "hard"
+        }
+      ],
+      "n_multi": 6,
+      "n_multi_chain_only": 2,
+      "multi": [
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "scheduler::m0+m1",
+          "desc": "常量 1→2 + 常量 0→1",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "scheduler::m1+m0",
+          "desc": "常量 0→1 + 常量 1→2",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "scheduler::m2+m0",
+          "desc": "常量 1→2 + 常量 1→2",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "scheduler::m3+m0",
+          "desc": "运算符替换 Sub→Add + 常量 1→2",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 1.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "scheduler::m4+m0",
+          "desc": "常量 1→2 + 常量 1→2",
+          "difficulty": "hard"
+        },
+        {
+          "r_control_flow": 0.0,
+          "r_literals": 0.0,
+          "r_chain": 1.0,
+          "failed_checks": [],
+          "evidence": [],
+          "task_id": "scheduler::m5+m1",
+          "desc": "比较符反转 Lt→GtE + 常量 0→1",
+          "difficulty": "hard"
+        }
+      ]
+    }
+  ]
+}

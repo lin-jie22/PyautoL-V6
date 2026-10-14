@@ -32,7 +32,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .ledger import content_hash
 from .verifier import Verdict, all_of, error_verdict
@@ -744,17 +744,64 @@ _FLIP_OPS = {
 }
 
 
+def numeric_literals(tree: ast.AST) -> List[ast.Constant]:
+    """按 `ast.walk` 序收集**数值字面量**节点 —— 变异与修法的共同选点口径。
+
+    ⛔ 入参是**已解析的树**，不是源码字符串：调用方要拿这些节点**就地改值**
+       再 `unparse`。若这里内部重新 `ast.parse`，返回的是**另一棵树**的节点
+       ⇒ 赋值改不到调用方那棵树上 ⇒ 修法静默失效（改了个寂寞）。
+
+    ⛔⛔ 这个函数存在的唯一理由，是修掉一个**自洽性 bug**（2026-10-14
+        实测 `scripts/probe_residual_diag.py`）：
+
+        · 变异器 `_Mutator.visit_Constant` 用 `isinstance(v, (int, float))`
+          选点 ⇒ `bool` 是 `int` 的子类 ⇒ `False` 会被选中并被 `+1` 成 `1`；
+        · 修法 `revert_literals` 的收集器却**排除 bool**（原文注释说怕
+          "把 `if x` 变成 `if 1`"）⇒ 两边的常量序列**长度不同**；
+        · 对齐代码取 `min(len(bo), len(go))` ⇒ 从变异点起**后面全部错位**
+          ⇒ 修法把本来正确的常量改坏。这比"修不好"更糟：它污染了没坏的地方。
+
+        选点口径必须**只有一个来源**，否则"修法"就退化成"随机改写器"。
+
+    ⛔ 为什么最终选**包含 bool** 而不是两边都排除：
+        · 包含 bool **不丢任务**：bool 变异题仍能被造出来、也能被修好；
+        · 那个"把 `if x` 变 `if 1`"的担忧不成立 —— 对齐只发生在
+          broken 与 base 的**同一遍历序**之间，而两边树形一致
+          ⇒ 对应位只可能是"同一常量被改坏了"，写回基线值必然正确；
+        · 真正会造成类型错乱的恰恰是**口径不一致导致的错位**，
+          而不是"允许对齐 bool"。
+        · ⛔ 反方向也不行：把变异器改成排除 bool 会**缩小任务空间**
+          （bool 不再是变异点），而 `which` 的编号含义也会变
+          ⇒ 既有账本与基线不可比。所以动修法侧，不动变异器。
+    """
+    return [n for n in ast.walk(tree)
+            if isinstance(n, ast.Constant)
+            and isinstance(n.value, (int, float))]
+
+
+#: ⛔ 默认变异种类**刻意不变**：`which` 是按遍历序的全局编号，加一种算子
+#:    就会让 `which=3` 指向另一个变异点 ⇒ 既有账本与基线全部不可比
+#:    （等于偷偷改了考卷）。要扩种类必须**显式传** `kinds=`，那是新实验。
+DEFAULT_MUTATION_KINDS: Tuple[str, ...] = ("compare", "binop", "constant")
+ALL_MUTATION_KINDS: Tuple[str, ...] = ("compare", "binop", "constant",
+                                       "boolop", "unaryop")
+
+
 class _Mutator(ast.NodeTransformer):
     """AST 级变异（SWE-smith 的 Procedural Mod 的迷你版）。"""
 
-    def __init__(self, which: int = 0):
+    def __init__(self, which: int = 0,
+                 kinds: Iterable[str] = DEFAULT_MUTATION_KINDS):
         self.which = which
+        self.kinds = set(kinds)
         self.seen = 0
         self.done = False
         self.desc = ""
 
     def visit_Compare(self, node: ast.Compare):
         self.generic_visit(node)
+        if "compare" not in self.kinds:
+            return node
         if self.done:
             return node
         self.seen += 1
@@ -769,20 +816,58 @@ class _Mutator(ast.NodeTransformer):
 
     def visit_BinOp(self, node: ast.BinOp):
         self.generic_visit(node)
-        if self.done:
+        if self.done or "binop" not in self.kinds:
             return node
         self.seen += 1
         if self.seen - 1 == self.which:
             old = type(node.op)
             new = _FLIP_OPS.get(old)
+            #: ⛔ `ast.Str` 在 3.8+ 已废弃，parser 不再产生它 ⇒ 这个守卫
+            #:    恒为真（失效）。保留它只为不改动既有行为；真正的边界由
+            #:    `synthesize_tasks` 的 Fail-to-Pass 校验兜底（造不出真失败
+            #:    的变异会被 rejected_no_failure 记掉）。
             if new is not None and not isinstance(node.left, ast.Str):
                 node.op = new()
                 self.done = True
                 self.desc = f"运算符替换 {old.__name__}→{new.__name__}"
         return node
 
+    def visit_BoolOp(self, node):
+        """`and` ↔ `or` 互换 —— **第三个正交维度**。
+
+        ⛔ 它跟前三类正交：只动 `BoolOp.op`，不碰比较符/运算符/常量。
+           于是"会修比较符"的技能修不好它，"会对齐常量"的技能也修不好它
+           ⇒ 它构成了一个**独立的能力维度**，可以用来检验闭环是否真的
+           能长出"第三个技能"（而不是只会二选一）。
+        """
+        self.generic_visit(node)
+        if self.done or "boolop" not in self.kinds:
+            return node
+        self.seen += 1
+        if self.seen - 1 == self.which:
+            old = type(node.op)
+            node.op = ast.Or() if old is ast.And else ast.And()
+            self.done = True
+            self.desc = (f"布尔运算 {old.__name__}→{type(node.op).__name__}")
+        return node
+
+    def visit_UnaryOp(self, node):
+        """`not x` 增删 —— 与 boolop 同族的第四类（默认关闭）。"""
+        self.generic_visit(node)
+        if self.done or "unaryop" not in self.kinds:
+            return node
+        if not isinstance(node.op, ast.Not):
+            return node
+        self.seen += 1
+        if self.seen - 1 == self.which:
+            self.done = True
+            self.desc = "取反 删除 not"
+            return node.value
+        return node
+
     def visit_Constant(self, node: ast.Constant):
-        if self.done or not isinstance(node.value, (int, float)):
+        if self.done or "constant" not in self.kinds \
+                or not isinstance(node.value, (int, float)):
             return node
         self.seen += 1
         if self.seen - 1 == self.which:
@@ -792,14 +877,16 @@ class _Mutator(ast.NodeTransformer):
         return node
 
 
-def mutate_source(source: str, which: int = 0) -> Tuple[str, str]:
+def mutate_source(source: str, which: int = 0,
+                  kinds: Iterable[str] = DEFAULT_MUTATION_KINDS
+                  ) -> Tuple[str, str]:
     """对源码做一次 AST 变异，返回 (新源码, 描述)。
 
     ⛔ 语法错误 ⇒ 抛异常（不静默返回原文）—— 静默返回原文会造出
     "看起来合成成功但什么都没变"的假任务。
     """
     tree = ast.parse(source)
-    m = _Mutator(which)
+    m = _Mutator(which, kinds)
     new_tree = m.visit(tree)
     ast.fix_missing_locations(new_tree)
     if not m.done:
@@ -842,40 +929,70 @@ class SynthesisReport:
 
 
 def synthesize_tasks(env: Environment, max_n: int = 8,
-                     timeout: float = 10.0) -> SynthesisReport:
+                     timeout: float = 10.0, *, depth: int = 1,
+                     kinds: Iterable[str] = DEFAULT_MUTATION_KINDS
+                     ) -> SynthesisReport:
     """从一个环境合成任务实例：**只保留真让测试变红的**（Fail-to-Pass）。
 
     ⛔ yield 必须统计：合成不出任务 = 这个环境没用，得记账，
     不能拿"尝试次数"冒充"任务数"。
+
+    ⛔⛔ **为什么需要 `depth`（多点变异）** —— 这是天花板真正的来源：
+        单点变异题，任何一个对口的单技能都能修好 ⇒ "链能叠加"这件事
+        在题面上**根本测不出来**。只有当一道题同时坏在两个维度上，
+        "装第二个技能会顶掉第一个"才会变成可观测的失败
+        （实测 `probe_growth_ceiling` B 段：flow=0 / lit=0 / chain=1.0）。
+        默认 `depth=1` 保持既有任务集不变 ⇒ 基线可比。
     """
     rep = SynthesisReport()
     before = verify_source(env, timeout=timeout)
     before_names = {c.name for c in before.checks if c.passed}
 
-    for i in range(max_n):
+    def _add(attempted_src: str, desc: str, task_id: str) -> bool:
+        """合成一条候选任务，成功返回 True。"""
         rep.attempted += 1
         try:
-            src, desc = mutate_source(env.source, which=i)
-        except Exception:  # noqa: BLE001
+            after = verify_source(env, source=attempted_src, timeout=timeout)
+        except Exception:                                       # noqa: BLE001
             rep.rejected_error += 1
-            continue
-        try:
-            after = verify_source(env, source=src, timeout=timeout)
-        except Exception:  # noqa: BLE001
-            rep.rejected_error += 1
-            continue
+            return False
         after_names = {c.name for c in after.checks if c.passed}
         broken = tuple(sorted(before_names - after_names))
         if not broken:
+            #: 变异了但测试没变红 ⇒ 不是有效任务（不能拿它充数）
             rep.rejected_no_failure += 1
-            continue
+            return False
         rep.valid += 1
         rep.tasks.append(TaskInstance(
-            task_id=f"{env.env_id}::m{i}",
-            env_id=env.env_id,
-            broken_source=src,
-            desc=desc,
-            fingerprint=content_hash(src)[:16],
-            fail_to_pass=broken,
-        ))
+            task_id=task_id, env_id=env.env_id,
+            broken_source=attempted_src, desc=desc,
+            fingerprint=content_hash(attempted_src)[:16],
+            fail_to_pass=broken))
+        return True
+
+    for i in range(max_n):
+        try:
+            src1, desc1 = mutate_source(env.source, which=i, kinds=kinds)
+        except Exception:                                       # noqa: BLE001
+            rep.rejected_error += 1
+            continue
+        if depth < 2:
+            _add(src1, desc1, f"{env.env_id}::m{i}")
+            continue
+        #: depth >= 2：在单点变异基础上**再变异一次**（不同变异点）
+        got = False
+        for j in range(max_n):
+            if j == i:
+                continue
+            try:
+                src2, desc2 = mutate_source(src1, which=j, kinds=kinds)
+            except Exception:                                   # noqa: BLE001
+                continue
+            if _add(src2, f"{desc1} + {desc2}",
+                    f"{env.env_id}::m{i}+m{j}"):
+                got = True
+                break
+        if not got:
+            #: 造不出二级变异 ⇒ 退回一级（记账如实，不静默丢任务）
+            _add(src1, desc1, f"{env.env_id}::m{i}")
     return rep

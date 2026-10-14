@@ -195,6 +195,34 @@ def _route_value(value: Any) -> Any:
     return value
 
 
+def route_with(routing: Dict[str, Any], kind: str, value: Any,
+               *, append: bool = False) -> Dict[str, Any]:
+    """返回**新** routing 字典：把 `value` 写进 `<kind>` 这条技能链。
+
+    ⛔ 这是路由的**唯一写入处**（与读取侧 `parse_route` 成对）。之前
+    `bind_capability` 自己写了一句 `routing[kind] = key` ⇒ 语义是**覆盖**，
+    而 `apply_gene` 的 append 分支是**追加**，两个写入点各写各的 ⇒
+    绑定一个 UCI 能力会把整条链顶掉（§26.6 记录的遗留边界）。
+    归一化必须只有一个地方，否则"链"是不是链取决于谁写的。
+
+        append=False（默认）⇒ 取代整条链
+        append=True          ⇒ 链尾追加，已在链上的不重复加（幂等）
+    """
+    out = dict(routing or {})
+    cur = list(parse_route(out.get(kind)))
+    if append:
+        for x in parse_route(value):
+            if x not in cur:
+                cur.append(x)
+    else:
+        cur = list(parse_route(value))
+    if not cur:
+        out.pop(kind, None)
+    else:
+        out[kind] = _route_value(cur)
+    return out
+
+
 def apply_gene(h: Harness, gene: Gene) -> Harness:
     """应用一个基因编辑，返回**新** Harness（原对象不受影响）。
 
@@ -236,27 +264,19 @@ def apply_gene(h: Harness, gene: Gene) -> Harness:
     if layer == "routing":
         if len(parts) != 2:
             raise ValueError(f"routing target 需形如 routing.<kind>，实得 {gene.target}")
-        routing = dict(h.routing)
         if gene.op == "remove":
             #: remove 支持"从链上摘掉某一项"，而不是整条路由消失 ——
             #: 摘掉一个技能不该把别的技能一起带走。
-            cur = parse_route(routing.get(parts[1]))
+            cur = list(parse_route(h.routing.get(parts[1])))
             want = str(gene.value or "")
             rest = [x for x in cur if x != want] if want else list(cur)
-            if not rest:
-                routing.pop(parts[1], None)
-            else:
-                routing[parts[1]] = _route_value(rest)
-        elif gene.op == "append":
+            routing = route_with(h.routing, parts[1], rest)
+        else:
             #: append = **能力叠加**（链尾追加），这是 L1 从"单值"升级成
             #: "链"的关键：装一个新技能不再顶掉旧的。
-            cur = list(parse_route(routing.get(parts[1])))
-            for x in parse_route(gene.value):
-                if x not in cur:
-                    cur.append(x)
-            routing[parts[1]] = _route_value(cur)
-        else:
-            routing[parts[1]] = _route_value(gene.value)
+            #: ⛔ 写入统一走 `route_with` —— 这里不再自己拼 list。
+            routing = route_with(h.routing, parts[1], gene.value,
+                                 append=(gene.op == "append"))
         return replace(h, routing=routing)
 
     if layer == "tools":

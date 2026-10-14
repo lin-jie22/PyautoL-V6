@@ -15,7 +15,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -302,13 +302,19 @@ def cmd_rebuild(args: argparse.Namespace) -> int:
 
 
 def cmd_synth(args: argparse.Namespace) -> int:
-    from .environment import Environment, synthesize_tasks, verify_source
+    from .environment import (DEFAULT_MUTATION_KINDS, Environment,
+                              synthesize_tasks, verify_source)
     p = _paths(Path(args.root))
     env = Environment.from_dir(p["task"])
     base = verify_source(env)
     print(f"环境 {env.env_id} fingerprint={env.fingerprint} "
           f"基线通过 {base.n_passed}/{len(base.checks)}")
-    rep = synthesize_tasks(env, max_n=int(args.max))
+    _kinds: Tuple[str, ...] = tuple(
+        x.strip() for x in (getattr(args, "kinds", "") or "").split(",")
+        if x.strip()) or DEFAULT_MUTATION_KINDS
+    rep = synthesize_tasks(env, max_n=int(args.max),
+                           depth=int(getattr(args, "depth", "1") or "1"),
+                           kinds=_kinds)
     print(json.dumps(rep.to_dict(), ensure_ascii=False, indent=2))
     for t in rep.tasks[:5]:
         print(f"  ✓ {t.task_id}  {t.desc}  F2P={list(t.fail_to_pass)}")
@@ -366,7 +372,8 @@ def _verify_fixed(env, broken_src, fixed_src, timeout: float = 10.0):
 
 
 def cmd_evolve(args: argparse.Namespace) -> int:
-    from .environment import Environment, synthesize_tasks
+    from .environment import (DEFAULT_MUTATION_KINDS, Environment,
+                              synthesize_tasks)
     from .evolution import EvolutionConfig, EvolutionLoop
     from .generalization import GeneralizationGate, make_heldout
     from .genome import Harness
@@ -477,8 +484,16 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     #: ⛔ held-out 补采样记录。没有它，"泛化闸判 inconclusive"和
     #:    "held-out 采样不够"在输出里长得一模一样。
     grow_ho_report: Dict[str, Any] = {}
+    #: ⛔⛔ 变异参数**默认与既有口径完全一致**（depth=1 / kinds=默认三种）。
+    #:    `which` 是全局遍历序编号，任何默认行为的改动都会让历史账本
+    #:    与基线不可比 ⇒ 新口径只能由命令行**显式**开启，算作新实验。
+    _kinds: Tuple[str, ...] = tuple(
+        x.strip() for x in (getattr(args, "kinds", "") or "").split(",")
+        if x.strip()) or DEFAULT_MUTATION_KINDS
+    _depth = int(getattr(args, "depth", "1") or "1")
     if args.heldout == "on":
-        rep_ho = synthesize_tasks(envs[ho_name], max_n=int(args.max_tasks))
+        rep_ho = synthesize_tasks(envs[ho_name], max_n=int(args.max_tasks),
+                                  depth=_depth, kinds=_kinds)
         if rep_ho.tasks:
             def _ho_tasks(src_tasks) -> list:
                 return [FrozenTask(task_id=t.task_id,
@@ -501,7 +516,9 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                 #    到顶仍无跨度 ⇒ 才真的报"判别力不足"。
                 g_ho = grow_for_difficulty(
                     envs[ho_name],
-                    lambda n: synthesize_tasks(envs[ho_name], max_n=n).tasks,
+                    lambda n: synthesize_tasks(envs[ho_name], max_n=n,
+                                               depth=_depth,
+                                               kinds=_kinds).tasks,
                     ("easy", "hard"), max_n=int(args.max_tasks))
                 if g_ho["covered"]:
                     ho_src = g_ho["tasks"]
@@ -532,12 +549,13 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     #    让候选为采样不足背锅，效果和"永远不提交"完全一样。
     #    补采样只加题不加判据（合成任务与候选无关），所以它不给任何优待。
     grow_report: Dict[str, Any] = {}
-    rep_synth = synthesize_tasks(envs[dev_name], max_n=int(args.max_tasks))
+    rep_synth = synthesize_tasks(envs[dev_name], max_n=int(args.max_tasks),
+                                 depth=_depth, kinds=_kinds)
     dev_src_tasks = rep_synth.tasks
     if ho_levels:
         g = grow_for_difficulty(
             envs[dev_name], lambda n: synthesize_tasks(
-                envs[dev_name], max_n=n).tasks,
+                envs[dev_name], max_n=n, depth=_depth, kinds=_kinds).tasks,
             ho_levels, max_n=int(args.max_tasks))
         dev_src_tasks = g["tasks"]
         grow_report = {k: v for k, v in g.items() if k != "tasks"}
@@ -571,6 +589,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     pool = {
         "fix_control_flow": "保守通用修法：只恢复控制流（比较/运算），不动字面量",
         "fix_literals": "通用字面量修法：只把数值常量对齐基线，不动结构/字符串",
+        "fix_boolops": "通用布尔运算修法：只把 and/or 对齐基线，不动比较/运算/常量",
         f"patch:{dev_name}": f"定点修法：{dev_name} 整个文件换回基线（换环境即失效）",
     }
     #: ⛔ 三类并列，前两类都是**通用**的（不点名环境），第三类是定点的：
@@ -856,6 +875,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="（保留位）不备份旧库 —— 默认总是备份")
     s = sub.add_parser("synth", help="合成任务并统计 yield")
     s.add_argument("--max", default="8")
+    #: ⛔ 变异参数默认**与既有基线同口径**（depth=1 / 默认三种），
+    #:    显式传参才算新实验 —— 否则历史账本不可比。
+    s.add_argument("--depth", default="1", choices=["1", "2"],
+                   help="变异点数：2 ⇒ 需要【叠加】才能修好")
+    s.add_argument("--kinds", default="",
+                   help="变异种类，逗号分隔：compare,binop,constant,"
+                        "boolop,unaryop")
     m = sub.add_parser("memory", help="记忆库：读数 / 换嵌入后全量重算 / 补记账")
     ms = m.add_subparsers(dest="memory_cmd", required=True)
     ms.add_parser("show", help="打印记忆库完整性读数")
@@ -887,6 +913,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     e.add_argument("--rounds", default="3")
     e.add_argument("--group", default="3")
     e.add_argument("--max-tasks", default="12")
+    e.add_argument("--depth", default="1", choices=["1", "2"],
+                   help="变异深度：1=单点（默认，与既有基线同口径）/ "
+                        "2=双点（需要【叠加】才能修好 ⇒ 抬高天花板）")
+    e.add_argument("--kinds", default="",
+                   help="变异种类，逗号分隔：compare,binop,constant,boolop,"
+                        "unaryop。留空=默认三种（与既有基线同口径）")
     e.add_argument("--capsules", default="both",
                    choices=["both", "general", "narrow"],
                    help="提议池：both=两类都给（定点修法必赢）/ general / narrow")

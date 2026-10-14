@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-10-14T10:31:34",
+  "note": "残差 = 链(control_flow+literals)跑完仍 reward<1 的 hard 题",
+  "rows": [
+    {
+      "env": "textscore",
+      "n_residual": 0,
+      "residual": []
+    },
+    {
+      "env": "eventflow",
+      "n_residual": 0,
+      "residual": []
+    },
+    {
+      "env": "stateflow",
+      "n_residual": 0,
+      "residual": []
+    },
+    {
+      "env": "scheduler",
+      "n_residual": 0,
+      "residual": []
+    }
+  ]
+}

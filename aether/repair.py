@@ -26,7 +26,7 @@ from __future__ import annotations
 import ast
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from .environment import Environment, verify_source
+from .environment import Environment, numeric_literals, verify_source
 
 Repair = Callable[[str, str], str]      # (broken_source, base_source) -> fixed
 
@@ -55,6 +55,10 @@ def revert_control_flow(broken_src: str, base_src: str) -> str:
         return out
 
     bo, go = ops(b), ops(g)
+    if len(bo) != len(go):
+        #: ⛔ 与 `revert_literals` 同一条防线：树形不同 ⇒ 遍历序不可信
+        #:    ⇒ 宁可不动。这里没有"部分对齐"这种折中：错位一次就污染一片。
+        return broken_src
     for i in range(min(len(bo), len(go))):
         kind, node = bo[i]
         ref = go[i][1]
@@ -87,21 +91,51 @@ def revert_literals(broken_src: str, base_src: str) -> str:
     """
     b = ast.parse(broken_src)
     g = ast.parse(base_src)
-
-    def nums(tree):
-        """收集数值常量节点。⛔ 排除 bool：`True` 是 int 的子类，
-        不排除会把 `if x` 变成 `if 1`。"""
-        out = []
-        for n in ast.walk(tree):
-            if isinstance(n, ast.Constant) \
-                    and isinstance(n.value, (int, float)) \
-                    and not isinstance(n.value, bool):
-                out.append(n)
-        return out
-
-    bo, go = nums(b), nums(g)
-    for i in range(min(len(bo), len(go))):
+    #: ⛔⛔ 口径必须与变异器同源（`environment.numeric_literals`）。
+    #:    以前这里**排除 bool** 而变异器不排除 ⇒ 两边序列长度不同
+    #:    ⇒ 下面的对齐会整体错位 ⇒ 把没坏的常量改坏（实测 4 条残差）。
+    #: ⛔ 传**树**不是字符串：必须拿到与 `b`/`g` 同一批节点对象。
+    bo, go = numeric_literals(b), numeric_literals(g)
+    if len(bo) != len(go):
+        #: ⛔ fail-closed：长度不等说明树形已不同，遍历序无法保证对应
+        #:    ⇒ 宁可一条都不改，也不许"错位污染"。
+        return broken_src
+    for i in range(len(bo)):
         bo[i].value = go[i].value
+    ast.fix_missing_locations(b)
+    return ast.unparse(b)
+
+
+def revert_boolops(broken_src: str, base_src: str) -> str:
+    """**通用**布尔运算修法：只把 `and` / `or` 对齐到基线，其余一律不动。
+
+    ⛔⛔ 与另外两个通用修法构成**三个正交维度**（2026-10-14 实测）：
+
+            revert_control_flow ⇒ 比较符 / 运算符
+            revert_literals     ⇒ 数值常量
+            revert_boolops      ⇒ and / or
+
+        "正交"在这里是可判定的：每一维只动自己那一类节点，
+        任取一维修另一维造出来的题 ⇒ reward 必须仍为 0；
+        三者叠加 ⇒ 三类题都能修好。判据来自执行，不来自声明。
+
+    ⛔ 与 `revert_literals` 同理，**刻意不进** `GENERIC_REPAIRS`：
+        难度由"通用修法（= 保守控制流修法）能否修好"定义，
+        把它加进那个集合 ⇒ boolop 题从 hard 变 easy ⇒ 难度跨度消失。
+        它只作为**技能**进 proposer 池，泛不泛化交给 held-out 闸判。
+    """
+    b = ast.parse(broken_src)
+    g = ast.parse(base_src)
+
+    def boolops(tree):
+        return [n for n in ast.walk(tree) if isinstance(n, ast.BoolOp)]
+
+    bo, go = boolops(b), boolops(g)
+    if len(bo) != len(go):
+        #: ⛔ 与另两个修法同一条防线：树形不同 ⇒ 遍历序不可信 ⇒ 不动。
+        return broken_src
+    for i in range(len(bo)):
+        bo[i].op = type(go[i].op)()
     ast.fix_missing_locations(b)
     return ast.unparse(b)
 

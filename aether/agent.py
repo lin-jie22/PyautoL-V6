@@ -37,7 +37,9 @@ from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
 from .environment import Environment, verify_source
 from .genome import parse_route          # 路由语义的唯一解释处（不可另抄一份）
 from .memory import MemoryOS
-from .repair import revert_control_flow, revert_literals   # 唯一事实源（难度分层也用它）
+#: ⛔ 唯一事实源：`revert_control_flow` 难度分层也用它，改动会同时
+#:    改变"什么算 easy"的定义。
+from .repair import revert_boolops, revert_control_flow, revert_literals
 from .verifier import Verdict, error_verdict
 
 #: L0 元规则指令表。**指令是有后果的**，不是注释。
@@ -285,6 +287,10 @@ class HarnessAgent:
             #: ⛔ 它跟 `fix_control_flow` 一样是通用的（不点名环境），
             #:    换环境照样生效 ⇒ 能不能过 held-out 由闸判，不在这里预判。
             return revert_literals(src, env.source), True
+        if strategy == "fix_boolops":
+            #: 第三维：**布尔运算**（and/or）。与前两维修的不是同一类节点，
+            #:    所以既能被单独提名进链，也不该顺手把别的层的题修好。
+            return revert_boolops(src, env.source), True
         if strategy.startswith("patch:"):
             # ⛔ 定点修法必须**校验环境是否匹配**。不校验的话它会在任何环境
             #    都"生效" ⇒ 定点退化成通用 ⇒ 泛化闸再也发现不了它。

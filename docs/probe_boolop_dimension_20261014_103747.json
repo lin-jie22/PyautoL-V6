@@ -1,0 +1,370 @@
+{
+  "generated_at": "2026-10-14T10:37:47",
+  "max_n": 12,
+  "mut_sets": {
+    "compare+binop": [
+      "compare",
+      "binop"
+    ],
+    "constant": [
+      "constant"
+    ],
+    "boolop": [
+      "boolop"
+    ]
+  },
+  "verdict": {
+    "diagonal_all_fixed": true,
+    "off_diagonal_all_zero": true
+  },
+  "diagonal": [
+    [
+      "textscore",
+      "compare+binop",
+      "flow",
+      1.0,
+      3
+    ],
+    [
+      "textscore",
+      "constant",
+      "literals",
+      1.0,
+      2
+    ],
+    [
+      "textscore",
+      "boolop",
+      "boolops",
+      1.0,
+      2
+    ],
+    [
+      "eventflow",
+      "compare+binop",
+      "flow",
+      1.0,
+      7
+    ],
+    [
+      "eventflow",
+      "constant",
+      "literals",
+      1.0,
+      7
+    ],
+    [
+      "eventflow",
+      "boolop",
+      "boolops",
+      1.0,
+      1
+    ],
+    [
+      "stateflow",
+      "compare+binop",
+      "flow",
+      1.0,
+      6
+    ],
+    [
+      "stateflow",
+      "constant",
+      "literals",
+      1.0,
+      7
+    ],
+    [
+      "stateflow",
+      "boolop",
+      "boolops",
+      0.0,
+      0
+    ],
+    [
+      "scheduler",
+      "compare+binop",
+      "flow",
+      1.0,
+      12
+    ],
+    [
+      "scheduler",
+      "constant",
+      "literals",
+      1.0,
+      9
+    ],
+    [
+      "scheduler",
+      "boolop",
+      "boolops",
+      1.0,
+      3
+    ]
+  ],
+  "off_diagonal": [
+    [
+      "textscore",
+      "compare+binop",
+      "literals",
+      0.0,
+      3
+    ],
+    [
+      "textscore",
+      "compare+binop",
+      "boolops",
+      0.0,
+      3
+    ],
+    [
+      "textscore",
+      "constant",
+      "flow",
+      0.0,
+      2
+    ],
+    [
+      "textscore",
+      "constant",
+      "boolops",
+      0.0,
+      2
+    ],
+    [
+      "textscore",
+      "boolop",
+      "flow",
+      0.0,
+      2
+    ],
+    [
+      "textscore",
+      "boolop",
+      "literals",
+      0.0,
+      2
+    ],
+    [
+      "eventflow",
+      "compare+binop",
+      "literals",
+      0.0,
+      7
+    ],
+    [
+      "eventflow",
+      "compare+binop",
+      "boolops",
+      0.0,
+      7
+    ],
+    [
+      "eventflow",
+      "constant",
+      "flow",
+      0.0,
+      7
+    ],
+    [
+      "eventflow",
+      "constant",
+      "boolops",
+      0.0,
+      7
+    ],
+    [
+      "eventflow",
+      "boolop",
+      "flow",
+      0.0,
+      1
+    ],
+    [
+      "eventflow",
+      "boolop",
+      "literals",
+      0.0,
+      1
+    ],
+    [
+      "stateflow",
+      "compare+binop",
+      "literals",
+      0.0,
+      6
+    ],
+    [
+      "stateflow",
+      "compare+binop",
+      "boolops",
+      0.0,
+      6
+    ],
+    [
+      "stateflow",
+      "constant",
+      "flow",
+      0.0,
+      7
+    ],
+    [
+      "stateflow",
+      "constant",
+      "boolops",
+      0.0,
+      7
+    ],
+    [
+      "stateflow",
+      "boolop",
+      "flow",
+      0.0,
+      0
+    ],
+    [
+      "stateflow",
+      "boolop",
+      "literals",
+      0.0,
+      0
+    ],
+    [
+      "scheduler",
+      "compare+binop",
+      "literals",
+      0.0,
+      12
+    ],
+    [
+      "scheduler",
+      "compare+binop",
+      "boolops",
+      0.0,
+      12
+    ],
+    [
+      "scheduler",
+      "constant",
+      "flow",
+      0.0,
+      9
+    ],
+    [
+      "scheduler",
+      "constant",
+      "boolops",
+      0.0,
+      9
+    ],
+    [
+      "scheduler",
+      "boolop",
+      "flow",
+      0.0,
+      3
+    ],
+    [
+      "scheduler",
+      "boolop",
+      "literals",
+      0.0,
+      3
+    ]
+  ],
+  "rows": [
+    {
+      "env": "textscore",
+      "matrix": {
+        "compare+binop": {
+          "n": 3,
+          "flow": 1.0,
+          "literals": 0.0,
+          "boolops": 0.0
+        },
+        "constant": {
+          "n": 2,
+          "flow": 0.0,
+          "literals": 1.0,
+          "boolops": 0.0
+        },
+        "boolop": {
+          "n": 2,
+          "flow": 0.0,
+          "literals": 0.0,
+          "boolops": 1.0
+        }
+      }
+    },
+    {
+      "env": "eventflow",
+      "matrix": {
+        "compare+binop": {
+          "n": 7,
+          "flow": 1.0,
+          "literals": 0.0,
+          "boolops": 0.0
+        },
+        "constant": {
+          "n": 7,
+          "flow": 0.0,
+          "literals": 1.0,
+          "boolops": 0.0
+        },
+        "boolop": {
+          "n": 1,
+          "flow": 0.0,
+          "literals": 0.0,
+          "boolops": 1.0
+        }
+      }
+    },
+    {
+      "env": "stateflow",
+      "matrix": {
+        "compare+binop": {
+          "n": 6,
+          "flow": 1.0,
+          "literals": 0.0,
+          "boolops": 0.0
+        },
+        "constant": {
+          "n": 7,
+          "flow": 0.0,
+          "literals": 1.0,
+          "boolops": 0.0
+        },
+        "boolop": {
+          "n": 0,
+          "flow": 0.0,
+          "literals": 0.0,
+          "boolops": 0.0
+        }
+      }
+    },
+    {
+      "env": "scheduler",
+      "matrix": {
+        "compare+binop": {
+          "n": 12,
+          "flow": 1.0,
+          "literals": 0.0,
+          "boolops": 0.0
+        },
+        "constant": {
+          "n": 9,
+          "flow": 0.0,
+          "literals": 1.0,
+          "boolops": 0.0
+        },
+        "boolop": {
+          "n": 3,
+          "flow": 0.0,
+          "literals": 0.0,
+          "boolops": 1.0
+        }
+      }
+    }
+  ]
+}
