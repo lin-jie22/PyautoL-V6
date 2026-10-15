@@ -255,8 +255,46 @@ def _check_provenance(root: Path, ctx: Dict[str, Any]) -> Check:
                  f"{rec['format_version']}）⇒ 与当前代码兼容")
 
 
+def _check_judge(root: Path, ctx: Dict[str, Any]) -> Check:
+    """判据集身份 + **边界不变量**（变异够不到判据）。
+
+    ⛔ 这是体检里最该有、此前完全没有的一项：账本记下了"被判的东西"
+       （环境指纹、harness id），却没人检查"判它的那段代码"是否还锁得住。
+       · 边界被破坏（某个 target 能改判据）⇒ **fail**：诚实性结构塌了；
+       · 账本里出现**多个判据身份** ⇒ fail：说明存在跨尺子比较的读数；
+       · 只有 `unknown`（升级前存量）⇒ ok 但标注"不可比"。
+    """
+    from . import judge as J
+    try:
+        bound = J.assert_boundary()
+    except RuntimeError as e:
+        return Check("judge.boundary", FAIL, str(e)[:200],
+                     "判据集可被变异寻址 ⇒ 诚实性结构塌了，先修边界")
+    from .ledger import Ledger
+    from .paths import paths as _p
+    led = Ledger(_p(root)["ledger"])
+    reps = []
+    if led.path.exists():
+        for ev in led.iter_events():
+            if ev.kind != "eval.verdict":
+                continue
+            reps.append({"judge_version": (ev.payload or {}).get("judge_version")})
+    cmp_ = J.check_verdict_comparable(reps)
+    if cmp_["state"] == J.INCOMPARABLE:
+        return Check("judge.boundary", FAIL,
+                     f"账本里有 {len(cmp_['versions'])} 种判据身份"
+                     f" ⇒ 存在跨尺子比较：{cmp_['reason'][:120]}",
+                     "同一批结论必须用同一把尺子重跑；跨版本比较不可采信")
+    detail = (f"判据身份 {J.identity()[:16]}；边界完好"
+              f"（{bound['probes_rejected']} 个越界 target 全部被拒）")
+    if cmp_["state"] == J.UNKNOWN:
+        detail += "；账本多为升级前存量 ⇒ 判据身份不可判别（放行但不可跨版本比）"
+    return Check("judge.boundary", OK, detail)
+
+
 CHECKS: List[Callable[[Path, Dict[str, Any]], Check]] = [
-    _check_ledger, _check_provenance, _check_projection, _check_memory,
+    _check_ledger, _check_provenance, _check_judge, _check_projection,
+    _check_memory,
     _check_backup, _check_caps, _check_writable,
 ]
 

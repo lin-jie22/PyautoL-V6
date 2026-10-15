@@ -46,3 +46,9 @@ data/seed/data/*.lock
 #: 这份文件只是"当前待办状态"的便携缓存，可随时由
 #: `aether caps candidates propose` 重建 ⇒ 不进版本库。
 data/candidates.json
+
+#: 判据集变更时留档的旧账本（`scripts/relaunch_ledger.py` 的产物）：
+#: ⛔ **不进版本库**（运行产物），但**也不许删** —— 它是"换尺子之前
+#: 的历史"的唯一凭据。留在本地，按需归档。
+data/ledger.pre-*.jsonl
+data/ledger.v*.jsonl

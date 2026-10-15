@@ -119,6 +119,15 @@ $PY -m aether.cli caps candidates approve --tool radare2 --by 你 --yes
 #   ⛔ 没有 --yes 一律不推进（退出码非 0）；不留名也不批。
 $PY -m aether.cli caps candidates hint --tool radare2        # 给人执行的命令
 #   装完重跑 `caps discover` 复验；每次状态都进账本（cap.candidate）。
+
+# 判据集（尺子）变更之后：**重新发布**，不是删事件
+# ⛔ 判据集有内容寻址身份（`aether/judge.py`）：改一行判据代码，
+#    历史读数与未来读数就**不同尺子** ⇒ 跨尺子比较被拒（doctor 会报）。
+#    出路是"保留前缀 + 留痕 + 断点续新链"，删事件会**断链**（实测过）。
+$PY scripts/relaunch_ledger.py --out data/ledger.v2.jsonl \
+    --reason "为什么换尺子" --by 你            # 默认 dry-run，先看方案
+$PY scripts/relaunch_ledger.py --out data/ledger.v2.jsonl \
+    --reason "为什么换尺子" --by 你 --apply    # 真写新链（不覆盖原账本）
 # ⛔ 为什么不直接自动装（三条都绕不过）：判据必须离线可回归（宪法）、
 #    子进程网络动作被动作级拦下（沙箱）、"自动下载并执行"会跳过
 #    "人审过这份清单"（信任）。详见 aether/caps_candidate.py。
@@ -181,6 +190,7 @@ V6/
 │   ├── _version.py         版本号/格式号的**唯一事实源**
 │   ├── paths.py            目录布局的唯一事实源（cli/serve/doctor 共用）
 │   ├── caps_candidate.py   能力候选：发现 → 闸 → 留痕 → **人批准**（引擎不装）
+│   ├── judge.py            **判据集身份**：尺子有指纹，变异够不到它
 │   ├── learner.py          外部知识摄入（复用记忆闸，不自搞一套）
 │   ├── aging.py            跨轮退化检测（ALE 四类信号）
 │   ├── interop.py          UCI 通用接入层（agent/skill/tool 挂得上叫得动）
@@ -190,7 +200,7 @@ V6/
 │   ├── eventflow/          事件流聚合（会话切分 / 滑动窗口 / 分位数）
 │   ├── stateflow/          状态机（转移 / 合法性 / 可达性 / 路径计数）
 │   └── scheduler/          区间调度（冲突 / 最大并发 / 贪心 / 区间合并）
-├── tests/                  45 个契约测试（RED→GREEN + 反证组；`aether check` 一条命令跑全）
+├── tests/                  46 个契约测试（RED→GREEN + 反证组；`aether check` 一条命令跑全）
 ├── supervisor/             TypeScript 外部监督器（只读账本 + 异常检测）
 ├── console/                零构建的只读可视化控制台
 ├── data/seed/              **种子数据**（随仓库发布的最小现场：小账本 + 记忆）

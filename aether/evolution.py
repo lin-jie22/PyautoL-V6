@@ -43,11 +43,30 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from . import checkpoint as _cp
 from .aging import RoundTrace
 from .genome import Capsule, Harness, apply_capsule, blast_radius, diff
+from .judge import identity as _judge_identity
 from .ledger import Ledger
 from .nongression import FrozenTask, GateResult, NonRegressionGate
 from .runtime import group_relative
 from .store import RunRow, Store
 from .verifier import Verdict
+
+#: 判据集身份的**进程内缓存**：`judge.identity()` 要读 5 个模块的源码，
+#: 每次裁决都算一遍是纯浪费。⛔ 缓存必须是**进程内**的 —— 跨进程缓存会在
+#: 判据代码变更之后继续吐旧身份，而那正是我们要发现的事情。
+_JUDGE_CACHE: Dict[str, str] = {}
+
+
+def _judge_version() -> str:
+    """当前判据集身份（进程内缓存一次）。
+
+    ⛔ 它进每条 `eval.verdict`：账本要能回答"这条读数是用哪把尺子量的"。
+       缺了它，改一行判据代码就会让历史与未来的读数**不可比**，
+       而账本上没有任何字段能发现（见 `aether/judge.py` 的说明）。
+    """
+    if "v" not in _JUDGE_CACHE:
+        _JUDGE_CACHE["v"] = _judge_identity()
+    return _JUDGE_CACHE["v"]
+
 
 Runner = Callable[[Harness, Dict[str, Any]], Verdict]
 
@@ -560,12 +579,20 @@ class EvolutionLoop:
             self._runs.append(row)
             if self.store is not None:
                 self.store.save_run(row, caliber=self.caliber)
+            #: ⛔⛔ 判据集身份**必须进裁决**。此前账本记下了"被判的东西"
+            #:    （环境指纹 `env_fingerprint`、harness 内容寻址 id），
+            #:    却没记下"判它的那段代码" ⇒ 改一行 `verify_source` 的判据，
+            #:    历史读数与未来读数就**不可比**，而账本上没有任何字段能发现。
+            #:    而"零新红""非回归""发展集涨了"全部建立在这把尺子上。
+            #:    ⇒ 每条裁决带上 `judge_version`；跨版本比较由
+            #:      `judge.incomparable` 判"不可比"并**拒绝**。
             self.ledger.append("eval.verdict", {
                 "run_id": run_id,
                 "harness_id": h.harness_id, "task_id": t.task_id,
                 "reward": v.reward, "passed": v.passed,
                 "split": "dev", "tag": tag,
                 "verdict": v.to_dict(), "caliber": self.caliber,
+                "judge_version": _judge_version(),
             }, actor="evolution")
         #: ⛔ 预算计量挂在**唯一评估入口**上：`evaluate_dev` 是所有发展集
         #:    评估的咽喉。逐个调用点各记一次 ⇒ 迟早漏一处 ⇒ 预算少算
