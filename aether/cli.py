@@ -1024,6 +1024,102 @@ def cmd_caps(args) -> int:
     reg = gw.registry
     cmd = getattr(args, "caps_cmd", "list")
 
+    if cmd == "candidates":
+        #: ⛔ 这条链**不下载、不安装**：它生成候选、过闸、留痕，并把
+        #:    "该怎么装"作为**给人的提示**打印出来。真正的安装由人执行
+        #:    （理由见 `aether/caps_candidate.py`）。
+        #: ⛔ 状态**落盘**（`data/candidates.json`）：CLI 每次调用都是新进程，
+        #:    而"批准"是跨调用动作。不落盘时 `validate` 后跑 `approve`
+        #:    会重新生成候选 ⇒ 批准状态丢失 ⇒ `hint` 报 validated。
+        from . import caps_candidate as CC
+        from . import discover as D
+        #: ⛔ 位置**按键取**，不许手拼 `root / "data" / ...`：
+        #:    布局的唯一事实源是 `paths()`（静态闸会抓手拼）。
+        cpath = _paths(Path(args.root))["candidates"]
+        saved = CC.load(cpath)
+        sub = getattr(args, "cand_cmd", "propose")
+
+        def _mk(tool_name: str):
+            tool = next((t for t in D.KNOWN_TOOLS if t.name == tool_name), None)
+            if tool is None:
+                return None, None
+            pr = D.probe(tool)
+            c = CC.from_probe(pr, install_argv=list(tool.install_argv))
+            #: 与已存档状态合并：新探针更新事实，但不把已批准的打回 pending
+            return CC.merge(c, saved.get(tool_name)) if c else None, pr
+
+        if sub == "propose":
+            probes = D.discover()
+            cands = []
+            for t, pr in zip(D.KNOWN_TOOLS, probes):
+                c = CC.from_probe(pr, install_argv=list(t.install_argv))
+                if not c:
+                    continue
+                c = CC.merge(c, saved.get(t.name))
+                cands.append(c)
+                CC.record(led, c)
+            CC.save(cpath, {c.tool: c for c in cands})
+            if getattr(args, "json", False):
+                print(json.dumps([c.to_dict() for c in cands],
+                                 ensure_ascii=False, indent=2))
+                return 0
+            if not cands:
+                print("✅ 没有待办候选：本机没有缺的工具，已有的也都包装了")
+                return 0
+            for c in cands:
+                mark = {"approved": "🟡 已批准（未安装）",
+                        "installed": "✅ 已装（复验过）"}.get(c.state, "· 待过闸")
+                print(f"{mark} {c.tool} [{c.kind}] {c.reason}")
+                if c.verify_hint:
+                    print(f"    ⇒ {c.verify_hint}")
+            print(f"\n候选 {len(cands)} 条 → {cpath}")
+            print("⛔ 下一步：`aether caps candidates validate --tool X`，"
+                  "然后 `approve --tool X --by 你 --yes`")
+            return 0
+
+        if sub in ("validate", "approve", "hint"):
+            c, pr = _mk(args.tool)
+            if c is None:
+                _log.warning(f"[caps] 不认识工具 {args.tool!r}；"
+                             f"已知：{[t.name for t in D.KNOWN_TOOLS]}")
+                return 2
+            if sub == "validate":
+                c = CC.validate(c, probe=pr)
+                saved[c.tool] = c
+                CC.save(cpath, saved)
+                CC.record(led, c)
+                print(json.dumps(c.to_dict(), ensure_ascii=False, indent=2))
+                return 0 if c.gate_passed else 1
+            if sub == "approve":
+                #: ⛔ 先过闸再批准：批一条已知不过闸的提案等于把闸当摆设。
+                c = CC.validate(c, probe=pr)
+                c = CC.approve(c, by=getattr(args, "by", "") or "",
+                               yes=bool(getattr(args, "yes", False)))
+                saved[c.tool] = c
+                CC.save(cpath, saved)
+                CC.record(led, c)
+                if c.state != CC.APPROVED:
+                    _log.warning("[caps] 未推进："
+                                 + (c.gate_reasons[-1] if c.gate_reasons else "?"))
+                    return 1
+                print(f"✅ 已批准（**仍未安装**）：{c.tool} by {c.approved_by}")
+                argv = CC.install_hint(c)
+                if argv:
+                    print("   安装命令（请**人工**执行）：\n     " + " ".join(argv))
+                else:
+                    print("   本系统没给出 install_argv：**不猜包管理器**，"
+                          "请按该工具的官方文档人工装。")
+                print("   装完跑 `aether caps discover` 复验。")
+                return 0
+            argv = CC.install_hint(c)
+            if not argv:
+                print(f"（没有可给的安装命令：候选状态={c.state}。"
+                      f"先 validate + approve --yes；或本系统没给出 "
+                      f"install_argv —— 我们不猜包管理器。）")
+                return 1
+            print(" ".join(argv))
+            return 0
+
     if cmd == "discover":
         #: ⛔ 只**发现**，不下载不安装（见 `aether/discover.py` 的说明）。
         #:    探到的每个工具都带"在哪、哪一版、用什么命令探出来的"。
@@ -1308,6 +1404,25 @@ def build_parser() -> argparse.ArgumentParser:
     dp.add_argument("--json", action="store_true", help="输出结构化发现报告")
     dp.add_argument("--manifest-only", action="store_true",
                     help="只输出清单（便于管进文件），不带报告")
+    #: ⛔ 这条链是"发现 → 候选 → 过闸 → 留痕 → **人批准**"，
+    #:    它存在的理由见 `aether/caps_candidate.py`：直接"去网上找并装"
+    #:    同时踩宪法（判据须离线可回归）、沙箱（网络动作被拦）、
+    #:    信任（自动下载并执行 = 跳过人审）。
+    cg = cs.add_parser(
+        "candidates",
+        help="能力候选：生成 / 过闸 / 批准（**不下载不安装**，安装由人做）")
+    cgs = cg.add_subparsers(dest="cand_cmd", required=True)
+    cgp = cgs.add_parser("propose", help="从本机探针生成候选（缺的工具 / 未包装的）")
+    cgp.add_argument("--json", action="store_true", help="结构化输出")
+    cgv = cgs.add_parser("validate", help="对候选过闸（探针复核 + 白名单 + 非回归 + 可复验）")
+    cgv.add_argument("--tool", required=True, help="工具名（如 ghidra）")
+    cga = cgs.add_parser("approve", help="**人批准**（没有 --yes 一律不推进）")
+    cga.add_argument("--tool", required=True)
+    cga.add_argument("--by", default="", help="批准人（必须留名）")
+    cga.add_argument("--yes", action="store_true",
+                     help="显式批准：本系统不代你决定装什么")
+    cgh = cgs.add_parser("hint", help="打印给人执行的安装命令（本命令不执行它）")
+    cgh.add_argument("--tool", required=True)
     cs.add_parser("list", help="列出已注册能力")
     sh = cs.add_parser("show", help="查看一个能力的声明")
     sh.add_argument("id")

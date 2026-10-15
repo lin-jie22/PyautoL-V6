@@ -30,6 +30,8 @@ from typing import Dict, Tuple, Union
 ROOT: Path = Path(__file__).resolve().parent.parent
 
 DATA_DIRNAME = "data"
+#: 能力候选档案文件名（见 `paths()` 的 `candidates` 键）。
+CANDIDATES_NAME = "candidates.json"
 TASKS_DIRNAME = "tasks"
 BACKUPS_DIRNAME = "backups"
 CONSOLE_DIRNAME = "console"
@@ -91,6 +93,12 @@ def paths(root: Union[str, Path], *, default_env: str = "textscore"
         "rea": r / DATA_DIRNAME / REA_DIRNAME,
         #: 兼容层编译产物（如 `ps`）。同样是投影：缺了就现编。
         "rea_shims": r / DATA_DIRNAME / REA_SHIMS_DIRNAME,
+        #: 能力候选档案。⛔ 它不是事实源（事实源是账本里的
+        #: `cap.candidate` 事件），只是"当前待办状态"的便携缓存 ——
+        #: 但它的**位置**必须和其它数据文件一样只有一处定义：
+        #: 调用方手拼 `root / "data" / "x.json"` 会被静态闸拦下
+        #: （实测踩过：`cli.py` 里手拼一次就被 `contract_entrypoints` 抓了）。
+        "candidates": r / DATA_DIRNAME / CANDIDATES_NAME,
     }
 
 

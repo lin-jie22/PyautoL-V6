@@ -44,7 +44,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 __all__ = ["Tool", "Probe", "KNOWN_TOOLS", "probe", "discover",
            "to_manifest", "report", "which", "extra_search_dirs",
-           "COMMON_BIN_DIRS"]
+           "install_roots", "INSTALL_LAYOUTS", "COMMON_BIN_DIRS"]
 
 def extra_search_dirs() -> List[Path]:
     """PATH 之外**项目约定**的可执行文件目录。
@@ -80,9 +80,60 @@ COMMON_BIN_DIRS: Tuple[Path, ...] = (
     Path("/opt/homebrew/bin"), Path("/usr/local/bin"), Path("/usr/bin"),
 )
 
+#: **安装目录约定**：有些工具不装进 PATH，而是解压到某个"安装根"下，
+#: 真正的可执行文件在它内部的固定相对路径上。
+#: ⛔ 实测（2026-10-15）：本机 `ghidra` 装在
+#:    `~/tools/ghidra_12.1.4_PUBLIC/support/analyzeHeadless`，
+#:    不在 PATH 上 ⇒ 只查 PATH 会把"装了"报成"没装"，
+#:    而 REA 自己的 doctor 明明报 `ghidra: healthy`（两份读数打架）。
+#: ⛔ 只列**可执行文件的相对位置**，不猜版本号：目录名里的版本由探针读出来。
+INSTALL_LAYOUTS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    #: (工具名, 相对于某个安装根目录的候选相对路径)
+    ("analyzeHeadless", ("support/analyzeHeadless",)),
+    ("r2", ("binr/radare2", "bin/radare2")),
+)
+
+
+def install_roots() -> List[Path]:
+    """可能存放"解压式安装"的根目录（逐个扫一层）。
+
+    ⛔ 只扫**用户目录下的约定位置**（`~/tools`、`~/opt`、`~/.local`），
+       不扫全盘：全盘扫描是让一个"发现"命令变成几十分钟的典型做法，
+       而且会把无关目录里的同名文件当成本工具。
+    """
+    out: List[Path] = []
+    for base in (Path.home() / "tools", Path.home() / "opt",
+                 Path.home() / ".local" / "share"):
+        if base.is_dir():
+            out.append(base)
+    return out
+
+
+def _which_in_install_layouts(exe: str) -> str:
+    """在"安装根/某工具目录/相对路径"里找可执行文件（见 `INSTALL_LAYOUTS`）。"""
+    rels = dict(INSTALL_LAYOUTS).get(exe)
+    if not rels:
+        return ""
+    for root in install_roots():
+        try:
+            children = sorted(root.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            if not child.is_dir():
+                continue
+            for rel in rels:
+                cand = child / rel
+                try:
+                    if cand.is_file() and os.access(cand, os.X_OK):
+                        return str(cand)
+                except OSError:
+                    continue
+    return ""
+
 
 def which(exe: str) -> str:
-    """按**统一顺序**找一个可执行文件：PATH → 项目约定 → 常见前缀。
+    """按**统一顺序**找一个可执行文件：PATH → 项目约定 → 安装目录约定 → 常见前缀。
 
     ⛔ 与 `check.find_node` 共用这一份（此前两处各写一遍，结果不一致：
        `node` 在一个模块里是 missing、在另一个模块里找得到）。
@@ -90,6 +141,9 @@ def which(exe: str) -> str:
     found = shutil.which(exe)
     if found:
         return found
+    hit = _which_in_install_layouts(exe)
+    if hit:
+        return hit
     for d in list(extra_search_dirs()) + list(COMMON_BIN_DIRS):
         cand = d / exe
         try:
@@ -123,6 +177,10 @@ class Tool:
     about: str = ""
     #: ⛔ 预置的替代名：同一个工具在不同包管理器下名字不同。
     aliases: Tuple[str, ...] = ()
+    #: **建议**安装命令（给人执行的提示，本系统**不执行**它）。
+    #: ⛔ 空元组表示"我们不知道该怎么装" ⇒ 宁可空着也不猜：
+    #:    猜错会让人装错东西，比不给提示更糟（同族：`version` 抽不到就留空）。
+    install_argv: Tuple[str, ...] = ()
 
 
 @dataclass
@@ -150,12 +208,14 @@ KNOWN_TOOLS: Tuple[Tool, ...] = (
          probe_args=(("-help",), ("--version",)),
          about="反编译/二进制分析（headless 模式）",
          capability={"id": "tool.ghidra", "kind": "tool"},
-         aliases=("ghidra", "ghidraRun")),
+         aliases=("ghidra", "ghidraRun"),
+         install_argv=("brew", "install", "--cask", "ghidra")),
     Tool(name="radare2", exe="r2",
          probe_args=(("-v",), ("-V",)),
          about="逆向工程框架（radare2）",
          capability={"id": "tool.radare2", "kind": "tool"},
-         aliases=("radare2", "rabin2")),
+         aliases=("radare2", "rabin2"),
+         install_argv=("brew", "install", "radare2")),
     Tool(name="objdump", exe="objdump", probe_args=(("--version",),),
          about="binutils 反汇编/目标文件检查",
          capability={"id": "tool.objdump", "kind": "tool"}),

@@ -41,3 +41,8 @@ backups/
 !data/seed/data/ledger.jsonl
 !data/seed/data/memory.json
 data/seed/data/*.lock
+
+#: 能力候选档案（运行产物）：**事实源是账本**（cap.candidate 事件），
+#: 这份文件只是"当前待办状态"的便携缓存，可随时由
+#: `aether caps candidates propose` 重建 ⇒ 不进版本库。
+data/candidates.json

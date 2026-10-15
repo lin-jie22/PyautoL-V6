@@ -108,6 +108,19 @@ $PY -m aether.serve --console console     # → http://127.0.0.1:8611/console/
 $PY -m aether.cli caps --caps capabilities.rea.json list
 $PY -m aether.cli caps discover                  # 探本机已有工具 → 生成能力清单
 $PY -m aether.cli caps discover --out my.json    # 写成文件，之后 --caps my.json
+
+# 能力候选：发现 → 候选 → 过闸 → **人批准** → 人装 → 复验
+# ⛔ 这一串是"想装东西但**不自己装**"的完整路径：引擎不执行安装、
+#    不发网络请求；它只产出提案、过闸、留痕，并把安装命令**交给人**。
+$PY -m aether.cli caps candidates propose                    # 生成本机缺什么
+$PY -m aether.cli caps candidates validate --tool radare2     # 过闸（看原因）
+$PY -m aether.cli caps candidates approve --tool radare2 --by 你 --yes
+#   ⛔ 没有 --yes 一律不推进（退出码非 0）；不留名也不批。
+$PY -m aether.cli caps candidates hint --tool radare2        # 给人执行的命令
+#   装完重跑 `caps discover` 复验；每次状态都进账本（cap.candidate）。
+# ⛔ 为什么不直接自动装（三条都绕不过）：判据必须离线可回归（宪法）、
+#    子进程网络动作被动作级拦下（沙箱）、"自动下载并执行"会跳过
+#    "人审过这份清单"（信任）。详见 aether/caps_candidate.py。
 # ⛔ 这个命令**只发现、不下载不安装**：它探路径与版本、生成清单。
 #    "从网上找了装"是刻意不做的 —— 判据必须离线可回归（宪法）、
 #    子进程的网络动作是动作级拦下的（沙箱）、且"自动下载并执行"
@@ -175,7 +188,7 @@ V6/
 │   ├── eventflow/          事件流聚合（会话切分 / 滑动窗口 / 分位数）
 │   ├── stateflow/          状态机（转移 / 合法性 / 可达性 / 路径计数）
 │   └── scheduler/          区间调度（冲突 / 最大并发 / 贪心 / 区间合并）
-├── tests/                  42 个契约测试（RED→GREEN + 反证组；`aether check` 一条命令跑全）
+├── tests/                  44 个契约测试（RED→GREEN + 反证组；`aether check` 一条命令跑全）
 ├── supervisor/             TypeScript 外部监督器（只读账本 + 异常检测）
 ├── console/                零构建的只读可视化控制台
 ├── data/seed/              **种子数据**（随仓库发布的最小现场：小账本 + 记忆）
