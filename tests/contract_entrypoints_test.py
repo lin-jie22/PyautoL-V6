@@ -38,7 +38,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-ROOT = Path("/Users/linshaojie/V6")
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 FAILS = []

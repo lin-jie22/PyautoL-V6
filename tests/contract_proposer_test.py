@@ -23,7 +23,7 @@ import json
 import sys
 from pathlib import Path
 
-ROOT = Path("/Users/linshaojie/V6")
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from aether.genome import Harness, apply_capsule, apply_gene  # noqa: E402

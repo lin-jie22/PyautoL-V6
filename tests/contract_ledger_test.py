@@ -21,7 +21,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path("/Users/linshaojie/V6")
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 FAILS = []
@@ -361,7 +361,10 @@ def main():
         finally:
             Ledger._read_tail_event = _read_tail
 
-    t3, f3 = _tail_and_full(prod)
+    #: ⛔ 用 tmp 里那份账本，不用生产账本：这一条守的是"反证已还原"，
+    #:    跟"库里攒了多少历史"无关；挂在 prod 上 ⇒ fresh checkout 里会
+    #:    因文件不存在而**抛异常**（那连"跳过"都算不上，是崩）。
+    t3, f3 = _tail_and_full(tmp / "badtail.jsonl")
     ck("G7 反证已还原 ⇒ 恢复等价", t3 == f3, f"tail={t3} full={f3}")
 
     print("\nH 组 · 一次只读请求不许把账本解析多遍")
@@ -373,7 +376,34 @@ def main():
         import aether.ledger as _LG
         from aether.serve import _collect
 
-        n_lines = sum(1 for _ in _LG.Ledger(prod).iter_lines())
+        #: ⛔⛔ **密闭化**（2026-10-15 r37 收口）：分母 `n_lines` 原本取自
+        #:    **生产账本** `data/ledger.jsonl` —— git **不入库**的运行时产物。
+        #:    两个后果，一个比一个糟：
+        #:      ① fresh checkout 里它不存在 ⇒ 分母 ≈ 0 ⇒ "解析次数 / 行数"
+        #:         这个**比值**失真 ⇒ H1 假红，而 H2 这个"反证"反证的是
+        #:         一个**假分母**（实测：worktree @537dda 把 ROOT 改成
+        #:         `__file__` 相对之后，红的正是 H2 —— 红得毫无信息量）；
+        #:      ② 就算存在，那也是**历史累计**。主工作区里它恰好留着，
+        #:         于是 H1 长期"绿"—— 绿的是"曾经攒下过一份账本"，
+        #:         不是"这次请求只解析了一遍"。
+        #:    ⛔ 比值型判据的分母**不许**取自生产数据（README 第 85 条）。
+        #:    ⇒ 改成**自造账本**：行数 N 是我们自己写下去的**已知常量**，
+        #:      于是比值有确定含义，且在**任何检出里都相同**。
+        #:    ⛔ 为什么一个只有 `ledger.jsonl` 的临时 root 就够：`_collect`
+        #:      只从 `paths(root)` 取 `ledger` / `db` / `memory` 三个键，不碰
+        #:      `tasks/`、不碰 skills json；`db` 与 `memory` 缺失时各自**整段
+        #:      跳过**（`store={}` / `runs=[]` / `consistency={}`,
+        #:      `file_ids=None` ⇒ 连记忆对账也跳过）⇒ 三个键里只有账本真的
+        #:      在参与，自造它就能让 `_collect` 完整跑一遍。
+        hroot = tmp / "hroot"
+        (hroot / "data").mkdir(parents=True, exist_ok=True)
+        hled = Ledger(hroot / "data" / "ledger.jsonl")
+        N_LINES = 400          # ⛔ 自造 ⇒ 已知常量，不是历史累计
+        for _i in range(N_LINES):
+            hled.append("probe.kind", {"i": _i, "pad": "x" * 64})
+        n_lines = sum(1 for _ in _LG.Ledger(hled.path).iter_lines())
+        ck("H0 密闭底座：自造账本行数 = 预期（分母错了 ⇒ 比值无意义）",
+           n_lines == N_LINES, f"写入 {N_LINES} 行 / 实读 {n_lines} 行")
         real = _json.loads
         cnt = {"n": 0}
         _LG.json.loads = (lambda s, *a, **k:
@@ -381,7 +411,7 @@ def main():
                            real(s, *a, **k))[1])
         try:
             cnt["n"] = 0
-            _collect(ROOT, limit=200)
+            _collect(hroot, limit=200)
             got = cnt["n"]
         finally:
             _LG.json.loads = real
@@ -410,7 +440,7 @@ def main():
                               (cnt2.__setitem__("n", cnt2["n"] + 1),
                                real2(s, *a, **k))[1])
             try:
-                _collect(ROOT, limit=200)
+                _collect(hroot, limit=200)
                 got2 = cnt2["n"]
             finally:
                 _LG.json.loads = real2
@@ -422,7 +452,7 @@ def main():
            passes2 >= 2.0,
            f"事故版 {got2} 次 = {passes2:.2f} 遍（正常 {passes:.2f} 遍）")
     except Exception as e:  # noqa: BLE001
-        ck("H 组可执行（data/ledger.jsonl 可读且 _collect 能跑）",
+        ck("H 组可执行（自造账本 + _collect 能跑）",
            False, f"{type(e).__name__}: {e}")
 
     # ── I 组：跨语言舍入契约（写入端自己守，不靠"碰巧不在 TS 侧跑"）──

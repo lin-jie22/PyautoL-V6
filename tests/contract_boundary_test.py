@@ -179,31 +179,101 @@ def group_b() -> None:
            f"got={got} base={r1.reward}")
 
 
-# ── C 组：端到端真的被走到（账本事件数）────────────────────────
+# ── C 组：提交路径必须把归因写进账本（密闭：临时账本）────────────
 def group_c() -> None:
-    print("\n【C】端到端：账本里的硬证据")
+    print("\n【C】提交路径的归因记账（密闭：临时账本 + 确定性提交）")
 
-    led = ROOT / "data" / "ledger.jsonl"
-    if not led.exists():
-        ck("C", "C1 账本存在", False, str(led))
-        return
-    n_step = 0
-    n_layer = 0
-    for line in led.read_text(encoding="utf-8",
-                              errors="replace").splitlines():
-        line = line.strip()
-        if not line or "attribution." not in line:
-            continue
-        try:
-            k = json.loads(line).get("kind")
-        except Exception:                               # noqa: BLE001
-            continue
-        if k == "attribution.step":
-            n_step += 1
-        elif k == "attribution.layer":
-            n_layer += 1
-    ck("C", "C1 生产链路产出过 attribution.step（此前恒 0）",
-       n_step > 0, f"step={n_step} layer={n_layer}")
+    #: ⛔⛔ 这里**不再**读 `ROOT/data/ledger.jsonl`。两条理由都要记住：
+    #:   ① 它是 **git 不入库**的运行时产物 ⇒ fresh checkout 里不存在
+    #:      ⇒ 干净检出必红（实测：worktree @537dda9 唯一一条红就是它，
+    #:      而那 100% 是环境差异、不是代码坏了 —— 这种红没有信息量）；
+    #:   ② 它是**历史累计**读数 —— "曾经有过"不等于"现在这条链路还在写"。
+    #: 改成：往**临时账本**里跑一轮**必然提交**的循环，再断言账本内容。
+    #: 「真实链路至今产出过 attribution.step」这类取证归
+    #: `scripts/probe_boundary_audit.py`（它对真实状态问"今天还成立吗"）——
+    #: 契约要**密闭可复现**，取证要**读真实状态**，判据形态本来就不同。
+    import ast
+    import tempfile
+
+    from aether.agent import HarnessAgent
+    from aether.environment import Environment, mutate_source
+    from aether.evolution import EvolutionConfig, EvolutionLoop
+    from aether.ledger import Ledger
+    from aether.nongression import Baseline, FrozenTask, NonRegressionGate
+    from aether.providers import TemplateProposer
+    from aether.verifier import Check, Verdict
+
+    cal = {"seed": 0, "timeout": 10.0}
+
+    def _v(passed: bool) -> Verdict:
+        return Verdict(passed=passed, checks=(Check("c", passed, "ev"),),
+                       evidence={"n": 1})
+
+    tmpc = Path(tempfile.mkdtemp(prefix="v6_bc_"))
+    env = Environment.from_dir(ROOT / "tasks" / "scheduler")
+    broken, _ = mutate_source(ast.parse(env.source), which=0)
+    spec_c = {"env_id": env.env_id, "broken_source": broken,
+              "task_class": "repair", "topic": env.env_id}
+    dev = [FrozenTask(task_id="d1", spec=spec_c)]
+    suite = [FrozenTask(task_id="f1", spec=spec_c)]
+    base = Baseline(caliber=cal, verdicts={"f1": _v(True)}, harness_id="seed")
+    gate = NonRegressionGate(suite, base)
+
+    #: runner 是**可调用包装**（提交决策由它给 ⇒ 确定性，不靠"候选恰好会赢"），
+    #: 而归因那一步用的是 `runner.agent`（**真** HarnessAgent）
+    #: ⇒ 走的是真 replay 路径，不是替身。
+    ag = HarnessAgent(envs={env.env_id: env})
+
+    class _Runner:
+        def __init__(self, agent: Any) -> None:
+            self.agent = agent
+
+        def __call__(self, h: Any, s: Any) -> Any:
+            return _v("restore_from_baseline" in h.skills)
+
+    def _round(attribute_layers: bool) -> Tuple[List[Any], Any]:
+        led = Ledger(tmpc / f"l_{int(attribute_layers)}.jsonl")
+        loop = EvolutionLoop(
+            led, gate, dev, _Runner(ag),
+            TemplateProposer(skills={"restore_from_baseline": "恢复到基线实现"}),
+            store=None, caliber=cal,
+            config=EvolutionConfig(group_size=2,
+                                   attribute_layers=attribute_layers))
+        rep = loop.run_round(
+            Harness(meta_rules="元规则", memory_policy={"recall_topk": 5}),
+            round_no=1)
+        return list(led.events()), rep
+
+    evs, rep = _round(True)
+    kinds = [e.kind for e in evs]
+
+    ck("C", "C1 底座：这一轮**真的提交了**（否则下面全是空真）",
+       bool(rep.improved) and "harness.commit" in kinds,
+       f"improved={rep.improved} kinds={sorted(set(kinds))}")
+
+    #: ⛔ 判据必须是**三态**，不许写成"必须有 attribution.step"：
+    #:    环境不可重放时**正确地**降级成 `_unavailable`（见 C2 的原因），
+    #:    写成"必须有 step"会把**正确的行为**判红。
+    step_evs = [e for e in evs if e.kind == "attribution.step"]
+    unav_evs = [e for e in evs if e.kind == "attribution.step_unavailable"]
+    ck("C", "C2 归因**不许静默**：写 step 或写 _unavailable（二选一），"
+       "不许什么都没有 —— 原缺口正是「端到端 0 次归因事件」",
+       len(step_evs) + len(unav_evs) == 1,
+       f"step={len(step_evs)} unavailable={len(unav_evs)}")
+
+    #: ⛔ 降级也**不许空串冒充**"已确认没有"（§50 那条：声明与实际的落差要记账）。
+    if unav_evs:
+        why = str(unav_evs[0].payload.get("reason")
+                  or unav_evs[0].payload.get("error") or "")
+        ck("C", "C3 降级必须带**非空原因**（不许空串冒充）",
+           bool(why.strip()), f"reason={why[:80]!r}")
+
+    #: ⛔ 反证：闸关掉时一条归因事件都不许有 —— 没有它，"C2 不静默"是恒真的
+    #:    （一个无条件写事件的实现也能过 C2）。
+    evs_off, _ = _round(False)
+    off = [e.kind for e in evs_off if e.kind.startswith("attribution.")]
+    ck("C", "C4 反证：attribute_layers=False ⇒ 0 条归因事件"
+       "（C2 因此不是恒真）", off == [], f"kinds={off}")
 
 
 # ── D 组：观测侧流式 ────────────────────────────────────────────

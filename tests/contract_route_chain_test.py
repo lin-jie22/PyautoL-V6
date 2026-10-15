@@ -35,7 +35,7 @@
 import sys
 from pathlib import Path
 
-ROOT = Path("/Users/linshaojie/V6")
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from aether.environment import Environment, synthesize_tasks   # noqa: E402

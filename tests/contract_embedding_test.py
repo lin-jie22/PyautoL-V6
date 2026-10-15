@@ -28,7 +28,7 @@ margin 下降 ⇒ 闸**拒绝**切换。同一个模型、同一个闸，两侧�
 import sys
 from pathlib import Path
 
-ROOT = Path("/Users/linshaojie/V6")
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from aether.embeddings import (HashingEmbedder, SynonymEmbedder,  # noqa: E402

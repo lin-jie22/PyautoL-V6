@@ -239,19 +239,37 @@ def group_c() -> None:
     #:    而函数一直都在。只有账本里的 `attribution.step` 能证明它跑过。
     led = ROOT / "data" / "ledger.jsonl"
     n_step = 0
+    n_unav = 0
     if led.exists():
         for line in led.read_text(encoding="utf-8", errors="replace"
                                   ).splitlines():
             line = line.strip()
-            if not line or '"attribution.step"' not in line:
+            if not line or "attribution.step" not in line:
                 continue
             try:
-                if json.loads(line).get("kind") == "attribution.step":
-                    n_step += 1
-            except Exception:  # noqa: BLE001
+                k = json.loads(line).get("kind")
+            except Exception:                            # noqa: BLE001
                 continue
-    ck("C", "C3 端到端真的产出过 turn-level 归因（账本 attribution.step > 0）",
-       n_step > 0, f"事件数={n_step}")
+            if k == "attribution.step":
+                n_step += 1
+            elif k == "attribution.step_unavailable":
+                n_unav += 1
+
+    #: ⛔ 这条取证**必须**留在 probe 里：它问的是"真实链路今天还成立吗"，
+    #:    读的正是 git 不入库的运行时账本 —— 这跟契约要"密闭可复现"是
+    #:    **两种判据形态**，不能混（ARCHITECTURE §36.3）。契约侧的密闭版
+    #:    见 `tests/contract_boundary_test.py` C 组。
+    if not led.exists():
+        ck("C", "C3 端到端产出过 turn-level 归因", False,
+           "账本不存在（本检出还没跑过真实循环）⇒ 这是**环境**结论、"
+           "不是代码回归；跑一轮 evolve 后再来看这条")
+    else:
+        ck("C", "C3 端到端产出过 turn-level 归因（账本 attribution.step > 0）",
+           n_step > 0,
+           f"step={n_step} step_unavailable={n_unav}"
+           + ("" if n_step else
+              " ⇒ 全是 _unavailable：环境两次 reward 不一致（不可重放），"
+              "归因**正确地拒绝给数字**，这是设计不是缺口"))
 
 
 # ── D 组：观测侧内存（TS detect 持全量事件）────────────────────────────
