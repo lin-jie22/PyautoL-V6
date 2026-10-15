@@ -70,6 +70,14 @@ def add_root_arg(p: argparse.ArgumentParser, *, suppress: bool = False
        盖掉主 parser 已解析的值 ⇒ `aether --root /x ui` 的 /x 会被
        子命令的默认值（仓库根）悄悄换掉。子命令一律用 `suppress=True`。
     """
+    #: ⛔ **幂等**：同一个 parser 上重复调用必须无害。
+    #:    实测踩过：给每个子命令挂 `--root`（好让 `aether doctor --root X`
+    #:    也能用）时，`_sub` 与容器子命令的路径重合 ⇒
+    #:    `argparse.ArgumentError: argument --root: conflicting option string`，
+    #:    而报错发生在**构造 parser 时** ⇒ 整个 CLI 都起不来。
+    #:    幂等比"调用方记得别重复"可靠（同族：`setdefault` 而不是 `[k]=`）。
+    if any("--root" in a.option_strings for a in p._actions):
+        return
     p.add_argument("--root", default=(argparse.SUPPRESS if suppress
                                       else str(ROOT)), help="V6 根目录")
 

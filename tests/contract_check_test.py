@@ -154,9 +154,19 @@ def main() -> int:
     tmp3 = Path(tempfile.mkdtemp(prefix="v6_check_empty_"))
     (tmp3 / "tests").mkdir()
     rep3 = C.run_checks(tmp3)
-    ck("C6 ⛔ 一份契约都没有 ⇒ 不许报'全绿'（要能被看出来）",
-       rep3["n_scripts"] == 0 and rep3["n_runs"] == 0,
-       f"scripts={rep3['n_scripts']} runs={rep3['n_runs']} ok={rep3['ok']}")
+    #: ⛔ **0 份契约 = 无从判别 ⇒ fail-closed**（与 doctor 的空套件同源）。
+    #:    这条断言最初写的是"n_runs == 0" —— 后来 check 增加了跨语言那一步
+    #:    （0 份契约时仍会跑），于是它转红。但转红暴露的是**真问题**：
+    #:    当时的报告是 `✅ 全部通过：0 份契约` —— 一个"什么都没验"的绿色结论。
+    #:    判据本身为空时必须当失败处理，而不是数一数跑了几个子步骤。
+    ck("C6 ⛔ 一份契约都没发现 ⇒ 判失败（判据为空 ≠ 全绿）",
+       rep3["n_scripts"] == 0 and rep3["empty"] is True
+       and rep3["ok"] is False and rep3["exit_code"] != 0,
+       f"scripts={rep3['n_scripts']} empty={rep3.get('empty')} "
+       f"ok={rep3['ok']} rc={rep3['exit_code']}")
+    ck("C7 ⛔ 且摘要里**明说**是'没发现契约'，不与'全绿'同形",
+       "一份契约都没发现" in C.summarize(rep3),
+       C.summarize(rep3).splitlines()[0])
 
     # ── D 组：子集必须自我标注 ───────────────────────────────────
     print("D 组：子集不许与全量同形")

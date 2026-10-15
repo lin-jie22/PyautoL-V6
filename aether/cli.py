@@ -1187,11 +1187,23 @@ def build_parser() -> argparse.ArgumentParser:
     add_log_args(ap)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("status", help="账本 + 库统计 + 投影一致性")
-    sub.add_parser("verify-chain", help="校验账本哈希链")
+    #: ⛔⛔ `--root` 也必须能在**子命令之后**写。此前只加在顶层 ⇒
+    #:    `aether --root /x doctor` 可以，而 `aether doctor --root /x`
+    #:    直接报 `unrecognized arguments` —— 而后者是所有人的第一直觉
+    #:    （也是文档里"参数跟在命令后面"的常规写法）。用户遇到的是一个
+    #:    "参数不存在"的报错，而参数**是**存在的，只是位置受限。
+    #:    用 `suppress=True` 挂到每个子命令上：不设默认值，就不会盖掉
+    #:    顶层已经解析出的值（见 `entry.add_root_arg` 的说明）。
+    def _sub(name, **kw):
+        sp = sub.add_parser(name, **kw)
+        add_root_arg(sp, suppress=True)
+        return sp
+
+    _sub("status", help="账本 + 库统计 + 投影一致性")
+    _sub("verify-chain", help="校验账本哈希链")
     #: ⛔ `check` 是把"全部验收"收成一条命令的入口：它自己聚合退出码，
     #:    是全仓库**唯一**能回答"这套代码现在算不算通过"的命令。
-    ck = sub.add_parser("check", help="跑完全部契约验收（一条命令、一个退出码）")
+    ck = _sub("check", help="跑完全部契约验收（一条命令、一个退出码）")
     ck.add_argument("--only", default="",
                     help="只跑文件名含该子串的契约（调试用；报告会标注是子集）")
     ck.add_argument("--json", action="store_true", help="输出结构化报告")
@@ -1199,28 +1211,28 @@ def build_parser() -> argparse.ArgumentParser:
                     help="单份契约超时秒数（默认 600；超时记 timeout 而不是失败）")
     ck.add_argument("-j", "--jobs", type=int, default=1,
                     help="并行数（契约各用临时目录，互不写生产状态）")
-    bk = sub.add_parser("backup", help="备份账本/记忆/投影（自带校验和）")
+    bk = _sub("backup", help="备份账本/记忆/投影（自带校验和）")
     bk.add_argument("--to", default="", help="备份存放目录（默认 <root>/backups）")
     bk.add_argument("--note", default="", help="给这份备份写一句备注")
     bk.add_argument("--archive", action="store_true",
                     help="顺便打成单个 .tar.gz（便于传输；备份本身照常保留）")
-    rs = sub.add_parser("restore", help="从备份恢复（默认只演练，--yes 才执行）")
+    rs = _sub("restore", help="从备份恢复（默认只演练，--yes 才执行）")
     rs.add_argument("--from", dest="src", required=True, help="备份目录")
     rs.add_argument("--yes", action="store_true",
                     help="真的执行覆盖（恢复前会自动留一份当前状态）")
-    dc = sub.add_parser("doctor", help="一条命令体检（只读，不改任何东西）")
+    dc = _sub("doctor", help="一条命令体检（只读，不改任何东西）")
     #: ⛔ 默认**不接**外部清单（`NO_CAPS`）：命令行体检的默认口径是
     #:    "只查仓库自带的"，与 UI 默认挂示例清单（`DEFAULT_CAPS`）不同 ——
     #:    两个默认值都在 `entry` 里命名，散在入口里就看不出是刻意的。
     dc.add_argument("--caps", default=NO_CAPS,
                     help="顺带校验能力清单能否装载（未指定 ⇒ 该项记 skipped）")
-    rb = sub.add_parser("rebuild", help="从账本重建 SQLite 投影（库只是视图）")
+    rb = _sub("rebuild", help="从账本重建 SQLite 投影（库只是视图）")
     rb.add_argument("--check", action="store_true",
                     help="只校验投影与账本是否一致，不重建")
     rb.add_argument("--out", default="", help="重建到别的库（默认覆盖 data/aether.db）")
     rb.add_argument("--force", action="store_true",
                     help="（保留位）不备份旧库 —— 默认总是备份")
-    s = sub.add_parser("synth", help="合成任务并统计 yield")
+    s = _sub("synth", help="合成任务并统计 yield")
     s.add_argument("--max", default="8")
     #: ⛔ 变异参数默认**与既有基线同口径**（depth=1 / 默认三种），
     #:    显式传参才算新实验 —— 否则历史账本不可比。
@@ -1229,7 +1241,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--kinds", default="",
                    help="变异种类，逗号分隔：compare,binop,constant,"
                         "boolop,unaryop")
-    m = sub.add_parser("memory", help="记忆库：读数 / 换嵌入后全量重算 / 补记账")
+    m = _sub("memory", help="记忆库：读数 / 换嵌入后全量重算 / 补记账")
     ms = m.add_subparsers(dest="memory_cmd", required=True)
     ms.add_parser("show", help="打印记忆库完整性读数")
     ms.add_parser("backfill",
@@ -1246,7 +1258,7 @@ def build_parser() -> argparse.ArgumentParser:
     mp.add_argument("--max-notes", default="10000", help="容量上限")
     mp.add_argument("--min-trust", default="0.05", help="低于此信任度即剪")
     mp.add_argument("--stale-days", default="30", help="未访问超过这么多天且零访问即剪")
-    c = sub.add_parser("caps", help="接入层：列出 / 查看 / 调用 agents 与 skills")
+    c = _sub("caps", help="接入层：列出 / 查看 / 调用 agents 与 skills")
     c.add_argument("--caps", default=NO_CAPS,
                    help="能力清单 JSON（不传则只显示源码内注册的能力）")
     cs = c.add_subparsers(dest="caps_cmd", required=True)
@@ -1259,7 +1271,7 @@ def build_parser() -> argparse.ArgumentParser:
     ld = cs.add_parser("load", help="装载能力清单并报告每条成败")
     ld.add_argument("manifest")
 
-    e = sub.add_parser("evolve", help="跑 self-harness 进化")
+    e = _sub("evolve", help="跑 self-harness 进化")
     e.add_argument("--rounds", default="3")
     e.add_argument("--group", default="3")
     e.add_argument("--max-tasks", default="12")
@@ -1306,7 +1318,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "（否则账本里会出现两个「第 3 轮」）。"
                         "⛔ 换尺子 / 换配置 / 账本回退 ⇒ 拒绝并说明是哪一种。")
 
-    u = sub.add_parser("ui", help="起 API + 控制台，并打开桌面窗口")
+    u = _sub("ui", help="起 API + 控制台，并打开桌面窗口")
     #: ⛔ 与 `aether.ui` **同一份**参数声明（`entry.add_serve_args`）。
     #:    手写一遍就必然漂移 —— 漂移的表现是"CLI 认这个开关、UI 不认"，
     #:    而两边的 help 都还写着"支持"。

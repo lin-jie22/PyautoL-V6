@@ -42,7 +42,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 __all__ = ["PASS", "FAIL", "SKIP", "TIMEOUT", "ERROR",
-           "Run", "discover", "supports_e2e", "run_checks", "summarize"]
+           "Run", "discover", "supports_e2e", "run_checks", "summarize",
+           "find_node", "cross_language"]
 
 PASS = "pass"
 FAIL = "fail"
@@ -77,6 +78,73 @@ class Run:
                 "status": self.status, "rc": self.rc,
                 "seconds": round(self.seconds, 2),
                 "reason": self.reason, "tail": self.tail}
+
+
+def find_node() -> Optional[str]:
+    """找 node 可执行文件（PATH → 项目约定路径 → 常见前缀）。
+
+    ⛔ 与 `tests/contract_traceability_test.py` 的 `_find_node` **同顺序**：
+       两处各写一份查找逻辑就会漂移（一处找得到、另一处找不到 ⇒
+       "跨语言对账跑不跑"取决于你用哪条命令）。
+    ⛔ 只查找、不安装、不下载：找到才跑，找不到就**明确报告未跑**。
+    """
+    import os
+    import shutil
+    found = shutil.which("node")
+    if found:
+        return found
+    cands: List[Path] = []
+    base = Path.home() / ".workbuddy" / "binaries" / "node" / "versions"
+    if base.is_dir():
+        cands += [d / "bin" / "node" for d in sorted(base.iterdir())]
+    cands += [Path("/opt/homebrew/bin/node"), Path("/usr/local/bin/node"),
+              Path("/Applications/DeepSeek Harness.app/Contents/Resources/"
+                   "runtime/primary-runtime/dependencies/node")]
+    for c in cands:
+        if c.is_file() and os.access(c, os.X_OK):
+            return str(c)
+    return None
+
+
+def cross_language(root: Path, timeout_s: float = 300.0) -> Run:
+    """跑一次 TS 监督器的 selfcheck（跨语言一致性）。
+
+    ⛔⛔ 为什么它必须在 `check` 里：跨语言对账此前**只**由
+       `contract_traceability_test` 的一步覆盖，而那一步在本机（node 不在
+       PATH 上）会走"找不到 node"分支。也就是说 CI 里很可能**整条跨语言
+       判据都没跑，而验收报告仍然全绿** —— 这正是本项目最恨的形态
+       （"没跑"伪装成"跑过了没问题"）。
+       ⇒ 把它提成 `check` 的**显式一步**：跑了就是 pass/fail，
+          node 不在就是 skip **并写明原因**（skip ≠ pass）。
+    """
+    node = find_node()
+    if node is None:
+        return Run("supervisor/selfcheck.ts", "cross-language", SKIP, None, 0.0,
+                   reason="找不到 node ⇒ 跨语言一致性**未验证**（未跑 ≠ 通过）"
+                          "；装 Node ≥22 或用 node 的绝对路径重跑")
+    sup = root / "supervisor"
+    if not (sup / "src" / "selfcheck.ts").is_file():
+        return Run("supervisor/selfcheck.ts", "cross-language", SKIP, None, 0.0,
+                   reason=f"没有 {sup / 'src' / 'selfcheck.ts'}")
+    t0 = time.time()
+    try:
+        p = subprocess.run([node, "src/selfcheck.ts"], cwd=str(sup),
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        return Run("supervisor/selfcheck.ts", "cross-language", TIMEOUT, None,
+                   time.time() - t0, reason=f"超过 {timeout_s:.0f}s 未结束")
+    except OSError as e:
+        return Run("supervisor/selfcheck.ts", "cross-language", ERROR, None,
+                   time.time() - t0, reason=f"{type(e).__name__}: {e}")
+    secs = time.time() - t0
+    out = (p.stdout or b"").decode("utf-8", "replace")
+    tail = "\n".join(out.strip().splitlines()[-4:])[:400]
+    if p.returncode == 0:
+        return Run("supervisor/selfcheck.ts", "cross-language", PASS, 0, secs,
+                   tail=tail)
+    return Run("supervisor/selfcheck.ts", "cross-language", FAIL, p.returncode,
+               secs, reason=f"退出码 {p.returncode}", tail=tail)
 
 
 def discover(root: Path) -> List[Path]:
@@ -145,7 +213,8 @@ def run_checks(root: str | Path,
                only: Optional[str] = None,
                modes: Sequence[str] = ("default", "e2e"),
                timeout_s: float = DEFAULT_TIMEOUT_S,
-               jobs: int = 1) -> Dict[str, Any]:
+               jobs: int = 1,
+               cross_lang: bool = True) -> Dict[str, Any]:
     """跑一遍验收，返回结构化报告。
 
     `only`：只跑文件名包含该子串的契约（调试用，报告里会写明是子集）。
@@ -183,6 +252,10 @@ def run_checks(root: str | Path,
                                plan))
     else:
         runs = [_one(s, m, root_p, timeout_s) for s, m in plan]
+    if cross_lang and not only:
+        #: ⛔ 只在**全量**时跑：跨语言对账是"整体验收"的一环，
+        #:    调一份具体契约时（`--only`）跑它只是浪费。
+        runs.append(cross_language(root_p))
     n = {k: sum(1 for r in runs if r.status == k)
          for k in (PASS, FAIL, SKIP, TIMEOUT, ERROR)}
     return {
@@ -199,8 +272,15 @@ def run_checks(root: str | Path,
         #: ⛔ 成败只看 fail/timeout/error —— **skip 不算通过**，
         #:    但它也不该让整条命令红（那是"不可判别 ≠ 有罪"）。
         #:    未声明 e2e 同样不拦，但必须在报告里可见。
-        "ok": (n[FAIL] == 0 and n[TIMEOUT] == 0 and n[ERROR] == 0),
-        "exit_code": 0 if (n[FAIL] == 0 and n[TIMEOUT] == 0
+        #: ⛔⛔ **0 份契约 = 无从判别 ⇒ fail-closed**（与 doctor 的
+        #:    "空套件不许恒绿"同源）。实测踩过：临时根目录下 0 份契约时
+        #:    报告是 `✅ 全部通过：0 份契约` —— 一个"什么都没验"的绿色
+        #:    结论，与"全量验过"在输出上几乎同形。契约测试是这套系统的
+        #:    判据本身，判据为空必须当失败处理。
+        "empty": len(scripts) == 0,
+        "ok": (bool(scripts) and n[FAIL] == 0 and n[TIMEOUT] == 0
+               and n[ERROR] == 0),
+        "exit_code": 0 if (scripts and n[FAIL] == 0 and n[TIMEOUT] == 0
                            and n[ERROR] == 0) else 1,
     }
 
@@ -209,7 +289,10 @@ def summarize(rep: Dict[str, Any]) -> str:
     """人读摘要（**结论先行**，细节在 `--json` 里）。"""
     c = rep["counts"]
     lines: List[str] = []
-    head = "✅ 全部通过" if rep["ok"] else "❌ 有未通过项"
+    if rep.get("empty"):
+        head = "❌ 一份契约都没发现（无从判别 ⇒ 按失败处理）"
+    else:
+        head = "✅ 全部通过" if rep["ok"] else "❌ 有未通过项"
     lines.append(f"{head}：{rep['n_scripts']} 份契约，"
                  f"{rep['n_runs']} 次执行 "
                  f"(pass={c[PASS]} fail={c[FAIL]} skip={c[SKIP]} "
@@ -229,6 +312,11 @@ def summarize(rep: Dict[str, Any]) -> str:
                      f"（未声明 ≠ 只有一种模式）⇒ 只按默认模式跑："
                      + "、".join(rep["undeclared_modes"][:6])
                      + ("…" if len(rep["undeclared_modes"]) > 6 else ""))
+    #: ⛔ 跨语言那一步被跳过时**必须单独点名**：它是"唯一事实源在两端
+    #:    算不算同一个东西"的判据，混在总数里最容易被忽略。
+    for r in rep["runs"]:
+        if r["mode"] == "cross-language" and r["status"] == SKIP:
+            lines.append(f"⚠️ 跨语言一致性**未验证**：{r['reason']}")
     if rep["e2e_not_supported"]:
         lines.append(f"ℹ️ {len(rep['e2e_not_supported'])} 份契约声明不支持 "
                      f"--e2e ⇒ 未跑第二遍（省下的不是覆盖，是重复）")

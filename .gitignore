@@ -31,3 +31,13 @@ data/rea_shims/
 
 # 备份产物（含唯一事实源副本）：不进版本库，doctor 会检查它存不存在
 backups/
+
+#: ⛔ 例外：**种子数据要进版本库**。上面把 data/*.jsonl / *.db / *.json
+#:    全排除了（运行产物不该提交），但那样 `git clone` 得到的是
+#:    "没有事实源的系统" —— 体检报"账本不存在"、demo 跑不起来。
+#:    种子是一份**小而有出处**的最小现场，专门用来被发布。
+!data/seed/
+!data/seed/data/
+!data/seed/data/ledger.jsonl
+!data/seed/data/memory.json
+data/seed/data/*.lock

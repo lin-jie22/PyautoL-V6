@@ -136,6 +136,10 @@ V6/
 │   ├── checkpoint.py       断点续跑（轮号接续 + 换环境拒绝）
 │   ├── backup.py           备份/恢复（唯一事实源此前无退路）
 │   ├── doctor.py           一条命令体检（三态：ok / fail / skipped）
+│   ├── check.py            全量验收（一条命令、五态、**聚合退出码**）
+│   ├── provenance.py       账本出处（谁写的、按哪版格式写）
+│   ├── _version.py         版本号/格式号的**唯一事实源**
+│   ├── paths.py            目录布局的唯一事实源（cli/serve/doctor 共用）
 │   ├── learner.py          外部知识摄入（复用记忆闸，不自搞一套）
 │   ├── aging.py            跨轮退化检测（ALE 四类信号）
 │   ├── interop.py          UCI 通用接入层（agent/skill/tool 挂得上叫得动）
@@ -148,6 +152,7 @@ V6/
 ├── tests/                  40 个契约测试（RED→GREEN + 反证组；`aether check` 一条命令跑全）
 ├── supervisor/             TypeScript 外部监督器（只读账本 + 异常检测）
 ├── console/                零构建的只读可视化控制台
+├── data/seed/              **种子数据**（随仓库发布的最小现场：小账本 + 记忆）
 ├── scripts/demo_evolve.py  端到端 demo + 报告
 ├── scripts/ab_generalization.py  泛化闸单变量对照实验（A/B/C/D 四组）
 ├── scripts/embedding_bench.py    嵌入判别力对照（中/英）+ 选型闸裁决
