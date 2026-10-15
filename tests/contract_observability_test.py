@@ -296,6 +296,10 @@ print("== G 组：held-out 判别力必须**进观测侧**（不是只在 JSON �
 import re  # noqa: E402
 import subprocess  # noqa: E402
 
+#: ⛔ 声明这份契约支持哪些模式（`aether check` 静态读这一行）：
+#:    未声明 ≠ 只有一种模式 —— 前者是"还没接线"，报告里会被点名。
+SUPPORTED_MODES = ("default",)
+
 NODE = os.environ.get("V6_NODE", "/Users/linshaojie/.workbuddy/binaries/node"
                                 "/versions/22.22.2-6/bin/node")
 CONSOLE = ROOT / "console" / "index.html"

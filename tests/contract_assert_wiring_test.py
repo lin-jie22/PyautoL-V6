@@ -35,6 +35,10 @@ import textwrap
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+#: ⛔ 声明这份契约支持哪些模式（`aether check` 静态读这一行）：
+#:    未声明 ≠ 只有一种模式 —— 前者是"还没接线"，报告里会被点名。
+SUPPORTED_MODES = ("default",)
+
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
 sys.path.insert(0, str(ROOT))

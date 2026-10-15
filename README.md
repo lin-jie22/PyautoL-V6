@@ -45,11 +45,20 @@ $PY scripts/demo_evolve.py         # 端到端 demo + 出报告
 $PY scripts/llm_e2e.py --rounds 3  # 真模型端到端：跑通 vs 赢过
 $PY scripts/llm_e2e.py --no-llm    # 离线对照组（模板提议器）
 
-# 契约测试（含反证组）—— ⛔ **两种模式都要跑**
-# e2e 组默认跳过；只跑默认模式等于把最重的那几组永久关掉
-# （实测：e2e 组因接口变更坏掉而无人发现，就是因为它从没被跑过）
-$PY scripts/run_contracts.py -j 4       # 统一 runner：汇总 + 诚实退出码
-for t in tests/contract_*_test.py; do $PY $t; $PY $t --e2e; done
+# 契约测试（含反证组）—— ⛔ **一条命令，一个退出码**
+# ⛔⛔ 以前这里是一句 shell `for` 循环。它**不是闸**：没有失败聚合 ⇒
+#    退出码 = 最后一次迭代 ⇒ 中间任何一份契约变红都被吞掉；
+#    而且 `--e2e` 被传给不支持的契约 ⇒ 几十次纯重复。
+#    现在判据只有一份（`aether/check.py`），下面两条命令共用它。
+$PY -m aether.cli check -j 4            # ← 全量验收（含 --e2e 与五态分类）
+$PY scripts/run_contracts.py -j 4       # ← 同一判据的薄壳（默认并行）
+
+# `check` 的五态：pass / fail / timeout / error / skip
+#   · 任何 fail/timeout/error ⇒ 整条命令退出码非 0（真闸）
+#   · skip 不算通过、也不拦（"不可判别 ≠ 有罪"），但报告里必须可见
+#   · `--only X` 只跑子集 ⇒ 报告**明说**是子集，不与"全绿"同形
+# ⛔ 每份契约用 `SUPPORTED_MODES = ("default", "e2e")` 声明自己支持哪些
+#    模式；**未声明 ≠ 只有一种模式**（前者是"没接线"，报告要点名）。
 
 # 运维面（r34 补齐）
 $PY -m aether.cli doctor                # 一条命令体检（只读）
@@ -132,7 +141,7 @@ V6/
 │   ├── eventflow/          事件流聚合（会话切分 / 滑动窗口 / 分位数）
 │   ├── stateflow/          状态机（转移 / 合法性 / 可达性 / 路径计数）
 │   └── scheduler/          区间调度（冲突 / 最大并发 / 贪心 / 区间合并）
-├── tests/                  36 个契约测试（RED→GREEN + 反证组；默认与 --e2e 两种模式都要跑）
+├── tests/                  37 个契约测试（RED→GREEN + 反证组；`aether check` 一条命令跑全）
 ├── supervisor/             TypeScript 外部监督器（只读账本 + 异常检测）
 ├── console/                零构建的只读可视化控制台
 ├── scripts/demo_evolve.py  端到端 demo + 报告

@@ -1,94 +1,73 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""契约测试的统一 runner。
+"""契约测试的统一 runner —— **`aether check` 的薄壳**。
 
-═══ 为什么需要一个 runner ═══
+═══ 为什么存在 ═══
 
-此前 24 个契约**没有统一入口**：README 里给的是一句 shell `for` 循环，
-而 24 个文件里只有一部分带 `__main__` 自测块。于是：
+此前 36 个契约**没有统一入口**：README 给的是一句 shell `for` 循环，
+而那句循环**不是闸** —— 没有失败聚合 ⇒ 退出码等于最后一次迭代 ⇒
+中间任何一份契约变红都被吞掉，整轮照样"成功"。而 V6 的第一条命题是
+"每一次自我修改都必须能被独立证伪"，验证这个命题的动作本身却不可信。
 
-  · 跑没跑全，取决于那句 for 循环有没有被复制对；
-  · 红了的那个文件名要自己从滚动输出里找；
-  · 没有"一共多少、绿多少、耗时多少"的汇总 ⇒ CI 拿不到一个可判的退出码
-    （而这正是契约存在的意义：它们是**判据**，不是参考）。
+⛔⛔ 本文件**不再自己实现判据**（2026-10-15 收敛）。此前存在两套 runner：
 
-⛔ runner 自己也要守同一条纪律：**退出码必须诚实**。
-只要有一个契约红 ⇒ 退出 1。汇总里同时给出"被跳过（无 __main__）"的
-文件清单 —— 跳过 ≠ 通过，不说出来就会被当成"都跑过了"。
+    scripts/run_contracts.py   只跑默认模式（不读 `SUPPORTED_MODES`）
+    aether/check.py            两种模式 + 五态分类 + 结构化报告
+
+两套 ⇒ 两份计数口径 ⇒ "跑过了"取决于你用了哪条命令。这与本项目反复惩罚的
+"判据有两份实现就等于没有判据"是同一个病。现在**判据只有一份**
+（`aether.check`），本文件只保留一个便利：默认并行 + 人类友好的输出。
 
 用法：
-    python scripts/run_contracts.py              # 跑全部（串行，稳）
-    python scripts/run_contracts.py -j 4         # 并行（各契约互不写生产状态）
-    python scripts/run_contracts.py --filter checkpoint
+    python scripts/run_contracts.py              # 并行 4（默认）
+    python scripts/run_contracts.py -j 1         # 串行（稳，便于读输出）
+    python scripts/run_contracts.py --filter ledger
+    python scripts/run_contracts.py --json       # 与 `aether check --json` 同构
 """
 from __future__ import annotations
 
 import argparse
-import subprocess
+import json
 import sys
-import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-TESTS = ROOT / "tests"
-
-
-def _run_one(py: str, f: Path) -> dict:
-    t0 = time.time()
-    try:
-        r = subprocess.run([py, str(f)], cwd=str(ROOT),
-                           capture_output=True, text=True, timeout=900)
-        out = (r.stdout or "") + (r.stderr or "")
-        return {"file": f.name, "rc": r.returncode,
-                "sec": round(time.time() - t0, 1),
-                "tail": out.strip().splitlines()[-1] if out.strip() else "",
-                "out": out}
-    except subprocess.TimeoutExpired:
-        return {"file": f.name, "rc": 124, "sec": round(time.time() - t0, 1),
-                "tail": "超时（>900s）", "out": ""}
+sys.path.insert(0, str(ROOT))
 
 
 def main(argv=None) -> int:
+    from aether import check as C
+
     ap = argparse.ArgumentParser(prog="run_contracts")
-    ap.add_argument("-j", "--jobs", type=int, default=1, help="并行数（默认 1）")
-    ap.add_argument("--filter", default="", help="只跑名字含这个串的契约")
-    ap.add_argument("--verbose", action="store_true", help="红的契约打出全文")
+    ap.add_argument("-j", "--jobs", type=int, default=4,
+                    help="并行数（默认 4；契约各用临时目录，互不写生产状态）")
+    #: ⛔ 保留原参数名 `--filter` 并同时接受 `--only`：改掉参数名会让
+    #:    README/CI 里已写好的命令行**静默失效**（argparse 直接报错反而是
+    #:    好事，怕的是被当成"跑过了"）。
+    ap.add_argument("--filter", "--only", dest="only", default="",
+                    help="只跑名字含这个串的契约")
+    ap.add_argument("--json", action="store_true", help="输出结构化报告")
+    ap.add_argument("--verbose", action="store_true",
+                    help="逐份契约打印一行（默认只打失败项与结论）")
+    ap.add_argument("--timeout", type=float, default=C.DEFAULT_TIMEOUT_S,
+                    help="单份契约超时秒数（超时记 timeout，不是失败）")
     args = ap.parse_args(argv)
 
-    files = sorted(TESTS.glob("contract_*_test.py"))
-    if args.filter:
-        files = [f for f in files if args.filter in f.name]
-    if not files:
-        print(f"❌ 没有匹配的契约：{args.filter or '(空)'}")
-        return 2
-
-    py = sys.executable
-    t0 = time.time()
-    if args.jobs > 1:
-        with ThreadPoolExecutor(max_workers=args.jobs) as ex:
-            results = list(ex.map(lambda f: _run_one(py, f), files))
-    else:
-        results = [_run_one(py, f) for f in files]
-
-    green = [r for r in results if r["rc"] == 0]
-    red = [r for r in results if r["rc"] != 0]
-    icons = {0: "✅", 124: "⏱️ "}
-    for r in results:
-        print(f"{icons.get(r['rc'], '❌')} {r['file']:<38} {r['sec']:>6.1f}s  "
-              f"{r['tail'][:60]}")
-    print()
-    print(f"总计 {len(results)} 个契约：{len(green)} 绿 / {len(red)} 红"
-          f"（{round(time.time() - t0, 1)}s）")
-    if red:
-        print("\n红的契约：")
-        for r in red:
-            print(f"  ❌ {r['file']} (rc={r['rc']})")
-            if args.verbose:
-                print(r["out"][-4000:])
-        return 1
-    print("✅ 全部契约通过")
-    return 0
+    rep = C.run_checks(ROOT, only=args.only or None, timeout_s=args.timeout,
+                       jobs=max(1, args.jobs))
+    if args.json:
+        print(json.dumps(rep, ensure_ascii=False, indent=2))
+        return int(rep["exit_code"])
+    if args.verbose:
+        icons = {"pass": "✅", "fail": "❌", "timeout": "⏱️ ",
+                 "error": "💥", "skip": "⏭️ "}
+        for r in rep["runs"]:
+            print(f"{icons.get(r['status'], '?')} {r['script']:<40} "
+                  f"[{r['mode']:<7}] {r['seconds']:>6.1f}s  "
+                  f"{r['reason'] or r['tail'][:50]}")
+        print()
+    print(C.summarize(rep))
+    return int(rep["exit_code"])
 
 
 if __name__ == "__main__":

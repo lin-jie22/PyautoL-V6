@@ -265,6 +265,10 @@ from aether.interop import (CapabilitySpec, Gateway, ParamSpec,   # noqa: E402
                             Registry, bind_capability)
 from aether.verifier import Check                                 # noqa: E402
 
+#: ⛔ 声明这份契约支持哪些模式（`aether check` 静态读这一行）：
+#:    未声明 ≠ 只有一种模式 —— 前者是"还没接线"，报告里会被点名。
+SUPPORTED_MODES = ("default",)
+
 h0 = H("fix_control_flow")
 h_bind = bind_capability(h0, "ext.litfix", "外部字面量修法",
                          route_from="repair")

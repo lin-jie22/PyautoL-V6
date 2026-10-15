@@ -596,6 +596,10 @@ ck("I12 ⛔ 同源对拍：CLI 与 HTTP 装载同一清单 ⇒ fingerprint 相�
    f"cli={_gw.registry.fingerprint} http={b.get('fingerprint')}")
 
 import shutil as _sh  # noqa: E402
+
+#: ⛔ 声明这份契约支持哪些模式（`aether check` 静态读这一行）：
+#:    未声明 ≠ 只有一种模式 —— 前者是"还没接线"，报告里会被点名。
+SUPPORTED_MODES = ("default",)
 _sh.rmtree(_td, ignore_errors=True)
 S.Handler.caps_hot = False
 S.Handler.gateway = None

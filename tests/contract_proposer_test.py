@@ -298,6 +298,10 @@ ck("G4 但技能词表必须给（那是**接口**，不是答案）",
 
 #: 反证：diagnostics 暴露注入了什么
 from aether.providers import LLMProposer  # noqa: E402
+
+#: ⛔ 声明这份契约支持哪些模式（`aether check` 静态读这一行）：
+#:    未声明 ≠ 只有一种模式 —— 前者是"还没接线"，报告里会被点名。
+SUPPORTED_MODES = ("default", "llm")
 p_diag = LLMProposer(None, heldout_note="x", route_keys=("repair",))
 p_diag.last_rejected = [("add_textscore_skill", "overfit")]
 d = p_diag.diagnostics()

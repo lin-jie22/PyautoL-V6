@@ -201,6 +201,10 @@ print("\n=== E 反证组（判据必须有判别力）===")
 
 import aether.aging as AG
 
+#: ⛔ 声明这份契约支持哪些模式（`aether check` 静态读这一行）：
+#:    未声明 ≠ 只有一种模式 —— 前者是"还没接线"，报告里会被点名。
+SUPPORTED_MODES = ("default",)
+
 # E1 事故版：判据退化为"永远健康" ⇒ 衰减轨迹必须被误判为健康
 _orig = AG.detect_aging
 

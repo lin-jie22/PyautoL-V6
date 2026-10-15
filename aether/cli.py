@@ -1120,6 +1120,28 @@ def cmd_restore(args) -> int:
     return 0
 
 
+def cmd_check(args) -> int:
+    """一条命令跑完全部验收，**一个退出码**。
+
+    ⛔ 存在的理由：收口前这件事在 README 里是一段手工 `for` 循环，
+       既没有失败聚合（退出码 = 最后一次迭代 ⇒ 中间的红全被吞掉），
+       又把 `--e2e` 传给不支持的契约（几百次纯重复）。详见
+       `aether/check.py` 的模块 docstring。
+    ⛔ check **不修**任何东西、不写账本：它只回答"通过了哪些验收、
+       哪些没跑、哪些失败了"。治疗各有命令（同 doctor 的纪律）。
+    """
+    from . import check as C
+    #: ⛔ `--timeout` 的默认值是 0.0（表示"没传"），必须 `or` 落到模块默认 ——
+    #:    直接把 0.0 传下去会变成 `subprocess.run(timeout=0)`：每一份契约
+    #:    立刻超时，得到"全红但看起来像环境问题"的假故障。
+    tmo = float(getattr(args, "timeout", 0.0) or C.DEFAULT_TIMEOUT_S)
+    rep = C.run_checks(args.root, only=getattr(args, "only", "") or None,
+                       timeout_s=tmo)
+    print(json.dumps(rep, ensure_ascii=False, indent=2)
+          if getattr(args, "json", False) else C.summarize(rep))
+    return int(rep["exit_code"])
+
+
 def cmd_doctor(args) -> int:
     """一条命令回答"这个系统现在健康吗"。**只读，不修任何东西**。
 
@@ -1167,6 +1189,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("status", help="账本 + 库统计 + 投影一致性")
     sub.add_parser("verify-chain", help="校验账本哈希链")
+    #: ⛔ `check` 是把"全部验收"收成一条命令的入口：它自己聚合退出码，
+    #:    是全仓库**唯一**能回答"这套代码现在算不算通过"的命令。
+    ck = sub.add_parser("check", help="跑完全部契约验收（一条命令、一个退出码）")
+    ck.add_argument("--only", default="",
+                    help="只跑文件名含该子串的契约（调试用；报告会标注是子集）")
+    ck.add_argument("--json", action="store_true", help="输出结构化报告")
+    ck.add_argument("--timeout", type=float, default=0.0,
+                    help="单份契约超时秒数（默认 600；超时记 timeout 而不是失败）")
+    ck.add_argument("-j", "--jobs", type=int, default=1,
+                    help="并行数（契约各用临时目录，互不写生产状态）")
     bk = sub.add_parser("backup", help="备份账本/记忆/投影（自带校验和）")
     bk.add_argument("--to", default="", help="备份存放目录（默认 <root>/backups）")
     bk.add_argument("--note", default="", help="给这份备份写一句备注")
@@ -1317,6 +1349,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "caps": cmd_caps,
         "backup": cmd_backup,
         "restore": cmd_restore,
+        "check": cmd_check,
         "doctor": cmd_doctor,
     }[args.cmd](args)
 

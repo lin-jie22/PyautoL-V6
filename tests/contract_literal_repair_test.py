@@ -122,6 +122,10 @@ print("\n== C 组：有机制 ≠ 这条路被走到 ==")
 from aether.cli import _default_runner, TASK_CLASS          # noqa: E402
 from aether.genome import Harness                           # noqa: E402
 
+#: ⛔ 声明这份契约支持哪些模式（`aether check` 静态读这一行）：
+#:    未声明 ≠ 只有一种模式 —— 前者是"还没接线"，报告里会被点名。
+SUPPORTED_MODES = ("default",)
+
 lit_env, lit_task = LIT[0]
 envs = {n: Environment.from_dir(ROOT / "tasks" / n) for n in ENV_NAMES}
 runner = _default_runner(envs)

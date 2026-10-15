@@ -29,6 +29,10 @@ from aether.ledger import Ledger                                     # noqa: E40
 from aether.nongression import Baseline, FrozenTask, NonRegressionGate  # noqa: E402
 from aether.verifier import Check, Verdict                           # noqa: E402
 
+#: ⛔ 声明这份契约支持哪些模式（`aether check` 静态读这一行）：
+#:    未声明 ≠ 只有一种模式 —— 前者是"还没接线"，报告里会被点名。
+SUPPORTED_MODES = ("default",)
+
 FAILS: list = []
 
 

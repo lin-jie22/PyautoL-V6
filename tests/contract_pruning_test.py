@@ -194,6 +194,10 @@ from aether.cli import main as cli_main                            # noqa: E402
 import io                                                          # noqa: E402
 from contextlib import redirect_stdout                            # noqa: E402
 
+#: ⛔ 声明这份契约支持哪些模式（`aether check` 静态读这一行）：
+#:    未声明 ≠ 只有一种模式 —— 前者是"还没接线"，报告里会被点名。
+SUPPORTED_MODES = ("default",)
+
 
 def run_cli(argv):
     buf = io.StringIO()
