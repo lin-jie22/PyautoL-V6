@@ -77,14 +77,58 @@ class Store:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self._migrate()
 
-    # ── 迁移（探测式）────────────────────────────────────────────
+    # ── 迁移 ─────────────────────────────────────────────────────
     def _migrate(self) -> None:
+        """建表 + **校验** schema 版本。
+
+        ⛔⛔ 修的是"伪迁移"：原实现只有
+              `executescript(_SCHEMA)`（全是 `CREATE TABLE IF NOT EXISTS`）
+              + **仅在版本行缺失时**插入 `SCHEMA_VERSION`
+            ⇒ 它**从不比较**已存版本，也**没有**升级/加列分支。
+            后果：库里是旧结构时，代码静默按新结构去读写 ——
+            列不存在 ⇒ `sqlite3.OperationalError` 出现在**业务查询**里
+            （排障方向指向查询本身），而不是在打开库的时候；
+            更坏的一种是列存在但语义变了 ⇒ **读出一堆看起来正常的错数**。
+
+        ⛔ 这里的处置分三种，且**不合并**（与 `provenance` 的三态同源）：
+            · 缺版本行（老库 / 手工建的库）⇒ 记 0，按 `unknown` **放行**
+              并把事实写进 `self.schema_state`（"不可判别 ≠ 有罪"）。
+            · 版本 < 代码版本 ⇒ 需要迁移：目前没有迁移器 ⇒
+              `upgrade_needed`，**放行但明确标注**（数据还在，重建
+              `aether rebuild` 是唯一正路）。
+            · 版本 > 代码版本 ⇒ 库比代码**新** ⇒ **拒绝**：
+              旧代码读新结构必然读错，这是唯一必须 fail-closed 的方向。
+        """
         self.conn.executescript(_SCHEMA)
         cur = self.conn.execute(
             "SELECT value FROM meta WHERE key='schema_version'").fetchone()
         if cur is None:
-            self.conn.execute("INSERT INTO meta (key,value) VALUES ('schema_version',?)",
-                              (str(SCHEMA_VERSION),))
+            self.conn.execute(
+                "INSERT INTO meta (key,value) VALUES ('schema_version',?)",
+                (str(SCHEMA_VERSION),))
+            self.conn.commit()
+            #: 刚建的库：版本行由我们自己写入 ⇒ 与代码同版本。
+            self.schema_state = "created"
+            self.schema_found = SCHEMA_VERSION
+            return
+        try:
+            found = int(cur["value"])
+        except (TypeError, ValueError):
+            found = 0
+        self.schema_found = found
+        if found == SCHEMA_VERSION:
+            self.schema_state = "ok"
+        elif found > SCHEMA_VERSION:
+            self.schema_state = "refused_newer"
+            raise RuntimeError(
+                f"投影库 {self.path} 的 schema 版本 {found} **高于**代码支持的 "
+                f"{SCHEMA_VERSION} ⇒ 这份库是更新的代码写的，读它必然读错。"
+                f"请升级代码，或按 docs/ARCHITECTURE 的迁移说明重建"
+                f"（`aether rebuild` 可从账本重放）")
+        else:
+            #: found < SCHEMA_VERSION：需要迁移，但**迁移器不存在** ——
+            #: 不假装成功（那正是原实现干的），而是标注 + 给出路。
+            self.schema_state = "upgrade_needed"
         self.conn.commit()
 
     @property

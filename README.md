@@ -145,7 +145,7 @@ V6/
 │   ├── eventflow/          事件流聚合（会话切分 / 滑动窗口 / 分位数）
 │   ├── stateflow/          状态机（转移 / 合法性 / 可达性 / 路径计数）
 │   └── scheduler/          区间调度（冲突 / 最大并发 / 贪心 / 区间合并）
-├── tests/                  39 个契约测试（RED→GREEN + 反证组；`aether check` 一条命令跑全）
+├── tests/                  40 个契约测试（RED→GREEN + 反证组；`aether check` 一条命令跑全）
 ├── supervisor/             TypeScript 外部监督器（只读账本 + 异常检测）
 ├── console/                零构建的只读可视化控制台
 ├── scripts/demo_evolve.py  端到端 demo + 报告

@@ -97,6 +97,7 @@ def _check_ledger(root: Path, ctx: Dict[str, Any]) -> Check:
 
 def _check_projection(root: Path, ctx: Dict[str, Any]) -> Check:
     from .ledger import Ledger
+    from .store import SCHEMA_VERSION as want_ver
     from .store import Store
     ps = _paths(root)
     if not ps["db"].exists():
@@ -104,11 +105,26 @@ def _check_projection(root: Path, ctx: Dict[str, Any]) -> Check:
                      "跑 aether rebuild 从账本重建", "no_db")
     led = Ledger(ps["ledger"])
     evs = led.events() if ps["ledger"].exists() else []
-    s = Store(ps["db"])
     try:
+        s = Store(ps["db"])
+    except RuntimeError as e:
+        #: ⛔ 库的 schema 比代码**新** ⇒ 打开即被拒（读它必然读错）。
+        #:    这是 fail-closed 的方向，体检必须报 fail 而不是崩掉。
+        return Check("projection.consistency", FAIL, str(e)[:200],
+                     "升级代码，或从账本重放重建投影（aether rebuild）")
+    try:
+        state = getattr(s, "schema_state", "ok")
+        found = getattr(s, "schema_found", 0)
         rep = s.consistency_report(evs)
     finally:
         s.close()
+    if state == "upgrade_needed":
+        #: ⛔ 需要迁移而**迁移器不存在** ⇒ 不许报"一致就没事了"：
+        #:    数据可能与新代码的结构语义不符（读出来是"看起来正常的错数"）。
+        return Check("projection.consistency", FAIL,
+                     f"投影库 schema 版本 {found} 低于代码要求的 {want_ver}"
+                     f" ⇒ 需要迁移，而本仓库**没有迁移器**",
+                     "从账本重放重建（aether rebuild）——库只是视图，重建是正路")
     return (Check("projection.consistency", OK, "投影与账本一致")
             if rep.get("ok") else
             Check("projection.consistency", FAIL,
