@@ -1,0 +1,55 @@
+[build-system]
+#: ⛔ 构建后端只用 setuptools（Python 生态里最普及的那个）。
+#:    我们**不引入任何运行期依赖**（stdlib only），所以这里也不该
+#:    顺手引入 hatchling/poetry 之类"只是因为流行"的后端 ——
+#:    那会让"零依赖"这条承诺在**打包阶段**就失效。
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aether-v6"
+#: ⛔ 版本号**唯一事实源**是 `aether/_version.py`，这里用 dynamic 从包读，
+#:    不写第二份（此前 `__init__.py` 与 `serve.py` 各写一份，实测漂移过）。
+dynamic = ["version"]
+description = "V6 · AETHER —— 可验证的自进化智能体骨架（每一次自我修改都必须能被独立地证伪、回放和撤销）"
+requires-python = ">=3.9"
+#: ⛔ **零运行期依赖**不是洁癖：自进化系统的判据必须离线可回归 ——
+#:    一旦依赖网络或模型，"零新红""非回归"这些判据就会随供给波动而失效
+#:    （V5 实测：链首供应商 82% 429，整条供给链废掉两轮）。
+#:    这条留空是**刻意的**，改动它等于改判据（见 README §4）。
+dependencies = []
+readme = "README.md"
+#: ⛔ 授权是**人的决定**：这里用的是最宽松的常见默认（MIT），
+#:    LICENSE 文件里那行版权持有人必须由仓库所有者自己填。
+#:    要换授权 ⇒ 同时改 LICENSE 与这里（两处不一致会被
+#:    `tests/contract_packaging_test.py` 抓到）。
+license = { file = "LICENSE" }
+keywords = ["self-improving", "agent", "verifiable", "ledger", "rlvr"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Software Development :: Testing",
+]
+#: ⛔ 控制台脚本只是**转发**到同一份命令表（`aether.cli`），
+#:    不在这里再写一条命令清单。
+[project.scripts]
+aether = "aether.cli:main"
+
+[project.optional-dependencies]
+#: 刻意留空：dev 工具一律走 stdlib（见 `aether/check.py` 与
+#: `scripts/`）。要接 ruff/mypy 时在**这里**声明，别偷偷 import。
+dev = []
+
+[tool.setuptools]
+packages = ["aether"]
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = { attr = "aether._version.CODE_VERSION" }
+
+[tool.setuptools.package-data]
+#: ⛔ 只带**包内**的文件。`console/` / `tasks/` / `supervisor/` 在仓库根，
+#:    它们是"这个仓库的资产"而不是"这个包的资源" —— 打进 wheel 会让
+#:    `--console` / `--caps` 的默认相对路径在安装后指向包内的副本，
+#:    于是"改了仓库的 console 却没生效"（两个事实源）。
+aether = ["py.typed"]

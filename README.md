@@ -33,7 +33,11 @@ V6 做的事是把这些纪律**下沉成系统的结构**：
 cd /Users/linshaojie/V6
 PY=/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/bin/python3
 
-$PY -m aether.cli synth            # 合成任务：看 yield，不是看尝试次数
+# ⛔ 只用 stdlib：**不需要 pip install**（`pyproject.toml` 只为"可安装"而存在，
+#    运行期依赖是空的，且这一点由 `contract_packaging_test.py` 静态守着）。
+#    `python -m aether` 与 `python -m aether.cli` 是同一个入口（前者是转发）。
+$PY -m aether --version            # V6 · AETHER <版本>（账本格式 vN）
+$PY -m aether synth                # 合成任务：看 yield，不是看尝试次数
 $PY -m aether.cli evolve --rounds 3 --group 3
 $PY -m aether.cli verify-chain     # 账本链是否被篡改过
 $PY -m aether.cli rebuild --check  # 投影（SQLite）与账本对不对得上
@@ -141,7 +145,7 @@ V6/
 │   ├── eventflow/          事件流聚合（会话切分 / 滑动窗口 / 分位数）
 │   ├── stateflow/          状态机（转移 / 合法性 / 可达性 / 路径计数）
 │   └── scheduler/          区间调度（冲突 / 最大并发 / 贪心 / 区间合并）
-├── tests/                  37 个契约测试（RED→GREEN + 反证组；`aether check` 一条命令跑全）
+├── tests/                  38 个契约测试（RED→GREEN + 反证组；`aether check` 一条命令跑全）
 ├── supervisor/             TypeScript 外部监督器（只读账本 + 异常检测）
 ├── console/                零构建的只读可视化控制台
 ├── scripts/demo_evolve.py  端到端 demo + 报告
