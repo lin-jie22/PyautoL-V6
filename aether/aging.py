@@ -80,6 +80,13 @@ class RoundTrace:
     memory_pool: int = 0
     consolidated: int = 0
     pruned: int = 0
+    #: ⛔ 增殖闸的**候选数**（`prune_dryrun()` 报的"将剪 N 条"）。
+    #:    自动路径**只 dry-run 不删** ⇒ `pruned` 恒 0，单看它无法区分
+    #:    "库很干净"和"闸没接线"。`prune_candidates > 0` 才是"该剪了"的
+    #:    信号。此前 CLI 写了 `aging_events["prune_candidates"]` 却**没有人
+    #:    消费**（死字段）⇒ 增殖在账本里依然不可见（V5：有机制 ≠ 这条路
+    #:    被走到）。
+    prune_candidates: int = 0
     #: 口径指纹（seed / 判据版本等）。跨轮不同 ⇒ 读数不可比。
     caliber: Dict[str, Any] = field(default_factory=dict)
 
@@ -99,6 +106,7 @@ class RoundTrace:
                 "skill_count": self.skill_count,
                 "memory_pool": self.memory_pool,
                 "consolidated": self.consolidated, "pruned": self.pruned,
+                "prune_candidates": self.prune_candidates,
                 "caliber": dict(self.caliber),
                 "mean_reward": round(self.mean_reward, 6)}
 

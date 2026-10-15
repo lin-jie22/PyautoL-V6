@@ -267,6 +267,24 @@ class MemoryAwareProposer:
                 "propose_calls": self.asked}
 
 
+def _missing_tool_of(weakness: Dict[str, Any]) -> str:
+    """从失败证据里解析**真正缺的**工具名。
+
+    ⛔ 不能写死一个默认工具名：那会让"缺 python_exec"的失败去开
+       `read_file` ⇒ 提议与病因错配 ⇒ 候选永远修不好，但**看起来在动**
+       （最难发现的一种空转）。
+    生产者：`agent.require_tools` 闸 ⇒ `PermissionError: 缺工具 ['read_file']`。
+    """
+    for ev in (weakness.get("evidence") or []):
+        m = re.search(r"缺工具\s*\[([^\]]*)\]", str(ev))
+        if m:
+            names = re.findall(r"['\"]([^'\"]+)['\"]", m.group(1))
+            if names:
+                return names[0]
+    #: 兜底：调用方显式给出的工具名（手工构造的 weakness / 旧路径）。
+    return str(weakness.get("tool") or "")
+
+
 @dataclass
 class TemplateProposer:
     """模板化变异提议器（stub 的默认搭档）。
@@ -322,12 +340,25 @@ class TemplateProposer:
                     rationale=f"补技能 {sname} 并接通路由", origin="mined"))
 
         if kind == "missing_tool":
-            tool = str(weakness.get("tool", "read_file"))
-            out.append(Capsule(name=f"tool:{tool}",
-                               genes=(gene_tool(tool, rationale="工具不可达"),),
-                               rationale=f"开放工具 {tool}", origin="mined"))
+            #: ⛔ 工具名必须从**失败证据**里取真正缺的那个（见 `_missing_tool_of`）。
+            #:    取不到 ⇒ 不提（走 noop 哨兵）而不是开一个可能不需要的工具：
+            #:    "开错工具"会把 L2 层的爆炸半径花在一个不解决病因的改动上。
+            tool = _missing_tool_of(weakness)
+            if tool:
+                out.append(Capsule(
+                    name=f"tool:{tool}",
+                    genes=(gene_tool(tool,
+                                     rationale="工具不可达（L2 闸拦下）"),),
+                    rationale=f"开放工具 {tool}", origin="mined"))
 
         if kind == "recall_miss":
+            #: ⛔⛔ 当前**没有自动分类路径**能产出这个 kind（见
+            #:    `evolution._ERROR_TO_KIND` 上方的纪律说明）：L4 通路只在
+            #:    "链上无技能"时才走，而那时真正的缺口是**技能**（加技能是更
+            #:    根本的修法）。这里保留为**显式接口** —— 供未来的 LLM 提议器
+            #:    或人工干预直接指定 `kind="recall_miss"`。它不是假仪表：
+            #:    入口存在，且 contract_evolution_test 的 J 组做反证
+            #:    （指定它 ⇒ 真的产出含 memory_policy 的 L4 变异）。
             out.append(Capsule(
                 name="tune:recall",
                 genes=(gene_tune("recall_topk", 2,

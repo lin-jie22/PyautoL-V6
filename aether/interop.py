@@ -975,7 +975,8 @@ def load_manifest(registry: Registry, src: Union[str, Dict[str, Any]],
     return rep
 
 
-def mount_capabilities(src: Union[str, Dict[str, Any], None]
+def mount_capabilities(src: Union[str, Dict[str, Any], None],
+                       ledger: Optional[Ledger] = None
                        ) -> Tuple[Any, LoadReport]:
     """装载能力并返回可直接用的网关 —— **两个入口唯一的装载接线**。
 
@@ -991,11 +992,16 @@ def mount_capabilities(src: Union[str, Dict[str, Any], None]
 
     返回 `(gateway, report)`。**调用方负责打印/暴露 skip** —— 装载报告
     不自己吞掉：能力没挂上却一声不响 = 调用时才发现 404。
+
+    ⛔ `ledger`（2026-10-15 收口）：此前这里**不收 ledger** ⇒ CLI / HTTP /
+       doctor 三个入口构造出来的 gateway 都没有账本 ⇒ 调用能力时
+       `cap.invoke` 事件**一条都写不出**（实测账本 0 次）。不传 = 保持旧行为
+       （某些纯探测调用不需要账），但**生产入口必须传**。
     """
     if not src:
-        return Gateway(_default_registry()), LoadReport()
+        return Gateway(_default_registry(), ledger=ledger), LoadReport()
     reg = Registry()
-    return Gateway(reg), load_manifest(reg, src)
+    return Gateway(reg, ledger=ledger), load_manifest(reg, src)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -1033,7 +1039,16 @@ class Gateway:
     def invoke(self, cid: str, args: Optional[Dict[str, Any]] = None,
                *, budget: Optional[Budget] = None, actor: str = "",
                context: Optional[Dict[str, Any]] = None,
-               write_ledger: bool = False) -> InvocationResult:
+               write_ledger: bool = True) -> InvocationResult:
+        """调用一个能力。⛔ 挂了 ledger 就**默认**记 `cap.invoke` 账。
+
+        ⛔⛔ `write_ledger` 此前默认 `False`，且**全代码库没有任何调用方
+           传 `True`**（grep 只有定义与使用两处）⇒ 账本里 `cap.invoke`
+           事件 **0 次**。这不是"从没调过能力"，是"调用了也不记账"——
+           把记账写成默认关的开关，等于仪表盘上永远指零（与第 80 条
+           "静默忽略 = 把没生效伪装成在跑"同族，这次落在记账上）。
+           现在默认 True：不想记的调用方必须**显式**传 False。
+        """
         inv = Invocation(capability=str(cid), args=dict(args or {}),
                          budget=budget or self.default_budget,
                          actor=actor, context=dict(context or {}))

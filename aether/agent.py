@@ -336,8 +336,11 @@ class HarnessAgent:
                     "L4", "recall", False,
                     "消融：反事实重放跳过召回 ⇒ 不走记忆通路（占位步）"))
             else:
+                #: ⛔ 显式开 consume 账：这是 L4 通路**唯一**的记忆消费点，
+                #:    记下来才能在账本里回答"记忆被消费过吗、召回到没有"。
                 notes = self.memory.search(
-                    f"{env.env_id} repair_hint 修法经验", top_k=topk)
+                    f"{env.env_id} repair_hint 修法经验", top_k=topk,
+                    ledger_actor="agent:L4")
                 # ⛔⛔ 跨运行**继承**的记忆不得进 L4 通路：它会让同一个种子
                 #    harness 的基线随历史漂移（实测空库 base=0.0、装载后 0.6）
                 #    ⇒ 结果不可复现，且记忆冒充了能力、掩盖真实弱点。

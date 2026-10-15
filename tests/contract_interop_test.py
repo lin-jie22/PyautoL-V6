@@ -608,6 +608,74 @@ def group_g() -> None:
        f"verified={r6.verified} checks={r6.checks}")
 
 
+def group_h() -> None:
+    """H 组：能力调用必须**进账本**（`cap.invoke`）。
+
+    ⛔ 背景（2026-10-15 实测）：账本里 `cap.invoke` 事件 **0 次**。查下来是
+       **两层缺口叠在一起**：① `mount_capabilities()` 完全不收 ledger ⇒
+       CLI/HTTP/doctor 三个入口造出的网关都没有账本；②
+       `Gateway.invoke(write_ledger=False)` 默认关，而**全代码库没有一个
+       调用方传 True**。单独修哪一层，读数都不会从 0 变成 1。
+       本组守：挂了 ledger ⇒ **默认**就记；显式 False ⇒ 不记（不是恒真）；
+       不挂 ledger ⇒ 不记也不崩（探测路径不受影响）；且装载接线真的把
+       ledger 传到底。
+    """
+    import tempfile as _tf
+    from aether.interop import (CapabilitySpec, Gateway, ParamSpec, Registry,
+                                mount_capabilities)
+    from aether.ledger import Ledger
+
+    td = _tf.mkdtemp(prefix="v6_interop_h_")
+    led = Ledger(Path(td) / "l.jsonl")
+
+    def _reg():
+        r = Registry()
+        r.register(CapabilitySpec(
+            id="h.echo", kind="skill", trusted=True,
+            inputs={"text": ParamSpec("str")},
+            outputs={"out": ParamSpec("str")}),
+            lambda text: {"out": str(text)})
+        return r
+
+    def _n(ledger):
+        return len([e for e in ledger.events() if e.kind == "cap.invoke"])
+
+    # ① 挂了 ledger ⇒ **默认**写账（调用方不需要记得传 write_ledger=True）
+    gw = Gateway(_reg(), ledger=led)
+    r = gw.invoke("h.echo", {"text": "hi"}, actor="cli")
+    evs = [e for e in led.events() if e.kind == "cap.invoke"]
+    ck("H1 ⛔ 挂了 ledger ⇒ 默认写 `cap.invoke`（开关不该默认是关的）",
+       r.status == "ok" and len(evs) == 1,
+       f"status={r.status} n_events={len(evs)}")
+    ck("H2 事件带分诊字段（capability / status / transport）",
+       bool(evs) and evs[0].payload.get("capability") == "h.echo"
+       and "status" in evs[0].payload and "transport" in evs[0].payload,
+       str(dict(evs[0].payload))[:140] if evs else "")
+    ck("H3 actor 如实记录调用方", bool(evs) and evs[0].actor == "cli",
+       f"{evs[0].actor if evs else None}")
+
+    # ② 反证：显式 write_ledger=False ⇒ 不记（证明 H1 不是恒真）
+    n0 = _n(led)
+    Gateway(_reg(), ledger=led).invoke("h.echo", {"text": "x"},
+                                       write_ledger=False)
+    ck("H4 反证：显式 write_ledger=False ⇒ 不记（H1 不是恒真）",
+       _n(led) == n0, f"{n0} -> {_n(led)}")
+
+    # ③ 不挂 ledger ⇒ 不记，也不崩（纯探测调用不需要账）
+    r3 = Gateway(_reg()).invoke("h.echo", {"text": "y"})
+    ck("H5 不挂 ledger ⇒ 照常返回、不崩（探测路径不受影响）",
+       r3.status == "ok", r3.status)
+
+    # ④ 装载接线必须**把 ledger 传到底**（CLI/HTTP/doctor 的唯一入口）
+    gw4, _rep = mount_capabilities("", ledger=led)
+    ck("H6 ⛔ mount_capabilities 把 ledger 传到底（否则三个入口全不记账）",
+       getattr(gw4, "ledger", None) is led,
+       str(getattr(gw4, "ledger", None)))
+    gw5, _ = mount_capabilities("")
+    ck("H7 不传 ledger ⇒ 网关就没有账本（保持旧行为，不伪造一个）",
+       getattr(gw5, "ledger", None) is None)
+
+
 def main() -> int:
     t0 = time.time()
     print("契约测试：通用接入层（UCI）")
@@ -618,6 +686,7 @@ def main() -> int:
     group_e()
     group_f()
     group_g()
+    group_h()
     print()
     print("=" * 60)
     if FAILS:

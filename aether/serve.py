@@ -910,7 +910,11 @@ class Handler(BaseHTTPRequestHandler):
 
         from .interop import mount_capabilities
         with Handler.caps_lock:
-            gw, rep = mount_capabilities(str(p))
+            #: ⛔ 热装载必须**继承**当前账本：不传 ⇒ 重载后调用能力静默不记账，
+            #:    而这是最难察觉的回归（能力在、账没了）。
+            _prev_led = (getattr(Handler.gateway, "ledger", None)
+                         if Handler.gateway is not None else None)
+            gw, rep = mount_capabilities(str(p), ledger=_prev_led)
             if not rep.loaded:
                 #: ⛔ 不替换：换空 = 能力凭空消失，比装载失败更难查
                 self._json({"error": "清单没装载上任何能力 ⇒ 保持原能力集不变",
@@ -986,7 +990,13 @@ def main(argv: Optional[list] = None) -> int:
     #:    的能力、HTTP 一声不响"的幽灵差异。判据有两份实现 = 没有判据。
     if args.caps:
         from .interop import mount_capabilities
-        gw, rep = mount_capabilities(args.caps)
+        from .ledger import Ledger
+        #: ⛔ 挂账本：调能力必须写 `cap.invoke`（此前不传 ⇒ 账本 0 次）。
+        #:    `Ledger.append` 走 `fcntl.flock(LOCK_EX)` + fsync ⇒ 与 evolve
+        #:    进程并发写是安全的（不是"HTTP 服务只读"那句能拦的范围：
+        #:    那句说的是不提供**写账本端点**，而调用能力是真实事件）。
+        _led = Ledger(paths(Path(args.root))["ledger"])
+        gw, rep = mount_capabilities(args.caps, ledger=_led)
         Handler.gateway = gw
         Handler.caps_src = str(args.caps)
         print(f"[caps] 装载 {len(rep.loaded)} 个能力：{rep.loaded}")

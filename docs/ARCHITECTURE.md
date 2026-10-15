@@ -3048,3 +3048,157 @@ segname __TEXT
    `binary_overview` 只给 `image_base` / 段表 / 三个**计数**，
    **不给**过程名与字符串实体。要名字得走上游别的操作 ——
    契约不该要求一个概览端点交出它设计上就不产出的东西。
+
+---
+
+## 35. r37 收口（2026-10-15）：词表诚实性 · 执行链入账 · consume 有账
+
+起点是第 34 章末尾那次审计给出的四条缺口：**L2/L4 结构上不可达**、
+**`cap.invoke` 0 次**、**`memory.pruned` 0 次且 consume 无账**、
+**`prune_candidates` 死字段**。四条全部按「先全量对拍 → 再改 →
+改完做运行时取证」三步走，不靠自述。
+
+### 35.1 ⛔ 词表诚实性：`_ERROR_TO_KIND` 从 7 条瘦身到 2 条
+
+**判定方法（判据同源）**：不新写一份分类器，直接调**被测对象自己的**
+`evolution.classify_error`，对 **659 个样本**（**649 条真实失败串**，
+取自账本 `weakness.mined` 的 evidence + 本轮 base 评估的判定 +
+10 条人工边界串）做**新旧交叉表**。
+
+结果分三类，只有一类是"漏"，另两类是"假"：
+
+```
+· 死 needle 4 条：no_skill / skill_not_found / tool_not_allowed / primitive
+    全代码库各只出现 1 处 ⇒ 就是词表自己 ⇒ 649 条真实串 0 命中。
+    看着有 7 条分类规则，实际只有 1 条在跑。
+· 漏检 1 条：PermissionError: 缺工具 ['python_exec']
+    （生产者 = agent.require_tools 的 L2 闸，agent.py:266-275）
+    没有任何 needle 覆盖 ⇒ 真缺工具时只会被归成 missing_skill
+    ⇒ 去加一个不解决病因的技能（"看着在动"）。
+· 误伤 1 条：宽泛词 memory 把 some memory error 这类文本判成 recall_miss。
+```
+
+修后词表只剩两条，**每条都有点名到姓的生产者**：
+
+```python
+_ERROR_TO_KIND = (
+    ("缺工具", "missing_tool"),   # agent.require_tools 闸
+    ("未知 env_id", "bad_config"),  # agent 解析 env 失败（配置错，非能力缺口）
+)
+```
+
+⛔ **交叉表是这次唯一敢动手的依据**：649 条真实串的**分类变化 = 0**（零误伤），
+而漏检（缺工具）与误伤（memory）各修掉一处。
+
+⛔ **光有 needle 不够，还得让下游能用它**：`TemplateProposer` 原先在
+`missing_tool` 分支里**写死** `weakness.get("tool", "read_file")`，
+而 `Weakness` **根本没有 `tool` 字段** ⇒ 提案永远指向同一个不相关的工具。
+新增 `providers._missing_tool_of(weakness)`，从**证据串**里正则取真正缺失的
+工具名（`缺工具 ['xxx']` → `xxx`）；取不到 ⇒ 返回哨兵走 noop，
+**宁可不提，也不提一个错的**。
+
+**契约 K 组（静态自证，别写成恒真）**：每条 needle 必须在代码里有字符串生产者。
+两处必须做对：① 用 **AST 取字符串字面量**（注释里提到 needle 不算生产者）；
+② **排除 `_ERROR_TO_KIND` 自身所在行**（不排除 ⇒ needle 自己就是"生产者"）。
+K2 是**反证**：把 `("no_skill", "missing_skill")` 注入词表 ⇒ K1 必须转红并
+点名 `无生产者：['no_skill']`（实测红过一次，随后还原）。
+
+### 35.2 ⛔ `cap.invoke` 从 0 次说起：两层缺口**叠**在一起
+
+账本里 `cap.invoke` **0 次**。查下来不是一处漏，是两层同时缺：
+
+```
+· interop.mount_capabilities() 完全不收 ledger
+    ⇒ CLI / HTTP 启动 / HTTP 热装载 三个入口造出来的 gateway 全都没有账本；
+· Gateway.invoke(..., write_ledger=False) 默认关
+    ⇒ grep 全代码库只有"定义处 + 使用处"两处，没有任何调用方传 True。
+```
+
+⇒ **单独修任何一层，读数都不会从 0 变成 1**，这正是它藏得久的原因。
+
+修法三条：
+1. `mount_capabilities(src, ledger=None)` 收账本并一路传到底；
+2. `Gateway.invoke(..., write_ledger=True)` **默认改开** —— "挂了 ledger 就写"，
+   不想记的调用方须**显式**传 `False`；
+3. `_append_ledger` 写 `cap.invoke` 事件，带
+   `capability / status / verified / transport`（**含被拒与失败**的调用）。
+
+**接线两处**：`cli._caps_gateway(path, ledger=None)` + `cmd_caps` 里造 `Ledger`；
+`serve.py` 的**启动装载点**（`--caps`）与**热装载点**各接一次，
+热装载继承 `getattr(Handler.gateway, "ledger", None)`
+（不继承 ⇒ 热装载会把已挂的账本**悄悄抹掉**）。
+
+**运行时取证（不是 grep 符号）**：
+
+```
+$PY -m aether.cli caps --caps ... --root /tmp/v6_capverify invoke rea.capabilities
+⇒ 账本出现 kind=cap.invoke actor=cli capability=rea.capabilities \
+   status=ok verified=False transport=subprocess
+```
+
+契约 H 组 7 条：**H4 是反证**（显式 `write_ledger=False` 时不许写账）。
+
+### 35.3 `memory.recall`：记忆的 consume 段第一次有账
+
+`learn` 段一直有账（539 写、`ledger_trace: complete`），`prune` 段也有账
+（`aging.trace.pruned`），**只有中间那步 `MemoryOS.search` 是空的** ⇒
+"记忆在因果链上"这句话在账本里只兑现了一半。
+
+修法：`MemoryOS.search(..., ledger_actor="")` 新增 `_record_recall()`，
+写 `memory.recall` 事件：`query_hash[:16] / n_hits / degraded / tiers / top_note`。
+⛔ `ledger_actor` **默认空 ⇒ 不记账**：记账是**调用方**声明自己在因果链上的位置，
+不是库自己猜（否则无法区分"L4 通路召回"与"工具/调试召回"）。
+记账失败写 `_ledger_error`，**不许静默吞**。
+
+**接线点**：`agent.py:339` 的 L4 通路传 `ledger_actor="agent:L4"`。
+
+**运行时取证**：不传 actor ⇒ 0 条；传 `agent:L4` ⇒ 1 条，
+payload `{'degraded': False, 'n_hits': 1, 'query_hash': '6e7d7277633de97d',
+'tiers': ['L3'], 'top_note': '...'}`。
+
+契约 J 组 3 条（L4 接口可达性）。
+
+### 35.4 `prune_candidates`：写进 dict 却没人读的字段
+
+`cli.prune_dryrun()` 同时写 `aging_events["pruned"]` 与
+`aging_events["prune_candidates"]`（前者 = 真剪的条数，后者 = **够格剪的条数**），
+而 `aging.RoundTrace` 只序列化 `pruned` ⇒ 后一个字段**写进内存 dict 后无人读**。
+
+⇒ 后果不是少一个数字，而是**读数退化**：池子小到没东西可剪（`pruned=0`）与
+"有候选但全被前置条件挡住（真剪 0）"在账本里**长得一模一样**。
+修法：`RoundTrace` 加 `prune_candidates: int = 0` + `to_dict()` 输出，
+`evolution._trace` 从 `aging_events` 消费它。
+
+⛔ 与第 83 条同一族：**写进 dict 却没人读的字段 = 假仪表**。
+
+### 35.5 ⛔ 我上一轮的两条判断被数据推翻（显式留痕）
+
+两条都要写下来，否则下一轮会照着错的结论继续修：
+
+1. **「L4 也该靠补词表变可达」——方向错。**
+   交叉表里 **171 条**提到 L4 的失败，其 `applied=()`（链上根本没装技能）
+   ⇒ 病因是**缺技能**，不是"召回差"。L4 的候选 needle（`memory`）在
+   649 条真实串上 **0 命中、只误伤** ⇒ 它不是"漏掉的词"，是
+   **没有对应生产者的词**。⇒ 删掉它；`providers` 的 `recall_miss` 分支
+   保留但注明它是**显式接口**（调用方主动声明"我召回不好"），
+   **不是假仪表**，而 `classify_error` 不为它编造一个生产者。
+   ⇒ 报告修复效果前先问一句：**「这条判据这一轮被触发几次」**。
+2. **「增殖闸是空仪表」——不成立。**
+   `aging.trace` 的 payload **本来就含** `pruned`（16/16 条），
+   读数是进去了的；真因是**池子小到没东西可剪**。
+   真缺口是 `prune_candidates` 这个**死字段**（见 35.4），不是闸本身。
+
+### 35.6 契约与回归
+
+| 文件 | 新增 | 内容 |
+|---|---|---|
+| `tests/contract_evolution_test.py` | I 组 5 条 | L2 可达性（含"提案必须指向真缺的那个工具"） |
+| 同上 | J 组 3 条 | L4 接口可达性（`ledger_actor` 归属） |
+| 同上 | K 组 2 条 | 词表诚实性静态自证 + K2 反证 |
+| `tests/contract_interop_test.py` | H 组 7 条 | 能力调用必须进账本 + **H4 反证** |
+
+读数：evolution 契约 **61 PASS / 0 FAIL**；interop / aging 契约全通过；
+全量回归 **34/34 绿（255.9s）**。
+
+⛔ 本轮**没有**报告任何"分数变好"：改动全是记账面与可达性面，
+报分只会掩盖"判据到底被触发了几次"这个真问题。

@@ -999,20 +999,26 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     return 0
 
 
-def _caps_gateway(path: str):
+def _caps_gateway(path: str, ledger=None):
     """装载能力清单并返回网关。
 
     ⛔ 直接调 `interop.mount_capabilities` —— 与 HTTP 服务（启动时装载 +
     `/api/capabilities/reload` 热装载）**同一个函数**。两个入口各写一份
     装载接线，就会出现"CLI 能调、HTTP 调不到"的幽灵差异。
+
+    ⛔ `ledger` 必须传：不传 ⇒ 网关没有账本 ⇒ 调用能力时 `cap.invoke`
+       一条也写不出（实测账本 0 次，见 `Gateway.invoke` 的说明）。
     """
     from .interop import mount_capabilities
-    return mount_capabilities(path)
+    return mount_capabilities(path, ledger=ledger)
 
 
 def cmd_caps(args) -> int:
     from .interop import load_manifest
-    gw, rep = _caps_gateway(getattr(args, "caps", "") or "")
+    from .ledger import Ledger
+    #: ⛔ 记账：CLI 调能力必须进账本 —— 否则"执行链不进账"这条缺口永远补不上。
+    led = Ledger(_paths(Path(args.root))["ledger"])
+    gw, rep = _caps_gateway(getattr(args, "caps", "") or "", ledger=led)
     for s in rep.skipped:
         _log.warning(f"[caps] ⚠️ 跳过 {s.get('id')}：{s.get('reason')}")
     reg = gw.registry

@@ -51,15 +51,34 @@ from .verifier import Verdict
 
 Runner = Callable[[Harness, Dict[str, Any]], Verdict]
 
-# 弱点类别 → 提议器 kind 的映射（V5 纪律：词表是判据源，动它要做全量对拍）
+# 失败信号 → 弱点类别的映射。
+#
+# ⛔⛔ 纪律（2026-10-15 收口，V5「拦不住的条目不许留在名单里」的同族）：
+#    **每一条都必须有真实生产者** —— 即有某段代码会真的产出这个字符串。
+#    此前这里是 7 条，实测三条问题（用 `classify_error` 对 649 条真实
+#    失败串 + 边界串做全量对拍）：
+#      1. `no_skill` / `skill_not_found` / `tool_not_allowed` / `primitive`
+#         在整个代码库里**只出现在本词表**（各 1 处）⇒ 永远命中 0 次，
+#         是**假仪表**：看着有 4 条分类规则，实际只有 1 条在跑。
+#      2. **真实生产者被漏掉**：`agent.require_tools` 缺工具时报的是
+#         `PermissionError: 缺工具 ['read_file']`，词表里没有任何 needle
+#         能对上 ⇒ L2 层（`gene_tool`）**结构上不可达**（哪怕真的缺工具，
+#         也只会被归到缺技能 ⇒ 提议加技能 ⇒ 修不好）。
+#      3. **宽泛词误伤**：needle `memory` 会把 `some memory error` 这类
+#         任何含该词的文本误判成 `recall_miss`。
+#    ⇒ 只保留有生产者的条目。`tests/contract_evolution_test.py` 的 K 组
+#      做静态自证：每个 needle 必须在 `aether/` 的**非词表**位置出现过。
+#
+# ⛔ 关于 `recall_miss`：它**不在**本表里 —— 因为当前没有任何代码会产生
+#    "召回失败"这个信号。`agent` 的 L4 通路在**链上无技能**时才走，那时
+#    真正的缺口是**技能**（加技能是更根本的修法），不是召回。所以
+#    `TemplateProposer` 的 `recall_miss` 分支保留为**显式接口**（供未来的
+#    LLM 提议器或人工干预指定 kind），但**没有自动分类路径**。
 _ERROR_TO_KIND: Tuple[Tuple[str, str], ...] = (
-    ("no_skill", "missing_skill"),
-    ("skill_not_found", "missing_skill"),
-    ("unknown", "missing_skill"),
-    ("tool_not_allowed", "missing_tool"),
-    ("primitive", "missing_tool"),
-    ("recall", "recall_miss"),
-    ("memory", "recall_miss"),
+    # agent.require_tools 闸：缺声明工具 ⇒ 直接失败
+    ("缺工具", "missing_tool"),
+    # agent 解析 env 失败（配置错，不是能力缺口）⇒ 无可用变异，走 noop
+    ("未知 env_id", "bad_config"),
 )
 
 
@@ -82,7 +101,12 @@ def classify_error(text: str) -> str:
     """把失败信号归到弱点类别。⛔ 未知 ⇒ `missing_skill`（保守默认）。
 
     为什么保守默认是"缺技能"：默认"unknown/noop"会让进化循环**什么都不做**
-    却记为成功，这是最难被发现的一种假成功。
+    却记为成功，这是最难被发现的一种假成功。而"缺技能"至少会去**试**：
+    提议器只提"链上还没有的技能"，都在链上时自然退化为 noop 哨兵
+    （由 C7d/C7e 契约守住）—— 所以这个默认**不会**造成重复提议。
+
+    ⛔ 命中顺序即优先级，且**大小写不敏感**：needle 与文本都转小写比较。
+    ⛔ 只保留**有真实生产者**的条目，见 `_ERROR_TO_KIND` 上方的纪律说明。
     """
     low = (text or "").lower()
     for needle, kind in _ERROR_TO_KIND:
@@ -433,6 +457,10 @@ class EvolutionLoop:
             skill_count=len(getattr(h, "skills", {}) or {}),
             consolidated=int(self.aging_events.get("consolidated", 0) or 0),
             pruned=int(self.aging_events.get("pruned", 0) or 0),
+            #: ⛔ 消费 CLI 写下的 `prune_candidates`：不接这一步，CLI 那边
+            #:    算了也白算（写进 dict 没人读 = 死字段）。
+            prune_candidates=int(
+                self.aging_events.get("prune_candidates", 0) or 0),
             caliber=dict(self.caliber or {}))
         self.aging_traces.append(trace)
         try:

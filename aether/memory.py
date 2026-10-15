@@ -380,7 +380,8 @@ class MemoryOS:
                update_access: bool = True,
                expand_links: bool = True,
                *,
-               max_links_added: Optional[int] = None) -> List[MemNote]:
+               max_links_added: Optional[int] = None,
+               ledger_actor: str = "") -> List[MemNote]:
         """按 `query` 检索记忆。
 
         🔴 修复一：查询侧嵌入失败 ⇒ **显式退化为关键词-only 路径**。
@@ -397,6 +398,13 @@ class MemoryOS:
             `top_k`** —— 这是链接扩散语义的一部分（原行为）。调用方若
             需要**严格上界**，传 `max_links_added=0` 或 `expand_links=False`。
             不改默认行为（保持兼容），但**接口上承认**这个语义。
+
+        ⛔ consume 段入账（2026-10-15 收口）：`ledger_actor` 非空时往账本
+           记一条 `memory.recall`。此前 `search` **完全无账** ⇒ 账本只能
+           回答"记忆被写过几次"，回答不了"被消费过几次、有没有召回" ⇒
+           learn → consume → cleanup 三段里 consume 是黑的。
+           ⛔ 默认**关**（空字符串）：search 是热点（agent 每轮 + 提议器
+           每轮），内部调用都记会把账本淹掉；只让**真实消费点**显式打开。
         """
         q: List[float] = []
         query_embed_failed = False
@@ -490,7 +498,30 @@ class MemoryOS:
             for n in out:
                 self.notes[n.note_id] = replace(
                     n, access_count=n.access_count + 1, last_access=ts)
+        #: ⛔ consume 段入账（只有显式指定 actor 才记，见 docstring）。
+        if ledger_actor:
+            self._record_recall(query, out, ledger_actor, query_embed_failed)
         return out
+
+    def _record_recall(self, query: str, out: List["MemNote"],
+                       actor: str, degraded: bool) -> None:
+        """记一条**有界的**召回账。
+
+        ⛔ 只记 `query_hash` 不记原文：① search 是热点，原文进账本会让账本
+           按查询内容膨胀；② 记忆正文/查询属于内容，账本是长期留存的事实源。
+           ⛔ 记账失败**不吞**：留痕到 `_ledger_error`（与 `prune` 同形态），
+           否则"consume 无账"会以"看起来有账但其实是空的"形式复现。
+        """
+        try:
+            self.ledger.append("memory.recall", {
+                "query_hash": content_hash(query or "")[:16],
+                "n_hits": len(out),
+                "degraded": bool(degraded),
+                "tiers": sorted({n.tier for n in out}),
+                "top_note": (out[0].note_id if out else ""),
+            }, actor=actor)
+        except Exception as e:  # noqa: BLE001
+            self._ledger_error = f"{type(e).__name__}: {e}"
 
     # ── 提升（L4/L3 → L2）＋ 对抗验证 ─────────────────────────────
     def promote(self, note_id: str, *,

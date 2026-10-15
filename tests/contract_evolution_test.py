@@ -135,6 +135,94 @@ def main():
        [c.name for c in p_all.propose({"kind": "missing_skill"}, Harness())]
        == ["add_skill:s1"])
 
+    # ── I 组：L2（工具层）**可达性** —— 词表漏检修复的反证 ─────────
+    #: ⛔ 2026-10-15 实测：`agent.require_tools` 缺工具时报的是
+    #:    `PermissionError: 缺工具 ['python_exec']`，而旧词表的 needle 是
+    #:    `tool_not_allowed` / `primitive`（**全代码库 0 生产者**）⇒ 真实
+    #:    生产者被漏掉 ⇒ L2 结构上不可达：哪怕真缺工具，也只会被归成"缺技能"
+    #:    ⇒ 去加一个不解决病因的技能（"看着在动"）。
+    #:    本组守：真实生产者 ⇒ 正确归类 ⇒ 提议开**真正缺的那个**工具。
+    print()
+    print("I 组：L2（工具层）可达性")
+    from aether.evolution import _ERROR_TO_KIND
+    real_err = "PermissionError: 缺工具 ['python_exec']"
+    ck("I1 ⛔ 真实生产者（缺工具）归类为 missing_tool（旧词表漏检）",
+       classify_error(real_err) == "missing_tool", classify_error(real_err))
+    caps_tool = TemplateProposer().propose(
+        {"kind": "missing_tool", "topic": "t", "evidence": [real_err]},
+        Harness())
+    ck("I2 ⛔ 提议开的是**真正缺的**工具（不是写死的 read_file）",
+       [c.name for c in caps_tool] == ["tool:python_exec"],
+       f"{[c.name for c in caps_tool]}")
+    br_tool = blast_radius(Harness(), _apply(Harness(), caps_tool[0]))
+    ck("I3 该变异真的落在 tools 层（L2 被碰到，不是空转）",
+       "tools" in br_tool["layers_touched"], f"{br_tool['layers_touched']}")
+    ck("I4 不触碰受保护层（L0）", not br_tool["touches_protected"],
+       f"{br_tool}")
+    #: 反证：拿不到工具名 ⇒ 不提（走 noop 哨兵），不是"开个默认工具"。
+    caps_noname = TemplateProposer().propose(
+        {"kind": "missing_tool", "topic": "t"}, Harness())
+    ck("I5 反证：证据里没有工具名 ⇒ 不提（不回退到开默认工具）",
+       [c.name for c in caps_noname] == ["noop"],
+       f"{[c.name for c in caps_noname]}")
+
+    # ── J 组：L4（记忆策略层）**接口可达性** ────────────────────────
+    #: ⛔ 如实标注：当前**没有自动分类路径**产出 `recall_miss`（L4 通路只在
+    #:    链上无技能时才走，那时真正的缺口是技能）⇒ 它作为**显式接口**保留。
+    #:    本组守：指定它 ⇒ 真的产出含 memory_policy 的变异（不是假入口）。
+    print()
+    print("J 组：L4（记忆策略层）接口可达性")
+    caps_recall = TemplateProposer().propose(
+        {"kind": "recall_miss", "topic": "t"}, Harness())
+    ck("J1 显式指定 recall_miss ⇒ 产出 L4 变异",
+       [c.name for c in caps_recall] == ["tune:recall"],
+       f"{[c.name for c in caps_recall]}")
+    br_rec = blast_radius(Harness(), _apply(Harness(), caps_recall[0]))
+    ck("J2 该变异落在 memory_policy 层",
+       "memory_policy" in br_rec["layers_touched"],
+       f"{br_rec['layers_touched']}")
+    ck("J3 ⛔ 词表里**没有** recall_miss 的自动路径（如实标注，不是假仪表）",
+       all(k != "recall_miss" for _, k in _ERROR_TO_KIND), f"{_ERROR_TO_KIND}")
+
+    # ── K 组：词表诚实性 —— 每条 needle 必须有**代码生产者** ─────────
+    #: ⛔ 判据设计（本组自身踩过的坑）：**必须排除词表自身所在的常量**，
+    #:    否则 needle 自己就是"生产者"，判据恒真。而且**只扫字符串字面量**
+    #:    ——注释里提到某个 needle 不算生产者（生产者是"代码会产出这个串"）。
+    print()
+    print("K 组：词表诚实性（每条 needle 必须有生产者）")
+    import ast as _ast
+    _aeth = ROOT / "aether"
+    _evo_p = _aeth / "evolution.py"
+    _evo_lines = _evo_p.read_text(encoding="utf-8").splitlines()
+    _i0 = next(i for i, l in enumerate(_evo_lines)
+               if l.startswith("_ERROR_TO_KIND"))
+    _i1 = next(i for i in range(_i0, len(_evo_lines))
+               if _evo_lines[i].strip() == ")")
+    _table_lines = set(range(_i0, _i1 + 1))
+    _lits = []
+    for _p in sorted(_aeth.rglob("*.py")):
+        try:
+            _tree = _ast.parse(_p.read_text(encoding="utf-8"))
+        except Exception:                          # noqa: BLE001
+            continue
+        _is_evo = (_p == _evo_p)
+        for _n in _ast.walk(_tree):
+            if not (isinstance(_n, _ast.Constant)
+                    and isinstance(_n.value, str)):
+                continue
+            if _is_evo and (getattr(_n, "lineno", 0) - 1) in _table_lines:
+                continue                           # 词表自身不是生产者
+            _lits.append(_n.value)
+    _corpus = "\n".join(_lits).lower()
+
+    def _orphans(table):
+        return [n for n, _ in table if n.lower() not in _corpus]
+
+    ck("K1 ⛔ 词表每条 needle 在代码里有字符串生产者（否则=假仪表）",
+       _orphans(_ERROR_TO_KIND) == [], f"无生产者：{_orphans(_ERROR_TO_KIND)}")
+    ck("K2 反证：注入假条目 ⇒ 同一判据变红（K1 有判别力，不是恒真）",
+       _orphans((("__no_such_needle__", "x"),)) == ["__no_such_needle__"])
+
     # ── D 组：循环机制（stub runner，可确定性断言）───────────────
     print("D 组：进化循环机制")
     led = Ledger(tmp / "l.jsonl")
