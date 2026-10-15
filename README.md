@@ -191,6 +191,7 @@ V6/
 │   ├── paths.py            目录布局的唯一事实源（cli/serve/doctor 共用）
 │   ├── caps_candidate.py   能力候选：发现 → 闸 → 留痕 → **人批准**（引擎不装）
 │   ├── judge.py            **判据集身份**：尺子有指纹，变异够不到它
+│   ├── world_facts.py      **陈述性知识**：学到的事实可继承/可选/可回滚
 │   ├── learner.py          外部知识摄入（复用记忆闸，不自搞一套）
 │   ├── aging.py            跨轮退化检测（ALE 四类信号）
 │   ├── interop.py          UCI 通用接入层（agent/skill/tool 挂得上叫得动）
@@ -200,7 +201,7 @@ V6/
 │   ├── eventflow/          事件流聚合（会话切分 / 滑动窗口 / 分位数）
 │   ├── stateflow/          状态机（转移 / 合法性 / 可达性 / 路径计数）
 │   └── scheduler/          区间调度（冲突 / 最大并发 / 贪心 / 区间合并）
-├── tests/                  46 个契约测试（RED→GREEN + 反证组；`aether check` 一条命令跑全）
+├── tests/                  47 个契约测试（RED→GREEN + 反证组；`aether check` 一条命令跑全）
 ├── supervisor/             TypeScript 外部监督器（只读账本 + 异常检测）
 ├── console/                零构建的只读可视化控制台
 ├── data/seed/              **种子数据**（随仓库发布的最小现场：小账本 + 记忆）

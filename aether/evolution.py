@@ -222,6 +222,13 @@ class RoundReport:
     #: worker"：配置存在但一次没走并行分支（`parallel_batches=0`）= 空账，
     #: 与「落点要兑现」同一条纪律。
     parallel: Optional[Dict[str, Any]] = None
+    #: 本轮末这一代 harness **知道什么**（陈述性知识的读数）。
+    #: ⛔ 它是"学到的洞察"第一次变得可见：此前洞察住在循环的内存缓存里，
+    #:    没人能回答"这一轮比上一轮多知道了什么"。
+    world_facts: Optional[Dict[str, Any]] = None
+    #: 本轮由"连续被拦"**晋升成事实**的条目（含门槛与键）。
+    #: ⛔ 与 `world_facts` 分开：那个是"现在知道什么"，这个是"这轮新学到什么"。
+    facts_promoted: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def improved(self) -> bool:
@@ -239,7 +246,10 @@ class RoundReport:
                 "step_credit": self.step_credit,
                 "saturated": self.saturated, "saturation": self.saturation,
                 "idle": self.idle, "budget": self.budget,
-                "parallel": self.parallel}
+                "parallel": self.parallel,
+                #: 陈述性知识的读数：这一代**知道什么** + 本轮**新学到什么**
+                "world_facts": self.world_facts,
+                "facts_promoted": self.facts_promoted}
 
 
 @dataclass
@@ -727,6 +737,68 @@ class EvolutionLoop:
         except OSError:
             return (0, 0)
 
+    # ── 陈述性知识（world_facts）：可继承、可选、可回滚 ───────────
+    def inherited_facts(self, h: Harness) -> Dict[str, Any]:
+        """这一代 harness **继承到的**世界事实（读数，不是判据）。
+
+        ⛔ 与 `_deadend_map()` 职责**不同**，所以不合并：
+           · `_deadend_map()` 是**从账本重建的派生量**，管"本轮少跑几次"；
+           · `world_facts` 是**基因组里的陈述性知识**，管"跨代继承什么"。
+           合并会让"读到旧账"与"学到新知识"混成一件事。
+        """
+        from . import world_facts as W
+        return W.summarize(h) if h is not None else {"n": 0, "by_scope": {},
+                                                     "keys": {}}
+
+    def _facts_deadend_streak(self, h: Harness, capsule: str,
+                              env_pair: str) -> int:
+        """基因组里是否已记着"这个候选在这套环境对上是死路" ⇒ 返回观测数。
+
+        ⛔ 继承的知识也要**能被撤销**：这里的返回值只影响"本轮要不要花预算
+           探测"，不影响任何裁决；事实本身可被 `world_facts.forget` 或
+           `apply_gene(remove)` 回滚（因此可被账本记录、可被审计）。
+        """
+        if h is None:
+            return 0
+        from . import world_facts as W
+        key = W.fact_key(W.SCOPE_DEADEND, capsule,
+                         W.env_pair_key(*str(env_pair).split("|", 1))
+                         if "|" in str(env_pair) else str(env_pair))
+        v = W.get(h, key)
+        try:
+            return int((v or {}).get("observations") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _observe_deadend(self, h: Harness, capsule: str, env_pair: str,
+                         round_no: int, event_kind: str,
+                         streak: int) -> Dict[str, Any]:
+        """把一次"被拦"记成**观察**；达到门槛才**晋升成事实**写进基因组。
+
+        ⛔ 门槛不能是 1（见 `world_facts.PROMOTE_MIN_OBS`）：一次偶发被写成
+           事实会被**继承**下去、影响后续所有轮的提议 ⇒ 把噪声固化成制度。
+        ⛔ 晋升是**一次真实的基因编辑**（走 `apply_gene`）⇒ 它会改变
+           `harness_id`、能被 `harness.commit` 记进账本、能被回滚。
+           这正是本模块存在的理由：洞察不再是过程性的。
+        """
+        from . import world_facts as W
+        pair = (W.env_pair_key(*str(env_pair).split("|", 1))
+                if "|" in str(env_pair) else str(env_pair))
+        key = W.fact_key(W.SCOPE_DEADEND, capsule, pair)
+        obs = [{"key": key, "kind": "deadend", "round_no": round_no}
+               for _ in range(max(0, int(streak)))]
+        cands = W.promote(obs)
+        out: Dict[str, Any] = {"key": key, "observations": int(streak),
+                               "promoted": False}
+        if key in cands and h is not None:
+            merged = dict(cands[key])
+            merged.update({"streak": int(streak), "event": event_kind})
+            new_h = W.remember(h, key, **merged)
+            out["promoted"] = True
+            out["harness_id"] = new_h.harness_id
+            out["world_facts"] = new_h.world_facts
+        return out
+
     def _deadend_map(self) -> Dict[str, int]:
         """从账本统计每个 (候选, 环境对) 的**连续**被拦次数。
 
@@ -970,6 +1042,13 @@ class EvolutionLoop:
             "batches": self.parallel_batches - _p0[0],
             "runs": self.parallel_runs - _p0[1],
         }
+        #: 陈述性知识读数：填在**所有**返回路径都经过的地方（与 parallel 同址）。
+        #: ⛔ `try/except`：读数失败不该拖垮一轮进化；失败时留 `None`
+        #:    （"没读到"与"读到 0 条"必须能分辨）。
+        try:
+            rep.world_facts = self.inherited_facts(h)
+        except Exception:                                  # noqa: BLE001
+            rep.world_facts = None
         return rep
 
     def _run_round(self, h: Harness, round_no: int = 0) -> RoundReport:
@@ -1039,6 +1118,21 @@ class EvolutionLoop:
             #: ⛔ 冷却只跳过**探测**，不许静默 —— 每条都进账本。
             cooling, streak = self._in_cooldown(cap.name, env_pair, deadend,
                                                 round_no)
+            #: ⛔⛔ **继承的知识优先于本轮派生量**：如果基因组里已经记着
+            #:    "这个候选在这套环境对上是死路"，就没有理由再花一次探索。
+            #:    这不是新增一层闸 —— 它是让**已经学到的**东西真的起作用
+            #:    （此前洞察烂在内存缓存里，换一次运行就丢光）。
+            inherited = self._facts_deadend_streak(h, cap.name, env_pair)
+            if inherited >= 1 and not cooling:
+                cooling = True
+                streak = max(streak, inherited)
+                self.ledger.append(
+                    "deadend.inherited",
+                    {"round_no": round_no, "capsule": cap.name,
+                     "env_pair": env_pair, "observations": inherited,
+                     "note": "基因组里已记着这条死路（陈述性知识）⇒ "
+                             "本轮不花探测预算；要撤销请 remove 那条 fact"},
+                    actor="evolution")
             if cooling:
                 cands.append(Candidate(
                     capsule_name=cap.name, harness_id="",
@@ -1051,6 +1145,47 @@ class EvolutionLoop:
                      "note": "已知死路 ⇒ 本轮不花探测预算（每 "
                              f"{self.cfg.deadend_probation_every} 轮试探一次）"},
                     actor="evolution")
+                #: ⛔⛔ **观察 → 事实**：连续被拦达门槛，就把这条洞察
+                #:    **写进基因组**（而不是只留在本轮的派生量里）。
+                #:    这是本模块存在的理由：洞察要能被**继承**。
+                #:    ⛔ 晋升只做一次（已有事实就不重复写，避免每轮改
+                #:      `harness_id` 造成无意义的产物增殖）。
+                if streak >= int(self.cfg.deadend_streak):
+                    try:
+                        pair0 = env_pair
+                        k0 = __import__(
+                            "aether.world_facts", fromlist=["x"]).fact_key(
+                            "deadend", cap.name,
+                            __import__("aether.world_facts",
+                                       fromlist=["x"]).env_pair_key(
+                                *str(env_pair).split("|", 1))
+                            if "|" in str(env_pair) else str(env_pair))
+                        already = self._facts_deadend_streak(h, cap.name,
+                                                             pair0) >= 1
+                        if not already:
+                            prom = self._observe_deadend(
+                                h, cap.name, pair0, round_no,
+                                "gen.probe", streak)
+                            if prom.get("promoted"):
+                                rep.facts_promoted.append(prom)
+                                self.ledger.append(
+                                    "world_fact.promoted",
+                                    {"round_no": round_no,
+                                     "capsule": cap.name, "env_pair": env_pair,
+                                     "observations": streak,
+                                     "fact_key": k0,
+                                     "harness_id": prom.get("harness_id"),
+                                     "note": "连续被拦达标 ⇒ 晋升为"
+                                             "**陈述性知识**（可继承、"
+                                             "可被选择、可被回滚）"},
+                                    actor="evolution")
+                    except Exception as e:                 # noqa: BLE001
+                        #: 晋升失败不该拖垮一轮：留痕并继续（读数里能看见）。
+                        self.ledger.append(
+                            "world_fact.promote_failed",
+                            {"round_no": round_no, "capsule": cap.name,
+                             "error": f"{type(e).__name__}: {e}"},
+                            actor="evolution")
                 continue
             try:
                 cand_h = apply_capsule(h, cap)

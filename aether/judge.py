@@ -46,7 +46,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .ledger import content_hash
 
 __all__ = ["JUDGE_MODULES", "JUDGE_CALIBER", "identity", "describe",
-           "normalize_source",
+           "normalize_source", "_caliber_value",
            "incomparable", "check_verdict_comparable", "assert_boundary",
            "COMPARABLE", "UNKNOWN", "INCOMPARABLE"]
 
@@ -67,6 +67,13 @@ JUDGE_MODULES: Tuple[str, ...] = (
 JUDGE_CALIBER: Tuple[str, ...] = (
     "aether.genome:LAYERS",
     "aether.genome:PROTECTED_LAYERS",
+    #: ⛔ **层集合与 op 白名单是尺子的一部分**，不是实现细节：
+    #:    它们定义"变异**能改什么**"。加/减一层、或放开一个 op，
+    #:    都会改变"什么算一次合法自我修改" ⇒ 跨那个点比读数不可比。
+    #:    实测踩过：新增 `world_facts` 层时 `judge.identity()` **没变** ——
+    #:    因为早先的实现只把"判据模块源码"算进身份，而 `LAYERS` 是
+    #:    **数据**不是源码 ⇒ 改层集合不触发身份变化。补进 `JUDGE_CALIBER`。
+    "aether.genome:_ALLOWED_OPS_BY_LAYER",
     "aether.verifier:SELF_REPORT_KEYS",
     "aether.nongression:pass_at_k",
 )
@@ -121,6 +128,31 @@ def _module_source(name: str) -> str:
     return normalize_source(inspect.getsource(mod))
 
 
+def _caliber_value(ref: str) -> Any:
+    """把一个口径引用（`模块:名字`）解析成**当前取值**（可哈希的表示）。
+
+    ⛔ 取不到时返回 `"<不可读：…>"` 而不是跳过：跳过会让身份对那部分
+       不敏感 ⇒ 一个"看起来有身份、其实漏了"的假身份。
+    ⛔ 取值要转成**稳定可序列化**的形式（`tuple` / 排序后的 list），
+       否则 dict/set 的迭代顺序会让身份随机漂移。
+    """
+    import importlib
+    mod_name, _, attr = ref.partition(":")
+    try:
+        val = getattr(importlib.import_module(mod_name), attr)
+    except Exception as e:                                 # noqa: BLE001
+        return f"<不可读：{type(e).__name__}>"
+    if isinstance(val, dict):
+        return {str(k): (sorted(v) if isinstance(v, (set, frozenset))
+                         else (list(v) if isinstance(v, tuple) else str(v)))
+                for k, v in sorted(val.items(), key=lambda kv: str(kv[0]))}
+    if isinstance(val, (set, frozenset)):
+        return sorted(str(x) for x in val)
+    if isinstance(val, (list, tuple)):
+        return [str(x) for x in val]
+    return str(val)
+
+
 def identity() -> str:
     """判据集的**内容寻址身份**（128 位前缀，与其它 `_ID_PREFIX` 同值）。
 
@@ -132,6 +164,14 @@ def identity() -> str:
             _module_source(n).encode("utf-8")).hexdigest()
             for n in JUDGE_MODULES},
         "caliber": list(JUDGE_CALIBER),
+        "caliber_values": {c: _caliber_value(c) for c in JUDGE_CALIBER},
+        #: ⛔⛔ 关键：把口径常量的**当前取值**算进身份。
+        #:    只算"名字列表"是不够的 —— 实测踩过：新增一层之后，
+        #:    `LAYERS` 的名字没变（`"aether.genome:LAYERS"` 这个字符串不变），
+        #:    于是身份纹丝不动，而"能被变异的是什么"已经变了。
+        #:    ⇒ 必须解析成实际值。取不到就记 `<不可读>`（**不许静默跳过**
+        #:    —— 静默跳过等于身份对那部分不敏感）。
+        "caliber_values": {c: _caliber_value(c) for c in JUDGE_CALIBER},
     }
     return content_hash(payload)[:32]
 
@@ -149,6 +189,10 @@ def describe() -> Dict[str, Any]:
         "judge_version": identity(),
         "modules": per_module,
         "caliber": list(JUDGE_CALIBER),
+        #: ⛔ 口径常量的**当前取值**也要能看见：只列名字的话，
+        #:    "新增了一层"这种变化在诊断输出上完全不可见
+        #:    （实测踩过：`LAYERS` 从 6 层变 7 层，名字列表一字未变）。
+        "caliber_values": {c: _caliber_value(c) for c in JUDGE_CALIBER},
         "note": ("判据集身份 = 上述模块的**规范化源码**哈希 + 口径常量。"
                  "改判据代码 ⇒ 身份改变 ⇒ 与历史裁决**不可比**"
                  "（这是刻意的：改尺子必须留痕）。"),

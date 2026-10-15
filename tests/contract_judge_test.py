@@ -108,21 +108,30 @@ def main() -> int:
             pass
     ck("B2 ⛔ 真实调用：改判据的 target 一个都进不来", not leaked, str(leaked))
     #: 反证另一面：**合法**的 harness 层必须照常能改（边界不是恒红）
+    #: ⛔ 每一层都要用**它自己合法的 op + value**：
+    #:    实测踩过 —— 用一套"通用"的 `(set, 1)` 去打所有层，
+    #:    在新增 `world_facts` 层（append 要求 Mapping）之后当场转红，
+    #:    而红的原因是**测试用错了 op**，不是边界坏了。
+    #:    ⇒ 这张表要跟着 `_ALLOWED_OPS_BY_LAYER` 一起维护。
     from aether.genome import LAYERS
     ok_layers = []
+    probes = {
+        "meta_rules": ("set", "L0.meta_rules", "规则"),
+        "routing": ("set", "L1.routing.repair", "fix"),
+        "tools": ("set", "L2.tools", "read_file"),
+        "skills": ("set", "L3.skills.x", "body"),
+        "memory_policy": ("tune", "L4.memory_policy.recall_topk", 1),
+        "world_facts": ("append", "L5.world_facts.deadend:c|env:e",
+                        {"observations": 3}),
+        "prompts": ("set", "prompts.a", "内容"),
+    }
     for layer in LAYERS:
-        t = {"meta_rules": "L0.meta_rules", "routing": "L1.routing.repair",
-             "tools": "L2.tools", "skills": "L3.skills.x",
-             "memory_policy": "L4.memory_policy.recall_topk",
-             "prompts": "prompts.a"}.get(layer)
-        if not t:
-            continue
+        op, t, v = probes[layer]
         try:
-            apply_gene(Harness(), Gene(op=("tune" if layer == "memory_policy"
-                                           else "set"), target=t, value=1))
+            apply_gene(Harness(), Gene(op=op, target=t, value=v))
             ok_layers.append(layer)
-        except Exception:                                  # noqa: BLE001
-            pass
+        except Exception as e:                             # noqa: BLE001
+            print(f"     （{layer} 失败：{type(e).__name__}: {str(e)[:60]}）")
     ck("B3 反证的另一半：合法层照常可改（边界不是恒红）",
        len(ok_layers) == len(LAYERS), f"{ok_layers} vs {list(LAYERS)}")
     #: 判据模块名单本身**也是判据**：加一个模块 ⇒ 身份变（改尺子要留痕）
@@ -133,6 +142,35 @@ def main() -> int:
            J.identity() != jv1)
     finally:
         J.JUDGE_MODULES = orig_mods
+
+    #: ⛔⛔ 口径常量是**尺子的一部分**，而且必须是**取值**敏感。
+    #:    实测踩过：新增 `world_facts` 层（`LAYERS` 从 6 层变 7 层）时
+    #:    `judge.identity()` **纹丝不动** —— 因为原实现只把口径常量的
+    #:    **名字列表**算进哈希，而名字（`"aether.genome:LAYERS"`）没变。
+    #:    那是一个"看起来有身份、其实漏了关键变化"的假身份。
+    from aether import genome as _g
+    base_layers = tuple(_g.LAYERS)
+    try:
+        _g.LAYERS = base_layers + ("probe_only_layer",)
+        ck("B5 ⛔ 改**层集合** ⇒ 判据身份必须变（取值敏感，不是名字敏感）",
+           J.identity() != jv1, "层集合变了而身份没变 = 假身份")
+    finally:
+        _g.LAYERS = base_layers
+    ck("B6 复原后身份回到原值（B5 不是恒红）", J.identity() == jv1)
+    ops = _g._ALLOWED_OPS_BY_LAYER
+    base_ops = dict(ops)
+    try:
+        ops["skills"] = tuple(base_ops["skills"]) + ("probe_only_op",)
+        ck("B7 ⛔ 改 **op 白名单** ⇒ 判据身份必须变（它定义什么算合法修改）",
+           J.identity() != jv1, "op 白名单是尺子的一部分")
+    finally:
+        ops.clear()
+        ops.update(base_ops)
+    ck("B8 复原后身份回到原值", J.identity() == jv1)
+    ck("B9 describe 里能看到口径取值（不只名字）",
+       "caliber_values" in J.describe()
+       and "world_facts" in str(J.describe()["caliber_values"]),
+       str(list(J.describe().keys())))
 
     # ── C 组：三态可比性 ─────────────────────────────────────────
     print("C 组：可比性三态（不合并）")

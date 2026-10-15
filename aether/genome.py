@@ -46,7 +46,7 @@ from .ledger import canonical_json, content_hash
 #:    编辑 ⇒ 必须能被 `blast_layers()` 识别为"层"，否则爆炸半径报告会把
 #:    `prompts.foo` 报成层名 `"foo"`（prompt 名）。
 LAYERS = ("meta_rules", "routing", "tools", "skills", "memory_policy",
-          "prompts")
+          "world_facts", "prompts")
 PROTECTED_LAYERS = frozenset({"meta_rules"})   # 触碰 ⇒ 需人工审批
 
 #: 各层允许的 op。⛔ 与 `providers.ALLOWED_OPS` 是**两层闸**：
@@ -60,6 +60,11 @@ _ALLOWED_OPS_BY_LAYER: Dict[str, Tuple[str, ...]] = {
     "tools":         ("set", "append", "remove"),
     "skills":        ("set", "append", "remove"),
     "memory_policy": ("set", "tune", "remove"),
+    #: 🟠 **陈述性知识层**：系统学到"关于这个世界的事实"。
+    #: ⛔ 它与其它层的性质不同：其它层是**指令/配置**（"怎么做"），
+    #:    这一层是**断言**（"这个世界是什么样的"）—— 可被证伪、可过期、
+    #:    可被回滚。把死路/超时/口径告警这类洞察放在这里，它们才**可继承**。
+    "world_facts": ("set", "append", "remove"),
     "prompts":       ("set", "append", "remove"),
 }
 
@@ -189,6 +194,12 @@ class Harness:
     tools: Tuple[str, ...] = ()
     skills: Dict[str, str] = field(default_factory=dict)
     memory_policy: Dict[str, Any] = field(default_factory=dict)
+    #: 🟠 **关于世界的事实**（陈述性知识）：key = 作用域，value = 断言。
+    #: ⛔ 为什么它必须在**基因组**里，而不是住在循环的内存缓存里：
+    #:    缓存里的洞察**不会被继承、不会被选择、不会被回滚** ——
+    #:    系统学到的东西全是过程性的，换一个 harness 就丢光。
+    #:    形状：`{"deadend:<候选>|<环境对>": {"kind": "deadend", ...}}`。
+    world_facts: Dict[str, Any] = field(default_factory=dict)
     prompts: Dict[str, str] = field(default_factory=dict)
 
     # ── 内容寻址：id 只由**身份字段**决定 ───────────────────────
@@ -207,6 +218,9 @@ class Harness:
             "tools": list(self.tools),
             "skills": self.skills,
             "memory_policy": self.memory_policy,
+            #: ⛔ 陈述性知识**必须进身份**：两个 harness 若"知道的事情不同"，
+            #:    它们就不是同一份产物（回滚、A/B 对比都以 id 为锚）。
+            "world_facts": self.world_facts,
             "prompts": self.prompts,
         })[:_ID_PREFIX]
 
@@ -220,6 +234,7 @@ class Harness:
             "tools": list(self.tools),
             "skills": dict(self.skills),
             "memory_policy": dict(self.memory_policy),
+            "world_facts": dict(self.world_facts),
             "prompts": dict(self.prompts),
         }
 
@@ -257,6 +272,7 @@ class Harness:
             tools=_as_tuple_str(d.get("tools")),
             skills=_as_dict(d.get("skills"), "skills"),
             memory_policy=_as_dict(d.get("memory_policy"), "memory_policy"),
+            world_facts=_as_dict(d.get("world_facts"), "world_facts"),
             prompts=_as_dict(d.get("prompts"), "prompts"),
         )
 
@@ -479,6 +495,36 @@ def apply_gene(h: Harness, gene: Gene) -> Harness:
         else:  # set
             mp[key] = gene.value
         return replace(h, memory_policy=mp)
+
+    # ── L5 world_facts（陈述性知识：关于世界的事实）──────────────
+    if layer == "world_facts":
+        #: target 形如 `L5.world_facts.<作用域名>`；作用域名里**允许** `:` 与
+        #: `|`（我们要写 `deadend:cand:x|env:a|b` 这种），所以这里**不能**
+        #: 按 `.` 切完就当 key —— 只有第一段是 key，其余原样拼回去。
+        if len(parts) < 2:
+            raise ValueError(
+                f"world_facts target 需形如 world_facts.<作用域>，"
+                f"实得 {gene.target!r}")
+        key = ".".join(parts[1:])
+        wf = dict(h.world_facts)
+        if gene.op == "remove":
+            wf.pop(key, None)
+        elif gene.op == "append":
+            #: append 的语义：把断言里**新增的键**并进已有断言（不然就退化成
+            #: set）。值必须是 Mapping 或 None（None = 只登记"我知道了"）。
+            cur = wf.get(key)
+            add = gene.value if isinstance(gene.value, dict) else None
+            if add is None:
+                raise ValueError(
+                    f"world_facts 的 append 需要 Mapping 值（要合并进已有断言），"
+                    f"实得 {type(gene.value).__name__}")
+            merged = dict(cur) if isinstance(cur, dict) else {}
+            merged.update(add)
+            merged.setdefault("kind", "note")
+            wf[key] = merged
+        else:  # set：整条替换（**明确**地覆盖，而不是合并）
+            wf[key] = gene.value
+        return replace(h, world_facts=wf)
 
     # ── prompts ──────────────────────────────────────────────────
     if layer == "prompts":
