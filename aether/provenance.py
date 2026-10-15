@@ -228,12 +228,3 @@ def describe() -> Dict[str, Any]:
                  "兼容性由 `provenance.compat_report` 判定（三态，"
                  "不可判别放行、不兼容拒绝）"),
     }
-
-
-__all__ = [
-    "CODE_VERSION", "LEDGER_FORMAT",
-    "KEY_CODE_VERSION", "KEY_FORMAT",
-    "COMPAT_OK", "COMPAT_UNKNOWN", "COMPAT_INCOMPATIBLE",
-    "Recorded", "parse_version", "is_compatible",
-    "read_from_payload", "stamp", "compat_report", "describe",
-]

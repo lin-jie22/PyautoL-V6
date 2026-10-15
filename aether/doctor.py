@@ -204,8 +204,43 @@ def _check_writable(root: Path, ctx: Dict[str, Any]) -> Check:
     return Check("data.writable", OK, f"{d} 可写")
 
 
+def _check_provenance(root: Path, ctx: Dict[str, Any]) -> Check:
+    """账本的**出处**是否可判别、是否兼容当前代码。
+
+    ⛔ 为什么这是体检项而不是"锦上添花"：账本是唯一事实源，而它的格式
+       版本此前**只参与算 hash、从不落盘** ⇒ 格式一旦漂移，读者只会得到
+       一句误导性的"链断了"（看起来像被篡改），而"这份数据是谁写的、
+       能不能拿来跟现在的读数比"根本无从判断。
+
+    三态处置（与 `provenance.compat_report` 同源）：
+      · `ok`           —— 有声明且兼容；
+      · `unknown`      —— 没声明（升级前存量）⇒ **ok 但写明"不可判别"**
+                          （"不可判别 ≠ 有罪"：升级前的账本不该被判非法）；
+      · `incompatible` —— 有声明但不兼容 ⇒ **fail**，并给出迁移/恢复动作。
+    """
+    from .ledger import Ledger
+    p = _paths(root)["ledger"]
+    if not p.exists():
+        return Check("ledger.provenance", SKIPPED, "账本文件不存在",
+                     "先跑一次 evolve 产生事件", "no_ledger_file")
+    rep = Ledger(p).source_compat()
+    rec = rep["recorded"]
+    if rep["state"] == "incompatible":
+        return Check("ledger.provenance", FAIL,
+                     "；".join(rep["reasons"]),
+                     "这份账本不能与当前代码的读数混比：先按 "
+                     "docs/ARCHITECTURE 的迁移说明升级数据，或从备份恢复")
+    if rep["state"] == "unknown":
+        return Check("ledger.provenance", OK,
+                     "账本没有出处声明（升级前存量）⇒ 出处不可判别；"
+                     "本次读数不得与声明了版本的账本跨版本比较")
+    return Check("ledger.provenance", OK,
+                 f"由 {rec['code_version']} 写出（格式版本 "
+                 f"{rec['format_version']}）⇒ 与当前代码兼容")
+
+
 CHECKS: List[Callable[[Path, Dict[str, Any]], Check]] = [
-    _check_ledger, _check_projection, _check_memory,
+    _check_ledger, _check_provenance, _check_projection, _check_memory,
     _check_backup, _check_caps, _check_writable,
 ]
 

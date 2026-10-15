@@ -24,7 +24,15 @@ V6 把这些从**工程师的纪律**变成**系统的结构**：
 """
 from __future__ import annotations
 
-__version__ = "0.1.0"
+#: ⛔ 版本的**唯一事实源**是 `_version.py`（不是这里）。
+#:    这里只把名字再导出一次，保持 `aether.__version__` 这个惯例读法。
+#:    依赖方向是单向的：`_version` → `provenance` → `ledger` → 这里，
+#:    所以版本号不会和 `ledger` 形成循环 import。
+#:    ⛔ 任何地方都不许再写版本号字面量（此前 `serve.py` 与这里各写一份，
+#:    实测漂移过：包报 0.1.0、端点报 0.2.0）。
+from ._version import CODE_VERSION, LEDGER_FORMAT
+
+__version__ = CODE_VERSION
 
 from .ledger import Ledger, Event, content_hash, canonical_json
 from .verifier import Verdict, Check, Verifier, assert_no_self_report
@@ -35,6 +43,7 @@ from .runtime import Trajectory, Step, group_relative, assign_credit
 from .memory import MemoryOS, MemNote, hash_embedding
 from .evolution import EvolutionLoop, EvolutionConfig, Weakness, mine_weaknesses
 from .store import Store, RunRow
+from . import provenance
 from .interop import (
     Registry, Gateway, CapabilitySpec, ParamSpec, Budget,
     Invocation, InvocationResult, CapabilityError, capability,
@@ -42,7 +51,7 @@ from .interop import (
 )
 
 __all__ = [
-    "__version__",
+    "__version__", "CODE_VERSION", "LEDGER_FORMAT", "provenance",
     "Ledger", "Event", "content_hash", "canonical_json",
     "Verdict", "Check", "Verifier", "assert_no_self_report",
     "Harness", "Gene", "Capsule", "apply_gene", "apply_capsule", "blast_radius", "diff",

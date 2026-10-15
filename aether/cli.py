@@ -1152,6 +1152,13 @@ def build_parser() -> argparse.ArgumentParser:
     """
     ap = argparse.ArgumentParser(prog="aether", description="V6 · AETHER CLI")
     add_root_arg(ap)
+    #: ⛔ `--version` 必须有，且只从 `_version` 读。一个系统要被人信任，
+    #:    第一件事是它能回答"我是谁、读的是哪版格式"。此前版本号散在
+    #:    4 处（含 `serve.py` 的字面量），且没有任何命令行入口能读出来。
+    from . import _version as _v
+    ap.add_argument("--version", action="version",
+                    version=f"V6 · AETHER {_v.CODE_VERSION}"
+                            f"（账本格式 v{_v.LEDGER_FORMAT}）")
     #: ⛔ 默认 INFO 而非 WARNING：改造前这些诊断是 `print(file=sys.stderr)`，
     #:    **全部可见**。默认 WARNING 会让 💾/ℹ 那几条凭空消失 ⇒ 静默改了
     #:    用户可见行为。要安静请显式 `--log-level WARNING`。
