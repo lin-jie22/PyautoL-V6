@@ -71,6 +71,22 @@ $PY -m aether.cli restore --from backups/backup-xxx --yes
 $PY -m aether.cli evolve --checkpoint cp.json --resume   # 断点续跑
 $PY -m aether.serve --api-token $TOKEN  # 非本机部署必须带上
 
+# 环境变量：全部**可选**（不给就离线跑，这是设计不是妥协）。
+# ⛔ 变量清单与代码**同源**：`contract_env_docs_test.py` 会把 `aether/` 里
+#    出现的每个 V6_* 与 .env.example 逐个对照（漏一个就转红）。样例见
+#    `.env.example`，其中如实标注了一个**已知缺口**：V6_EMB_API_KEY
+#    被读入后没有被任何地方使用（嵌入端点若需鉴权会静默 401）。
+cp .env.example .env.my && $EDITOR .env.my   # 例：填入 LLM / 嵌入端点
+
+# 发布与变更
+$PY -m aether --version              # 版本 + 账本格式（唯一事实源 _version.py）
+cat CHANGELOG.md                     # 含"已知边界"一节：没做/没验的事都在里面
+git tag v0.2.0                       # 版本号必须能锚定到某个提交（有契约守）
+
+# 种子现场：新克隆的仓库没有 data/（运行产物不进版本库）
+$PY -m aether --root data/seed doctor    # ⛔ `--root` 在子命令前后都可以写
+$PY -m aether --root data/seed rebuild   # 库只是视图：从账本重放出来
+
 # 反证探针：单独挖某一类缺口的**对拍脚本**（不是契约测试，是取证工具）
 $PY scripts/probe_spread_audit.py   # held-out 没判别力时闸会不会假放行
 $PY scripts/probe_sandbox_audit.py  # 沙箱是"真隔离"还是"只是 subprocess"
@@ -149,7 +165,7 @@ V6/
 │   ├── eventflow/          事件流聚合（会话切分 / 滑动窗口 / 分位数）
 │   ├── stateflow/          状态机（转移 / 合法性 / 可达性 / 路径计数）
 │   └── scheduler/          区间调度（冲突 / 最大并发 / 贪心 / 区间合并）
-├── tests/                  40 个契约测试（RED→GREEN + 反证组；`aether check` 一条命令跑全）
+├── tests/                  42 个契约测试（RED→GREEN + 反证组；`aether check` 一条命令跑全）
 ├── supervisor/             TypeScript 外部监督器（只读账本 + 异常检测）
 ├── console/                零构建的只读可视化控制台
 ├── data/seed/              **种子数据**（随仓库发布的最小现场：小账本 + 记忆）

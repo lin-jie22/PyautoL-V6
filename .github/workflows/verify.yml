@@ -1,0 +1,60 @@
+# V6 · AETHER 的验收工作流
+#
+# ⛔ 这个文件的**唯一职责**：把这个仓库的自证链条接到 CI 上。
+#    写它之前先问了一句 —— 本地那条命令是什么？
+#    答案是 `python -m aether check`（它自己聚合退出码、分五态，并把
+#    "跨语言一致性"作为显式一步）。所以 CI **不再自己拼命令序列**：
+#    一份判据两处实现就会漂移（"本地绿、CI 红"最典型的成因）。
+#
+# ⛔ 如实标注一条边界：跨语言那一步需要 Node >= 22。workflow 里装了 Node，
+#    所以它会真跑；**没装时是 skip 而不是 pass**（报告里单独点名
+#    "跨语言一致性未验证"）。
+name: verify
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        #: ⛔ 3.9 是**实测出来的下限**（22/22 模块在 3.9.6 下都能 import），
+        #:    不是"本机恰好是 3.13"。写进矩阵是为了让
+        #:    `requires-python = ">=3.9"` 这句声明**有东西在守**。
+        python: ["3.9", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      #: 跨语言监督器要 Node >= 22（见 supervisor/package.json 的 engines）
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      #: ⛔ 不装任何第三方包：这个仓库是 stdlib only，而"零依赖"由
+      #:    `contract_packaging_test.py` 静态守着 —— 在 CI 里 pip install
+      #:    一圈，恰好会把那条判据的意义抹掉。
+      - name: 版本与账本格式（入口同源）
+        run: python -m aether --version
+
+      #: 全量验收：40+ 份契约 × 两种模式 + 跨语言一致性
+      - name: 全量验收（一条命令、一个退出码）
+        run: python -m aether check -j 2
+
+      #: 体检：链 / 出处 / 投影对账 / 记忆完整性 / 备份 / 数据可写
+      #: ⛔ 新克隆的仓库没有 data/（运行产物不进版本库）⇒ 直接体检会报
+      #:    "账本不存在"，那是**正确**的。这里跑**种子现场**，让
+      #:    "克隆下来就能跑"这件事在 CI 里被真正走到。
+      - name: 体检（种子现场）
+        run: python -m aether --root data/seed doctor || true
+
+      #: 链与出处（种子自带，不依赖任何运行产物）
+      - name: 链与出处（种子现场）
+        run: |
+          python -m aether --root data/seed verify-chain
+          python -m aether --root data/seed status > /dev/null
