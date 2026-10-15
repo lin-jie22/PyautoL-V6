@@ -179,6 +179,7 @@ V6/
 ├── discover.py         从本机已有工具生成能力清单（**发现**，不下载不安装）
 │   ├── _version.py         版本号/格式号的**唯一事实源**
 │   ├── paths.py            目录布局的唯一事实源（cli/serve/doctor 共用）
+│   ├── caps_candidate.py   能力候选：发现 → 闸 → 留痕 → **人批准**（引擎不装）
 │   ├── learner.py          外部知识摄入（复用记忆闸，不自搞一套）
 │   ├── aging.py            跨轮退化检测（ALE 四类信号）
 │   ├── interop.py          UCI 通用接入层（agent/skill/tool 挂得上叫得动）
