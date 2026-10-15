@@ -176,7 +176,7 @@ V6/
 │   ├── doctor.py           一条命令体检（三态：ok / fail / skipped）
 │   ├── check.py            全量验收（一条命令、五态、**聚合退出码**）
 │   ├── provenance.py       账本出处（谁写的、按哪版格式写）
-├── discover.py         从本机已有工具生成能力清单（**发现**，不下载不安装）
+│   ├── discover.py         从本机已有工具生成能力清单（**发现**，不下载不安装）
 │   ├── _version.py         版本号/格式号的**唯一事实源**
 │   ├── paths.py            目录布局的唯一事实源（cli/serve/doctor 共用）
 │   ├── caps_candidate.py   能力候选：发现 → 闸 → 留痕 → **人批准**（引擎不装）
