@@ -181,6 +181,16 @@ def main() -> int:
                out.get("degraded") is None
                or "code" in (out.get("degraded") or {}),
                str(out.get("degraded"))[:160])
+            #: ⛔⛔ 降级**必须带机器可读原因**。REA 给调用方的 `message`
+            #:    与 `cleanup_reason` 是同一句泛泛的话，真因埋在
+            #:    `details.diagnostics.primary_error.diagnostics.reason`
+            #:    里（实测 `spawn EPERM` = 收尾时 `ps` 被环境拒）
+            #:    ⇒ 不带 reason 的话，调用方只知道"坏了"，不知道该怪谁。
+            dg = out.get("degraded")
+            if isinstance(dg, dict):
+                ck("B6b ⛔ 降级必须带 reason（不许只给泛泛的 message）",
+                   bool(str(dg.get("reason") or "").strip()),
+                   f"reason={dg.get('reason')!r}")
 
     #: ⛔⛔ 这条是**独立读数**，不是 B1 的推论：`rea doctor` 在
     #:    Ghidra/IDA/Hopper 全缺时**照样**返回结构完整的信封（healthy=false）
@@ -201,16 +211,27 @@ def main() -> int:
     # ── C 组：经 V6 的 Gateway 调用（不是绕过 V6 自己调脚本）────────
     print()
     print("== C 组：走 mount_capabilities + invoke ==")
+    #: ⛔ 断言**精确集合**而不是"数量 == N"：
+    #:    只判数量 ⇒ 加一个能力恒红（噪声），删一个能力也恒红但不是同一条；
+    #:    反过来若写成从清单里读 ids 再自比 ⇒ 恒绿（橡皮图章）。
+    #:    写死集合 ⇒ 增/删能力都必须**显式改这里**并过 review，这才是闸。
+    EXPECTED_IDS = (
+        "rea.analyze",
+        "rea.analyze_javascript_application",
+        "rea.capabilities",
+        "rea.doctor",
+        "rea.inspect_android_package",
+    )
     try:
         from aether import interop
         #: ⛔ `mount_capabilities` 返回的是 **(gateway, report)** 元组 ——
         #:    按单个对象取会拿到元组，`getattr(rep,'loaded')` 恒为空（假绿）。
         _gw, rep = interop.mount_capabilities(str(MANIFEST))
         ids = sorted(rep.loaded or [])
-        ck("C1 清单 4 个能力全部装载", len(ids) == 4,
-           f"loaded={ids} skipped={rep.skipped}")
+        ck("C1 清单 5 个能力全部装载", tuple(ids) == tuple(sorted(EXPECTED_IDS)),
+           f"loaded={ids} expected={sorted(EXPECTED_IDS)} skipped={rep.skipped}")
     except Exception as ex:                                # noqa: BLE001
-        ck("C1 清单 4 个能力全部装载", False, f"{type(ex).__name__}: {ex}")
+        ck("C1 清单 5 个能力全部装载", False, f"{type(ex).__name__}: {ex}")
         ids = []
 
     with tempfile.TemporaryDirectory() as td2:
@@ -301,6 +322,63 @@ def main() -> int:
                         offenders.append(f"{nm}@{node.lineno}")
     ck("E4 桥不 start_new_session（实测会破坏 REA 的 worker 清理）",
        not offenders, f"代码里出现了：{offenders}")
+
+    # ── F 组：错误信封判据（含反证）─────────────────────────────────
+    print()
+    print("== F 组：错误信封必须被判为错误（含反证）==")
+    try:
+        import importlib.util as _ilu
+        _spec = _ilu.spec_from_file_location("rea_bridge_under_test",
+                                             str(BRIDGE))
+        _mod = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        ck("F0 能加载桥模块（不跑子进程，纯判据对拍）", True)
+    except Exception as ex:                                # noqa: BLE001
+        ck("F0 能加载桥模块（不跑子进程，纯判据对拍）", False, str(ex))
+        _mod = None
+
+    if _mod is not None:
+        f = _mod._extract_result
+        #: 形态 ①：带 `error` 键 —— `capability_unavailable` 走这种
+        e1 = {"error": "Analysis failed",
+              "code": "capability_unavailable",
+              "category": "unsupported_provider",
+              "details": {"rejections": []}}
+        r1, d1 = f(e1)
+        ck("F1 形态①（带 error 键）⇒ 判为错误",
+           r1 is None and isinstance(d1, dict))
+
+        #: 形态 ②：只有 `code` + `category`，**没有 error 键**
+        #: ⛔ 这就是被漏判的那一种（2026-10-15 实测）。旧判据
+        #:    `if "error" not in data: return data, None`
+        #:    会把这个**失败信封原样当结果返回** ⇒ 顶层 `ok=true`
+        #:    而分析根本没成 ⇒ 观测侧恒亮绿灯（宪法禁的假仪表）。
+        e2 = {"code": "cleanup_incomplete",
+              "category": "execution_failure",
+              "details": {"provider_id": "jadx",
+                          "operation": "close_binary",
+                          "diagnostics": {
+                              "reason": "shell wrapper",
+                              "provider_cleanup": {
+                                  "reason": "spawn EPERM"}}}}
+        r2, d2 = f(e2)
+        ck("F2 ⛔ 形态②（无 error 键）⇒ 判为错误（不许当成功结果返回）",
+           r2 is None and isinstance(d2, dict),
+           f"result={type(r2).__name__}")
+        ck("F3 ⛔ 错误信封也必须带 reason（真因，不是泛泛的 message）",
+           bool(str((d2 or {}).get("reason") or "").strip()),
+           f"reason={(d2 or {}).get('reason')!r}")
+        ck("F4 ⛔ reason 取**最深**那条（浅层只是壳：外层说谁失败了，内层才是为什么）",
+           str((d2 or {}).get("reason")) == "spawn EPERM",
+           f"reason={(d2 or {}).get('reason')!r}")
+
+        #: 反证：成功信封（带 evidence_id）不得被误判为错误、不得被降级
+        good = {"evidence_id": "ev_1", "provider": "jadx",
+                "normalized_result": {"summary": {"classes": 1}}}
+        rg, dg = f(good)
+        ck("F5 反证：成功信封 ⇒ 不判为错误且不降级",
+           rg is not None and dg is None,
+           f"result_not_none={rg is not None} degraded={dg!r}")
 
     print()
     print("=" * 60)

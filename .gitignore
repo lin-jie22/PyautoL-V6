@@ -26,3 +26,5 @@ node_modules/
 
 #: REA 桥的全量输出落盘（运行时投影，不是源）
 data/rea/
+#: REA 兼容层的**编译产物**（由 `scripts/shims/*.c` 现编，缺了现编 ⇒ 不入版本库）
+data/rea_shims/

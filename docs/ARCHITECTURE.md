@@ -2642,3 +2642,321 @@ E 布局静态闸 + 运行时对拍 / F 三个入口 `--help` 可执行 /
 无令牌一律 401 ⇒ 拿它探活会永远"没起来"。看起来像 G1 坏了，实际是 G2 在生效。
 ⛔ 收尾用 `start_new_session` + `killpg`：只 terminate 父进程会让 serve 子进程
 变孤儿并占住端口 ⇒ 下一次跑"服务起不来"，而真实原因只是上次没清干净。
+
+---
+
+## 34. REA 接入：外部引擎的读数必须穿透到调用方（2026-10-15 · r37）
+
+主题：**接一个你控制不了的外部工具时，最贵的不是"调不通"，而是"调通了但
+你不知道它其实没成"**。本轮把 `morluto/rea`（npm `rea-agents@6.5.0`，MIT，
+207 个 MCP 工具）接进 V6，四条分析通道的实测状态全部记在下面。
+
+### 34.1 为什么不自己写反编译器
+
+V6 的价值在"把结果变成可归因的账本"，不在"再造一个 Ghidra"。REA 已经把
+Hopper / Ghidra / IDA / Apktool / JADX 包成 MCP 工具，且**每个结果自带
+Evidence 信封**（`evidence_id` / `provider` / `confidence` / `authority` /
+`limitations` / `normalized_result` / `locations`）—— 这与 V6 的
+`InvocationResult`（**故意没有 `reward` 字段**）同构，接起来不别扭。
+
+⛔ 权威来源是 `rea mcp doctor` 与 `docs/android-analysis.md:37-79`，
+**不是 README 概览**。本轮按 README 走的那两步全白费。
+
+### 34.2 桥的形态
+
+`scripts/rea_bridge.py` 实现 `CliAdapter`：argv 起子进程、`shell=False`、
+env 净化为 `PATH/HOME/LANG/LC_ALL/TMPDIR`、stdin 收一个 JSON、stdout 必须吐
+**恰好一个** JSON。**输出超预算直接报错，不截断** —— 半截 JSON 会被
+`json.loads` 之前的宽松解析伪装成"成功但内容少"，这是最坏的一类假成功。
+
+经 `mount_capabilities(src)` 挂进能力池后，调用面统一：
+
+```bash
+$PY -m aether.cli caps --caps capabilities.rea.json list
+$PY -m aether.cli caps --caps capabilities.rea.json invoke rea.doctor --json '{}'
+```
+
+⛔ `--caps` 是 **caps 子命令自己的**开关：写在 `caps list` 之后会报
+`unrecognized arguments`。
+
+### 34.3 ⛔⛔ 头号坑：`cleanup_incomplete` 的真因不在 REA，在沙箱
+
+现象：**每次**调用都以 `rc=1` / `code=cleanup_incomplete` 收尾，而
+`normalized_result` 里数据是完整的。
+
+二分排除：env 净化 / stdin / cwd / `--format` / 管道 / 临时目录堆积 /
+后台负载 —— **全部无差别复现**。node 侧 `mkdtemp` + `rmSync` 实测正常。
+
+真因要从信封深处挖：
+
+```
+details.diagnostics.primary_error.diagnostics.reason
+  = "process table could not be inspected: spawn EPERM"
+```
+
+REA 的 `supervisor.stop()` 靠 `ps` 查进程表来确认 worker 确实退出了；
+**本沙箱拒 `ps`**（`operation not permitted`）⇒ 确认不了 ⇒ 报收尾失败。
+
+也就是说：**分析成功了，收尾的"确认"这一步被环境掐了**。这是环境限制，
+不是桥缺陷。处理方式是三条：
+
+1. **不美化 rc** —— `rc=1` 就是 1，不因为"结果其实有"就改成 0；
+2. **把 `reason` 下钻透出**（`_walk` / `_find_key` / `_find_reason`，有界深
+   度 6）—— 嵌套位置会随 REA 版本漂移，而"有没有这个读数"才是要守的不变量；
+3. **超时单独开读数**（`timeout_reason`），**不许混进 `degraded`** —— 超时
+   是"我们等不动了"，不是"REA 说它降级了"，混在一起会让人误判该怪谁。
+
+⛔⛔ REA 给调用方的 `message` 与 `cleanup_reason` 是**同一句泛泛的话**。只看
+顶层字段，你永远只知道"坏了"，不知道该怪谁。
+
+> **后续（同一轮内已解决）**：真因确认后补了 `scripts/shims/ps_shim.c`
+> （见 34.9）。装上兼容层后，同一条调用的错误信封从
+> `cleanup_incomplete / cleanup: "incomplete"` 变成
+> `provider_timeout / operation: "list_documents"`，
+> 而 `details.cleanup` 变为 **`"complete"`** ⇒
+> **收尾确认这一步确实是被 `ps` 掐断的**，现已打通；
+> 卡点前移到了 Ghidra 会话建立（见 34.7）。
+
+### 34.4 Ghidra 原生反编译器：它不看 `GHIDRA_INSTALL_DIR`
+
+`FileManage::discoverGhidraRoot(argv[0])` 从**自己的可执行路径逐级上溯**找名
+为 `Ghidra` 的目录来定 root，**找不到才取 `SLEIGHHOME` 兜底**。
+
+⇒ 只设 `GHIDRA_INSTALL_DIR` 时，`rea doctor` 会报：
+
+```
+ghidra-native_decompiler | config_drift:
+  Matching native decompiler for darwin/arm64 was not found
+```
+
+修法：桥里 `SLEIGHHOME = GHIDRA_INSTALL_DIR`（`_engine_env()`）。注入后该项
+从失败列表消失，且出现 `native_decompiler_path: .../os/mac_arm_64/decompile`。
+
+⛔⛔ **只带确实存在的引擎变量** —— 声明一个不存在的路径 = 假仪表（宪法第 3 条）。
+
+### 34.5 `remediation` 文案不是诊断结论
+
+上一条的 remediation 说"需重编 arm64 版本"。照它做是对的，但**照它理解是错
+的**：真编出来的二进制文件一直都在，问题在 root 发现路径。按"需要重编"去折腾
+`-arch` 参数，两小时颗粒无收。
+
+⇒ 宪法第 75 条：外部工具的修复建议只是**建议**，真因必须是**自己实测出来的
+路径**，不能是转述。
+
+### 34.6 一个布尔不许兼两职
+
+桥最初只吐一个 `ok`：既表示"调用成功"，又被读数的人当成"引擎齐全"。实测
+`ok=true` 时 `hopper` / `ida-registration` 全在 `failing_checks` 里 ⇒ 绿灯亮着
+而引擎根本不全。
+
+拆成三个读数：`ok`（这次调用成没成）+ `rea_self_check.healthy`（REA 自认为健康
+吗）+ `failing_checks`（到底哪几项在红）。宪法第 74 条。
+
+### 34.7 当前可用面与已知边界（诚实清单）
+
+已实测可用：
+
+| 通道 | 状态 | 证据 |
+|---|---|---|
+| `rea.doctor` | ✅ | `healthy / 207 tools / catalog digest / request_flow` 全返回 |
+| 设备注册 | ✅ | 6 个 harness 已注册（含 claude_code / codex / copilot_cli / vscode） |
+| JS / Electron 静态 | ✅ | 端到端跑通 |
+| .NET / Flutter APK 静态 | ✅ | 端到端跑通 |
+| 原生二进制（Ghidra） | ⚠️ 半通 | `Analysis succeeded for file: ...target-*.bin`（**导入 + 自动分析过了**）且 `details.cleanup = "complete"` ⇒ 卡点**不在**收尾；而是 `ReaGhidraBridge` 建立会话时挂住，REA 自己的 provider 预算（330s）先耗尽，报 `provider_timeout / operation: "list_documents"` |
+| Android APK 反编译（jadx） | ❓ 未验 | JAR 已落盘且 SHA-256 逐字节对拍通过（`6e5eacf5...573ff75`）；本机**无 Android SDK / d8 / aapt2 / apksigner**，且外网被代理拦（502）⇒ **缺真实 APK 样本** |
+
+**两条未决，都如实挂着，不粉饰：**
+
+1. **原生桥会话握手挂住**：项目临时目录里 `session.json` / `bridge.sock`
+   **从未被创建**。已排除"沙箱禁 unix socket"（node 探针实测 `unix socket 可用
+   ✓`）。剩下两个候选（沙箱再禁了某个系统调用 / 该桥在 darwin/arm64 上本就慢或
+   挂）**都没证实**。需在非沙箱终端验证。
+2. **APK 通道缺样本**：需先解决自建 APK 的来源。
+
+### 34.8 契约：`tests/contract_rea_bridge_test.py`
+
+A 适配器形态（5）/ B 信封结构（10，**含 B6b**）/ C 引擎变量（4）/ D 输出预算（1）
+/ E 端到端（4）。
+
+⛔⛔ **B6b 是这一轮最关键的一条**：
+
+```python
+ck("B6b ⛔ 降级必须带 reason（不许只给泛泛的 message）",
+   bool(str(dg.get("reason") or "").strip()), ...)
+```
+
+它把 34.3 那个坑钉死：降级**必须**带机器可读原因。没有 B6b，下一次 REA 改文案，
+`reason` 又沉回信封深处，调用方再次只能看到"坏了"。
+
+⛔⛔ **每次跑完 REA 必须 `pgrep -fl java` 检查孤儿** —— 超时被杀会留下孤儿
+JVM 各占一个核烧 CPU。本轮踩过（2 个：pid 16079 / 16395），已 `kill -9` 清理。
+
+---
+
+### 34.9 ⛔⛔ 外部工具的隐式依赖：文档没写 ≠ 不存在
+
+装上兼容层前后，同一条 `analyze` 调用的错误信封**变了**：
+
+| | 前 | 后 |
+|---|---|---|
+| `code` | `cleanup_incomplete` | `provider_timeout` |
+| `category` | `execution_failure` | `timeout` |
+| `details.operation` | `close_binary` | `list_documents` |
+| `details.cleanup` | `incomplete` | **`complete`** |
+
+⇒ 这四条一起构成**因果证据**：收尾确认确实是被"读不到进程表"掐断的；
+   补上之后它过了，卡点**前移**到 Ghidra 会话建立。没有这张对照表，
+   "我修好了 ps" 就只是一句自我声明。
+
+**取证路径**（可复用）：REA 把自己的 CLI 编成 bundle，但它 exec 的外部命令在
+`dist` 里是**明文**的：
+
+```
+grep -rn 'execFileOutput("ps"' node_modules/rea-agents/dist/
+  → dist/process/ProcessOwnershipObservation.js:  execFileOutput("ps", ["-axo","pid=,ppid=,pgid=,uid=,stat=,command="], ...)
+  → dist/mcp/ProcessOwnership-Bl_3ejLe.js:       execFileOutput("ps", ["eww","-p",String(pid)], ...)
+```
+
+⇒ 接一个你控制不了的外部工具前，先去它的**产物**里 grep 它 exec 了什么，
+   别信 README 的 "Requirements" 章节。
+
+⛔ **探测必须用与真实调用同形态的输入** —— 这里就是真的 exec 一次
+   `ps -p 1`，而不是 `shutil.which("ps")`。`/bin/ps` 在本环境**存在**且
+   权限位齐全，只是 exec 被沙箱拒（errno = EPERM；同一环境下 `pgrep` 可用）
+   ⇒ 只看 `which` 会把"有文件"读成"能用"。
+
+#### 兼容层的三条自律
+
+⛔ **不编造字段**：某个进程内核读不到 ⇒ **整行跳过**，不填占位。宁可少一行，
+   也不能让调用方拿一张"看起来齐但字段是编的"的表去判活。
+⛔ **不追求与 ps 全等**：只实现消费者**真正请求**的 spec；不支持的参数
+   组合一律 exit 64 + stderr。静默猜一个像样的输出 = 假仪表。
+   STAT 列只吐**首字符**：`+`/`s`/`X` 需要"控制终端的前台进程组"信息，
+   libproc/kinfo_proc 都给不出 ⇒ 不猜。
+   （实测旁证：本机 `pbi_status` 对所有可读进程恒为 2 / SRUN，
+    连正在 `sleep()` 的进程也报 2 ⇒ 这个字段在这里**不携带信息**，
+    消费者的判活只看 `startsWith("Z")`，首字符足够。）
+⛔ **只在原生实现不可用时接管**：系统 `ps` 能跑就让它跑 —— 那才是权威实现，
+   无条件接管是自找麻烦。
+
+#### 为什么用 `kinfo_proc` 而不是 libproc 的 `proc_bsdinfo`
+
+`ps` 自己读的是 `KERN_PROC_ALL` sysctl 返回的 `struct kinfo_proc`（`<sys/sysctl.h>`
+在用户态可见）。而 `libproc` 的 `proc_bsdinfo` 有两处坑：
+
+1. **`sizeof` 是 136，不是网上常见的 112** ⇒ 按 112 申请缓冲，
+   `proc_pidinfo` 直接返回 0（errno = ENOMEM），你会拿到一张全 0 的表，
+   而且**没有任何报错**。
+2. 僵尸进程 `proc_pidinfo` 返回 0 ⇒ 整行消失 ⇒ 表里"没有"那个还挂着的 worker。
+
+⇒ 用与 `ps` 同源的结构，并在 `--selftest` 里用自己的 pid / pgid / uid 对拍：
+    布局漂了**跑之前**就炸，而不是静默出一张假表。
+
+---
+
+### 34.10 ⛔⛔ 构建选靶错误：能编译通过 ≠ 就是被调用方要的那个产物
+
+**症状**（修复前）：一次 `rea analyze <bin> --provider ghidra` 永久挂住，
+Ghidra 的 `ghidra.log` 停在启动 `ReaGhidraBridge.java`，再无输出。
+三个 JVM 的线程栈卡在**同一处**：
+
+```
+"main" ... runnable, cpu=5314ms elapsed=3499s        ← CPU 几乎不动
+  at java.io.FileInputStream.readBytes(Native Method)
+  at java.lang.Process$PipeInputStream.read(Process.java:1116)
+  at ghidra.app.decompiler.DecompileProcess.readToBurst(DecompileProcess.java:206)
+  at ghidra.app.decompiler.DecompileProcess.readToResponse(DecompileProcess.java:234)
+  at ghidra.app.decompiler.DecompileProcess.registerProgram(DecompileProcess.java:486)
+  at ghidra.app.decompiler.DecompileProcess.<init>(...)
+  at ghidra.app.decompiler.DecompileInterface.initializeProcess(DecompInterface.java:291)
+  at ghidra.app.decompiler.DecompileInterface.openProgram(DecompInterface.java:402)
+  at ReaGhidraBridge.initializeDecompiler(ReaGhidraBridge.java:922)
+  at ReaGhidraBridge.run(ReaGhidraBridge.java:237)
+```
+
+**判读**：`cpu=5314ms / elapsed=3499s` ⇒ **不是算得慢，是卡在 I/O 上等一个永远不会来的回应**。
+⛔ 这一类信号（卡 I/O 而非卡 CPU）应优先怀疑**形态/协议对不上**，而不是先去调超时、加机器。
+
+**根因**：`Ghidra/Features/Decompiler/src/decompile/cpp/` 里有**两个 `main()`**：
+
+| 源文件 | Makefile 目标 | 编译标志 | 实际形态 |
+|---|---|---|---|
+| `consolemain.cc:176` | `decomp_opt` / `decomp_dbg` | **`-D__TERMINAL__`** | 独立**交互控制台**，`IfaceTerm("[decomp]> ",cin,cout)` + `mainloop()`，逐字符回显 |
+| `ghidra_process.cc:518` | `ghidra_opt` / `ghidra_dbg` | 无 `__TERMINAL__` | **Ghidra 管道协议**，`while(status==0) status = GhidraCapability::readCommand(cin,cout)` |
+
+而官方安装目标只有一条：
+
+```make
+install_ghidraopt:  ghidra_opt
+	cp ghidra_opt $(GHIDRA_BIN)/Ghidra/Features/Decompiler/os/$(OSDIR)/decompile
+```
+
+⇒ 上一轮把**控制台版**编出来装成了 `decompile`。于是：
+
+| 侧 | 行为 |
+|---|---|
+| Java | 按 Ghidra 12 的**打包二进制协议**写 `00 00 01 02 … "registerProgram" … <?xml …` |
+| 原生 | 把这些字节当**终端键盘输入**，做 readline 回显（实测 stdout 抓到 `[decomp]> re` / `reg` / `register`） |
+
+双方语言不通 ⇒ Java 阻塞在 `readToBurst` 直到 provider 预算（330s）耗尽，
+信封报 `provider_timeout / operation: list_documents`。
+
+#### 三层取证（缺一不可）
+
+1. **运行时取证真实路径**。`pgrep -fl decompile` 直接读到子进程 argv[0]：
+
+   ```
+   .../Ghidra/Features/Decompiler/build/os/mac_arm_64/decompile
+                                       ^^^^^^  ← 多一层 build/
+   ```
+
+   ⛔⛔ 上一轮把兼容层装在 `.../Decompiler/os/mac_arm_64/`，**一次都没被调用**。
+   这与 §34.9 的 `ps` 坑是**同一个形态**：改的不是真正被走到的那条路。
+   REA 的解析逻辑（`dist/ghidra/GhidraInstallation.js`）**同时认两个位置**，
+   其 remediation 文案原话即为 “or its **build/os** equivalent”。
+
+2. **线程栈定点**。`jcmd <javapid> Thread.print` 把卡点钉到 `readToBurst`，
+   配合 CPU 时间判定「等 I/O」而非「在算」。
+
+3. **字节流对拍**。把 `decompile` 临时换成包装器，录下 Java 写来的 stdin 与原生吐回的 stdout。
+   ⓵ 包装器**不能用 BSD `tee`**：它写文件走 stdio 缓冲，子进程一旦提前退出，
+   tee 会被 SIGPIPE 杀掉，**缓冲区内容直接丢失** ⇒ 看起来像「Java 什么都没发」。
+   macOS 没有 `stdbuf`，改用显式 `flush()` 的 Python 泵。
+
+#### 修复：按官方 `ghidra_opt` 目标重编，并覆盖 Darwin 分支硬编码
+
+```sh
+make ghidra_opt ARCH_TYPE="-arch arm64" OSDIR="mac_arm_64" \
+                ADDITIONAL_FLAGS="-mmacosx-version-min=11.0 -w"
+```
+
+⚠️ 官方 Makefile 在 Darwin 分支里**硬编码**了两处，且分支上方就挂着原作者的 TODO：
+
+```make
+# TODO: need to revise to support arm64/aarch64 arch - improve on both OS and arch detection
+ifeq ($(OS),Darwin)
+  ARCH_TYPE=-arch x86_64          ← 硬编码
+  OSDIR=mac_x86_64                ← 硬编码
+  ADDITIONAL_FLAGS=-mmacosx-version-min=10.6 -w   ← arm64 上 10.6 不合法
+endif
+```
+
+⇒ 在 Apple Silicon 上直接 `make` 会**静默**产出 x86_64 产物并装进 `mac_x86_64/`，必须显式覆盖。
+⇒ 配方已固化为 `scripts/build_rea_engines.sh`（幂等，产物安装到 `os/` 与 `build/os/` 两个候选位）。
+
+#### 前后对照（同一条 `analyze` + `--provider ghidra`）
+
+| | 修复前 | 修复后 |
+|---|---|---|
+| `ok` | false | **true** |
+| `returncode` | 1 | **0** |
+| `timed_out` | true | **false** |
+| `duration_ms` | 300s+ 超时 | **9209** |
+| `degraded` | `cancelled` | **`None`** |
+| `operation` | `list_documents`（卡住） | **`binary_overview`** |
+| `normalized_result` | – | `image_base 0x100000000`，10 段 / 9 过程 / 24 串 |
+
+⛔ 为什么这**不是**空壳成功：`normalized_result` 里是真实 Mach-O 结构
+（`__TEXT` / `__text` / `__stubs` / `__cstring` / `__unwind_info` / `__got` /
+`__DATA_CONST` / `__LINKEDIT` / `EXTERNAL`），与 `nm` / `strings` 的真值对得上，
+而不是一个 `ok=true` 的空信封。

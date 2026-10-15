@@ -70,8 +70,22 @@ NODE=/Users/linshaojie/.workbuddy/binaries/node/versions/22.22.2-6/bin/node
 cd supervisor && $NODE src/selfcheck.ts                    # 含跨语言一致性验证
 $NODE src/index.ts --ledger ../data/ledger.jsonl --watch 30
 
-# 控制台
+# 控制台（三栏工作台）
+$PY -m aether.cli ui                       # 起服务 + 开桌面窗口（推荐）
+$PY -m aether.cli ui --no-open            # 只起服务
 $PY -m aether.serve --console console     # → http://127.0.0.1:8611/console/
+
+# REA（外部逆向引擎，经能力清单调用）
+$PY -m aether.cli caps --caps capabilities.rea.json list
+$PY -m aether.cli caps --caps capabilities.rea.json invoke rea.doctor --json '{}'
+$PY -m aether.cli caps --caps capabilities.rea.json \
+    invoke rea.analyze_javascript_application --json '{"path":"/绝对路径/目标"}'
+$PY -m aether.cli caps --caps capabilities.rea.json \
+    invoke rea.inspect_android_package --json '{"path":"/绝对路径/目标.apk"}'
+# ⛔ `--caps` 是 **caps 子命令自己的**开关，写在 `caps list` 之后会报
+#    unrecognized arguments（实测踩过）。
+# ⛔⛔ APK **不走** `rea.analyze`：它的自动候选只有 ghidra/hopper/ida
+#    三个**可执行体** provider，会统一拒掉 `target_kind=archive`。
 ```
 
 **零第三方依赖**（Python stdlib + Node 内置模块）。这不是洁癖：
@@ -886,6 +900,104 @@ serve 三处 / backup.BACKUP_TARGETS）。改布局要改四处，漏一处 ⇒ 
 ⛔ 静态闸只判**路径拼接**形态（`"data" / "ledger.jsonl"` 的 BinOp），不判所有字符串
 常量 —— `"data"` 也是 HTTP 响应里的常见键名，按常量判会误伤；误伤一次就会有人
 加白名单，白名单一开这条闸就废了。
+
+### 73. **降级 / 失败读数必须带机器可读的 `reason`，不许只给泛泛的 message**
+
+经桥调 REA 每次 `rc=1`、`code=cleanup_incomplete`，调用方只看得到
+"Provider cleanup could not be fully confirmed"。真因埋在
+
+```
+details.diagnostics.primary_error.diagnostics.reason
+  = "process table could not be inspected: spawn EPERM"
+```
+
+⇒ 为此花掉大量二分（env 净化 / stdin / cwd / `--format` / 管道 /
+临时目录堆积 / 后台负载 **全部无差别复现**）才定位到：REA 收尾靠 `ps`
+查进程表，而**沙箱拒 `ps`**。
+
+⛔ 判据：任何 `degraded` / `error` / `timeout` 读数**都**必须带机器可读
+reason；只有 message 的降级 = 让下一个人重做一遍二分。
+   · reason 必须**下钻取** —— 顶层字段常常只是复述 message；
+   · 契约钉一条「降级 ⇒ reason 非空」，否则这条读数会静默退回泛文案。
+⛔ **超时不许混进 `degraded`**：一个是「跑完了但收尾没确认（结果可用）」，
+   一个是「没跑完（结果没有）」，归因完全不同。
+
+### 74. **一个布尔不许兼两职**
+
+桥的 `ok` 只表示「**拿到结果了**」，但调用方极易读成「引擎都齐全」。
+实测：`ok=true` 的同时 REA 自报 `healthy=false` / `environment_healthy=false`。
+
+⇒ 拆成**两个独立读数**：`ok`（这步成没成）+ `rea_self_check.healthy`
+（环境齐不齐）；且 `healthy` 为假时必须列出 `failing_checks`
+（否则只知道坏了，不知道缺什么）。
+
+⛔ 判据：一个布尔若可能被读成两种意思，就拆。同形态已栽三次 ——
+   UI「面板写了 ≠ 渲染了」、桥「ok ≠ 引擎齐全」、闸「全 0 ≠ 失效」。
+
+### 75. **外部工具的 remediation 文案只是建议，不许当诊断结论**
+
+REA 报 `Decompiler executable may not be compatible with your system and may
+need to be rebuilt`，看着像架构不对 ⇒ 顺着文案去折腾 `-arch` 是白费力气。
+它实际是 Ghidra 原生二进制用 `FileManage::discoverGhidraRoot(argv[0])`
+从**自己的可执行路径**上溯找 `Ghidra` 目录，而它被 `analyzeHeadless` 从
+**项目临时目录**拉起 ⇒ 上溯必然失败。
+
+⛔ 判据：`remediation` / 报错文案 = **给人类看的下一个动作**，不是根因。
+   诊断必须来自**实测读数**（退出码 / stderr / reason 字段）。
+   本例真正的修法：`SLEIGHHOME` 与 `GHIDRA_INSTALL_DIR` **设成同一个目录**。
+
+### 76. **外部工具的隐式依赖要先取证：文档没写 ≠ 不存在**
+
+REA 在关闭 provider 前会 exec 一次
+`ps -axo pid=,ppid=,pgid=,uid=,stat=,command=`（见
+`node_modules/rea-agents/dist/process/ProcessOwnershipObservation.js` 里的
+`execFileOutput("ps", ["-axo", ...])`），用它扫进程表确认 worker 进程组已退出。
+**这条依赖在任何文档里都没写**。它拿不到进程表时 fail-closed：把一次**分析成功**
+的运行记成 `cleanup_incomplete`（rc=1）并丢弃结果 —— 看 `message` 是同一句泛泛的
+话，看 `reason` 才知"读不到进程表"，再钻一层才是 `spawn EPERM`。
+
+⇒ 接一个你控制不了的外部工具前，先去它的**产物**里 grep 它到底 exec 了什么，
+   别信 README 的"Requirements"章节。
+⇒ 同源：探测**必须**用与真实调用同形态的输入 —— 这里就是真的 exec 一次
+   `ps -p 1`，而不是 `shutil.which("ps")`。`/bin/ps` 在本环境**存在**且权限位
+   齐全，只是 exec 被沙箱拒（errno = EPERM，而 `pgrep` 可用）⇒ 只看
+   `which` 会把"有文件"读成"能用"。
+
+### 77. **兼容层要自报家门，且只在原生实现不可用时接管**
+
+`scripts/shims/ps_shim.c` 用 libproc（`KERN_PROC_ALL` + `struct kinfo_proc`，
+与 `ps` 同源）补上进程表。三条纪律：
+
+⛔ **不编造字段**：某个进程读不到 ⇒ **整行跳过**，不填占位。宁可少一行，
+   也不能让调用方拿"看起来齐但字段是编的"的表去判活。
+⛔ **不追求与 ps 全等**：只实现消费者真正请求的 spec；不支持的参数组合
+   一律 exit 64 + stderr。静默猜一个像样的输出 = 假仪表。
+   STAT 只吐**首字符**：`+`/`s`/`X` 需要"控制终端前台进程组"信息，
+   拿不到就不猜（且消费者的判活只看 `startsWith("Z")`，首字符足够）。
+⛔ **只在原生不可用时接管**：系统 `ps` 能跑就让它跑 —— 那才是权威实现，
+   无条件接管是自找麻烦。
+
+⇒ 读数记账：`process_table_source ∈ {system:ps, shim:libproc, unavailable}`。
+   调用方必须能看出这次的进程表**是谁给的**（与第 75 条同一条纪律：
+   声明与实际的落差必须记账）。
+
+**78. 外部工具的真实路径靠运行时取证，不靠文档或直觉猜。**
+   接一个你控制不了的外部工具前，先 `pgrep -fl <工具名>` 读它**实际** exec 的
+   argv[0]，再决定往哪装补丁 / 兼容层。
+   ⛔ 本次差了一层 `build/os`：装在 `.../Decompiler/os/mac_arm_64/decompile`
+   的兼容层**零调用**，真实路径是 `.../Decompiler/build/os/mac_arm_64/decompile`
+   （REA 两个位置都认，其 remediation 文案明说 “or its build/os equivalent”）。
+   ⛔ 「文档说在 X 目录」不构成证据；「按命名规律推出来应该在 X」更不构成。
+   ⇒ 兼容层必须**自报家门**，让调用方能验证「改动是否真被走到」（第 77 条同纪律）。
+   ⇒ 取证后**必须清理**：临时包装器、孤儿进程、`/tmp` 日志一律复位。
+
+**79. 一个源码树有多个 `main()` 时，先确认哪个产物才是被调用方加载的那个。**
+   ⛔ 「能编过」≠「编对了」。判据是**安装目标 / 入口契约**，不是编译成功。
+   ⛔ 上游构建脚本可能**硬编码**平台分支（本次 Ghidra 12.1.4 的 Darwin 分支
+   写死 `ARCH_TYPE=-arch x86_64` 与 `OSDIR=mac_x86_64`，上方还挂着原作者
+   TODO 明说不支持 arm64）⇒ 跨平台构建必须显式覆盖，否则**静默**产出错架构产物。
+   ⇒ 判定信号：**卡在 I/O（CPU≈0）而不是在算** ⇒ 先怀疑协议/形态对不上，
+     别先去调超时、加机器（与第 76 条「文档没写 ≠ 不存在」成对使用）。
 
 ---
 

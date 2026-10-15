@@ -58,6 +58,35 @@
       }
     },
     {
+      "id": "rea.inspect_android_package",
+      "kind": "tool",
+      "version": "0.1.0",
+      "summary": "REA：检查一个 APK 的声明与解码后 manifest（不执行目标，走 jadx）",
+      "trusted": false,
+      "sandbox": "process",
+      "effects": ["read"],
+      "timeout_s": 330.0,
+      "inputs": {
+        "path": {"type": "str", "required": true,
+                 "desc": "独立 APK 文件的**绝对路径**（相对路径会被桥拒绝）"}
+      },
+      "outputs": {
+        "ok": {"type": "bool", "required": true},
+        "evidence_id": {"type": "str", "required": false},
+        "summary": {"type": "dict", "required": false},
+        "full_output": {"type": "dict", "required": true,
+                        "desc": "{path, bytes, sha256} —— 全量 Evidence 落点"}
+      },
+      "impl": {
+        "transport": "cli",
+        "argv": [
+          "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/bin/python3",
+          "/Users/linshaojie/V6/scripts/rea_bridge.py",
+          "--command", "inspect_android_package"
+        ]
+      }
+    },
+    {
       "id": "rea.analyze",
       "kind": "tool",
       "version": "0.1.0",

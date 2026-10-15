@@ -40,13 +40,21 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
+from . import provenance
+
 #: 冷启动只读尾部多少字节来找"最后一条事件"。
 #: ⛔ 必须 ≥ 单条事件的最大行长，否则缓冲区里可能一个完整行都没有 ⇒
 #:    退回全扫（慢但不出错）。64 KB 对 payload 里带源码片段的事件够了；
 #:    真正超长时也不会算错，只是退化到全扫。
 HYDRATE_TAIL_BYTES = 64 * 1024
 
-LEDGER_VERSION = 1
+#: 账本**文件格式**版本。⛔ 参与 `Event.identity()` 的 hash ⇒ 改它必然让
+#:    全部历史 hash 失效，所以只能走"迁移 + 留痕"。真正的出处契约在
+#:    `provenance` 模块：除了这个参与 hash 的常量，每条账本的**第一条
+#:    事件**还会在 payload 里落一份人可读的 `format_version` /
+#:    `src_version`，好让读者能回答"这份数据是谁写的、按哪版格式写的"，
+#:    而不是只能看到一句误导性的"链断了"。
+LEDGER_VERSION = provenance.LEDGER_FORMAT
 
 
 #: JS `Number` 能精确表示的最大整数（2^53）。
@@ -369,6 +377,13 @@ class Ledger:
             #: 的自由区，历史文件缺 `sid` 也不影响链校验）
             body = dict(payload or {})
             body.setdefault("sid", self.session)
+            #: 🟠 出处：**第一条事件**上盖章（写入侧只需声明一次）。
+            #:    ⛔ 用 `seq == 1` 判断"我是第一个写者"，而不是"文件当前为空"
+            #:       —— 后者在并发下会把两个写者都当成第一个。
+            #:    ⛔ `setdefault` 语义：调用方显式声明的出处优先（测试要靠
+            #:       它构造"旧版本写的账本"）。
+            if seq == 1:
+                body = provenance.stamp(body)
             ev = Event(seq=seq, ts=ts if ts is not None else time.time(),
                        kind=kind, actor=actor, payload=body,
                        prev_hash=self._last_hash, hash="")
@@ -452,6 +467,29 @@ class Ledger:
 
     def events(self) -> List[Event]:
         return list(self.iter_events())
+
+    # ── 出处：这份账本是谁写的、按哪版格式写的 ──────────────────
+    def source(self, *, max_scan: int = 5000) -> provenance.Recorded:
+        """读账本里的出处声明（写入侧在**第一条事件**上盖章）。
+
+        ⛔ 只扫前 `max_scan` 条：声明按契约就在第一条，扫到就该停；
+           `max_scan` 只是防"账本是别人造的、永远找不到声明"时把整个
+           大账本读穿（这是一个**读路径**，不许变成 DoS 入口）。
+        ⛔ 找不到 ⇒ 返回"没声明"（`declared=False`），**不抛错**：
+           升级前的存量账本本来就该是这个结果，而不是故障。
+        """
+        for i, ev in enumerate(self.iter_events()):
+            if i >= max_scan:
+                break
+            rec = provenance.read_from_payload(ev.payload,
+                                               source=f"seq={ev.seq}")
+            if rec.declared:
+                return rec
+        return provenance.Recorded(source="(none)")
+
+    def source_compat(self, *, max_scan: int = 5000) -> Dict[str, Any]:
+        """出处的**兼容性**读数（三态：ok / incompatible / unknown）。"""
+        return provenance.compat_report(self.source(max_scan=max_scan))
 
     def iter_lines(self) -> Iterator[str]:
         """给跨语言消费者用：直接吐原始行（TS 侧自己解析）。

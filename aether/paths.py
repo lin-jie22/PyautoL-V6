@@ -36,6 +36,9 @@ CONSOLE_DIRNAME = "console"
 #: 外部能力（REA 桥）的全量输出落点。**声明式**：桥脚本只读这里，
 #: 不自己拼 `root / "data" / "rea"`（拼了就是布局又多一份）。
 REA_DIRNAME = "rea"
+#: REA 需要、但本环境缺失的系统工具的**兼容层**落点（编译产物，不入备份）。
+#: 目前只有一个 `ps`（本沙箱拒绝对 `/bin/ps` 的 exec，见 `scripts/shims/ps_shim.c`）。
+REA_SHIMS_DIRNAME = "rea_shims"
 
 LEDGER_NAME = "ledger.jsonl"
 DB_NAME = "aether.db"
@@ -86,6 +89,8 @@ def paths(root: Union[str, Path], *, default_env: str = "textscore"
         #: 外部能力输出（REA 桥的全量 Evidence 落点）。不入备份清单 ——
         #: 它是**投影**（可从目标重跑得到），不是事实源。
         "rea": r / DATA_DIRNAME / REA_DIRNAME,
+        #: 兼容层编译产物（如 `ps`）。同样是投影：缺了就现编。
+        "rea_shims": r / DATA_DIRNAME / REA_SHIMS_DIRNAME,
     }
 
 
