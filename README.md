@@ -91,6 +91,7 @@ $PY -m aether --root data/seed rebuild   # 库只是视图：从账本重放出�
 $PY scripts/probe_spread_audit.py   # held-out 没判别力时闸会不会假放行
 $PY scripts/probe_sandbox_audit.py  # 沙箱是"真隔离"还是"只是 subprocess"
 $PY scripts/probe_memory_audit.py   # 一次 _collect 的内存峰值花在哪（含投影库场景）
+$PY scripts/probe_self_reference.py # 自指负载：多少产出在给自己造机器（只读）
 
 # TypeScript 监督器（Node ≥22 原生跑 TS，无需 npm install）
 # ⛔ 本机 `node` 不在 PATH 上；项目约定用 workbuddy 的二进制（契约测试的
@@ -189,7 +190,7 @@ V6/
 │   ├── eventflow/          事件流聚合（会话切分 / 滑动窗口 / 分位数）
 │   ├── stateflow/          状态机（转移 / 合法性 / 可达性 / 路径计数）
 │   └── scheduler/          区间调度（冲突 / 最大并发 / 贪心 / 区间合并）
-├── tests/                  44 个契约测试（RED→GREEN + 反证组；`aether check` 一条命令跑全）
+├── tests/                  45 个契约测试（RED→GREEN + 反证组；`aether check` 一条命令跑全）
 ├── supervisor/             TypeScript 外部监督器（只读账本 + 异常检测）
 ├── console/                零构建的只读可视化控制台
 ├── data/seed/              **种子数据**（随仓库发布的最小现场：小账本 + 记忆）
