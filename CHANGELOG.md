@@ -30,6 +30,7 @@
 | **种子数据**：`git clone` 后就有可验的事实源 | `data/seed/` | 由 `contract_ledger_test` / `doctor` 间接覆盖 |
 | 跨语言一致性成为验收的**显式一步** | `aether.check.cross_language` | `contract_check_test.py` |
 | `--root` 在子命令前后都能写 | `aether/entry.py`（幂等） | `contract_serve_test` / CLI 冒烟 |
+| 能力**发现**：从本机已有工具生成清单（不下载不安装） | `aether/discover.py` · `aether caps discover` | `contract_discover_test.py` |
 | 备份 / 恢复 / 体检 / 断点续跑 / 日志分级 | `aether/{backup,doctor,checkpoint,logging_setup}.py` | `contract_ops_test.py` / `contract_logging_test.py` / `contract_repro_test.py` |
 
 ### 修掉的**方向错的改动**（注释自信、前提是错的）
@@ -70,4 +71,6 @@
 | `CliAdapter` 丢弃子进程 stdout 的诊断信封 | **未修**：REA 超时时调用方看不到原因（契约 C2b 故意断言这个坏行为，修好会转红） |
 | `_ID_PREFIX` 的一致化 | 5 处已统一为 32，`interop.py` 仍是 `[:16]`（跨语言契约面，动它代价大于收益） |
 | `data/` 运行产物是否进版本库 | **不进**（这是刻意的）；只发布 `data/seed/` 种子 |
+| REA 契约在**整套压测**下会假红 | 实测：单独跑全绿、4 份并发全绿，但 `aether check -j 4`（45 个 subprocess 同时跑）时 `contract_rea_bridge_test` 红过一次。REA/Ghidra 是**共享重资源**，被挤到超时后可能以退出码 0 + 空壳信封收尾；J 组已按"空壳 ⇒ 跳过并写明未测"处理，C 组按"超时 ⇒ 跳过"处理，但仍有未覆盖的路径。**根因未定位**，不假装它不存在 |
+| 从网上下载并安装工具 | **刻意不做**：判据必须离线可回归；子进程网络动作是动作级拦下的；"自动下载并执行"把"人审过清单"这一步整个拿掉。要装工具请人工装，装完 `aether caps discover` 重新生成清单 |
 | 一处未复现的偶发 | 某次全量 `check -j 4` 时 `contract_difficulty_test.py` 红过一次，之后 4 路并发 ×4 + 全量 ×3 均未再现，**根因未定位** |

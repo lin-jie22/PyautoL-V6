@@ -1024,6 +1024,41 @@ def cmd_caps(args) -> int:
     reg = gw.registry
     cmd = getattr(args, "caps_cmd", "list")
 
+    if cmd == "discover":
+        #: ⛔ 只**发现**，不下载不安装（见 `aether/discover.py` 的说明）。
+        #:    探到的每个工具都带"在哪、哪一版、用什么命令探出来的"。
+        from . import discover as D
+        probes = D.discover()
+        man = D.to_manifest(probes)
+        if getattr(args, "out", ""):
+            outp = Path(args.out)
+            outp.parent.mkdir(parents=True, exist_ok=True)
+            outp.write_text(json.dumps(man, ensure_ascii=False, indent=2),
+                            encoding="utf-8")
+            _log.info(f"[caps] 清单已写：{outp}（{len(man['capabilities'])} 个能力）")
+        if getattr(args, "manifest_only", False):
+            print(json.dumps(man, ensure_ascii=False, indent=2))
+            return 0
+        rep_d = D.report(probes)
+        if getattr(args, "json", False):
+            print(json.dumps({"discover": rep_d, "manifest": man},
+                             ensure_ascii=False, indent=2))
+        else:
+            for pr in probes:
+                icon = {"found": "✅", "missing": "⏭️ ", "error": "❌"}[pr.status]
+                extra = f"  {pr.version}" if pr.version else f"  {pr.detail}"
+                print(f"{icon} {pr.tool:<10} {pr.path or '（PATH 里没有）'}{extra}")
+            print(f"\n发现 {rep_d['n']} 个候选："
+                  f"{rep_d['counts']['found']} 已装 / "
+                  f"{rep_d['counts']['missing']} 未装 / "
+                  f"{rep_d['counts']['error']} 探针失败")
+            if rep_d["missing"]:
+                print(f"⏭️  未装（**这是正常结果**，本命令不会替你装）："
+                      f"{'、'.join(rep_d['missing'])}")
+            print("ℹ️ 要装工具请**人工**装（会改环境、涉许可证与供应链），"
+                  "装完重跑本命令即可。")
+        return 0
+
     if cmd == "list":
         print(json.dumps({"fingerprint": reg.fingerprint, "n": len(reg),
                           "capabilities": reg.manifest()},
@@ -1262,6 +1297,17 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--caps", default=NO_CAPS,
                    help="能力清单 JSON（不传则只显示源码内注册的能力）")
     cs = c.add_subparsers(dest="caps_cmd", required=True)
+    #: ⛔ `discover` 是"**发现**"而不是"下载/安装"：它探本机已有工具的
+    #:    路径与版本，生成可直接被 `--caps` 读的清单。故意不提供
+    #:    "从网上装"—— 那会改环境、涉许可证与供应链，且与本项目
+    #:    "判据必须离线可回归"的宪法冲突（详见 `aether/discover.py`）。
+    dp = cs.add_parser("discover",
+                       help="探本机已装的外部工具并生成能力清单（不下载/不安装）")
+    dp.add_argument("--out", default="",
+                    help="把生成的清单写到这个路径（不传则只打印报告）")
+    dp.add_argument("--json", action="store_true", help="输出结构化发现报告")
+    dp.add_argument("--manifest-only", action="store_true",
+                    help="只输出清单（便于管进文件），不带报告")
     cs.add_parser("list", help="列出已注册能力")
     sh = cs.add_parser("show", help="查看一个能力的声明")
     sh.add_argument("id")

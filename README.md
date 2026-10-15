@@ -106,6 +106,15 @@ $PY -m aether.serve --console console     # → http://127.0.0.1:8611/console/
 
 # REA（外部逆向引擎，经能力清单调用）
 $PY -m aether.cli caps --caps capabilities.rea.json list
+$PY -m aether.cli caps discover                  # 探本机已有工具 → 生成能力清单
+$PY -m aether.cli caps discover --out my.json    # 写成文件，之后 --caps my.json
+# ⛔ 这个命令**只发现、不下载不安装**：它探路径与版本、生成清单。
+#    "从网上找了装"是刻意不做的 —— 判据必须离线可回归（宪法）、
+#    子进程的网络动作是动作级拦下的（沙箱）、且"自动下载并执行"
+#    会把"人审过这份清单"这一步整个拿掉（见 aether/discover.py 的说明）。
+#    装工具是**人**的事（会改环境、涉许可证与供应链）；装完重跑即可。
+# ⛔ 探到的条目状态是 `discovered_unwrapped`：它证明工具**存在**，
+#    但 argv 是版本探针命令 ⇒ 还没被包装成可用能力（存在 ≠ 可用）。
 $PY -m aether.cli caps --caps capabilities.rea.json invoke rea.doctor --json '{}'
 $PY -m aether.cli caps --caps capabilities.rea.json \
     invoke rea.analyze_javascript_application --json '{"path":"/绝对路径/目标"}'
@@ -154,6 +163,7 @@ V6/
 │   ├── doctor.py           一条命令体检（三态：ok / fail / skipped）
 │   ├── check.py            全量验收（一条命令、五态、**聚合退出码**）
 │   ├── provenance.py       账本出处（谁写的、按哪版格式写）
+├── discover.py         从本机已有工具生成能力清单（**发现**，不下载不安装）
 │   ├── _version.py         版本号/格式号的**唯一事实源**
 │   ├── paths.py            目录布局的唯一事实源（cli/serve/doctor 共用）
 │   ├── learner.py          外部知识摄入（复用记忆闸，不自搞一套）

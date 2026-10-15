@@ -81,29 +81,18 @@ class Run:
 
 
 def find_node() -> Optional[str]:
-    """找 node 可执行文件（PATH → 项目约定路径 → 常见前缀）。
+    """找 node 可执行文件（**口径只有一份**：`discover.which`）。
 
-    ⛔ 与 `tests/contract_traceability_test.py` 的 `_find_node` **同顺序**：
-       两处各写一份查找逻辑就会漂移（一处找得到、另一处找不到 ⇒
-       "跨语言对账跑不跑"取决于你用哪条命令）。
+    ⛔ 此前这里自己写了一遍"PATH → 项目约定路径 → 常见前缀"的查找顺序，
+       而 `aether/discover.py` 需要同一件事时又得写第二遍 ⇒
+       实测已经出现不一致：`node` 在 discover 里报 `missing`、
+       在这里却找得到（因为项目约定目录不在 PATH 上）。
+       "有没有装"取决于你问了哪个模块 —— 这正是本项目反复修的形态。
+       ⇒ 现在两边都走 `discover.which`，一个实现。
     ⛔ 只查找、不安装、不下载：找到才跑，找不到就**明确报告未跑**。
     """
-    import os
-    import shutil
-    found = shutil.which("node")
-    if found:
-        return found
-    cands: List[Path] = []
-    base = Path.home() / ".workbuddy" / "binaries" / "node" / "versions"
-    if base.is_dir():
-        cands += [d / "bin" / "node" for d in sorted(base.iterdir())]
-    cands += [Path("/opt/homebrew/bin/node"), Path("/usr/local/bin/node"),
-              Path("/Applications/DeepSeek Harness.app/Contents/Resources/"
-                   "runtime/primary-runtime/dependencies/node")]
-    for c in cands:
-        if c.is_file() and os.access(c, os.X_OK):
-            return str(c)
-    return None
+    from .discover import which
+    return which("node") or None
 
 
 def cross_language(root: Path, timeout_s: float = 300.0) -> Run:
