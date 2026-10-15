@@ -2960,3 +2960,91 @@ endif
 （`__TEXT` / `__text` / `__stubs` / `__cstring` / `__unwind_info` / `__got` /
 `__DATA_CONST` / `__LINKEDIT` / `EXTERNAL`），与 `nm` / `strings` 的真值对得上，
 而不是一个 `ok=true` 的空信封。
+
+### 34.11 ⛔⛔ 桥的 argv 必须严格：静默忽略会把"参数没生效"伪装成"命令在跑"
+
+**这不是上一节的延续，是独立的第三个坑**，而且它骗的是**排查方向**。
+
+想手工复核原生通道时，我按最自然的 CLI 形状调用：
+
+```bash
+python scripts/rea_bridge.py --command analyze \
+       --params '{"path":"/tmp/rea_native_check/probe_bin","provider":"ghidra"}'
+```
+
+现象：**进程起来后永久挂住**，stdout 与 stderr 双双 0 字节，
+`pgrep -fl java` 也查不到 JVM ⇒ 看起来十足像"引擎又卡在握手上了"。
+
+真因在桥自己身上（`scripts/rea_bridge.py`）：
+
+```
+main() 第 551 行：raw = sys.stdin.read()      ← 输入**只有** stdin
+pinned_command()：在 sys.argv 里找 "--command"，其余 token 一律丢弃
+```
+
+⇒ `--params` **桥根本不支持**（全文件 0 处匹配），却被静默吞掉；
+   脚本照常走到 `sys.stdin.read()` 等 EOF，而交互式调用下 stdin 永不关闭
+⇒ 表现为"挂住"，日志里没有任何异常。
+
+⛔ **静默忽略 = 把"参数没生效"伪装成"命令正在跑"**。
+   这次绕的圈子全花在查引擎和沙箱上（这两处**都已经查过且是好的**），
+   而真根因是我自己传参的方式桥不支持、且它对此一声不吭。
+
+修法（`pinned_command()`）：
+
+- argv **只能**是 `--command <name>`，多一个位置都 ⇒ `BridgeError`（rc=2）；
+- 按**位置**判定而非按 token 内容 —— 否则"值恰好叫 `--command`"会被误杀；
+- stderr **点名**那个多余参数，并说明"输入只在 stdin"。
+
+⇒ 与第 69 条「入口参数只能有一份」是同一条纪律的两端：
+   69 条管**发送侧**（三个入口各自声明 = 三个真相），
+   这里管**接收侧**（契约明文写了输入只在 stdin，就必须拒绝 argv 里的多余东西）。
+
+契约：`tests/contract_rea_bridge_test.py` **I 组**
+I1 未知 argv ⇒ rc=2｜I2 错误信息点名参数｜I3 **反证**：合法形态不被误伤。
+
+### 34.12 ⛔ 「外部对拍工具」自己也要先校准（尺子不是免检的）
+
+给原生通道找外部真值时，我用 `otool -l` 独立数一遍 Mach-O 的段，
+打算拿它跟 Ghidra 报的 `segment_count` 对拍：
+
+```
+cmd LC_SEGMENT_64
+segname __PAGEZERO        ← 段命令 1
+cmd LC_SEGMENT_64
+segname __TEXT            ← 段命令 2
+sectname __text           ← 节
+segname __TEXT            ← ⛔ 这是**这个节的所属段名**，不是新的一段
+sectname __stubs
+segname __TEXT
+...
+```
+
+数出来 `segname` 9 行 + `sectname` 5 行 = **14**，而真实段命令只有 **4**。
+
+⛔ 若拿 14 去对拍，会把**通道正常**误判成**通道读数错了**，
+   然后去"修"一个根本没错的上游 —— 这是比漏检更贵的错误，
+   因为它会同时毁掉那条本来可用的通道和人对整份契约的信任。
+
+⇒ **判定信号**：真值和上游对不上时，**先怀疑自己的尺子**。
+   用一个结构已知的最小样本把尺子校准一遍，再回来判上游。
+   （与「判据必须与被测对象同源」「反证要跟着判据一起改」同源，
+    但新的一面是：**外部权威工具同样会骗人**，而且骗得更像真的。）
+
+⇒ J 组真值口径因此定为 `(LC_SEGMENT_64 数) + (sectname 数)` = 4+5 = **9**，
+   与 Ghidra 的 `segment_count` **逐条相等**；
+   并且**不钉段的绝对个数**（随工具链漂），只钉它与 `otool` 一致。
+
+#### J 组判据的四层（缺一层就会退化成橡皮图章）
+
+| 层 | 断言 | 防的是什么 |
+|---|---|---|
+| ① 构造真值 | `format=mach-o` / `architecture=arm64` / `image_base=0x100000000` | 走错通道 / 退到兜底 |
+| ② 外部真值 | `subject.digest.sha256 == 文件独立算出的值` | 上游换了目标还在自报成功 |
+| ③ 内部自洽 | `segment_count == len(segments)`、`end-start == length` | 计数是编的、结构不自洽 |
+| ④ 下界真值 | `procedure_count >= 4`、`string_count >= 2` | 概览归零（空壳） |
+
+⛔ 顺带一条**形态**记录（不是缺陷，是接口的边界）：
+   `binary_overview` 只给 `image_base` / 段表 / 三个**计数**，
+   **不给**过程名与字符串实体。要名字得走上游别的操作 ——
+   契约不该要求一个概览端点交出它设计上就不产出的东西。

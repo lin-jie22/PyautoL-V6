@@ -22,6 +22,7 @@ stdout 吐一个 JSON。它有三个地方最容易长出假仪表，本文件�
 跑法：
     python tests/contract_rea_bridge_test.py
 """
+import hashlib
 import json
 import os
 import subprocess
@@ -35,6 +36,7 @@ sys.path.insert(0, str(ROOT))
 
 BRIDGE = ROOT / "scripts" / "rea_bridge.py"
 MANIFEST = ROOT / "capabilities.rea.json"
+TESTS = ROOT / "tests"
 PY = sys.executable
 
 FAILS = []
@@ -379,6 +381,216 @@ def main() -> int:
         ck("F5 反证：成功信封 ⇒ 不判为错误且不降级",
            rg is not None and dg is None,
            f"result_not_none={rg is not None} degraded={dg!r}")
+
+    # ── G 组：APK 通道（jadx）端到端，与**先验真值**对拍 ─────────────
+    #: ⛔⛔ 为什么这组比 B 组更硬：B 组的样本也是自建的，但断言的是
+    #:    "跑通了"；G 组的包名/类数是**构造样本时就写死的先验真值**，
+    #:    于是判据是"上游读数 == 我埋进去的数" —— 一旦上游开始
+    #:    编造/回退到空壳，这条立刻转红（而不是继续报 ok=true）。
+    print()
+    print("== G 组：APK 通道走 jadx，产物对拍先验真值 ==")
+    PKG = "com.example.selftest"
+    N_CLASSES = 3
+    N_ENTRIES = 3                    #: AndroidManifest.xml / classes.dex / MANIFEST.MF
+    with tempfile.TemporaryDirectory() as td4:
+        apk = Path(td4) / "selftest.apk"
+        built: list = []
+        try:
+            sys.path.insert(0, str(TESTS))
+            from _apk_fixture import build_apk
+            built = build_apk(str(apk))
+        except Exception as ex:                            # noqa: BLE001
+            ck("G1 能自建 APK 样本", False, f"{type(ex).__name__}: {ex}")
+
+        ck("G1 能自建 APK 样本", apk.is_file() and len(built) == N_CLASSES,
+           f"file={apk.is_file()} classes={len(built)}")
+
+        if apk.is_file():
+            rc, out, err = run_bridge(
+                ["--command", "inspect_android_package"], {"path": str(apk)})
+            ck("G2 桥退出 0（拿到结果）", rc == 0, f"rc={rc} err={err[:200]}")
+
+            env: dict = {}
+            if isinstance(out, dict):
+                fp = ROOT / str((out.get("full_output") or {}).get("path", ""))
+                if fp.is_file():
+                    env = json.loads(fp.read_text(encoding="utf-8"))
+            nr = env.get("normalized_result") or {}
+
+            #: ⛔ 两条路都必须是**真断言**，不许留"跳过"这个第三态：
+            #:    引擎在 ⇒ 必须产 jadx 信封且读数对得上；
+            #:    引擎不在 ⇒ 必须给出可归因的失败（不是空泛 ok=false）。
+            if (out or {}).get("ok"):
+                ck("G3 ⛔ provider 必须是 jadx（证明不是走了别的引擎）",
+                   (out.get("provider") or {}).get("id") == "jadx",
+                   str(out.get("provider")))
+                ck("G4 evidence_id 存在", bool(out.get("evidence_id")),
+                   str(out.get("evidence_id"))[:40])
+                sha = hashlib.sha256(apk.read_bytes()).hexdigest()
+                got = ((env.get("subject") or {}).get("digest") or {}).get("sha256")
+                ck("G5 ⛔ subject.digest.sha256 == 文件真值（说的是这个包）",
+                   got == sha, f"自报={got} 独立={sha}")
+                ck("G6 package_name == 先验真值（manifest 真解出来了）",
+                   nr.get("package_name") == PKG,
+                   f"got={nr.get('package_name')} want={PKG}")
+                ck("G7 class_count == 先验顶层类数",
+                   nr.get("class_count") == N_CLASSES,
+                   f"got={nr.get('class_count')} want={N_CLASSES}")
+                ck("G8 resource_count == APK 的 zip 条目数",
+                   nr.get("resource_count") == N_ENTRIES,
+                   f"got={nr.get('resource_count')} want={N_ENTRIES}")
+                ck("G9 ⛔ 未降级（干净跑完）", out.get("degraded") is None,
+                   str(out.get("degraded"))[:160])
+                ck("G10 manifest 解码完整",
+                   (nr.get("manifest") or {}).get("status") == "complete",
+                   str((nr.get("manifest") or {}).get("status")))
+            else:
+                dg = (out or {}).get("degraded") or {}
+                ck("G11 引擎缺失时失败**可归因**（不许空泛 ok=false）",
+                   bool(str(dg.get("code") or "").strip())
+                   and bool(str(dg.get("reason") or "").strip()),
+                   f"code={dg.get('code')} reason={str(dg.get('reason'))[:80]}")
+                print(f"       ↳ 引擎缺失，G4–G10 无法验证：{dg.get('code')}")
+
+    # ── H 组：反证 —— 拿非 APK 冒充，不许静默成功 ───────────────────
+    print()
+    print("== H 组：反证 —— 非 APK 冒充不得产出 jadx 成功信封 ==")
+    with tempfile.TemporaryDirectory() as td5:
+        notapk = Path(td5) / "fake.apk"
+        notapk.write_bytes(b"this is definitely not an apk\n" * 4)
+        rc_n, out_n, _ = run_bridge(
+            ["--command", "inspect_android_package"], {"path": str(notapk)})
+        claim_ok = bool((out_n or {}).get("ok"))
+        has_evidence = bool((out_n or {}).get("evidence_id"))
+        #: ⛔ 只看 ok 不看 evidence ⇒ 会漏掉"报错但仍自称成功"的空壳。
+        ck("H1 ⛔ 非 APK 不得产出带 Evidence 的成功信封",
+           not (claim_ok and has_evidence),
+           f"ok={claim_ok} evidence={str((out_n or {}).get('evidence_id'))[:24]} rc={rc_n}")
+
+    # ── I 组：未知 argv 必须报错，不许静默忽略 ───────────────────────
+    #: ⛔⛔ 为什么值得单列一组（2026-10-15 实测踩到）：
+    #:    桥的输入**只在 stdin**，argv 只用来钉 `--command`。旧实现只在
+    #:    argv 里找 `--command`，其余 token **一律丢弃** ⇒
+    #:    `rea_bridge.py --command analyze --params '{...}'` 看起来完全合理，
+    #:    实际脚本仍在 `sys.stdin.read()` 等 EOF ⇒ **表现为"桥挂住了"**，
+    #:    而日志里没有任何异常 ⇒ 归因时极易被引到"引擎慢/沙箱限制"上去。
+    #:    与 r36「漏了要抛错不是静默跳过」同一条纪律。
+    print()
+    print("== I 组：未知 argv 必须报错（静默忽略 = 把参数失效伪装成命令在跑）==")
+    rc_u, out_u, err_u = run_bridge(
+        ["--command", "analyze", "--params", '{"path":"/tmp/x"}'], {"path": "/tmp/x"})
+    ck("I1 ⛔ 未知 argv ⇒ rc=2（不是静默忽略）", rc_u == 2, f"rc={rc_u}")
+    ck("I2 错误信息里点名那个参数", "--params" in err_u, err_u[:160])
+    #: 反证：证明 I1 拦的是真东西 —— 合法形态必须**照常通过**、不被误伤。
+    rc_ok, out_ok, err_ok = run_bridge(["--command", "capabilities"], {})
+    ck("I3 反证：合法 argv（--command capabilities）不被误伤",
+       rc_ok == 0 and bool((out_ok or {}).get("ok")),
+       f"rc={rc_ok} err={err_ok[:160]}")
+
+    # ── J 组：原生二进制通道（Ghidra）端到端，与先验真值对拍 ──────────
+    #: ⛔ 判据怎么选才既不橡皮图章又不脆：
+    #:    ① **构造真值**：arm64 macOS 可执行 ⇒ image_base 恒为 0x100000000、
+    #:       format=mach-o、architecture=arm64（链接器约定，不随版本漂）；
+    #:    ② **外部真值**：subject.digest.sha256 必须等于文件独立算出的值
+    #:       （"说的是这个包"，防上游换目标）；
+    #:    ③ **内部自洽**：计数必须等于实体条数、end-start 必须等于 length
+    #:       （防"计数是编的"——与 V5 手册「计数与 evidence 必须分开存」同源）；
+    #:    ④ **下界真值**：我们编译了 4 个函数、埋了 2 条标记串 ⇒
+    #:       procedure_count >= 4、string_count >= 2（归零即空壳）。
+    #:    不钉 segment 的**绝对数**（随工具链漂），只钉它与 otool 段+节的总数一致。
+    print()
+    print("== J 组：原生二进制走 Ghidra，结构与先验真值对拍 ==")
+    SRC = (
+        "#include <stdio.h>\n"
+        "int alpha_helper(int x){return x*3+1;}\n"
+        "int beta_helper(int x){return x-7;}\n"
+        "int gamma_entry(int x){return alpha_helper(x)+beta_helper(x);}\n"
+        "int main(void){printf(\"REA_MARKER_ALPHA_STRING\\n\");"
+        "printf(\"REA_MARKER_BETA_STRING\\n\");return gamma_entry(42);}\n"
+    )
+    with tempfile.TemporaryDirectory() as td6:
+        csrc = Path(td6) / "probe.c"
+        cbin = Path(td6) / "probe_bin"
+        csrc.write_text(SRC, encoding="utf-8")
+        ccp = subprocess.run(["/usr/bin/cc", "-arch", "arm64", "-o", str(cbin),
+                              str(csrc)], stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, timeout=180)
+        ck("J1 能自建原生二进制样本",
+           cbin.is_file(), f"rc={ccp.returncode} err={ccp.stderr[:160]}")
+
+        if cbin.is_file():
+            #: 独立真值：`otool` 的段命令数 + 节数（不数 segname 行，见 J7 注释）
+            want_blocks = None
+            try:
+                tl = subprocess.run(["/usr/bin/otool", "-l", str(cbin)],
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, timeout=60)
+                lines_o = tl.stdout.decode("utf-8", "replace").splitlines()
+                n_seg = len([l for l in lines_o if "cmd LC_SEGMENT_64" in l])
+                n_sect = len([l for l in lines_o if "sectname" in l])
+                if n_seg:
+                    want_blocks = n_seg + n_sect
+            except Exception:                              # noqa: BLE001
+                want_blocks = None
+
+            rc_j, out_j, err_j = run_bridge(
+                ["--command", "analyze"],
+                {"path": str(cbin), "provider": "ghidra"})
+            if (out_j or {}).get("ok"):
+                fp = ROOT / str((out_j.get("full_output") or {}).get("path", ""))
+                full = json.loads(fp.read_text(encoding="utf-8")) if fp.is_file() else {}
+                nr = full.get("normalized_result") or {}
+                subj = full.get("subject") or {}
+                up = (((full.get("analysis_profile") or {}).get("parameters") or {})
+                      .get("upstream_analysis_profile") or {}).get("provider") or {}
+
+                ck("J2 ⛔ 上游 provider 真的是 ghidra（不是退回别的路）",
+                   up.get("id") == "ghidra", str(up)[:120])
+                ck("J3 subject 形态 = mach-o / arm64",
+                   subj.get("format") == "mach-o"
+                   and subj.get("architecture") == "arm64",
+                   str(subj)[:160])
+                sha = hashlib.sha256(cbin.read_bytes()).hexdigest()
+                got = (subj.get("digest") or {}).get("sha256")
+                ck("J4 ⛔ subject.digest.sha256 == 文件真值", got == sha,
+                   f"自报={got} 独立={sha}")
+                ck("J5 ⛔ image_base == 0x100000000（arm64 macOS 约定）",
+                   nr.get("image_base") == "0x100000000", str(nr.get("image_base")))
+                segs = nr.get("segments") or []
+                ck("J6 ⛔ 内部自洽：segment_count == 实际段条数",
+                   nr.get("segment_count") == len(segs) and len(segs) > 0,
+                   f"count={nr.get('segment_count')} len={len(segs)}")
+                #: ⛔ J7 用**外部工具**独立数一遍，不拿上游读数当真值。
+                #:    真值口径：(LC_SEGMENT_64 段命令数) + (sectname 节数)。
+                #:    ⛔ 别写成「segname 行数 + sectname 行数」—— `otool -l`
+                #:       的**每个 section 也会自带一行 segname**（标明所属段），
+                #:       那么数会重复计一次段名（实测 9+5=14，而真实是 4+5=9）。
+                if want_blocks is not None:
+                    ck("J7 ⛔ 段结构 == otool 的段命令+节总数（外部对拍）",
+                       len(segs) == want_blocks,
+                       f"ghidra={len(segs)} otool={want_blocks}")
+                bad = [s.get("name") for s in segs
+                       if int(str(s.get("end")), 16) - int(str(s.get("start")), 16)
+                       != int(s.get("length"))]
+                ck("J8 每段 end-start == length（结构自洽）", not bad, str(bad)[:120])
+                ck("J9 ⛔ procedure_count >= 4（自建了 4 个函数，归零即空壳）",
+                   (nr.get("procedure_count") or 0) >= 4,
+                   f"got={nr.get('procedure_count')}")
+                ck("J10 ⛔ string_count >= 2（埋了 2 条标记串）",
+                   (nr.get("string_count") or 0) >= 2,
+                   f"got={nr.get('string_count')}")
+                ck("J11 operation == binary_overview（走的是原生概览，不是兜底）",
+                   full.get("operation") == "binary_overview",
+                   str(full.get("operation")))
+                ck("J12 ⛔ 未降级", out_j.get("degraded") is None,
+                   str(out_j.get("degraded"))[:160])
+            else:
+                dg = (out_j or {}).get("degraded") or {}
+                ck("J13 引擎缺失时失败**可归因**（不许空泛 ok=false）",
+                   bool(str(dg.get("code") or "").strip())
+                   and bool(str(dg.get("reason") or "").strip()),
+                   f"code={dg.get('code')} reason={str(dg.get('reason'))[:80]}")
+                print(f"       ↳ 引擎缺失/超时，J2–J12 无法验证：{dg.get('code')}")
 
     print()
     print("=" * 60)

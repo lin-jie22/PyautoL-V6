@@ -241,13 +241,34 @@ def pinned_command() -> Optional[str]:
        就由调用方决定了，白名单退化成摆设 —— 清单写了 `analyze`，
        调用方一个 stdin 就能换成 `decompile`。
        钉在 argv 里 ⇒ 换命令必须改清单，而改清单是要过 review 的。
+
+    ⛔⛔ 为什么**不认识的参数必须报错而不是忽略**（2026-10-15 实测）：
+       本桥的输入**只有** stdin，argv 里除了 `--command` 什么都没有。
+       但 `--params '{...}'` 这种形状看起来完全合理，而旧实现只在
+       argv 里找 `--command`、其余**一律静默丢弃** ⇒ 调用方以为参数
+       传进去了，实际脚本卡在 `sys.stdin.read()` 等 EOF，
+       **表现为"桥挂住了"**，日志里却看不出任何异常。
+       ⇒ 与 r36「漏了要抛错不是静默跳过」同一条纪律：
+         静默忽略 = 把"参数没生效"伪装成"命令在跑"。
     """
     rest = sys.argv[1:]
     if "--command" in rest:
         i = rest.index("--command")
         if i + 1 >= len(rest):
             raise BridgeError("--command 后面缺值")
+        #: ⛔ 严格形态：argv **只能**是 `--command <name>`，多一个位置都不行。
+        #:    按**位置**判定而非按 token 内容 —— 值恰好叫 `--command` 也合法。
+        expected = {i, i + 1}
+        extra = [t for j, t in enumerate(rest) if j not in expected]
+        if extra:
+            raise BridgeError(
+                f"不认识的 argv 参数 {extra}（本桥的输入**只在 stdin**，"
+                f"argv 只能是 --command <name>；静默忽略会让调用方误以为参数生效）")
         return rest[i + 1]
+    if rest:
+        raise BridgeError(
+            f"不认识的 argv 参数 {rest}（本桥的输入**只在 stdin**，"
+            f"argv 只能是 --command <name>）")
     return None
 
 
