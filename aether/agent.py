@@ -553,15 +553,11 @@ class HarnessAgent:
             closed_over_id = str(getattr(h, "harness_id", "") or "")
         except Exception:  # noqa: BLE001
             closed_over_id = ""
-        stats: Dict[str, int] = {"calls": 0, "non_ablatable": 0,
-                                 "ablatable": 0, "id_mismatch": 0}
 
         def replay(task_id: str, harness_id: str, ablated: List[Any]) -> float:
-            stats["calls"] += 1
             #: ⛔ 调用方声明的 harness 必须就是闭包捕获的那一个（见 docstring）。
             declared = str(harness_id or "")
             if declared and closed_over_id and declared != closed_over_id:
-                stats["id_mismatch"] += 1
                 raise ValueError(
                     f"replay 的 harness_id={declared[:32]} 与闭包捕获的 "
                     f"{closed_over_id[:32]} 不一致 ⇒ 这不是归因，是换 harness 重考")
@@ -573,14 +569,19 @@ class HarnessAgent:
             if not real:
                 #: 消融的是判据步/结构步 ⇒ 去掉它 reward 就没有定义。
                 #: 贡献记 0 是**定义**，不是"测出来它没用"。
-                stats["non_ablatable"] += 1
                 return base_reward
-            stats["ablatable"] += 1
             try:
                 return float(self.run(h, spec, skip=tuple(real)).reward)
             except Exception:  # noqa: BLE001
                 return base_reward
 
-        replay.stats = stats            # type: ignore[attr-id]
-        replay.base_reward = base_reward  # type: ignore[attr-id]
+        #: ⛔ 这里原来挂着两行"诊断仪器"：
+        #:      `replay.stats = stats` / `replay.base_reward = base_reward`
+        #:    它们**只写不读**（全仓 grep：除这两行外没有任何 `.stats` /
+        #:    `.base_reward` 读取），却给函数对象硬塞了两个属性 ——
+        #:    mypy 会因此报 `attr-defined`，作者就写了
+        #:    `# type: ignore[attr-id]`，而 **`attr-id` 根本不是合法错误码**
+        #:    （合法的是 `attr-defined`）⇒ 那条抑制从来没生效过，
+        #:    只是把"有个类型错误"伪装成"已处理"。
+        #:    ⇒ 直接删掉死仪器：没有属性要抑制，也就没有假抑制。
         return replay

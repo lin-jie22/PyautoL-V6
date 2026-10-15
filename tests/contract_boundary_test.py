@@ -392,14 +392,14 @@ def group_f() -> None:
     orig_reward = AG.AgentResult.reward
 
     def flaky_reward(self):            # type: ignore[no-untyped-def]
-        flaky_reward.k = getattr(flaky_reward, "k", 0) + 1   # type: ignore
-        return 1.0 if flaky_reward.k % 2 else 0.0            # type: ignore
+        flaky_reward.k = getattr(flaky_reward, "k", 0) + 1   # type: ignore[attr-defined]
+        return 1.0 if flaky_reward.k % 2 else 0.0            # type: ignore[attr-defined]
 
-    AG.AgentResult.reward = property(flaky_reward)          # type: ignore
+    AG.AgentResult.reward = property(flaky_reward)          # type: ignore[assignment]
     try:
         got = flaky.replay_fn(h, spec)
     finally:
-        AG.AgentResult.reward = orig_reward                 # type: ignore
+        AG.AgentResult.reward = orig_reward                 # type: ignore[assignment]
     ck("F", "F3 事故版（reward 不可重放）⇒ replay_fn 返回 None（不给数字）",
        got is None)
 

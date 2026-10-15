@@ -167,7 +167,7 @@ ck("A4 /api/events 正常返回且受 limit 约束",
 
 #: 反证：把端点匹配退化成旧写法 ⇒ A2 必须从 404 翻成别的状态
 _old_endpoint_is = S._endpoint_is
-S._endpoint_is = lambda path, prefix: path.startswith(prefix)  # type: ignore
+S._endpoint_is = lambda path, prefix: path.startswith(prefix)  # type: ignore[assignment]
 try:
     code2, _, _ = srv.get("/api/status_extra")
     ck("A5 反证：还原 startswith 写法 ⇒ /api/status_extra 不再是 404"
@@ -215,7 +215,7 @@ ck("C3 向上穿越到 /etc/passwd ⇒ 404",
 
 #: 反证：还原字符串前缀写法 ⇒ C2 必须能读到 secret
 _old_is_within = S._is_within
-S._is_within = (  # type: ignore
+S._is_within = (  # type: ignore[assignment]
     lambda child, parent: str(child).startswith(str(parent)))
 try:
     code2, _, body2 = srv.get("/console/../console_bak/secret.txt")
@@ -257,7 +257,7 @@ ck("D5 无 Origin 头 ⇒ 不发 ACAO",
 
 #: 反证：伪造一个恒返回 * 的实现 ⇒ D1/D4 必须翻转
 _old_cors = S.Handler._cors_headers
-S.Handler._cors_headers = (  # type: ignore
+S.Handler._cors_headers = (  # type: ignore[assignment]
     lambda self: {"Access-Control-Allow-Origin": "*"})
 try:
     code2, hs2, _ = srv.get("/api/status", origin="https://evil.example")
@@ -344,7 +344,7 @@ ck("F4 `_event_dict` 退路能吃下普通对象",
 #:    直接给序列化函数打标记，看两个端点会不会同时带上。
 _marker = {"__v6_serve_probe__": 1}
 _old_ed = S._event_dict
-S._event_dict = lambda ev: dict(_marker)  # type: ignore
+S._event_dict = lambda ev: dict(_marker)  # type: ignore[assignment]
 try:
     _, _, sb = srv.get("/api/status?limit=2")
     _, _, eb = srv.get("/api/events?limit=2")
