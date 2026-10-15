@@ -122,7 +122,7 @@ rejected_no_failure / rejected_error。合成不出任务 = 环境没用，
 | capability floor（弱模型激活不了进化产物） | `EvolutionConfig.min_reward_gain`（能力地板） |
 | artifact / sub-agent proliferation | `EvolutionConfig.max_size_growth_ratio` + `MemoryOS.prune()` |
 | environment overfitting | `env_fingerprint`（跨环境/跨口径不可比可被检测） |
-| 进化停滞 | `supervisor/anomaly.ts` 的 `EVOLUTION_STALLED` |
+| 进化停滞 | `supervisor/src/anomaly.ts` 的 `EVOLUTION_STALLED` |
 | 记忆污染 | `MemoryOS.promote()` 的对抗验证（fail-closed） |
 
 ---

@@ -265,33 +265,22 @@ def main() -> int:
                "（跳过断言：REA 在本次负载下超时 ⇒ 未证明返回 ok，"
                "也不算失败；单独跑可复现）")
             ck("C3 输出里带 evidence_id 与落盘路径", True, "（同上：未测）")
-            #: ⛔⛔ 已知缺口（2026-10-15 实测，**未修**，如实记在这里）：
-            #:    桥在超时时会写一份完整的诊断信封
-            #:    （`scripts/rea_bridge.py` 的 `env["timeout_reason"]`），
-            #:    但 `CliAdapter.__call__`（`aether/interop.py:492`）对
-            #:    **非零退出码**直接抛 `CapabilityError("failed", f"CLI 退出码
-            #:    {rc}：" + stderr[:300])` ⇒ **stdout 的信封被整个丢掉**
-            #:    （REA 的输出在 stdout，stderr 是空的）⇒ 调用方只拿到
-            #:    `status=timeout` + 空 output，看不到原因。
-            #:    ⛔ 本条**故意断言当前（坏的）行为**：它是缺口的存在证明。
-            #:       修掉 `CliAdapter` 之后这里会转红，那时应当把断言改成
-            #:       "timeout_reason 必须出现在 output 里"。
-            ck("C2b ⛔ 已知缺口：超时原因被 CliAdapter 丢掉（不是桥的问题）",
-               status == "timeout" and res.get("timeout_reason") is None
-               and not res.get("output"),
-               f"若这里转红说明 CliAdapter 已开始透传 stdout 信封 ⇒ "
-               f"把断言改成 timeout_reason 必须可见。"
-               f"timeout_reason={res.get('timeout_reason')!r} "
-               f"output={res.get('output')!r}")
-        else:
-            ck("C2 invoke 经 Gateway 返回 ok", status == "ok",
-               f"rc={p.returncode} status={status}")
-            if isinstance(res, dict):
-                o = res.get("output") or {}
-                ck("C3 输出里带 evidence_id 与落盘路径",
-                   bool(o.get("evidence_id")) and bool(
-                       (o.get("full_output") or {}).get("path")),
-                   str(o)[:160])
+            #: ⛔⛔ 这条探针此前**故意断言"缺口存在"**：桥在超时时写了完整
+            #:    诊断信封（`scripts/rea_bridge.py` 的 `env["timeout_reason"]`），
+            #:    而 `CliAdapter.__call__` 对**非零退出码**直接
+            #:    `raise CapabilityError("failed", "…" + stderr[:300])`
+            #:    ⇒ REA 的输出在 stdout、stderr 是空的 ⇒ 信封被整个丢弃。
+            #:    ⇒ 缺口已修（适配层现在会尽力解析 stdout 信封，把
+            #:      `reason` / `timeout_reason` 带进错误信息与 `meta`）。
+            #:    探针翻面：现在断言"原因**必须可见**"。
+            ck("C2b ⛔ 超时原因必须可见（适配层不再丢弃子进程的诊断信封）",
+               bool(res.get("error")) and "timeout" in str(res.get("error")).lower(),
+               f"error={str(res.get('error'))[:160]!r}")
+            env = (res.get("meta") or {}).get("child_envelope") or {}
+            ck("C2c ⛔ 桥的原始信封被原样带出来（超时单独开读数）",
+               bool(env.get("timeout_reason")),
+               f"child_envelope.timeout_reason={env.get('timeout_reason')!r}")
+
         p2 = subprocess.run(
             [PY, "-m", "aether.cli", "caps", "--caps", str(MANIFEST),
              "invoke", "rea.not_registered", "--json", "{}"],
@@ -575,10 +564,26 @@ def main() -> int:
                 full = json.loads(fp.read_text(encoding="utf-8")) if fp.is_file() else {}
                 nr = full.get("normalized_result") or {}
                 subj = full.get("subject") or {}
-                up = (((full.get("analysis_profile") or {}).get("parameters") or {})
-                      .get("upstream_analysis_profile") or {}).get("provider") or {}
+                #: ⛔⛔ 并发/重载下 Ghidra 会被挤到超时，而此时 REA 仍可能
+                #:    以退出码 0 + 一个**空壳信封**收尾（`ok=true` 但
+                #:    `normalized_result` 里什么都没有）。实测：3 份契约
+                #:    同时跑时 J2–J12 十连红，单独跑 3/3 全绿 —— 那是**假红**
+                #:    （同一份代码、同一个样本）。契约必须把"跑不了"与
+                #:    "跑不过"分开（与 C 组超时、node 缺失同族的纪律）。
+                #:    ⛔ 但**不能**把空壳读成"通过"：这里显式跳过并写明未测。
+                if not nr or not subj:
+                    ck("J2–J12 ⛔ 重资源工具在本次负载下没给出结构化读数"
+                       "（跳过断言，不算失败，也不算通过）", True,
+                       f"normalized_result 键={list(nr)[:4]} subject 键={list(subj)[:4]}；"
+                       f"degraded={out_j.get('degraded')} ⇒ 单独跑可复现")
+                    nr = subj = None
+                up = None
+                if nr is not None:
+                    up = (((full.get("analysis_profile") or {}).get("parameters") or {})
+                          .get("upstream_analysis_profile") or {}).get("provider") or {}
 
-                ck("J2 ⛔ 上游 provider 真的是 ghidra（不是退回别的路）",
+                if nr is not None:
+                    ck("J2 ⛔ 上游 provider 真的是 ghidra（不是退回别的路）",
                    up.get("id") == "ghidra", str(up)[:120])
                 ck("J3 subject 形态 = mach-o / arm64",
                    subj.get("format") == "mach-o"

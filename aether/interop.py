@@ -490,9 +490,45 @@ class CliAdapter(BaseAdapter):
             raise CapabilityError(
                 "unavailable", f"可执行文件不存在：{self.argv[0]}（{e}）")
         if p.returncode != 0:
+            #: ⛔⛔ 非零退出码**不等于**"没有任何诊断"。实测（REA 桥）：
+            #:    子进程把完整的诊断信封写在 **stdout**（JSON），stderr 是空的，
+            #:    然后以非零码退出表示"这次没成功"。原实现直接
+            #:    `raise CapabilityError("failed", "…" + stderr[:300])`
+            #:    ⇒ **stdout 被整个丢掉** ⇒ 调用方只看到"退出码 1"，
+            #:    看不到桥精心写的 `timeout_reason` / `degraded` / `full_output`。
+            #:    这与桥自己的注释（"超时单独开一个读数，不许混进 degraded"）
+            #:    直接矛盾 —— 它认真分了诊，我们在适配层把诊断扔了。
+            #:    ⇒ 先**尽力**解析 stdout 信封，把诊断带进 error 与 meta。
+            #:    ⛔ 只解析、不改变判定：退出码非 0 仍然是 failed，
+            #:      绝不因为"信封看起来像 ok"就放行（那是把失败伪装成成功）。
+            env, why = None, ""
+            try:
+                cand = json.loads(p.stdout.decode("utf-8", "replace"))
+                if isinstance(cand, dict):
+                    env = cand
+            except Exception:  # noqa: BLE001 —— 不是 JSON 就算了，不因此报错
+                env = None
+            if env is not None:
+                why = str(env.get("reason") or env.get("message")
+                          or env.get("timeout_reason") or "")
+            err_txt = p.stderr.decode("utf-8", "replace").strip()
+            detail = why or err_txt[:300] or "(子进程没有给出任何诊断)"
+            #: ⛔⛔ 分诊**必须保留**：桥把"我们等不到结果"（timed_out）与
+            #:    "工具判失败"（failed）分得很清楚（它自己的注释写着
+            #:    "超时单独开一个读数，不许混进 degraded"），但适配层原来
+            #:    一律压成 `failed` ⇒ 调用方拿到的分诊比子进程能给的**更粗**
+            #:    ⇒ "超时了该重试" 与 "工具说不行" 变成同一件事。
+            #:    ⛔ 只在子进程**明确**说自己超时才改判：靠退出码猜是骗人。
+            st = "failed"
+            if env is not None and (env.get("timed_out") is True
+                                    or bool(env.get("timeout_reason"))):
+                st = "timeout"
             raise CapabilityError(
-                "failed",
-                f"CLI 退出码 {p.returncode}：{p.stderr.decode('utf-8', 'replace')[:300]}")
+                st,
+                f"CLI 退出码 {p.returncode}：{detail}",
+                child_envelope=env, child_stdout_tail=(
+                    p.stdout.decode("utf-8", "replace")[-800:] if env is None
+                    else ""))
 
         #: 🟠 修复二：**拒绝静默截断**。原先 `p.stdout[:max_output_bytes]`
         #:    会把超长输出砍成半截 JSON ⇒ 解析失败 ⇒ 返回 `{"_raw": "..."}`
