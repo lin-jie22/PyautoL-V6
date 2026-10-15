@@ -167,10 +167,61 @@ def main() -> int:
         ops.clear()
         ops.update(base_ops)
     ck("B8 复原后身份回到原值", J.identity() == jv1)
-    ck("B9 describe 里能看到口径取值（不只名字）",
-       "caliber_values" in J.describe()
-       and "world_facts" in str(J.describe()["caliber_values"]),
-       str(list(J.describe().keys())))
+    #: ⛔ 口径取值要能看见**且分两栏**：判据口径（影响可比性）与
+    #:    变异规则口径（只作审计）。混在一起会让"加了一层"看起来
+    #:    像"换了尺子" —— 实测踩过，`doctor` 因此把 1416 条有效历史裁决
+    #:    报成"跨尺子比较"。
+    d = J.describe()
+    ck("B9 describe 里能看到判据口径取值（不只名字）",
+       "caliber_values" in d and d["caliber_values"],
+       str(list(d.keys())))
+    ck("B9b ⛔ 变异规则口径**分开报**（`world_facts` 在 mutation 栏，不在 judge 栏）",
+       "mutation_caliber" in d
+       and "world_facts" in str(d["mutation_caliber"])
+       and "world_facts" not in str(d["caliber_values"]),
+       str({k: v for k, v in d.items() if "caliber" in k})[:200])
+    ck("B9c 判据身份与变异规则身份是**两个独立的身份**",
+       J.identity() != J.mutation_identity())
+
+    #: ⛔⛔ **跨进程确定性**：身份只由**内容**决定。
+    #:    实测踩过最危险的一类 bug：`_caliber_value` 对可调用对象返回
+    #:    `str(fn)` = `<function pass_at_k at 0x101801940>` —— **含内存地址**
+    #:    ⇒ 判据身份**每个进程都不同** ⇒ 每条裁决都与上一次"不可比"
+    #:    ⇒ 整个可比性机制在跨运行场景下**静默失效**，而症状只是"身份乱跳"
+    #:    （看起来像有人在改代码）。这类 bug 不报错，所以必须机器守。
+    import subprocess as _sp
+    probe = ("import sys; sys.path.insert(0, %r); "
+             "from aether import judge as J; "
+             "print(J.identity()); print(J.mutation_identity())" % str(ROOT))
+    outs = []
+    fails = []
+    for _ in range(2):
+        try:
+            r = _sp.run([sys.executable, "-B", "-c", probe], cwd=str(ROOT),
+                        stdout=_sp.PIPE, stderr=_sp.PIPE, timeout=300)
+            outs.append(r.stdout.decode().split())
+        except Exception as e:                             # noqa: BLE001
+            fails.append(f"{type(e).__name__}: {e}")
+            outs.append([])
+    #: ⛔ 子进程失败（超时 / 起不来）与"身份不稳定"是**两件事**：
+    #:    整套压测（49 个 subprocess 同时跑）下起子进程本身就会慢/失败。
+    #:    实测踩过：这一组在全量 `check -j 4` 时红过一次，而单独跑全绿。
+    #:    ⇒ 能判就判，判不了就说"未测"（跳过 ≠ 通过，会打印出来）。
+    if fails and any(not o for o in outs):
+        print(f"  SKIP B10/B11 子进程起不来 ⇒ 本次**未验证**跨进程稳定性：{fails[:1]}")
+    else:
+        ck("B10 ⛔ 判据身份**跨进程**稳定（不能含内存地址等非内容信息）",
+           len(outs[0]) == 2 and outs[0] == outs[1],
+           f"{outs[0]} vs {outs[1]}")
+        ck("B11 ⛔ 且与**本进程**算出来的一致（不是只有子进程自洽）",
+           len(outs[0]) == 2 and outs[0][0] == J.identity()
+           and outs[0][1] == J.mutation_identity(),
+           f"{outs[0]} vs {(J.identity(), J.mutation_identity())}")
+    #: 可调用对象的口径值必须是**源码哈希**，不是 repr
+    cv = J._caliber_value("aether.nongression:pass_at_k")
+    ck("B12 可调用对象的口径值取源码（不是含地址的 repr）",
+       isinstance(cv, str) and cv.startswith("<src:") and "0x" not in cv,
+       str(cv)[:60])
 
     # ── C 组：三态可比性 ─────────────────────────────────────────
     print("C 组：可比性三态（不合并）")

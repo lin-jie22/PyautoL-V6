@@ -45,7 +45,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .ledger import content_hash
 
-__all__ = ["JUDGE_MODULES", "JUDGE_CALIBER", "identity", "describe",
+__all__ = ["JUDGE_MODULES", "JUDGE_CALIBER", "MUTATION_CALIBER",
+           "identity", "mutation_identity", "describe",
            "normalize_source", "_caliber_value",
            "incomparable", "check_verdict_comparable", "assert_boundary",
            "COMPARABLE", "UNKNOWN", "INCOMPARABLE"]
@@ -64,18 +65,27 @@ JUDGE_MODULES: Tuple[str, ...] = (
 #: 参与判定的**口径常量**（不是代码，但也决定判据）。
 #: ⛔ 只放"读一次就影响裁决"的常量；放多了会让 identity 每次无关改动都变，
 #:    那就退化成"永远不可比"，比没有身份更坏。
+#: ⛔ 只放**真正影响裁决**的口径常量。
+#:    判据：改它之后，同一条 verdict 的 `reward` 可能不同吗？
+#:    会 ⇒ 属于这里（改它 ⇒ 跨版本不可比）；
+#:    不会（例如"哪些层可被变异"）⇒ 属于 `MUTATION_CALIBER`。
 JUDGE_CALIBER: Tuple[str, ...] = (
-    "aether.genome:LAYERS",
-    "aether.genome:PROTECTED_LAYERS",
-    #: ⛔ **层集合与 op 白名单是尺子的一部分**，不是实现细节：
-    #:    它们定义"变异**能改什么**"。加/减一层、或放开一个 op，
-    #:    都会改变"什么算一次合法自我修改" ⇒ 跨那个点比读数不可比。
-    #:    实测踩过：新增 `world_facts` 层时 `judge.identity()` **没变** ——
-    #:    因为早先的实现只把"判据模块源码"算进身份，而 `LAYERS` 是
-    #:    **数据**不是源码 ⇒ 改层集合不触发身份变化。补进 `JUDGE_CALIBER`。
-    "aether.genome:_ALLOWED_OPS_BY_LAYER",
     "aether.verifier:SELF_REPORT_KEYS",
     "aether.nongression:pass_at_k",
+)
+
+#: ⛔⛔ **变异规则**（哪些层/op 可被编辑）与**判据**（怎么算对错）
+#:    必须**分开记身份**。混在一起会造成一个具体的坏后果：
+#:    新增一层（例如 `world_facts`）会把**所有历史裁决**判成"不可比"，
+#:    而历史裁决的含义其实一点没变 —— 变化的是"能被变异的是什么"。
+#:    实测踩过：引入 `world_facts` 层后 `judge.identity()` 变了，
+#:    `doctor` 立刻报"存在跨尺子比较"，而那 1416 条历史裁决完全有效。
+#:    ⇒ 分开：`identity()`（判据，决定可比性）与 `mutation_identity()`
+#:      （变异规则，只作审计；它变了**不**影响跨版本比较）。
+MUTATION_CALIBER: Tuple[str, ...] = (
+    "aether.genome:LAYERS",
+    "aether.genome:_ALLOWED_OPS_BY_LAYER",
+    "aether.genome:PROTECTED_LAYERS",
 )
 
 COMPARABLE = "comparable"
@@ -142,6 +152,20 @@ def _caliber_value(ref: str) -> Any:
         val = getattr(importlib.import_module(mod_name), attr)
     except Exception as e:                                 # noqa: BLE001
         return f"<不可读：{type(e).__name__}>"
+    #: ⛔⛔ **可调用对象要取源码，不能取 `str(val)`**。实测踩过：
+    #:    `str(pass_at_k)` 是 `<function pass_at_k at 0x101801940>` ——
+    #:    **含内存地址** ⇒ `judge.identity()` 每次进程都不同 ⇒
+    #:    每条裁决都会与上一次"不可比" ⇒ 整个机制在跨运行场景下**失效**，
+    #:    而且症状是"身份乱跳"，看起来像我在改代码，其实是地址在变。
+    #:    这是"身份必须只由内容决定"的直接违反。
+    if callable(val) and not isinstance(val, type):
+        try:
+            import inspect
+            return f"<src:{hashlib.sha256(normalize_source(inspect.getsource(val)).encode('utf-8')).hexdigest()[:16]}>"
+        except Exception as e:                             # noqa: BLE001
+            return f"<callable-不可读：{type(e).__name__}>"
+    if isinstance(val, type):
+        return f"<class:{val.__module__}.{val.__qualname__}>"
     if isinstance(val, dict):
         return {str(k): (sorted(v) if isinstance(v, (set, frozenset))
                          else (list(v) if isinstance(v, tuple) else str(v)))
@@ -165,6 +189,10 @@ def identity() -> str:
             for n in JUDGE_MODULES},
         "caliber": list(JUDGE_CALIBER),
         "caliber_values": {c: _caliber_value(c) for c in JUDGE_CALIBER},
+        #: ⛔ 变异规则身份**分开报**：它变了**不**影响可比性，
+        #:    但必须可见（"能被变异的是什么"变了是重要事实）。
+        "mutation_identity": mutation_identity(),
+        "mutation_caliber": {c: _caliber_value(c) for c in MUTATION_CALIBER},
         #: ⛔⛔ 关键：把口径常量的**当前取值**算进身份。
         #:    只算"名字列表"是不够的 —— 实测踩过：新增一层之后，
         #:    `LAYERS` 的名字没变（`"aether.genome:LAYERS"` 这个字符串不变），
@@ -174,6 +202,20 @@ def identity() -> str:
         "caliber_values": {c: _caliber_value(c) for c in JUDGE_CALIBER},
     }
     return content_hash(payload)[:32]
+
+
+def mutation_identity() -> str:
+    """**变异规则**的身份（哪些层/op 可被编辑）。
+
+    ⛔ 它记录在读数里、供审计，但**不参与跨版本可比性判断** ——
+       改它不会让历史裁决失效（历史裁决仍然是"用同一把尺子量出来的"）。
+       混进 `identity()` 会让每次加层都把全部历史判成不可比，
+       那种"过度敏感"和"不够敏感"一样坏：前者会让人把判据关掉。
+    """
+    return content_hash({
+        "caliber": list(MUTATION_CALIBER),
+        "caliber_values": {c: _caliber_value(c) for c in MUTATION_CALIBER},
+    })[:32]
 
 
 def describe() -> Dict[str, Any]:
@@ -193,9 +235,16 @@ def describe() -> Dict[str, Any]:
         #:    "新增了一层"这种变化在诊断输出上完全不可见
         #:    （实测踩过：`LAYERS` 从 6 层变 7 层，名字列表一字未变）。
         "caliber_values": {c: _caliber_value(c) for c in JUDGE_CALIBER},
-        "note": ("判据集身份 = 上述模块的**规范化源码**哈希 + 口径常量。"
+        #: ⛔ 变异规则身份**分开报**：改它**不**影响跨版本可比性
+        #:    （历史裁决仍然是同一把尺子量的），但"能被变异的是什么"
+        #:    变了是重要事实，必须可见。
+        "mutation_identity": mutation_identity(),
+        "mutation_caliber": {c: _caliber_value(c) for c in MUTATION_CALIBER},
+        "note": ("判据集身份 = 上述模块的**规范化源码**哈希 + 判据口径常量。"
                  "改判据代码 ⇒ 身份改变 ⇒ 与历史裁决**不可比**"
-                 "（这是刻意的：改尺子必须留痕）。"),
+                 "（这是刻意的：改尺子必须留痕）。"
+                 "⛔ 变异规则（哪些层/op 可编辑）是**单独的身份**："
+                 "改它不会让历史裁决失效。"),
     }
 
 

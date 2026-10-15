@@ -76,7 +76,15 @@ def plan(ledger: Path, *, current: Optional[str] = None
     """
     cur = current or J.identity()
     events = _load(ledger)
-    last_bad = -1
+    #: ⛔⛔ 断点判据：**第一条**用旧尺子量的裁决之后全丢。
+    #:    实测踩过一个判据 bug：原先用"**最后一条**旧身份"当断点 ——
+    #:    而上一轮重新发布插的 `evolution.judge_changed` 标记在**末尾**，
+    #:    它本身就不是"当前身份"的裁决 ⇒ 断点被推到最末 ⇒ 所有实验期的
+    #:    旧尺子裁决都被当成"前缀"保留下来（dry-run 显示"保留 2991"，
+    #:    而账本里明明躺着 4 种身份）。
+    #:    ⇒ 判据改成"第一条旧的之后全丢"，并且**标记事件不参与**这个判断
+    #:      （它是留痕，不是量出来的读数）。
+    first_bad = -1
     other_versions: Dict[str, int] = {}
     no_id = 0
     for i, e in enumerate(events):
@@ -87,10 +95,18 @@ def plan(ledger: Path, *, current: Optional[str] = None
             no_id += 1
             continue
         if v != cur:
-            last_bad = i
             other_versions[v[:16]] = other_versions.get(v[:16], 0) + 1
-    keep = events[:last_bad + 1] if last_bad >= 0 else events
-    drop = events[last_bad + 1:] if last_bad >= 0 else []
+            if first_bad < 0:
+                first_bad = i
+    keep = events[:first_bad] if first_bad >= 0 else events
+    drop = events[first_bad:] if first_bad >= 0 else []
+    #: 新链要写进去的"被丢掉的旧身份"（不是前缀里那些 —— 那些还在链上）
+    dropped_versions: Dict[str, int] = {}
+    for e in drop:
+        if e.get("kind") != "eval.verdict":
+            continue
+        v = str((e.get("payload") or {}).get("judge_version") or "(无身份)")
+        dropped_versions[v[:16]] = dropped_versions.get(v[:16], 0) + 1
     return {
         "current_judge": cur,
         "n_events": len(events),
@@ -98,6 +114,7 @@ def plan(ledger: Path, *, current: Optional[str] = None
         "n_drop": len(drop),
         "cut_at_seq": (drop[0].get("seq") if drop else None),
         "other_versions_prefix": other_versions,
+        "dropped_versions": dropped_versions,
         "verdicts_without_id": no_id,
         "dropped_kinds": sorted({str(d.get("kind")) for d in drop}),
         "note": ("前缀保留（判据变更前的历史原样重算 hash）；后缀不搬"
@@ -149,7 +166,7 @@ def relaunch(ledger: Path, out: Path, *, reason: str, by: str,
     marker = Event(seq=len(lines) + 1, ts=float(keep[-1].get("ts") or 0.0)
                    if keep else 0.0,
                    kind="evolution.judge_changed", actor=str(by),
-                   payload={"from_judge": sorted(pl["other_versions_prefix"]),
+                   payload={"from_judge": sorted(pl["dropped_versions"]),
                             "to_judge": cur, "reason": reason,
                             "dropped_events": pl["n_drop"],
                             "dropped_kinds": pl["dropped_kinds"],
