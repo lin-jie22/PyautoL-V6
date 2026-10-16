@@ -38,6 +38,8 @@ V6 的 `tests/contract_*.py` 是**可执行脚本**（自带 `_main()`，退出�
 跑法：
     python tests/contract_srcmut_test.py
 """
+import inspect
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -363,9 +365,17 @@ def main():
     from aether.evolution import EvolutionConfig
     ck("H1 ⛔ 生产默认 source_cleanup_enabled=True",
        EvolutionConfig().source_cleanup_enabled is True)
-    ck("H2 ⛔ 生产默认 max_source_probes == 0（循环只提议、不对拍；"
-       "对拍是分钟级的，交给 CLI）",
-       EvolutionConfig().max_source_probes == 0)
+    #: ⛔⛔ **这条断言在 2026-10-16 被实测推翻后改写**：原断言是
+    #:    `max_source_probes == 0`（"循环只提议、不对拍，对拍交给 CLI"）。
+    #:    但那条默认值是**一次未跑完的取证**留下的（11m54s 被 kill，
+    #:    被当成"≈10 分钟"）；本次实测端到端 **159.7s**，差 4.5 倍。
+    #:    ⇒ 更严重的是：预算为 0 ⇒ 唯一可证明的 `unreachable` 类
+    #:       **永远**拿不到裁决 ⇒ 提议 127 次 / 过闸 0 次 / 执行 0 次。
+    #:       那不是"保守"，是**死闸**：连事件都在记（n_probed=0），
+    #:       只是永远记 0。⇒ 默认值改为 >= 1，由本条钉住。
+    ck("H2 ⛔ 生产默认 max_source_probes >= 1"
+       "（=0 ⇒ 唯一可证明的那类恒红 ⇒ 提议得过、闸过不了 ⇒ 死闸）",
+       EvolutionConfig().max_source_probes >= 1)
     ck("H3 反证：显式关 ⇒ 真的关掉（不是常量）",
        EvolutionConfig(source_cleanup_enabled=False).source_cleanup_enabled
        is False
@@ -373,6 +383,81 @@ def main():
     from aether.evolution import EvolutionLoop
     ck("H4 循环上有 `_source_cleanup_pass` 这个方法（不只是写在文档里）",
        callable(getattr(EvolutionLoop, "_source_cleanup_pass", None)))
+    #: ⛔ 注入点必须在**类**上（不在 `EvolutionConfig` 里）：配置会被
+    #:    `asdict()` → `fingerprint()` JSON 化，塞函数 ⇒ 指纹静默退成空串
+    #:    ⇒ checkpoint 续跑校验从此恒过（假仪表）。见 `_cfg_fingerprint`。
+    ck("H5 ⛔ 对拍 runner 工厂的注入点在**类**上且默认 None（None ⇒ 真实对拍）",
+       getattr(EvolutionLoop, "_probe_runner_factory", "__missing__") is None)
+    ck("H6 反证：配置里**没有** runner 字段（否则指纹会静默退成空串）",
+       "runner" not in EvolutionConfig.__dataclass_fields__)
+
+    # ══ I 组：⛔⛔ 「没跑」与「跑了但没过」必须可分辨（死闸显性化）════
+    print("I 组：未验证原因码可分辨（预算为 0 ⇒ 必须记 over_budget）")
+    from aether.evolution import EvolutionLoop as _EL
+    from aether.ledger import Ledger as _Lg
+    #: ⛔ 受控原因码：**封闭集合**，新增分支必须同时加到这里，
+    #:    否则 `unverified_reasons` 里会冒出没被任何断言看住的键。
+    _CODES = frozenset({"verified_ok", "verified_fail",
+                        "probe_unverified", "no_contracts",
+                        "over_budget", "heuristic_no_edits"})
+    src = inspect.getsource(_EL._source_cleanup_pass)
+    ck("I1 ⛔ 源码里出现全部 5 个原因码（少一个 ⇒ 有分支没被记账）",
+       all(c in src for c in ("verified_ok", "verified_fail", "no_contracts",
+                              "over_budget", "heuristic_no_edits")),
+       f"{[c for c in sorted(_CODES) if c not in src]}")
+    with tempfile.TemporaryDirectory() as _td:
+        _lg = _Lg(_td + "/l.jsonl")
+        _lp = _EL(ledger=_lg, gate=None, dev_suite=[], runner=None,
+                  proposer=None,
+                  config=EvolutionConfig(source_cleanup_enabled=True,
+                                         max_source_probes=0))
+        _lp._source_cleanup_pass([])
+        ev = [json.loads(x) for x in open(_td + "/l.jsonl") if x.strip()]
+        ps = [e for e in ev if e.get("kind") == "cleanup.source_pass"]
+        ck("I2 ⛔ 预算 0 的运行也**照样**写汇总事件（不许静默跳过）",
+           len(ps) == 1, f"{len(ps)}")
+        pay = ps[-1]["payload"] if ps else {}
+        ck("I3 ⛔⛔ 核心：n_provable>0 且 n_probed==0 ⇒ 原因码里必须有"
+           " over_budget（把「闸被关着」与「没有债」分开）",
+           int(pay.get("n_provable", 0)) > 0
+           and int(pay.get("n_probed", 0)) == 0
+           and int(dict(pay.get("unverified_reasons") or
+                        {}).get("over_budget", 0)) > 0,
+           json.dumps(pay.get("unverified_reasons"), ensure_ascii=False))
+        ck("I4 ⛔ 原因码必须落在受控集合里（出现新码 ⇒ 先补断言）",
+           set(dict(pay.get("unverified_reasons") or {})) <= set(_CODES),
+           str(set(dict(pay.get("unverified_reasons") or {})) - set(_CODES)))
+        ck("I5 ⛔ 预算 0 时 note 必须自带警告（读数自己说清『闸被关着』）",
+           "预算为 0" in str(pay.get("note", "")))
+        #: ⛔⛔ 反证：注入一个**廉价 runner** 后，同样的 pass 必须真的对拍
+        #:    ⇒ 证明「预算 > 0」不是又一个只在文档里生效的开关。
+        _seen = {"n": 0}
+
+        def _cheap_factory(sel_paths):
+            def _run(root):
+                _seen["n"] += 1
+                return {"ok": True, "failed": [], "rc": 0, "error": ""}
+            return _run
+
+        _EL._probe_runner_factory = _cheap_factory
+        try:
+            _lg2 = _Lg(_td + "/l2.jsonl")
+            _lp2 = _EL(ledger=_lg2, gate=None, dev_suite=[], runner=None,
+                       proposer=None,
+                       config=EvolutionConfig(source_cleanup_enabled=True,
+                                              max_source_probes=1))
+            _lp2._source_cleanup_pass([])
+            ev2 = [json.loads(x) for x in open(_td + "/l2.jsonl") if x.strip()]
+            p2 = [e for e in ev2
+                  if e.get("kind") == "cleanup.source_pass"][-1]["payload"]
+            ck("I6 ⛔⛔ 反证：预算=1 且存在可证明提案 ⇒ n_probed == 1"
+               "（默认预算真的会把对拍跑起来，不是空开关）",
+               int(p2.get("n_probed", 0)) == 1 and _seen["n"] == 2,
+               f"n_probed={p2.get('n_probed')} runner_calls={_seen['n']}")
+            ck("I7 ⛔ 反证：预算=1 时 note **不带**「预算为 0」警告",
+               "预算为 0" not in str(p2.get("note", "")))
+        finally:
+            _EL._probe_runner_factory = None
     #: ⛔ 「源码清理不进 best 选择」这条**不写成断言**：它是一条**设计说明**，
     #:    用行为断言表达它需要跑一整轮循环，而勉强写成静态断言会得到一条
     #:    恒真的检查 —— 那正是本契约要消灭的东西。⇒ 它记在 `_source_cleanup_pass`

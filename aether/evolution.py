@@ -304,19 +304,27 @@ class EvolutionConfig:
     #:      ⇒ 改的是**源码**，不可逆 ⇒ 只提案、不过 harness 那条选择链。
     #: ⛔ **默认开**（与 `cleanup_enabled` 同理由）：默认关的开关是假仪表。
     source_cleanup_enabled: bool = True
-    #: ⛔ **默认 0 = 循环里不对拍**，但**扫描 / 提议 / 记账照做**。
-    #:    理由（成本实测）：一次对拍 = 复制一份仓库 + 跑两遍冻结契约，
-    #:    真实耗时是**分钟级**（选中 8 份契约时 ≈ 10 分钟）。放进每次运行
-    #:    的末尾 ⇒ 进化循环的耗时被它主导，回归测试也一起变慢。
-    #:    ⇒ 职责分离：**循环 = 提议器**（自动产出 + 自动记账，便宜）；
-    #:      **CLI = 验证器**（`aether caps cleanup validate`，花时间给真裁决）。
-    #:    ⛔ 这不是"默认关的开关"那种假仪表：关掉的是**昂贵的可选验证**，
-    #:       机制本身（扫描 → 提议 → 记账）是**默认开**的，而且"这次没对拍"
-    #:       会被**显式**记进 `cleanup.source_pass` 的 `n_probed=0` ——
-    #:       看得见的关闭，不是"没接线所以当它不存在"。
-    #:       （与 `parallel_workers=0` 同形态：保守且可比，不是没有机制。）
-    #:    ⛔ 设成 N>0 的后果：每次运行末尾多花 N × 分钟。想自动过闸就付这个钱。
-    max_source_probes: int = 0
+    #: ⛔ **预算 = 每次运行最多对拍几条提案**。默认 **1**（不是 0）。
+    #:
+    #: ⛔⛔ **为什么从 0 改成 1（2026-10-16 实测推翻了原依据）**：
+    #:    原默认值 0 的依据是「一次对拍 ≈ 10 分钟」—— 但那是一次
+    #:    **未跑完**的取证（11m54s 被 kill），不是一次测得的耗时。
+    #:    本次实测（`unreachable` / `aether/providers.py:714-749`）：
+    #:        · 删前基线 8 份冻结契约 = **29.7s**
+    #:        · 端到端（复制仓库 + 删前 + 删后）= **159.7s**，裁决 `ok`
+    #:    ⇒ 与「太贵」这条依据差 **4.5 倍**，而它当初据此把整条流水线关死。
+    #:
+    #: ⛔ **默认 0 的代价不是「慢一点」，是死闸**：源码清理里**只有**
+    #:    `unreachable` 这一类带可执行编辑（另两类是启发式，本就过不了闸），
+    #:    预算为 0 ⇒ 它**永远**拿不到裁决 ⇒ `validate` 第 ③ 条 fail-closed
+    #:    ⇒ **提议 127 次 / 过闸 0 次 / 执行 0 次**。看似「保守」，实际是
+    #:    「有机制 ≠ 这条路被走到」（第 5 条纪律），比默认关的开关更隐蔽：
+    #:    连事件都在记（n_probed=0），只是永远记的是 0。
+    #:
+    #: ⛔ 保留「看得见的关闭」这一条：预算耗尽 / 被关掉的条目**必须**在
+    #:    `cleanup.source_pass` 里给出 `unverified_reasons` 分项计数，
+    #:    让「没有可证明的提案」与「有提案但预算为 0 ⇒ 恒红」**可分辨**。
+    max_source_probes: int = 1
     dev_pass_threshold: float = 0.0     # 发展集 reward 阈值（0=全部计入）
     #: 提交后做一次**反事实层归因**（哪一层带来了这次提升）。
     attribute_layers: bool = True
@@ -446,6 +454,20 @@ class EvolutionLoop:
     #:    ⛔ 计数与展示分离：`round_no` 是**真实总数**，这个窗口只影响
     #:    `done_rounds` 的展示条数，绝不能反过来用它推算完成到第几轮。
     _CP_KEEP_ROUNDS: int = 10
+    #: ⛔ **对拍 runner 工厂的注入点**（默认 None ⇒ 用 `srcmut.contract_runner`）。
+    #:
+    #: ⛔⛔ **为什么不放在 `EvolutionConfig` 里**：配置对象会被
+    #:    `asdict()` → `fingerprint()` JSON 化（见 `_cfg_fingerprint`）。
+    #:    塞一个函数进去 ⇒ JSON 化抛 TypeError ⇒ 被 `except` 兜住
+    #:    ⇒ **指纹静默退回空串** ⇒ checkpoint 续跑的那道一致性校验
+    #:    从此恒过（假仪表，第 5 条纪律的又一个落点）。
+    #:    ⇒ 机制（可注入）与事实源（可序列化）必须分开存放。
+    #:
+    #: ⛔ 存在的唯一理由是**可测**：不注入的话，契约要么跑 160 秒的
+    #:    真实对拍，要么只能做静态检查 —— 而静态检查证明不了
+    #:    「预算 > 0 时**真的**对拍了」（第 5 条：有机制 ≠ 这条路被走到）。
+    _probe_runner_factory: Optional[Callable[..., Callable[[Any],
+                                                           Dict[str, Any]]]] = None
 
     def __init__(self, ledger: Ledger, gate: NonRegressionGate,
                  dev_suite: List[FrozenTask], runner: Runner,
@@ -1196,9 +1218,14 @@ class EvolutionLoop:
         probed = 0
         n_pass = 0
         by_kind: Dict[str, int] = {}
+        #: ⛔ 原因码：**必须**能分辨「没东西可证明」与「有东西但没给预算」。
+        #:    二者在外部都表现为 n_passed=0，但修法完全相反（补契约 vs 给预算）。
+        #:    与「三态必须分开」同族：把环境故障读成"等价"是同一类事故。
+        reasons: Dict[str, int] = {}
         for p in props:
             by_kind[p.kind] = by_kind.get(p.kind, 0) + 1
             verdict = None
+            code = ""
             if p.edits:
                 if probed < self.cfg.max_source_probes:
                     probed += 1
@@ -1207,13 +1234,20 @@ class EvolutionLoop:
                         _root, [e.file for e in eds])
                     pr: Dict[str, Any]
                     if sel:
-                        pr = _sm.probe(_root, eds,
-                                       runner=_sm.contract_runner(sel))
+                        factory = (type(self)._probe_runner_factory
+                                   or _sm.contract_runner)
+                        pr = _sm.probe(_root, eds, runner=factory(sel))
                     else:
                         pr = {"ok": False, "unverified": True, "reason": why}
                     p.evidence["nonregression"] = pr
                     verdict = bool(pr.get("ok")) and not pr.get("unverified")
+                    code = "verified_ok" if verdict else (
+                        "verified_fail" if not pr.get("unverified")
+                        else "probe_unverified")
+                    if not sel:
+                        code = "no_contracts"
                 else:
+                    code = "over_budget"
                     p.evidence["nonregression"] = {
                         "ok": False, "unverified": True,
                         "reason": (f"超出本次对拍预算（max_source_probes="
@@ -1222,23 +1256,36 @@ class EvolutionLoop:
                 #: ⛔ 前两类是**启发式** ⇒ 拿不出可应用的编辑 ⇒ 无从对拍。
                 #:    它们本来就该红 —— 这不是缺陷，是判据的边界：
                 #:    启发式只撑得住"提案"，撑不住"判定"。
+                code = "heuristic_no_edits"
                 p.evidence["nonregression"] = {
                     "ok": False, "unverified": True,
                     "reason": ("启发式判定 ⇒ 无可执行编辑 ⇒ 无法对拍；"
                                "这一类只能提案，不能过闸")}
+            p.evidence["nonregression"]["reason_code"] = code
+            reasons[code] = reasons.get(code, 0) + 1
             p = _cl.validate(p, non_regression_ok=verdict)
             _cl.record(self.ledger, p)
             n_pass += 1 if p.gate_passed else 0
 
         #: ③ 汇总事件（这次运行的源码清理读数）
+        #:    ⛔ `unverified_reasons` 是**给外部看的判据**：n_passed=0 时
+        #:       靠它区分「无提案」/「预算为 0」/「契约缺失」/「确实删坏了」。
+        n_provable = sum(1 for p in props if p.edits)
         self._append_safe("cleanup.source_pass", {
             "rounds": len(reports),
             "n_proposed": len(props), "n_by_kind": by_kind,
-            "n_probed": probed, "n_passed": n_pass, "load": rd,
+            "n_provable": n_provable,
+            "probe_budget": int(self.cfg.max_source_probes),
+            "n_probed": probed, "n_passed": n_pass,
+            "unverified_reasons": dict(sorted(reasons.items())),
+            "load": rd,
             "note": ("源码侧清理 pass：提议 → 过闸 → 记账。**不进 best "
                      "选择**（删源码不改 harness ⇒ reward 不变 ⇒ 两种量纲"
                      "不能比）。过闸的提案等人执行："
-                     "`aether caps cleanup approve`。"),
+                     "`aether caps cleanup approve`。"
+                     + ("" if self.cfg.max_source_probes > 0 else
+                        " ⚠️ 本轮预算为 0 ⇒ 可证明提案**一律未验证**，"
+                        "这不是『没有债』而是『闸被关着』。")),
         })
 
     def _genome_load(self, h: Harness) -> int:
