@@ -69,6 +69,15 @@ MUTANTS: tuple = (
     Mut("aether/evolution.py", "cleanup_group_size: int = 1",
         "cleanup_group_size: int = 5", "tests/contract_cleanup_test.py",
         "一次清 5 条 ⇒ 出事不知道是谁"),
+    #: ── 源码侧清理 pass（r40）──────────────────────────────────
+    Mut("aether/evolution.py", "source_cleanup_enabled: bool = True",
+        "source_cleanup_enabled: bool = False",
+        "tests/contract_srcmut_test.py",
+        "整根源码清理轴空转 ⇒ '债是在涨还是在消'重新变得没人回答"),
+    Mut("aether/evolution.py", "max_source_probes: int = 0",
+        "max_source_probes: int = 3",
+        "tests/contract_srcmut_test.py",
+        "循环里开始对拍 ⇒ 每次运行末尾多花分钟级时间（默认值朝贵的方向漂）"),
 )
 
 #: ⛔ 反证（探针自检）：这一条**必须**转红。它坏了 ⇒ 上面全是假读数。
@@ -91,15 +100,27 @@ def _build(dst: Path, contract: str) -> None:
 
 def _mutate(dst: Path, m: Mut) -> int:
     """翻那一行。⛔ 原文必须**恰好出现一次** —— 出现 0 次说明字段改名了
-    （探针悄悄失效，报出来的 0 条红是假的）；出现多次说明不敢下刀。"""
+    （探针悄悄失效，报出来的 0 条红是假的）；出现多次说明不敢下刀。
+
+    ⛔⛔ 为什么要加**词边界**守卫（2026-10-16 实测踩的）：
+        `m.old = "cleanup_enabled: bool = True"` 在加了新字段
+        `source_cleanup_enabled: bool = True` 之后会**匹配到 2 处** ——
+        后者把前者整串包含在里面。裸子串匹配分不清"这个名字"和
+        "名字里的一段"，于是探针注入失败 ⇒ 连带 CANARY 自检失败 ⇒
+        **所有结论被作废**（这次是好事：fail-closed 拦住了假读数）。
+        ⇒ 用 `(?<![A-Za-z0-9_])` / `(?![A-Za-z0-9_])` 夹住：
+          新字段再叫 `xxx_cleanup_enabled` 也不会撞上旧条目。
+    """
     f = dst / m.src
     txt = f.read_text(encoding="utf-8")
-    n = len(re.findall(re.escape(m.old), txt))
+    pat = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(m.old) + r"(?![A-Za-z0-9_])")
+    n = len(pat.findall(txt))
     if n != 1:
         raise RuntimeError(
             f"目标串出现 {n} 次（应为 1）：{m.old!r} —— 探针已失效，"
             f"请更新 MUTANTS（这是探针的**读数**，不是被测对象的结论）")
-    f.write_text(txt.replace(m.old, m.new), encoding="utf-8")
+    #: ⛔ 用 lambda 替换：`m.new` 里若有反斜杠，`re.sub` 会当转义解释。
+    f.write_text(pat.sub(lambda _m: m.new, txt, count=1), encoding="utf-8")
     return n
 
 

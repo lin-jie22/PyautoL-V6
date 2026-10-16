@@ -1124,7 +1124,11 @@ def cmd_caps(args) -> int:
         #: ⛔ 本命令**只在显式 approve --yes 之后才给出补丁**，而且
         #:    **从不改源码** —— 删错了是不可逆的，账本只能留痕不能还原。
         from . import cleanup as CL
-        cpath = _paths(Path(args.root))["cleanup"]
+        #: ⛔ 延迟 import：只有走到 cleanup 这条命令才需要它（它带 subprocess
+        #:    与 shutil，是"对拍"这条路上才用的重家伙）。
+        from . import srcmut as SM
+        src_root = Path(args.root)
+        cpath = _paths(src_root)["cleanup"]
         saved = CL.load(cpath)
         sub = getattr(args, "cleanup_cmd", "propose")
 
@@ -1159,14 +1163,58 @@ def cmd_caps(args) -> int:
             if not targets:
                 print("（没有可校验的提案：先跑 `caps cleanup propose`）")
                 return 2
+            #: ⛔ 对拍很贵（每条要复制一份仓库 + 跑一次冻结契约）
+            #:    ⇒ 默认只对前 N 条**带可执行编辑**的提案跑，其余记为
+            #:      `unverified`。⛔ **unverified 就是红**，不冒充"通过"。
+            probe_limit = int(getattr(args, "probe_limit", 3) or 3)
             bad = 0
+            probed = 0
             for p in targets:
-                p = CL.validate(p)
+                verdict: Any = None
+                if p.edits and probed < probe_limit:
+                    probed += 1
+                    eds = [SM.Edit.from_dict(x) for x in p.edits]
+                    sel, why = SM.select_contracts(
+                        src_root, [e.file for e in eds],
+                        max_contracts=int(
+                            getattr(args, "max_contracts", 12) or 12))
+                    if not sel:
+                        p.evidence["nonregression"] = {
+                            "unverified": True, "ok": False,
+                            "reason": why}
+                    else:
+                        pr = SM.probe(src_root, eds,
+                                      runner=SM.contract_runner(
+                                          sel,
+                                          python_exe=getattr(args, "python",
+                                                             None)))
+                        p.evidence["nonregression"] = pr
+                        verdict = bool(pr.get("ok")) and not pr.get("unverified")
+                elif p.edits:
+                    p.evidence["nonregression"] = {
+                        "unverified": True, "ok": False,
+                        "reason": (f"超出本次对拍预算（--probe-limit "
+                                   f"{probe_limit}）⇒ 未验证，不当通过")}
+                else:
+                    #: ⛔ 前两类（启发式）**拿不到**"删后"的源码
+                    #:    ⇒ 无从对拍 ⇒ 它们本来就该红。这不是缺陷，
+                    #:       是判据的边界：启发式只撑得住提案，撑不住判定。
+                    p.evidence["nonregression"] = {
+                        "unverified": True, "ok": False,
+                        "reason": ("启发式判定（名字没人用 / 只写不读）⇒ "
+                                   "没有可应用的编辑 ⇒ 无法对拍；"
+                                   "这一类只能提案，不能过闸")}
+                p = CL.validate(p, non_regression_ok=verdict)
                 saved[p.prop_id] = p
                 CL.record(led, p)
                 mark = "✅" if p.gate_passed else "❌"
                 print(f"{mark} [{p.kind}] {p.target} @ {p.where} "
                       f"state={p.state} 减负={p.evidence.get('load_delta')}")
+                nr = p.evidence.get("nonregression") or {}
+                if nr.get("unverified"):
+                    print(f"     ⚠️ 未验证：{str(nr.get('reason'))[:90]}")
+                elif nr.get("ok"):
+                    print("     ✅ 对拍通过：删前删后冻结契约一致")
                 for r in p.gate_reasons:
                     print(f"     ⇒ {r}")
                 bad += 0 if p.gate_passed else 1
@@ -1179,7 +1227,21 @@ def cmd_caps(args) -> int:
             if p is None:
                 _log.warning(f"[cleanup] 没有提案 {pid!r}（先跑 propose/validate）")
                 return 2
-            p = CL.validate(p)
+            #: ⛔ 复用 `validate` 阶段存下来的裁决，但**必须先验指纹**：
+            #:    源码一动 ⇒ 当初那次对拍证明的是**另一段代码** ⇒ 裁决作废。
+            #:    直接复用缓存 ⇒ "曾经证明过安全" 会冒充 "现在仍然安全"。
+            verdict: Any = None
+            cached = p.evidence.get("nonregression") or {}
+            if p.edits:
+                eds = [SM.Edit.from_dict(x) for x in p.edits]
+                stale = [e for e in eds if not SM.verify(src_root, e)[0]]
+                if stale:
+                    p.evidence["nonregression_stale"] = (
+                        f"源码已变（{len(stale)} 条编辑指纹不匹配）⇒ "
+                        f"裁决作废，请重跑 `caps cleanup validate`")
+                elif cached.get("ok") and not cached.get("unverified"):
+                    verdict = True
+            p = CL.validate(p, non_regression_ok=verdict)
             p = CL.apply_patch(p, approved_by=getattr(args, "by", "") or "",
                                yes=bool(getattr(args, "yes", False)))
             saved[pid] = p
@@ -1518,8 +1580,22 @@ def build_parser() -> argparse.ArgumentParser:
     clb = cls_.add_parser("propose", help="扫描并生成清理提案（只读）")
     clb.add_argument("--limit", type=int, default=20)
     clb.add_argument("--json", action="store_true")
-    clv = cls_.add_parser("validate", help="对提案过闸（不许碰判据集/减负可测/非回归/可执行）")
+    clv = cls_.add_parser(
+        "validate",
+        help="对提案过闸（不动判据集/减负可测/非回归对拍/可执行）")
     clv.add_argument("--id", dest="pid", default="", help="提案 id（不传则全跑）")
+    #: ⛔ 对拍预算：每条 = 复制一份仓库 + 跑一次冻结契约。
+    #:    ⛔ **超出预算的提案记为 unverified ⇒ 红**，不是"跳过"。
+    #:      跳过的提案会停留在 `pending`，看上去像"待办"，
+    #:      而它其实从未被验证 —— 那才是最容易骗人的形态。
+    clv.add_argument("--probe-limit", type=int, default=3,
+                     help="本次最多对几条提案做删前/删后对拍（默认 3）")
+    clv.add_argument("--max-contracts", type=int, default=12,
+                     help="单次对拍最多跑几份冻结契约（默认 12；"
+                          "超了记为 unverified，不静默截断）")
+    clv.add_argument("--python", default=None,
+                     help="跑冻结契约用的解释器（默认当前进程；"
+                          "契约是**独立脚本**，不需要 pytest）")
     cla = cls_.add_parser("approve", help="**人批准**（没有 --yes 一律不推进）")
     cla.add_argument("--id", dest="pid", required=True)
     cla.add_argument("--by", default="", help="批准人（必须留名）")

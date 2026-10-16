@@ -296,6 +296,27 @@ class EvolutionConfig:
     #: 每轮最多提几个清理候选。⛔ 默认 1：清理同样走**最小编辑原则**，
     #:    一次只清一条 ⇒ 归因清楚、回滚便宜（一次清 5 条 ⇒ 出事不知道是谁）。
     cleanup_group_size: int = 1
+    # ── 源码侧清理 pass（第二根轴的**另一半**）────────────────────
+    #: ⛔ 与上面的 `cleanup_*` 是**两根不同的轴**，别混为一谈：
+    #:    · `cleanup_*`（基因组侧）—— 每轮跑，产出 `Capsule`，改 **harness**
+    #:      ⇒ 可回滚（纯数据）、可参与 `best` 选择。
+    #:    · `source_*`（源码侧）—— **每次运行**跑一次，产出 `CleanupProposal`
+    #:      ⇒ 改的是**源码**，不可逆 ⇒ 只提案、不过 harness 那条选择链。
+    #: ⛔ **默认开**（与 `cleanup_enabled` 同理由）：默认关的开关是假仪表。
+    source_cleanup_enabled: bool = True
+    #: ⛔ **默认 0 = 循环里不对拍**，但**扫描 / 提议 / 记账照做**。
+    #:    理由（成本实测）：一次对拍 = 复制一份仓库 + 跑两遍冻结契约，
+    #:    真实耗时是**分钟级**（选中 8 份契约时 ≈ 10 分钟）。放进每次运行
+    #:    的末尾 ⇒ 进化循环的耗时被它主导，回归测试也一起变慢。
+    #:    ⇒ 职责分离：**循环 = 提议器**（自动产出 + 自动记账，便宜）；
+    #:      **CLI = 验证器**（`aether caps cleanup validate`，花时间给真裁决）。
+    #:    ⛔ 这不是"默认关的开关"那种假仪表：关掉的是**昂贵的可选验证**，
+    #:       机制本身（扫描 → 提议 → 记账）是**默认开**的，而且"这次没对拍"
+    #:       会被**显式**记进 `cleanup.source_pass` 的 `n_probed=0` ——
+    #:       看得见的关闭，不是"没接线所以当它不存在"。
+    #:       （与 `parallel_workers=0` 同形态：保守且可比，不是没有机制。）
+    #:    ⛔ 设成 N>0 的后果：每次运行末尾多花 N × 分钟。想自动过闸就付这个钱。
+    max_source_probes: int = 0
     dev_pass_threshold: float = 0.0     # 发展集 reward 阈值（0=全部计入）
     #: 提交后做一次**反事实层归因**（哪一层带来了这次提升）。
     attribute_layers: bool = True
@@ -1100,33 +1121,125 @@ class EvolutionLoop:
             rep.world_facts = None
         return rep
 
-    def _record_source_load(self, reports: List[RoundReport]) -> None:
-        """每次运行记一条 `cleanup.scan`（源码侧自指负载）。
+    def _append_safe(self, kind: str, payload: Dict[str, Any],
+                     actor: str = "evolution") -> None:
+        """账本写入兜底：账本挂了不该让整轮进化陪葬。
 
-        ⛔ 每**次运行**一次，不是每轮一次：全仓 AST 扫描很贵，每轮扫 ⇒
-           进化循环会在编码工作上花掉比评估还多的时间 —— 那是把努力分配
-           砍向了**另一端**。我们要的是"分一点力给它"，不是"全搬过去"。
-
-        ⛔ 扫不出来 ⇒ **不记**（而不是记一个 0）：记 0 会得到"没有死代码"
-           的假象，而那正是这套系统最擅长自我欺骗的地方。
+        ⛔ 为什么需要它：这个 pass 跑在**每次运行末尾**，而账本写不进
+           （磁盘满 / 权限）就让整轮进化失败 ⇒ 因果完全不成比例。
+        ⛔ 但 `except: pass` 是最危险的形态 —— 它让"记了"与"没记"无从分辨。
+           ⇒ 失败路径**另有事件**承担可见性（见 `_source_cleanup_pass`
+           的 `cleanup.source_failed`），不是把失败吞掉。
         """
         try:
-            from .cleanup import source_load
-            rd = source_load()
+            self.ledger.append(kind, payload, actor=actor)
         except Exception:                                  # noqa: BLE001
+            pass
+
+    def _source_cleanup_pass(self, reports: List[RoundReport]) -> None:
+        """**每次运行**一次：扫源码侧自指负载 → 产出清理提案 → 过闸 → 记账。
+
+        ═══ 它回答的是"让系统能提议改自己的源码"这件事的**另一半** ═══
+
+        基因组侧（r39 的 `CleanupProposer`）已经在**每轮**提议了，但源码侧
+        此前只有一条**人肉 CLI**（`aether caps cleanup propose`）⇒
+        "系统的债是在涨还是在消"这个问题**没有任何时间序列**能回答 ——
+        每次看都是一个人肉快照。那正是"只能靠人回头发现"的机制形态。
+
+        ⛔ 为什么不每轮做：三次全仓 AST 扫描很贵，每轮扫 ⇒ 进化循环会在
+           编码工作上花掉比评估还多的时间 ⇒ 把"努力分配"砍向了**另一端**。
+           我们要的是"分一点力给它"，不是"全搬过去"。
+
+        ⛔⛔ **源码清理不参与 `best` 选择**（与基因组侧的关键区别）：
+            删源码**不改变 harness** ⇒ reward 不变 ⇒ 拿它跟能力候选比，
+            是把两种量纲塞进同一把尺子（与"两轴不加权求和"同一个理由）。
+            ⇒ 它走**并行的提案流水线**：提议 → 过闸 → 记账 → 等人执行。
+            ⛔ 后果：它**不会**出现在任何一轮的 `committed` 里 ——
+               那不是"没记账"，是账记在 `cleanup.source_pass` 事件上。
+
+        ⛔ 扫描挂了 ⇒ **记失败事件**，不静默跳过：
+           "没扫"与"扫了没有"必须能分辨（否则它又是一个假仪表）。
+        """
+        if not self.cfg.source_cleanup_enabled:
             return
-        payload: Dict[str, Any] = {
+        try:
+            from . import cleanup as _cl
+            from . import srcmut as _sm
+            from .paths import ROOT as _root
+        except Exception as e:                             # noqa: BLE001
+            self._append_safe("cleanup.source_failed", {
+                "rounds": len(reports),
+                "error": f"{type(e).__name__}: {e}",
+                "note": "源码清理 pass 连模块都没导入 ⇒ 这一项**没有读数**"})
+            return
+        try:
+            rd = _cl.source_load()
+            props = _cl.build(limit=self.cfg.max_source_probes * 4 + 8)
+        except Exception as e:                             # noqa: BLE001
+            self._append_safe("cleanup.source_failed", {
+                "rounds": len(reports),
+                "error": f"{type(e).__name__}: {e}",
+                "note": "源码清理 pass 扫描失败 ⇒ 这一项**没有读数**"})
+            return
+
+        #: ① 读数事件（沿用旧的 `cleanup.scan` 形态 + 三个键，向后兼容）
+        self._append_safe("cleanup.scan", {
             "rounds": len(reports),
             "source": rd,
             "genome": (reports[-1].genome_load_before if reports else -1),
             "note": ("源码侧自指负载（**下界**）。每次运行扫一次、不每轮扫"
                      "（太贵）。要回答『债是在涨还是在消』，就把这个事件的"
                      "时间序列连起来读 —— 单看一次只能看到一个快照。"),
-        }
-        try:
-            self.ledger.append("cleanup.scan", payload, actor="evolution")
-        except Exception:                                  # noqa: BLE001
-            pass
+        })
+
+        #: ② 过闸 + 逐条记账
+        probed = 0
+        n_pass = 0
+        by_kind: Dict[str, int] = {}
+        for p in props:
+            by_kind[p.kind] = by_kind.get(p.kind, 0) + 1
+            verdict = None
+            if p.edits:
+                if probed < self.cfg.max_source_probes:
+                    probed += 1
+                    eds = [_sm.Edit.from_dict(x) for x in p.edits]
+                    sel, why = _sm.select_contracts(
+                        _root, [e.file for e in eds])
+                    pr: Dict[str, Any]
+                    if sel:
+                        pr = _sm.probe(_root, eds,
+                                       runner=_sm.contract_runner(sel))
+                    else:
+                        pr = {"ok": False, "unverified": True, "reason": why}
+                    p.evidence["nonregression"] = pr
+                    verdict = bool(pr.get("ok")) and not pr.get("unverified")
+                else:
+                    p.evidence["nonregression"] = {
+                        "ok": False, "unverified": True,
+                        "reason": (f"超出本次对拍预算（max_source_probes="
+                                   f"{self.cfg.max_source_probes}）⇒ 未验证")}
+            else:
+                #: ⛔ 前两类是**启发式** ⇒ 拿不出可应用的编辑 ⇒ 无从对拍。
+                #:    它们本来就该红 —— 这不是缺陷，是判据的边界：
+                #:    启发式只撑得住"提案"，撑不住"判定"。
+                p.evidence["nonregression"] = {
+                    "ok": False, "unverified": True,
+                    "reason": ("启发式判定 ⇒ 无可执行编辑 ⇒ 无法对拍；"
+                               "这一类只能提案，不能过闸")}
+            p = _cl.validate(p, non_regression_ok=verdict)
+            _cl.record(self.ledger, p)
+            n_pass += 1 if p.gate_passed else 0
+
+        #: ③ 汇总事件（这次运行的源码清理读数）
+        self._append_safe("cleanup.source_pass", {
+            "rounds": len(reports),
+            "n_proposed": len(props), "n_by_kind": by_kind,
+            "n_probed": probed, "n_passed": n_pass, "load": rd,
+            "note": ("源码侧清理 pass：提议 → 过闸 → 记账。**不进 best "
+                     "选择**（删源码不改 harness ⇒ reward 不变 ⇒ 两种量纲"
+                     "不能比）。过闸的提案等人执行："
+                     "`aether caps cleanup approve`。"),
+        })
 
     def _genome_load(self, h: Harness) -> int:
         """基因组侧的自指负载（死条目数）。**扫不出来 ⇒ 返回 -1**。
@@ -1761,13 +1874,14 @@ class EvolutionLoop:
                     actor="evolution")
                 break
 
-        #: ── 源码侧自指负载：每**次运行**扫一次（很贵，不许每轮扫）────
+        #: ── 源码侧清理 pass：每**次运行**一次（很贵，不许每轮扫）────
         #:    ⛔ 这是"12 个零消费方接口 / 10 个只写不读属性"那两个读数的家。
         #:      此前它们只活在 `caps cleanup propose` 这条**手工命令**里
         #:      ⇒ "系统的债是在涨还是在消"这个问题**没有任何时间序列**
         #:      能回答 —— 每次看都是一个人肉快照。这也正是"只能靠人回头
         #:      发现"的机制形态。
-        self._record_source_load(reports)
+        #:    ⇒ 现在它自己产出提案、自己过闸、自己记账：人只剩"执行"这一步。
+        self._source_cleanup_pass(reports)
 
         #: ⛔ 落点要兑现：写了 checkpoint 却没有任何读数 ⇒ "我开了续跑"
         #:    与"续跑真的可用"在外部无法区分（假仪表）。这里记一条事件，

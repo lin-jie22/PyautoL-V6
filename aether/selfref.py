@@ -53,7 +53,8 @@ from typing import Any, Dict, List, Sequence, Set, Tuple
 #: 写成 `Path(__file__).parents[1]` 更直白，但那样测试就无法改它了。
 ROOT = Path(__file__).resolve().parent.parent
 
-__all__ = ["scan_dead_api", "scan_write_only", "mechanism_vs_gain", "report"]
+__all__ = ["scan_dead_api", "scan_write_only", "scan_unreachable",
+           "mechanism_vs_gain", "report"]
 
 #: 扫这些目录里的源码（`aether/` 是产品代码；tests/scripts 是使用者）。
 SOURCE_DIRS = ("aether",)
@@ -193,6 +194,90 @@ def scan_write_only() -> Dict[str, Any]:
             "note": ("只看 `obj.attr` 赋值而全仓无 `x.attr` 读取的形态。"
                      "⇒ 同样是**下界**：`d['k'] = v` 这类键写入没扫"
                      "（键名太泛，假阳率会爆）。")}
+
+
+#: 终止语句：它们**之后**的同级语句在控制流上永不可达。
+#: ⛔ 只认"语句块顶层的裸终止语句"—— 嵌在 `if` / `try` 里的不算
+#:    （`if x: return 1` 之后的代码在 x 为假时**是可达的**）。
+_TERMINATORS = (ast.Return, ast.Raise, ast.Continue, ast.Break)
+
+
+def scan_unreachable() -> Dict[str, Any]:
+    """找**控制流上永不可达**的语句块（`return` 之后粘着的复制件）。
+
+    ═══ 它与前两类扫描的性质不同：这是**唯一可证明**的一类 ═══
+
+        · `scan_dead_api`   —— **启发式**：名字没在别处出现过 ⇒ 不算死。
+              它永远只能是**下界** —— 反射 / 字符串调用 / 框架回调静态
+              不可见 ⇒ 它只撑得住「提案给人看」，撑不住「判定」。
+        · `scan_write_only` —— 同为启发式（读形态扫不全）。
+        · `scan_unreachable`—— **语法级确定**：终止语句之后的同级语句，
+              控制流永远到不了 ⇒ 删掉它**行为等价**。
+              这是**证明**，不是「测试通过了」。
+
+    ⛔ 保守口径（宁可漏报，不可冤报，与前两类同纪律）：
+       ① **只扫 `body`，不扫 `orelse` / `finalbody` / `handlers`**：
+          · `while/for` 的 `else` 在循环正常结束时**是可达的**；
+          · `try` 的 `finally` 在 `return` 之后**仍会执行**（那是 with/try
+            自己的语义，不是「后面的语句」）；
+          · `except` 分支同理。⇒ 一律不扫 ⇒ 只会漏报。
+       ② **只认语句块顶层的裸终止语句**：`if x: return 1` 里的 `return`
+          嵌在 `If.body` 里，不是本块的顶层 ⇒ 后面的代码在 `x` 为假时
+          可达 ⇒ 不报。（而 `If.body` 自己只有一条语句，也没有后继。）
+       ③ 嵌套块只留**最外层**：`return` 之后一个 `if` 内部的终止语句
+          产生的区间已被外层覆盖 ⇒ 去重丢弃。⛔ 不这么做，同一段会被
+          报两次，而 **条数是减负读数** ⇒ 重复计数会让读数失真
+          （与「计数与 evidence 必须分开存」同族）。
+       ④ 扫不到 ⇒ 空列表，不抛错。
+
+    ⛔ 为什么这一类是「能让系统提议改自己源码」的关键：
+       前两类的判据是「看起来没人用」，谁也不敢据此自动改；
+       这一类的判据是「执行流压根到不了」⇒ 它可以过闸。
+    """
+    spans: List[Dict[str, Any]] = []
+    for f in _iter_py(SOURCE_DIRS):
+        txt = f.read_text(encoding="utf-8", errors="replace")
+        try:
+            tree = ast.parse(txt)
+        except SyntaxError:
+            continue
+        rel = str(f.relative_to(ROOT))
+        for node in ast.walk(tree):
+            body = getattr(node, "body", None)
+            if not isinstance(body, list):
+                continue
+            for i, st in enumerate(body):
+                if not isinstance(st, _TERMINATORS):
+                    continue
+                tail = body[i + 1:]
+                if not tail:
+                    break                    #: 一个块只取第一处，见 ③
+                first, last = tail[0], tail[-1]
+                spans.append({
+                    "file": rel,
+                    "kind": type(st).__name__.lower(),
+                    "terminator_line": int(getattr(st, "lineno", 0) or 0),
+                    "start_line": int(getattr(first, "lineno", 0) or 0),
+                    "end_line": int(getattr(last, "end_lineno", None)
+                                    or getattr(last, "lineno", 0) or 0),
+                    "n_stmts": len(tail),
+                })
+                break
+    #: ③ 去重：丢弃被其它区间完整包含的内层区间（同一段只算一条）。
+    spans.sort(key=lambda d: (d["start_line"], -d["end_line"]))
+    kept: List[Dict[str, Any]] = []
+    for s in spans:
+        if any(s["file"] == k["file"] and s["start_line"] >= k["start_line"]
+               and s["end_line"] <= k["end_line"] for k in kept):
+            continue
+        kept.append(s)
+    kept.sort(key=lambda d: (d["file"], d["start_line"]))
+    return {"unreachable": kept, "n_unreachable": len(kept),
+            "n_lines": sum(max(0, d["end_line"] - d["start_line"] + 1)
+                           for d in kept),
+            "note": ("控制流级判定：终止语句之后的**同级**语句永不可达 ⇒ "
+                     "删掉行为等价（**证明**，不是测试通过）。保守面：只扫 "
+                     "`body`、只认顶层裸终止语句 ⇒ 同样是**下界**。")}
 
 
 #: 机制类事件：它们是"系统在给自己造机器"的痕迹。

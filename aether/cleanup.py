@@ -55,10 +55,12 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from . import judge as _judge
 from . import selfref as _sr
+from . import srcmut as _srcmut
 from .agent import is_known_strategy
 from .genome import (Gene, Harness, gene_remove_skill, gene_route_remove,
                      parse_route)
 from .ledger import content_hash
+from .paths import ROOT as _ROOT
 
 __all__ = ["PENDING", "PROPOSED", "REJECTED", "APPLIED", "CleanupProposal",
            "load", "save", "build", "validate", "apply_patch", "record",
@@ -97,6 +99,13 @@ class CleanupProposal:
     load_after_expected: Dict[str, int] = field(default_factory=dict)
     #: 给人执行的补丁（**本模块不执行**）
     patch: str = ""
+    #: ⛔⛔ **机器可应用**的结构化编辑（与 `patch` 的人读文本**并存**）。
+    #:    `patch` 是**说明**（"删第 714–749 行"），`edits` 才是**可执行**的
+    #:    —— 带行区间与被删原文的**指纹**（见 `srcmut.Edit`）。
+    #:    ⛔ 没有它，非回归闸拿不到"删之后"的源码 ⇒ 那道闸只能空转
+    #:       （这正是 2026-10-16 实测抓到的形态：四道闸里唯一会拦的
+    #:       那一道从来没被喂过裁决，因为没人能把它应用起来）。
+    edits: List[Dict[str, Any]] = field(default_factory=list)
     evidence: Dict[str, Any] = field(default_factory=dict)
 
     def identity(self) -> Dict[str, Any]:
@@ -111,11 +120,32 @@ class CleanupProposal:
                 "gate_reasons": self.gate_reasons,
                 "load_before": self.load_before,
                 "load_after_expected": self.load_after_expected,
-                "patch": self.patch, "evidence": self.evidence}
+                "patch": self.patch, "edits": list(self.edits),
+                "evidence": self.evidence}
 
 
 def _judge_modules_short() -> Tuple[str, ...]:
     return tuple(m.split(".")[-1] for m in _judge.JUDGE_MODULES)
+
+
+def _protected_modules(extra: Optional[Sequence[str]] = None) -> Tuple[str, ...]:
+    """源码清理的**排除面**（唯一事实源）。
+
+    ⛔⛔ `build()` 与 `validate()` **必须**用同一个集合。两处各写一份 ⇒
+        扫的时候排除得**多**、判的时候排除得**少** ⇒ 手工构造的提案能
+        绕过判定（2026-10-16 实测：`where="aether/judge.py:1-2"` 在
+        `validate` 里**不触发**第 ① 条 —— 因为 `judge` 不在
+        `JUDGE_MODULES` 里，而在 `srcmut.SOURCE_PROTECTED` 里）。
+        ⇒ 与「多入口系统的参数必须单一事实源」同形态，落点换了而已。
+
+    三个来源取并集：
+      ① `_judge.JUDGE_MODULES` —— 判据集（verifier/environment/…）；
+      ② `_srcmut.SOURCE_PROTECTED` —— 闸自己、judge、selfref（尺子）；
+      ③ `extra` —— 调用方显式追加（测试注入用）。
+    """
+    return tuple(sorted(set(_judge_modules_short())
+                        | set(_srcmut.SOURCE_PROTECTED)
+                        | {str(x) for x in (extra or ())}))
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -214,15 +244,25 @@ def genome_load(h: Harness) -> int:
 
 
 def source_load() -> Dict[str, int]:
-    """源码侧的自指负载（12 个零消费方接口 / 10 个只写不读属性那两个读数）。
+    """源码侧的自指负载：**三类**死形态的读数。
 
-    ⛔ **很贵**（全仓 AST 扫描）⇒ 只许每**次运行**扫**一次**，
+        · `dead_api`     零消费方的公开接口（下界 12）—— **启发式**
+        · `write_only`   只写不读的属性（下界 10）      —— **启发式**
+        · `unreachable`  控制流上永不可达的语句块        —— **可证明**
+
+    ⛔ ⛔ **很贵**（三次全仓 AST 扫描）⇒ 只许每**次运行**扫**一次**，
        不许每轮扫。落点：`evolution.run()` 末尾记一个 `cleanup.scan` 事件。
        每轮扫它 ⇒ 进化循环会在编码工作上花掉比评估还多的时间，
        那是把"努力分配"砍向了另一端。
+
+    ⛔ 三个键的**性质不同**，别把它们加到一起当成"债有多少"：
+       前两个是"看起来没人用"（只能支撑提案），第三个是"执行流到不了"
+       （能支撑判定）。混成一个数 ⇒ 判据失去它唯一可证明的那一半。
     """
     return {"dead_api": int(_sr.scan_dead_api().get("n_dead") or 0),
-            "write_only": int(_sr.scan_write_only().get("n_write_only") or 0)}
+            "write_only": int(_sr.scan_write_only().get("n_write_only") or 0),
+            "unreachable": int(
+                _sr.scan_unreachable().get("n_unreachable") or 0)}
 
 
 def build(*, limit: int = 20) -> List[CleanupProposal]:
@@ -233,9 +273,13 @@ def build(*, limit: int = 20) -> List[CleanupProposal]:
     """
     dead = _sr.scan_dead_api()
     wo = _sr.scan_write_only()
+    un = _sr.scan_unreachable()
     load_before = {"dead_api": int(dead["n_dead"]),
-                   "write_only": int(wo["n_write_only"])}
-    judge_files = set(_judge_modules_short())
+                   "write_only": int(wo["n_write_only"]),
+                   "unreachable": int(un["n_unreachable"])}
+    #: ⛔ 排除面与 `validate()` **同源**（见 `_protected_modules`）。
+    #:    这里是**扫都不扫**，不是"扫出来再拦掉"。
+    protected = set(_protected_modules())
     out: List[CleanupProposal] = []
     #: ⛔⛔ **只清理产品代码**（`aether/` 之内）。测试与脚本里的"零消费方
     #:    符号"不是死代码 —— 它们由**测试夹具**在运行时读写（实测踩过：
@@ -250,7 +294,7 @@ def build(*, limit: int = 20) -> List[CleanupProposal]:
         if not _is_prod(d["file"]):
             continue
         fname = Path(str(d["file"])).stem
-        if fname in judge_files:
+        if fname in protected:
             continue
         p = CleanupProposal(
             kind="dead_api", target=str(d["name"]), where=f"{d['file']}:{d['line']}",
@@ -258,13 +302,18 @@ def build(*, limit: int = 20) -> List[CleanupProposal]:
                     f"**或字符串**出现过）"),
             load_before=dict(load_before),
             load_after_expected={"dead_api": load_before["dead_api"] - 1,
-                                 "write_only": load_before["write_only"]},
+                                 "write_only": load_before["write_only"],
+                                 "unreachable": load_before["unreachable"]},
             patch=(f"# 删除 {d['file']} 第 {d['line']} 行起的 "
                    f"`def {d['name']}(...)`\n"
                    f"# ⛔ 由**人**执行：本模块只提案，不改源码"),
             evidence={"scan_entry": d,
                       "scan_note": dead["note"],
-                      "judge_modules_excluded": list(judge_files)})
+                      #: ⛔ 这一类**不给** `edits` —— 它的判据是启发式的
+                      #:    （名字没出现过 ⇒ 可能有反射/框架回调），
+                      #:    撑不起"删掉行为等价"这个证明 ⇒ 只能提案。
+                      "editable": False,
+                      "protected_excluded": sorted(protected)})
         p.prop_id = content_hash(p.identity())[:_ID_PREFIX]
         out.append(p)
     for w in wo["write_only"][:limit]:
@@ -276,10 +325,52 @@ def build(*, limit: int = 20) -> List[CleanupProposal]:
             reason=(f"只写不读的属性（赋值 {w['n_assign']} 次，全仓无读取）"),
             load_before=dict(load_before),
             load_after_expected={"dead_api": load_before["dead_api"],
-                                 "write_only": load_before["write_only"] - 1},
+                                 "write_only": load_before["write_only"] - 1,
+                                 "unreachable": load_before["unreachable"]},
             patch=(f"# 删除 {w['first_site']} 的赋值（`self.{w['attr']} = …`）\n"
                    f"# ⛔ 由**人**执行"),
-            evidence={"scan_entry": w, "scan_note": wo["note"]})
+            evidence={"scan_entry": w, "scan_note": wo["note"],
+                      "editable": False,
+                      "protected_excluded": sorted(protected)})
+        p.prop_id = content_hash(p.identity())[:_ID_PREFIX]
+        out.append(p)
+
+    # ── ③ 不可达块：**唯一可证明**的一类 ⇒ 带可执行编辑 ──────────
+    for u in un["unreachable"][:limit]:
+        if not _is_prod(u["file"]):
+            continue
+        fname = Path(str(u["file"])).stem
+        if fname in protected:
+            continue
+        #: ⛔ 拿不到指纹 ⇒ **没有编辑**（读不动/区间非法）⇒ 不提。
+        #:    提出一条执行不了的提案，比不提更糟：它占着"待办"的位置，
+        #:    而人看不出来它根本做不了。
+        e = _srcmut.from_lines(_ROOT, str(u["file"]),
+                               int(u["start_line"]), int(u["end_line"]))
+        if e is None:
+            continue
+        p = CleanupProposal(
+            kind="unreachable",
+            target=f"{fname}:{u['start_line']}-{u['end_line']}",
+            where=f"{u['file']}:{u['start_line']}-{u['end_line']}",
+            reason=(f"控制流上永不可达：`{u['kind']}` 在第 {u['terminator_line']}"
+                    f" 行终止，其后 {e.n_lines} 行 / {u['n_stmts']} 条语句"
+                    f" 永远执行不到 ⇒ 删掉**行为等价**"),
+            load_before=dict(load_before),
+            load_after_expected={"dead_api": load_before["dead_api"],
+                                 "write_only": load_before["write_only"],
+                                 "unreachable": load_before["unreachable"] - 1},
+            patch=(f"# 删除 {u['file']} 第 {u['start_line']}–{u['end_line']} 行"
+                   f"（共 {e.n_lines} 行，位于第 {u['terminator_line']} 行的 "
+                   f"`{u['kind']}` 之后）\n"
+                   f"# ⛔ 由**人**执行（本模块只提案，不改源码）"),
+            edits=[e.to_dict()],
+            evidence={"scan_entry": u, "scan_note": un["note"],
+                      "editable": True, "edit_id": e.edit_id,
+                      "sha256": e.sha256, "n_lines": e.n_lines,
+                      "proof": ("控制流级证明，不是测试通过：终止语句之后的"
+                                "同级语句不可达 ⇒ 删掉不改变任何执行结果"),
+                      "protected_excluded": sorted(protected)})
         p.prop_id = content_hash(p.identity())[:_ID_PREFIX]
         out.append(p)
     return out
@@ -288,15 +379,29 @@ def build(*, limit: int = 20) -> List[CleanupProposal]:
 def validate(p: CleanupProposal, *,
              non_regression_ok: Optional[bool] = None,
              judge_modules: Optional[Sequence[str]] = None) -> CleanupProposal:
-    """过闸。四项**逐项记因**（只报第一个会让人修完一个又冒一个）。
+    """过闸。**逐项记因**（只报第一个会让人修完一个又冒一个）。
 
     ① 不在判据集里（**构造上**排除"清理碰判据"这条通道）；
     ② 减负可测：必须给出"清理后自指负载下降"的具体读数；
-    ③ 非回归必须通过（由调用方传入裁决：冻结套件不许因此变红）；
-    ④ 必须给出补丁（拿不出怎么改 ⇒ 不可执行 ⇒ 不可验收）。
+    ③ 非回归必须有**通过裁决**（冻结契约删前删后结果一致）；
+    ④ 必须给出补丁（拿不出怎么改 ⇒ 不可执行 ⇒ 不可验收）；
+    ⑤ 可证明的那类（不可达块）必须带**可执行的结构化编辑**。
+
+    ⛔⛔ **第 ③ 条是 2026-10-16 实测修掉的**：原写法是
+        `if non_regression_ok is False:` ⇒ 调用方不传（None）就**跳过**，
+        而两个生产调用点（`cli.py` 的 validate / approve）从来不传
+        ⇒ 四道闸里唯一会拦的那一道**从未被喂过裁决**。
+        看着四道闸，实际零道在拦 —— 标准假仪表。
+        ⇒ 改成 **fail-closed**：拿不到**明确的通过裁决**就拦。
+        ⛔ 代价是"没接 runner 的调用点会全部转红"，而那是**正确的**：
+          它把"这条提案从没被验证过"这件事显式暴露出来，
+          而不是让它在 `gate_passed=True` 下面静默躺着。
     """
     p.gate_reasons = []
-    mods = tuple(judge_modules) if judge_modules else _judge_modules_short()
+    #: ⛔ 排除面与 `build()` **同源**（`_protected_modules`）。
+    #:    ⛔ `judge_modules` 参数是**追加**进来的，不是替换 —— 传了它却把
+    #:       默认排除面顶掉，等于让调用方有能力松开判据层那道锁。
+    mods = _protected_modules(judge_modules)
     # ① 不许碰判据集
     if any(m and m in p.where for m in mods):
         p.gate_reasons.append(
@@ -312,12 +417,21 @@ def validate(p: CleanupProposal, *,
             p.gate_reasons.append(
                 f"减负读数为 {delta} ⇒ 没有任何一项下降 ⇒ 这次清理不可测")
         p.evidence["load_delta"] = delta
-    # ③ 非回归
-    if non_regression_ok is False:
-        p.gate_reasons.append("非回归闸未通过 ⇒ 清理不得让冻结套件变红")
+    # ③ 非回归：⛔⛔ **fail-closed**（见 docstring：原来这道闸恒不触发）
+    if non_regression_ok is not True:
+        p.gate_reasons.append(
+            "非回归闸**没有通过裁决**"
+            + ("" if non_regression_ok is None
+               else f"（裁决={non_regression_ok}）")
+            + " ⇒ 拿不到「删前删后冻结契约一致」的证据就不放行"
+              "（想放行请注入 runner 跑 `srcmut.probe`）")
     # ④ 可执行
     if not p.patch.strip():
         p.gate_reasons.append("缺补丁 ⇒ 拿不出'怎么改'的提案不可执行")
+    # ⑤ 可证明的那类必须带**可执行**的编辑（对拍只能靠它）
+    if p.kind == "unreachable" and not p.edits:
+        p.gate_reasons.append(
+            "不可达块缺结构化编辑 ⇒ 无法在副本里应用 ⇒ 拿不到对拍裁决")
     p.gate_passed = not p.gate_reasons
     p.state = PROPOSED if p.gate_passed else REJECTED
     return p
@@ -367,7 +481,9 @@ def load(path: Any) -> Dict[str, CleanupProposal]:
             gate_reasons=list(d.get("gate_reasons") or []),
             load_before=dict(d.get("load_before") or {}),
             load_after_expected=dict(d.get("load_after_expected") or {}),
-            patch=str(d.get("patch") or ""), evidence=dict(d.get("evidence") or {}))
+            patch=str(d.get("patch") or ""),
+            edits=list(d.get("edits") or []),
+            evidence=dict(d.get("evidence") or {}))
         if p.prop_id:
             out[p.prop_id] = p
     return out
