@@ -44,6 +44,14 @@ TESTS = ROOT / "tests"
 PY = sys.executable
 
 FAILS = []
+#: ⛔「跳过的组」必须**单独记账**，不能混进 PASS：
+#:    Ghidra 是重资源工具，负载高时会退化成空壳信封（`ok=true` 但读数为空）。
+#:    那时 J2–J12 无从断言 ⇒ 契约**跳过**它们。若把跳过记成 PASS，
+#:    则工具哪天彻底跑不动了，这份契约会**恒绿且零覆盖** —— 与
+#:    「空冻结套件不得恒绿」是同一个病。⇒ 单独列出来，并在末尾显式提示。
+#:    ⛔ 但也不判红：红会把"机器忙"报成"契约坏了"（与 srcmut 的三态
+#:    同纪律：跑不起来 ≠ 测不过）。⇒ 记账 + 提示，不判失败。
+SKIPPED = []
 
 
 def ck(name, cond, detail=""):
@@ -576,6 +584,7 @@ def main() -> int:
                        "（跳过断言，不算失败，也不算通过）", True,
                        f"normalized_result 键={list(nr)[:4]} subject 键={list(subj)[:4]}；"
                        f"degraded={out_j.get('degraded')} ⇒ 单独跑可复现")
+                    SKIPPED.append("J2–J12（Ghidra 未给出结构化读数）")
                     nr = subj = None
                 up = None
                 if nr is not None:
@@ -585,44 +594,44 @@ def main() -> int:
                 if nr is not None:
                     ck("J2 ⛔ 上游 provider 真的是 ghidra（不是退回别的路）",
                    up.get("id") == "ghidra", str(up)[:120])
-                ck("J3 subject 形态 = mach-o / arm64",
-                   subj.get("format") == "mach-o"
-                   and subj.get("architecture") == "arm64",
-                   str(subj)[:160])
-                sha = hashlib.sha256(cbin.read_bytes()).hexdigest()
-                got = (subj.get("digest") or {}).get("sha256")
-                ck("J4 ⛔ subject.digest.sha256 == 文件真值", got == sha,
-                   f"自报={got} 独立={sha}")
-                ck("J5 ⛔ image_base == 0x100000000（arm64 macOS 约定）",
-                   nr.get("image_base") == "0x100000000", str(nr.get("image_base")))
-                segs = nr.get("segments") or []
-                ck("J6 ⛔ 内部自洽：segment_count == 实际段条数",
-                   nr.get("segment_count") == len(segs) and len(segs) > 0,
-                   f"count={nr.get('segment_count')} len={len(segs)}")
-                #: ⛔ J7 用**外部工具**独立数一遍，不拿上游读数当真值。
-                #:    真值口径：(LC_SEGMENT_64 段命令数) + (sectname 节数)。
-                #:    ⛔ 别写成「segname 行数 + sectname 行数」—— `otool -l`
-                #:       的**每个 section 也会自带一行 segname**（标明所属段），
-                #:       那么数会重复计一次段名（实测 9+5=14，而真实是 4+5=9）。
-                if want_blocks is not None:
-                    ck("J7 ⛔ 段结构 == otool 的段命令+节总数（外部对拍）",
-                       len(segs) == want_blocks,
-                       f"ghidra={len(segs)} otool={want_blocks}")
-                bad = [s.get("name") for s in segs
-                       if int(str(s.get("end")), 16) - int(str(s.get("start")), 16)
-                       != int(s.get("length"))]
-                ck("J8 每段 end-start == length（结构自洽）", not bad, str(bad)[:120])
-                ck("J9 ⛔ procedure_count >= 4（自建了 4 个函数，归零即空壳）",
-                   (nr.get("procedure_count") or 0) >= 4,
-                   f"got={nr.get('procedure_count')}")
-                ck("J10 ⛔ string_count >= 2（埋了 2 条标记串）",
-                   (nr.get("string_count") or 0) >= 2,
-                   f"got={nr.get('string_count')}")
-                ck("J11 operation == binary_overview（走的是原生概览，不是兜底）",
-                   full.get("operation") == "binary_overview",
-                   str(full.get("operation")))
-                ck("J12 ⛔ 未降级", out_j.get("degraded") is None,
-                   str(out_j.get("degraded"))[:160])
+                    ck("J3 subject 形态 = mach-o / arm64",
+                       subj.get("format") == "mach-o"
+                       and subj.get("architecture") == "arm64",
+                       str(subj)[:160])
+                    sha = hashlib.sha256(cbin.read_bytes()).hexdigest()
+                    got = (subj.get("digest") or {}).get("sha256")
+                    ck("J4 ⛔ subject.digest.sha256 == 文件真值", got == sha,
+                       f"自报={got} 独立={sha}")
+                    ck("J5 ⛔ image_base == 0x100000000（arm64 macOS 约定）",
+                       nr.get("image_base") == "0x100000000", str(nr.get("image_base")))
+                    segs = nr.get("segments") or []
+                    ck("J6 ⛔ 内部自洽：segment_count == 实际段条数",
+                       nr.get("segment_count") == len(segs) and len(segs) > 0,
+                       f"count={nr.get('segment_count')} len={len(segs)}")
+                    #: ⛔ J7 用**外部工具**独立数一遍，不拿上游读数当真值。
+                    #:    真值口径：(LC_SEGMENT_64 段命令数) + (sectname 节数)。
+                    #:    ⛔ 别写成「segname 行数 + sectname 行数」—— `otool -l`
+                    #:       的**每个 section 也会自带一行 segname**（标明所属段），
+                    #:       那么数会重复计一次段名（实测 9+5=14，而真实是 4+5=9）。
+                    if want_blocks is not None:
+                        ck("J7 ⛔ 段结构 == otool 的段命令+节总数（外部对拍）",
+                           len(segs) == want_blocks,
+                           f"ghidra={len(segs)} otool={want_blocks}")
+                    bad = [s.get("name") for s in segs
+                           if int(str(s.get("end")), 16) - int(str(s.get("start")), 16)
+                           != int(s.get("length"))]
+                    ck("J8 每段 end-start == length（结构自洽）", not bad, str(bad)[:120])
+                    ck("J9 ⛔ procedure_count >= 4（自建了 4 个函数，归零即空壳）",
+                       (nr.get("procedure_count") or 0) >= 4,
+                       f"got={nr.get('procedure_count')}")
+                    ck("J10 ⛔ string_count >= 2（埋了 2 条标记串）",
+                       (nr.get("string_count") or 0) >= 2,
+                       f"got={nr.get('string_count')}")
+                    ck("J11 operation == binary_overview（走的是原生概览，不是兜底）",
+                       full.get("operation") == "binary_overview",
+                       str(full.get("operation")))
+                    ck("J12 ⛔ 未降级", out_j.get("degraded") is None,
+                       str(out_j.get("degraded"))[:160])
             else:
                 dg = (out_j or {}).get("degraded") or {}
                 ck("J13 引擎缺失时失败**可归因**（不许空泛 ok=false）",
@@ -638,6 +647,14 @@ def main() -> int:
         for f in FAILS:
             print(f"   - {f}")
         return 1
+    if SKIPPED:
+        #: ⛔ 不判红（"机器忙" ≠ "契约坏了"），但**不许**让它看起来像覆盖过了。
+        print(f"⚠️  断言 {len(SKIPPED)} 组被跳过，**未覆盖 ≠ 通过**：")
+        for s in SKIPPED:
+            print(f"   - {s}")
+        print("   ⇒ 单独跑这份契约可复现；若长期如此，说明外部工具在这台机器上")
+        print("     跑不动了 —— 那份覆盖是真的没了，不是还在。")
+        return 0
     print(f"✅ 全部通过（{time.time() - t0:.1f}s）")
     return 0
 
