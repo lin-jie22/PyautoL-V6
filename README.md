@@ -1653,6 +1653,59 @@ SyntaxWarning，全仓库几秒钟 —— 这种警告几乎总指向"作者想�
 
 ---
 
+## 5-quater-6. 第 97 条：契约守护的路径 ≠ 生产走的路径
+
+本轮"跑几轮看有没有进化"，结果跑出的缺陷**不在进化循环里，而在验证它的装置上**。
+
+现象：进化运行都在第 3 轮撞上 `baseline_reward=1.0` 并空转停止。要判断这个
+"到顶"可不可信，得先看泛化闸有没有判别力 —— 一查，它没有。
+
+```python
+# aether/repair.py · difficulty_report
+spec = getattr(t, "spec", None)
+if isinstance(spec, dict):                    # ⛔ 生产传的是 mappingproxy
+    src = spec.get("broken_source")
+if src is None:
+    src = getattr(t, "broken_source", None)   # ⛔ FrozenTask 没这个属性
+if not src:
+    continue                                  # ⇒ 每个任务都被跳过
+```
+
+`FrozenTask.__post_init__` 为兑现"冻结基线"的承诺，把 `.spec` 包成了
+`MappingProxyType` —— 它**不是** dict 子类。于是生产路径上 labels **恒为空**，
+`spread` 恒为 `False`，泛化闸拿不到任何同层对照。
+
+**为什么既有契约没抓到**（这才是最值得记的）：
+
+`contract_difficulty_test.py` 的 A/B 组喂的是 `synthesize_tasks()` 直接返回的
+**TaskInstance**：没有 `.spec`、有 `.broken_source` ⇒ 走兜底分支 ⇒ 正常工作
+⇒ **契约全绿**。而生产 `cmd_evolve` 喂的是 **FrozenTask**，是**另一条路**。
+
+⇒ 契约写的判据是对的，它只是**压根没扫到生产那个入口**。
+   与第 92 条「契约的判据落点必须与被测对象同源」同形，但侧面不同：
+   · 第 92 条：扫错了**文件/目标**（模块从 scripts 搬进包，扫描目标没跟着搬）；
+   · 第 97 条：喂错了**输入类型**（契约用 TaskInstance，生产用 FrozenTask）。
+   ⇒ **同源 = 同目标 + 同入参形态**，两头都要对。
+
+修法：`isinstance(spec, Mapping)`（`collections.abc`）。修复前后对拍（同一批任务）：
+
+| 路径 | 输入类型 | 修复前 | 修复后 |
+|---|---|---|---|
+| 契约 | `TaskInstance` | easy 3 / hard 2 ✅ | easy 3 / hard 2 ✅ |
+| 生产 | `FrozenTask` | **labels = {}** ⛔ | easy 3 / hard 2 ✅ |
+
+⇒ 修复后**两条路径一致**，泛化闸第一次真正拿到同层对照。
+   代价真实：难度分层从"空转"变成"真跑"，每次运行多花约 2s。
+
+⛔ 补契约 I 组 4 条（含反证 I3：复原旧写法 ⇒ labels 恒为空 ⇒ I1 必须转红，
+   否则 I1 在新旧实现下都绿，是一条没有牙的断言）。
+
+**顺带确认**：`contract_streaming_test.py` 在全量回归里 timeout=1（>600s），
+单独跑 **66/66 全绿 / 2m15s**；已 grep 确认其完全不涉及 repair / difficulty /
+evolve ⇒ 归因并发负载，非本次改动（与第 96 条① 同形）。
+
+---
+
 ## 6. 与 V5 的关系
 
 V6 不是 V5 的替代品，是它的**结构化重写**：

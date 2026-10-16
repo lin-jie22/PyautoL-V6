@@ -395,6 +395,67 @@ ck("H9 同一套 held-out 下，拦截/放行裁决的 discriminative **一致**
    and pr_partial.discriminative is True,
    f"{pr_flat_overfit.discriminative}/{pr_partial.discriminative}")
 
+# ══ I 组：难度分层必须覆盖**生产真正传入的类型** ═══════════════
+# ⛔ 2026-10-16 实测抓到的覆盖缺口（r41）：
+#    契约 A/B 组喂的是 `synthesize_tasks()` 返回的 **TaskInstance**
+#    （没有 `.spec`、有 `.broken_source`）⇒ 走 `getattr(t,'broken_source')`
+#    兜底 ⇒ 正常出标签 ⇒ **契约全绿**。
+#
+#    而生产 `cmd_evolve` 喂的是 **FrozenTask**，其 `.spec` 被
+#    `__post_init__` 包成 **MappingProxyType**（冻结基线承诺），
+#    **不是** dict 子类；且 FrozenTask **没有** `.broken_source`
+#    ⇒ 兜底也取不到 ⇒ 每个任务都 `continue` ⇒ labels **恒为空**
+#    ⇒ 泛化闸拿不到同层对照 ⇒ "generalize" 退化成无条件放行。
+#
+#    ⇒ 契约守护的路径与生产走的路径**不是同一条**（与 r40 那条同形）：
+#      不是断言写错了，是它压根没扫到生产那个入口。
+print()
+print("== I 组：难度分层要能处理生产真正传入的 FrozenTask ==")
+
+#: 生产实际传入的类型：FrozenTask（spec 是冻结后的 mappingproxy）
+_frozen_tasks = [FrozenTask(task_id=t.task_id,
+                            spec={"env_id": "textscore",
+                                  "broken_source": t.broken_source,
+                                  "topic": "textscore",
+                                  "task_class": "probe"})
+                 for t in rep.tasks]
+_d_frozen = difficulty_report(e, _frozen_tasks)
+ck("I1 ⛔ FrozenTask 也要能取出源码 ⇒ labels 非空"
+   "（生产走的正是这条路；旧写法 isinstance(spec, dict) ⇒ 恒空）",
+   len(_d_frozen["labels"]) == len(rep.tasks), str(_d_frozen))
+ck("I2 两种输入类型标签一致 ⇒ 判据不因输入类型而漂移",
+   _d_frozen["labels"] == labels,
+   f"{_d_frozen['labels']} vs {labels}")
+
+
+def _old_style_difficulty_report(env, tasks, timeout=10.0):
+    """事故版：逐字复原 r41 修复**之前**的写法。
+
+    ⛔ 反证用途：证明 I1/I2 有判别力 —— 换成旧写法它们必须转红，
+       否则两条断言在新旧实现下都绿，等于没有牙。
+    """
+    out = {}
+    for t in tasks:
+        src = None
+        spec = getattr(t, "spec", None)
+        if isinstance(spec, dict):        #: ⛔ 旧写法：mappingproxy 不命中
+            src = spec.get("broken_source")
+        if src is None:
+            src = getattr(t, "broken_source", None)
+        if not src:
+            continue
+        out[t.task_id] = classify_difficulty(env, src, timeout=timeout)
+    return out
+
+
+ck("I3 ⛔ 反证：换回旧写法 ⇒ FrozenTask 路径 labels **恒为空**"
+   "（I1 必须翻转，否则它是恒真断言）",
+   _old_style_difficulty_report(e, _frozen_tasks) == {})
+#: 同一批任务走 TaskInstance 路径时，旧写法**仍然正常** ⇒ 缺口只落在生产路径
+ck("I4 旧写法下 TaskInstance 路径仍正常 ⇒ 既有契约全绿而生产坏着"
+   "（这正是它一直没被发现的原因）",
+   len(_old_style_difficulty_report(e, rep.tasks)) == len(rep.tasks))
+
 print()
 print(f"{'ALL PASS' if not FAILS else str(len(FAILS)) + ' FAILED'}"
       f"  ({len(FAILS)} failures)")
