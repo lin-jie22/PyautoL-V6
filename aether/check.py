@@ -42,8 +42,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 __all__ = ["PASS", "FAIL", "SKIP", "TIMEOUT", "ERROR",
-           "Run", "discover", "supports_e2e", "run_checks", "summarize",
-           "find_node", "cross_language"]
+           "Run", "discover", "supports_e2e", "is_exclusive", "declared_modes",
+           "run_checks", "summarize", "find_node", "cross_language"]
 
 PASS = "pass"
 FAIL = "fail"
@@ -60,6 +60,14 @@ DEFAULT_TIMEOUT_S = 600.0
 #: 即可；check 静态读源码，不 import（import 契约会执行它的顶层断言）。
 _MODES_RE = re.compile(
     r"^\s*SUPPORTED_MODES\s*=\s*\(([^)]*)\)", re.MULTILINE)
+
+#: ⛔ **独占契约的静态声明**：`EXCLUSIVE = True` 的契约**必须串行跑**。
+#:    与 `SUPPORTED_MODES` 同为**静态读取**（不 import，理由见 `declared_modes`）。
+#:    ⛔⛔ 未声明 ⇒ `False`（并发跑），这与"声明了 False"同义 —— 但**默认并发**
+#:        是安全的那一侧：把一份普通契约误判成独占只会慢，把一份性能契约
+#:        误判成并发则会**测出别人的负载**（读数不可信，且稳定超时）。
+_EXCLUSIVE_RE = re.compile(
+    r"^\s*EXCLUSIVE\s*=\s*(True|False)\s*$", re.MULTILINE)
 
 
 @dataclass
@@ -173,6 +181,31 @@ def supports_e2e(script: Path) -> bool:
     return bool(modes and "e2e" in modes)
 
 
+def is_exclusive(script: Path) -> bool:
+    """这份契约是否声明了「必须独占」（**测墙钟 / 测内存**的那类）。
+
+    ⛔⛔ 为什么需要它（2026-10-17 实测）：
+        `contract_ops_test` 与 `contract_streaming_test` 是**测量型**契约
+        （前者比接口耗时，后者用 `tracemalloc` 量内存峰值）。把它们和另外
+        47 份一起丢进 `ThreadPoolExecutor(jobs=4)` ⇒ 4 路争抢 CPU ⇒
+        墙钟时间**按并发度放大**：单独跑 113s / 135s，套件里两次独立运行
+        **均 >600s 超时**（`pass=49 fail=0 timeout=2`，rc=1）。
+
+    ⛔ 超时只是最显眼的**症状**。真正的病是：**并发下的性能读数根本不可信**
+        —— 即使没超时，量到的也是别的契约的负载，判据等于失效。
+        ⇒ 所以不能靠"提 timeout"糊过去，那会把失效藏进十分钟里。
+
+    ⛔ 未声明 ⇒ `False`（并发跑）。这是**安全侧**：普通契约被误判成独占
+        只是慢一点；性能契约被误判成并发则是读数失真。
+    """
+    try:
+        txt = script.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    m = _EXCLUSIVE_RE.search(txt)
+    return bool(m and m.group(1) == "True")
+
+
 def _one(script: Path, mode: str, root: Path,
          timeout_s: float) -> Run:
     """跑一份契约的一次模式。**任何异常都落到 status 上**，不外传。"""
@@ -234,13 +267,33 @@ def run_checks(root: str | Path,
                 plan.append((s, "e2e"))
             else:
                 not_e2e.append(s.name)
-    if jobs > 1 and len(plan) > 1:
+    #: ⛔ **分段调度**：独占契约（测量型）**串行**，其余按 `jobs` 并发。
+    #:    混在一段里跑 ⇒ 性能契约在 CPU 争抢下失真并稳定超时
+    #:    （根因与实测见 `is_exclusive` 的 docstring）。
+    plan_excl = [(s, m) for (s, m) in plan if is_exclusive(s)]
+    plan_par = [(s, m) for (s, m) in plan if not is_exclusive(s)]
+    done: Dict[tuple, Run] = {}
+
+    #: ① 独占段：**一次只跑一份**，不与任何契约（含彼此）并发。
+    for s, m in plan_excl:
+        r = _one(s, m, root_p, timeout_s)
+        done[(r.script, r.mode)] = r
+
+    #: ② 并发段
+    if jobs > 1 and len(plan_par) > 1:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=max(1, int(jobs))) as ex:
-            runs = list(ex.map(lambda t: _one(t[0], t[1], root_p, timeout_s),
-                               plan))
+            for r in ex.map(lambda t: _one(t[0], t[1], root_p, timeout_s),
+                            plan_par):
+                done[(r.script, r.mode)] = r
     else:
-        runs = [_one(s, m, root_p, timeout_s) for s, m in plan]
+        for s, m in plan_par:
+            r = _one(s, m, root_p, timeout_s)
+            done[(r.script, r.mode)] = r
+
+    #: ⛔ **按 plan 原序归位**：并行下结果是乱序返回的，直接 append 会把
+    #:    A 的失败记到 B 头上 —— 比慢更糟，那是在撒谎。
+    runs = [done[(s.name, m)] for s, m in plan]
     if cross_lang and not only:
         #: ⛔ 只在**全量**时跑：跨语言对账是"整体验收"的一环，
         #:    调一份具体契约时（`--only`）跑它只是浪费。
@@ -256,6 +309,9 @@ def run_checks(root: str | Path,
         "runs": [r.to_dict() for r in runs],
         "undeclared_modes": undeclared,
         "e2e_not_supported": not_e2e,
+        #: ⛔ 被**串行化**的契约必须可见：否则"全绿"里藏着"这些其实没跟
+        #:    别人并发跑过" ⇒ 与全量并发验收不同形，输出却长得一样。
+        "exclusive": [s.name for s, m in plan_excl],
         "subset": bool(only),
         "only": only or "",
         #: ⛔ 成败只看 fail/timeout/error —— **skip 不算通过**，

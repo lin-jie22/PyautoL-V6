@@ -206,6 +206,34 @@ def main() -> int:
        parsed is not None and parsed["n_runs"] == 0
        and parsed["subset"] is True)
 
+    # ── F 组：测量型契约必须声明独占（并发下读数不可信）─────────────
+    print("F 组：测量型契约必须声明 EXCLUSIVE")
+    _excl = [p.name for p in real if C.is_exclusive(p)]
+    #: ⛔⛔ **把事故钉死**：这两份一旦被摘掉 EXCLUSIVE ⇒ 回到 4 路并发
+    #:    ⇒ 墙钟被放大 ⇒ 稳定超时（实测两次独立运行均 `timeout=2`，
+    #:      单独跑 60–113s，套件里 >600s）。摘声明看着像"清理无用配置"，
+    #:    实际是拆掉承重结构 ⇒ 必须有断言拦住。
+    for _m in ("contract_ops_test.py", "contract_streaming_test.py"):
+        ck(f"F1 ⛔⛔ {_m} **必须**声明 EXCLUSIVE"
+           f"（摘掉 ⇒ 并发失真 ⇒ 超时）",
+           _m in _excl, f"exclusive={_excl}")
+    ck("F2 ⛔ 普通契约**不**被误判为独占（否则全体串行 ⇒ 套件无谓变慢）",
+       "contract_ledger_test.py" not in _excl
+       and "contract_serve_test.py" not in _excl, str(_excl))
+    #: ⛔ **反证**（第 8 条纪律）：把 `is_exclusive` 换成恒 False
+    #:    ⇒ F1 的两条断言必须**转红**，否则 F1 是恒真断言。
+    _orig = C.is_exclusive
+    try:
+        C.is_exclusive = lambda _p: False
+        _red = sum(1 for _m in ("contract_ops_test.py",
+                                "contract_streaming_test.py")
+                   if not C.is_exclusive(ROOT / "tests" / _m))
+        ck("F3 反证：is_exclusive 换成恒 False ⇒ F1 两条都要转红"
+           "（证明 F1 有牙）",
+           _red == 2, f"转红 {_red}/2")
+    finally:
+        C.is_exclusive = _orig
+
     print("\n" + "=" * 60)
     if FAILS:
         print(f"❌ {len(FAILS)} 项未通过：")

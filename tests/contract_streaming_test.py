@@ -42,6 +42,13 @@ from aether.store import Store                             # noqa: E402
 #:    未声明 ≠ 只有一种模式 —— 前者是"还没接线"，报告里会被点名。
 SUPPORTED_MODES = ("default",)
 
+#: ⛔⛔ **必须独占执行**：这份契约测的是**内存峰值**与**遍历次数**
+#:    （`tracemalloc` + 构造大对象）。`tracemalloc` 本身 CPU 开销极大，
+#:    与别的契约并发 ⇒ 墙钟时间被按并发度放大 ⇒ 实测由 135s 放大到 >600s
+#:    超时，且即便不超时，量到的时序也不可信。
+#:    ⇒ `aether check` 会把它排进串行段，不与任何契约同时跑。
+EXCLUSIVE = True
+
 FAILS: List[str] = []
 N_CK = 0
 

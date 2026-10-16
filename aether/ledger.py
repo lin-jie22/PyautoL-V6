@@ -399,6 +399,66 @@ class Ledger:
             fcntl.flock(fh, fcntl.LOCK_UN)
             fh.close()
 
+    def append_many(self, items, actor: str = "system",
+                    ts: Optional[float] = None) -> List[Event]:
+        """批量追加一批事件 —— **整批只在末尾 fsync 一次**。
+
+        ⛔⛔ 为什么需要它（2026-10-17 实测，不是推测）：
+            逐条 `append()` 每写一条都 `os.fsync`（见上面 391-394 行）。
+            实测单次 **34.5 ms**，其中绝大部分是磁盘同步等待 ⇒ 写 3000 条
+            就是 **103 s**。`contract_ops_test` 的 E6 必须先把账本放大到
+            3000 条才能让 health/status 的量级差**可观测**；
+            套件 4 路并发时多进程同时 fsync ⇒ 磁盘队列争抢 ⇒
+            稳定放大到 **>600 s 超时**（两次独立运行均 `timeout=2`）。
+
+        ⛔ **语义与逐条 append 等价**：hash 链照旧逐条串联（`prev_hash`
+            不变），落盘文件与「逐条 append 再各 fsync」**逐字节相同**。
+            唯一差别是**中间态的持久性**：批量只同步一次 ⇒ 中途崩溃会丢
+            **这一整批**，而不是只丢最后一条。
+            ⇒ **生产写入路径必须继续用 `append()`**（一条都不能丢）；
+              只有「基准放大 / 回填 / 离线构造账本」这类**可重放**的场景用它。
+
+        `items`：可迭代的 `(kind, payload)` 二元组。
+        """
+        fh = self._acquire()
+        try:
+            #: ⛔ 只在**批次开始**时对齐一次（与 `append` 同口径：锁内重读尾巴）。
+            #:    ⛔⛔ **批次内绝不许再 `_hydrate`** —— 那会重读文件尾巴，
+            #:        而我们自己写的行还在 Python 缓冲区里（可能只落盘了
+            #:        一部分）⇒ `_read_tail_event()` 会读到**中间某一行**
+            #:        ⇒ `_seq` 被拉回旧值 ⇒ **hash 链错位**。
+            #:        （2026-10-17 实测：300 条批量写入时第 25 条起 seq
+            #:         少 1，整条链与逐条写入不再一致 —— 这次改动自己
+            #:         踩出来的坑，靠**逐字节对拍**抓到，不是读代码想出来的。）
+            #:    ⛔ 批次期间**锁全程持有** ⇒ 不会有别的写者插入 ⇒
+            #:        内存里推进的 `_seq` / `_last_hash` 就是权威值。
+            self._hydrate(if_changed=True)
+            out: List[Event] = []
+            with self.path.open("a", encoding="utf-8") as f:
+                for kind, payload in items:
+                    seq = self._seq + 1
+                    body = dict(payload or {})
+                    body.setdefault("sid", self.session)
+                    if seq == 1:
+                        body = provenance.stamp(body)
+                    ev = Event(seq=seq, ts=ts if ts is not None else time.time(),
+                               kind=kind, actor=actor, payload=body,
+                               prev_hash=self._last_hash, hash="")
+                    ev = Event(**{**asdict(ev),
+                                  "hash": content_hash(ev.identity())})
+                    f.write(ev.to_line())
+                    self._seq = ev.seq
+                    self._last_hash = ev.hash
+                    out.append(ev)
+                #: ⛔ 只在**整批写完**后同步一次（文件仍开着）——
+                #:    这是批量与逐条 append 的**唯一**差别。
+                f.flush()
+                os.fsync(f.fileno())
+            return out
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+            fh.close()
+
     # ── 读 ────────────────────────────────────────────────────────
     def iter_events(self, since_offset: int = 0,
                     progress: Optional[Dict[str, Any]] = None,

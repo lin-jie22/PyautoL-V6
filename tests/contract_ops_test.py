@@ -30,6 +30,12 @@ from pathlib import Path
 #:    未声明 ≠ 只有一种模式 —— 前者是"还没接线"，报告里会被点名。
 SUPPORTED_MODES = ("default",)
 
+#: ⛔⛔ **必须独占执行**：这份契约测的是**墙钟时间**（E6 比 health 与
+#:    status 的耗时）。跟别的契约并发 ⇒ CPU 时间片被瓜分 ⇒ 量到的是
+#:    **别人的负载**，判据失真；实测 4 路并发下由 113s 放大到 >600s 超时。
+#:    ⇒ `aether check` 会把它排进串行段，不与任何契约同时跑。
+EXCLUSIVE = True
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -166,9 +172,15 @@ def main():
         import time as _time
         from aether.ledger import Ledger as _Ledger
         _led = _Ledger(str(Path(good) / "data" / "ledger.jsonl"))
-        for _i in range(3000):
-            _led.append("probe.bench", {"i": _i, "pad": "x" * 80},
-                        actor="ops-contract")
+        #: ⛔⛔ **必须用批量接口**：逐条 `append()` 每条都 fsync，
+        #:    实测单次 34.5ms ⇒ 3000 条 = **103s**；套件 4 路并发下
+        #:    多进程同时 fsync ⇒ 稳定放大到 >600s 超时（两次独立运行均
+        #:    `timeout=2`）。`append_many()` 整批只同步一次，
+        #:    落盘文件与逐条 append **逐字节相同**（hash 链不变），
+        #:    只是中间态不保证 —— 这里是"构造基准账本"，可重放，安全。
+        _led.append_many(
+            [("probe.bench", {"i": _i, "pad": "x" * 80}) for _i in range(3000)],
+            actor="ops-contract")
         _opener.open(base + "/api/health", timeout=20).read()      # 预热
         _opener.open(base + "/api/status?limit=5", timeout=30).read()
 
