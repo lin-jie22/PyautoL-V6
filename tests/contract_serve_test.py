@@ -649,7 +649,7 @@ ck("J3 响应带 skipped_dirs（前端从这里渲染，不硬编码名单）",
    f"{b.get('skipped_dirs')}")
 names = [e["name"] for e in b.get("entries", [])]
 ck("J4 跳过目录不出现在列举里（.git / node_modules / __pycache__）",
-   not ({"\.git", "node_modules", "__pycache__"} & set(names)), f"{names}")
+   not ({".git", "node_modules", "__pycache__"} & set(names)), f"{names}")
 
 #: J5–J7 三条路径闸：**少一条就是任意文件读取**
 code, _, b = srv.get("/api/files?path=../../..")
