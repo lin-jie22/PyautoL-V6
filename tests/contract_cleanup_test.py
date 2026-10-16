@@ -174,7 +174,7 @@ def main():
     from aether.evolution import EvolutionConfig, EvolutionLoop
     from aether.ledger import Ledger
     from aether.nongression import Baseline, FrozenTask, NonRegressionGate
-    from aether.providers import TemplateProposer
+    from aether.providers import CleanupProposer, TemplateProposer
     from aether.verifier import Check, Verdict
 
     tmp = Path(tempfile.mkdtemp(prefix="v6_cleanup_"))
@@ -259,6 +259,53 @@ def main():
        {"removal_safe", "removal_regress"} <= set(GV.VERDICTS)
        and "removal_safe" in GV.PASS_VERDICTS,
        f"VERDICTS={GV.VERDICTS} PASS={GV.PASS_VERDICTS}")
+
+    # ── F 组：⛔⛔ 钉住**生产默认口径**（不许只是"传了才生效"）──────
+    print("F 组：生产默认值本身（推翻默认值 ⇒ 这里必须转红）")
+    #: ⛔⛔ 通用形态：**用显式参数构造的测试，只能证明"传了会生效"，
+    #:    证明不了"生产默认就启用"。**
+    #:    D5 是"显式传 False"的对照组。万一有人把那种写法抄成 D 组的
+    #:    构造方式（对照组喧宾夺主），全文件就没有一条还在走默认路径
+    #:    ⇒ 生产里这根轴是关的，而契约全绿。⇒ 必须另有一组**直接断言
+    #:    默认值本身**的条目：它不依赖任何一条传参路径。
+    #:
+    #: ⛔⛔ 而每一条的**判别力是实测出来的，不是我以为的**（2026-10-16）。
+    #:    逐个翻默认值、在 /tmp 的独立副本里跑本文件，实测转红面：
+    #:      A  `cleanup_enabled`    True→False  ⇒ D1 D2 D3 D4 + F1 F4（6 条）
+    #:      B  `min_load_gain`      1.0→0.1     ⇒ **只有 F2**（1 条）
+    #:      C  `cleanup_group_size` 1→5         ⇒ **只有 F3**（1 条）
+    #:    ⇒ 两条结论，与我写下 F 组时的设想**相反**（别照旧注释改回去）：
+    #:      ① F1/F4 的价值不是"唯一能看见"，而是**直接命中根因**。
+    #:         翻 `cleanup_enabled` 时 D1–D4 也会红，但那 4 条读起来是
+    #:         "这一轮无事可做" —— 与关掉清理之前的旧行为**同形**，
+    #:         只会把人引向"循环动不了"，而不是"开关默认就是关的"。
+    #:      ② F2/F3 才是**全文件唯一的读数**：把减负地板放松到 0.1 条、
+    #:         或一次清 5 条，除它们之外 30 条断言一条都不响。
+    #:    ⇒ E1–E5 在三个事故版下**都不红**（E 组直接构造 gate，不经过
+    #:      EvolutionConfig）—— 预期之内，也说明不该让 E 组来盯默认值。
+    dflt = EvolutionConfig()
+    ck("F1 ⛔ 生产默认 cleanup_enabled=True"
+       "（翻成 False ⇒ 轴空转；D1–D4 连带红，F1/F4 才直接指向根因）",
+       dflt.cleanup_enabled is True, f"{dflt.cleanup_enabled}")
+    ck("F1x ⛔ 反证：显式关掉 ⇒ F1 转红（F1 不是恒真）",
+       EvolutionConfig(cleanup_enabled=False).cleanup_enabled is False)
+    ck("F2 ⛔ 生产默认 min_load_gain >= 1.0"
+       "（至少真少一条才算减负；放松到 0.1 ⇒ **全文件只有这条会红**）",
+       dflt.min_load_gain >= 1.0, f"{dflt.min_load_gain}")
+    ck("F3 ⛔ 生产默认 cleanup_group_size == 1"
+       "（最小编辑：一次只清一条；改成 5 ⇒ **全文件只有这条会红**）",
+       dflt.cleanup_group_size == 1, f"{dflt.cleanup_group_size}")
+    #: ⛔ 自动构造也是"默认开"的一部分：没有注入时必须**自己造一个**，
+    #:    不构造 ⇒ 这条通路一个候选都提不出来 ⇒ 闸永远不裁决（假仪表）。
+    ck("F4 ⛔ 未注入且默认开 ⇒ __init__ 真的自己造了清理提案器",
+       isinstance(loop.cleanup, CleanupProposer),
+       f"{type(loop.cleanup).__name__}")
+    ck("F5 ⛔ 反证：显式关掉 ⇒ 是真的没有提案器（不是造了却不用）",
+       EvolutionLoop(ledger=Ledger(tmp / "l_f5.jsonl"), gate=gate,
+                     dev_suite=[ft], runner=runner_green,
+                     proposer=TemplateProposer(skills={}), caliber=CAL,
+                     config=EvolutionConfig(cleanup_enabled=False)
+                     ).cleanup is None)
 
     print()
     if FAILS:
