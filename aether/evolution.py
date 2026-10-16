@@ -177,6 +177,14 @@ class Candidate:
     #: 发展集**按难度层**的增益。⛔ 泛化闸拿它做同层对照 —— 缺了它，
     #: "能力边界"会被误判成"挑食"（见 generalization.probe 的自指死锁说明）。
     dev_by_difficulty: Dict[str, float] = field(default_factory=dict)
+    #: ── 减负轴 ──────────────────────────────────────────────
+    #: 应用这个候选后**自指负载**掉了多少条（在候选 harness 上**现扫**出来的）。
+    #: ⛔ 单位与 reward 不同，不参与加权求和（见 EvolutionConfig 的说明）。
+    load_gain: float = 0.0
+    #: 是"清理"还是"补能力"。⛔ 用结构化标记（capsule 的 origin），
+    #:    不靠名字前缀匹配 —— 名字是给人看的，拿它当判据 ⇒
+    #:    改一次命名约定，清理候选就悄悄走回能力轴。
+    is_cleanup: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {"capsule": self.capsule_name, "harness_id": self.harness_id,
@@ -188,6 +196,8 @@ class Candidate:
                 "blast": self.blast, "n_verdicts": self.n_verdicts,
                 "dev_by_difficulty": {k: round(v, 4)
                                       for k, v in self.dev_by_difficulty.items()},
+                "load_gain": round(self.load_gain, 4),
+                "is_cleanup": self.is_cleanup,
                 "generalization": self.generalization}
 
 
@@ -229,6 +239,14 @@ class RoundReport:
     #: 本轮由"连续被拦"**晋升成事实**的条目（含门槛与键）。
     #: ⛔ 与 `world_facts` 分开：那个是"现在知道什么"，这个是"这轮新学到什么"。
     facts_promoted: List[Dict[str, Any]] = field(default_factory=list)
+    #: 本轮**常设清理提案器**提了几个候选（与有没有弱点无关）。
+    #: ⛔ 单独计数：没有它，"这一轮有没有在收拾自己的产出"在报告里查不到
+    #:    —— 而那正是"努力分配"要被看见的那个数。
+    cleanup_proposed: int = 0
+    #: 本轮基线 harness 的**自指负载**（基因组侧死条目数）。-1 = 没扫出来。
+    #: ⛔ 与 `load_gain` 是两件事：这是**存量**，那些是**增量**。
+    #:    只看增量 ⇒ 不知道债是在减少还是在增加。
+    genome_load_before: int = -1
 
     @property
     def improved(self) -> bool:
@@ -249,7 +267,10 @@ class RoundReport:
                 "parallel": self.parallel,
                 #: 陈述性知识的读数：这一代**知道什么** + 本轮**新学到什么**
                 "world_facts": self.world_facts,
-                "facts_promoted": self.facts_promoted}
+                "facts_promoted": self.facts_promoted,
+                #: 减负轴的两个读数：本轮提了几个清理候选 + 清理前的存量
+                "cleanup_proposed": self.cleanup_proposed,
+                "genome_load_before": self.genome_load_before}
 
 
 @dataclass
@@ -260,6 +281,21 @@ class EvolutionConfig:
     min_advantage: float = 0.0          # 组内优势为正才考虑
     max_size_growth_ratio: float = 0.5  # 产物增殖闸：体积涨 50% 以上需更强增益
     require_human_for_protected: bool = True   # L0 触碰 ⇒ 停等人工
+    # ── 减负轴（第二根轴）──────────────────────────────────────
+    #: ⛔ 存在理由（努力分配）：进化循环每轮都在**评估候选**，而没有任何东西
+    #:    在自己的产出上花一点力。机制根源是**判据只认增益、不认减负** ——
+    #:    删掉一个死条目 reward 不变 ⇒ 按单轴判据它永远提不出来 ⇒
+    #:    "通过测试但不产生增益"的机制只增不减。
+    #: ⛔ **两轴不做加权求和**：reward 的单位是分、load 的单位是条，
+    #:    把它们换算成同一个数 ⇒ 换算比例是编的 ⇒ 系统只是去讨好那个比例。
+    #:    ⇒ 两轴各自有一道门槛，取"或"（见第 7 步）。
+    min_load_gain: float = 1.0           # 减负地板：至少真少 1 条死条目
+    #: 常设清理提案器。⛔ **默认开** —— 默认关的开关是假仪表（README 第 83 条）：
+    #:    看着有机制，实际这条路从没被走到。
+    cleanup_enabled: bool = True
+    #: 每轮最多提几个清理候选。⛔ 默认 1：清理同样走**最小编辑原则**，
+    #:    一次只清一条 ⇒ 归因清楚、回滚便宜（一次清 5 条 ⇒ 出事不知道是谁）。
+    cleanup_group_size: int = 1
     dev_pass_threshold: float = 0.0     # 发展集 reward 阈值（0=全部计入）
     #: 提交后做一次**反事实层归因**（哪一层带来了这次提升）。
     attribute_layers: bool = True
@@ -400,7 +436,8 @@ class EvolutionLoop:
                  on_round_end: Optional[Callable[[Any], None]] = None,
                  aging_probes: Optional[List[FrozenTask]] = None,
                  budget: Optional[RunBudget] = None,
-                 checkpoint_path: Optional[str] = None):
+                 checkpoint_path: Optional[str] = None,
+                 cleanup: Optional[Any] = None):
         self.ledger = ledger
         self.gate = gate
         self.dev_suite = dev_suite
@@ -433,6 +470,18 @@ class EvolutionLoop:
         #: ⛔ 默认 None 而非"默认写到 data/"：写文件是**副作用**，不该由
         #:    库层替调用方决定往哪儿写（CLI 侧显式开 `--checkpoint`）。
         self.checkpoint_path = checkpoint_path
+        #: 常设清理提案器（**不看 weakness**，每轮都提"收拾自己产出"的变异）。
+        #: ⛔⛔ 没有注入且配置允许时**自己造一个**：不构造 ⇒ 这条通路一个候选
+        #:    都提不出来 ⇒ `min_load_gain` 那道闸永远不触发 ⇒ 看着有判据，
+        #:    实际从不裁决（与"默认关的记账开关"同形态的假仪表）。
+        #:    ⇒ 想关掉请显式传 `cleanup=None` + `cfg.cleanup_enabled=False`，
+        #:      那是一眼看得见的关闭，不是"没接线所以当它不存在"。
+        self.cleanup = cleanup
+        if self.cleanup is None and self.cfg.cleanup_enabled:
+            #: ⛔ 延迟 import：`providers → cleanup → agent → memory/environment`
+        #:    这条链不轻，而它只在**真的要建清理提案器**时才需要。
+            from .providers import CleanupProposer
+            self.cleanup = CleanupProposer()
         #: 最近一次成功落盘的 checkpoint 路径（读数，供 CLI/观测侧显示）。
         #: ⛔ 类级兜底见上方 `checkpoint_path` 的声明处。
         self.last_checkpoint: Optional[str] = None
@@ -1051,6 +1100,52 @@ class EvolutionLoop:
             rep.world_facts = None
         return rep
 
+    def _record_source_load(self, reports: List[RoundReport]) -> None:
+        """每次运行记一条 `cleanup.scan`（源码侧自指负载）。
+
+        ⛔ 每**次运行**一次，不是每轮一次：全仓 AST 扫描很贵，每轮扫 ⇒
+           进化循环会在编码工作上花掉比评估还多的时间 —— 那是把努力分配
+           砍向了**另一端**。我们要的是"分一点力给它"，不是"全搬过去"。
+
+        ⛔ 扫不出来 ⇒ **不记**（而不是记一个 0）：记 0 会得到"没有死代码"
+           的假象，而那正是这套系统最擅长自我欺骗的地方。
+        """
+        try:
+            from .cleanup import source_load
+            rd = source_load()
+        except Exception:                                  # noqa: BLE001
+            return
+        payload: Dict[str, Any] = {
+            "rounds": len(reports),
+            "source": rd,
+            "genome": (reports[-1].genome_load_before if reports else -1),
+            "note": ("源码侧自指负载（**下界**）。每次运行扫一次、不每轮扫"
+                     "（太贵）。要回答『债是在涨还是在消』，就把这个事件的"
+                     "时间序列连起来读 —— 单看一次只能看到一个快照。"),
+        }
+        try:
+            self.ledger.append("cleanup.scan", payload, actor="evolution")
+        except Exception:                                  # noqa: BLE001
+            pass
+
+    def _genome_load(self, h: Harness) -> int:
+        """基因组侧的自指负载（死条目数）。**扫不出来 ⇒ 返回 -1**。
+
+        ⛔ 为什么必须能表示"没扫出来"：返回 0 会得到一个"没有死条目"的
+           假象 ⇒ 减负轴从此**永远为零** ⇒ 清理候选全部因"减负不可测"
+           被拦 ⇒ 看起来像"清理没用"，实际是表坏了。
+           -1 与 0 必须能分辨（与"skipped ≠ pass"同一条纪律）。
+
+        ⛔ 延迟 import：`cleanup → agent → memory/environment` 这条链不轻，
+           而本方法只在**真的要量减负**时才需要；且它依赖 `agent` 的
+           策略词汇表，那本身就是"判据同源"要求的代价。
+        """
+        try:
+            from .cleanup import genome_load
+            return int(genome_load(h))
+        except Exception:                                  # noqa: BLE001
+            return -1
+
     def _run_round(self, h: Harness, round_no: int = 0) -> RoundReport:
         rep = RoundReport(round_no=round_no)
 
@@ -1061,6 +1156,11 @@ class EvolutionLoop:
         base_reward, base_vs = self.evaluate_dev(h, tag="base:")
         rep.baseline_reward = base_reward
         base_by_level = self.reward_by_difficulty(base_vs)
+        #: 减负轴的**存量**基准（在基线 harness 上现扫）。
+        #: ⛔ 与 `load_gain`（增量）分开记：只看增量 ⇒ 不知道债是在减少
+        #:    还是在增加（背着债还在涨，与没背债在涨，是两件不同的事）。
+        base_load = self._genome_load(h)
+        rep.genome_load_before = base_load
 
         # 2) MINE —— 弱点必须由**这一轮、这个 harness 的**失败证据支撑。
         #
@@ -1077,37 +1177,67 @@ class EvolutionLoop:
         #      （历史 run 仍然写进 store，供投影/归因/审计使用。）
         runs = self._runs_from_verdicts(base_vs, h)
         weaknesses = mine_weaknesses(runs)
-        if not weaknesses:
-            rep.revert_reason = "no_weakness_evidence（无失败证据 ⇒ 不提议）"
-            #: 与"到顶"同族：这一轮**无事可做**。连续发生 ⇒ 停止循环
-            #: （实测：10 轮压力跑里 r2–r10 全是这个，空转 9 轮）。
+        #: ⛔⛔ 无弱点**不再直接 return** —— 那正是"每轮都在评估候选、没有
+        #:    任何东西在自己的产出上花一点力"的机制根源：发展集一全绿，
+        #:    这一轮就什么也不做（实测：10 轮压力跑里 r2–r10 全是这个，
+        #:    空转 9 轮）。改成：能力侧无事可做 ⇒ 把这一轮花在清理上。
+        w = weaknesses[0] if weaknesses else None
+        capsules: List[Capsule] = []
+        if w is not None:
+            rep.weakness = w
+            rep.ledger_seqs.append(self.ledger.append(
+                "weakness.mined", {"round_no": round_no, **w.to_dict()},
+                actor="evolution").seq)
+            # 3) PROPOSE + 构造候选
+            #: ⛔ 提议预算**在调用之前**查：真 LLM 时一次 propose = 一次付费
+            #:    调用，调用完再查等于钱已经花出去了（止损必须发生在花钱前）。
+            if self.budget is not None and self.budget.exhausted():
+                rep.revert_reason = (f"budget_exhausted（{self.budget.exhausted()}"
+                                     f" ⇒ 不再提议）")
+                rep.ledger_seqs.append(self.ledger.append(
+                    "evolution.budget_stop", {
+                        "round_no": round_no, "harness_id": h.harness_id,
+                        "reason": rep.revert_reason,
+                        "budget": self.budget.to_dict()},
+                    actor="evolution").seq)
+                return rep
+            capsules += list(self.proposer.propose(
+                w.to_dict(), h, n=self.cfg.group_size))
+            if self.budget is not None:
+                self.budget.spend(propose_calls=1)
+
+        # 3b) **常设清理提案器**：与"这一轮有没有弱点"无关，每轮都跑。
+        #:     ⛔ 它不看 weakness —— 码健康不是失败信号，是**维护轴**，
+        #:        发展集全绿它也不会消失。放在弱点分支**之后**且不受它
+        #:        `return` 影响，是这一轮"总在产出上花力"的保证。
+        if self.cleanup is not None:
+            try:
+                got = self.cleanup.propose(
+                    {}, h, n=self.cfg.cleanup_group_size)
+            except Exception as e:                         # noqa: BLE001
+                #: ⛔ 编码层故障不该让循环炸掉，但**不许静默**：提不出来
+                #:    必须能在账本上看见（否则"没提"与"没扫"无法区分）。
+                got = []
+                self.ledger.append(
+                    "cleanup.propose_failed",
+                    {"round_no": round_no, "harness_id": h.harness_id,
+                     "error": f"{type(e).__name__}: {e}"}, actor="evolution")
+            capsules += list(got)
+            rep.cleanup_proposed = len(got)
+
+        if not capsules:
+            #: 两边都没得提 ⇒ 才是真的"这一轮无事可做"（与"到顶"同族）。
+            #: ⛔ 措辞沿用原分支：契约依赖它，且它必须与"提了但被闸拦下"
+            #:    区分开 —— 后者值得重试，前者再跑也是空转。
             rep.idle = True
+            rep.revert_reason = (
+                "no_weakness_evidence（无失败证据 ⇒ 不提议）" if w is None
+                else "no_candidates（能力侧与清理侧都没产出候选）")
             rep.ledger_seqs.append(self.ledger.append(
                 "evolve.noop", {"round_no": round_no, "harness_id": h.harness_id,
                                 "reason": rep.revert_reason},
                 actor="evolution").seq)
             return rep
-        w = weaknesses[0]
-        rep.weakness = w
-        rep.ledger_seqs.append(self.ledger.append(
-            "weakness.mined", {"round_no": round_no, **w.to_dict()},
-            actor="evolution").seq)
-
-        # 3) PROPOSE + 构造候选
-        #: ⛔ 提议预算**在调用之前**查：真 LLM 时一次 propose = 一次付费
-        #:    调用，调用完再查等于钱已经花出去了（止损必须发生在花钱前）。
-        if self.budget is not None and self.budget.exhausted():
-            rep.revert_reason = (f"budget_exhausted（{self.budget.exhausted()}"
-                                 f" ⇒ 不再提议）")
-            rep.ledger_seqs.append(self.ledger.append(
-                "evolution.budget_stop", {
-                    "round_no": round_no, "harness_id": h.harness_id,
-                    "reason": rep.revert_reason, "budget": self.budget.to_dict()},
-                actor="evolution").seq)
-            return rep
-        capsules = self.proposer.propose(w.to_dict(), h, n=self.cfg.group_size)
-        if self.budget is not None:
-            self.budget.spend(propose_calls=1)
         #: 死路账：**从账本读**（事实源），不是进程内状态 —— 否则换一次
         #:    运行就"忘了"这条死路，冷却形同虚设。
         deadend = self._deadend_map()
@@ -1227,6 +1357,15 @@ class EvolutionLoop:
             c.n_verdicts = len(vs)
             c.dev_by_difficulty = self._level_gain(
                 base_by_level, self.reward_by_difficulty(vs))
+            #: 5b) 减负轴：**在候选 harness 上现扫**，不许用提案时算好的数。
+            #:    ⛔ 减负读数必须可复核：提案说"清理后少 1 条"，真正的验证
+            #:      是拿应用后的产物再扫一遍 —— 对不上就是提案在撒谎。
+            #:    ⛔ 扫不出来（-1）⇒ load_gain 记 0 而不是记一个看起来
+            #:      很大的数 ⇒ 坏了的表**不放行**（fail-closed）。
+            cand_load = self._genome_load(cand_h)
+            c.load_gain = (float(base_load - cand_load)
+                           if base_load >= 0 and cand_load >= 0 else 0.0)
+            c.is_cleanup = (cap.origin == "cleanup")
             cands.append(c)
 
         # 6) 组内相对优势（只对过了闸且有评估结果的候选算）
@@ -1239,22 +1378,55 @@ class EvolutionLoop:
             for c, a in zip(scored, advs[1:]):
                 c.advantage = a
 
-        # 7) 选择：优势为正 + 超过能力地板 + 过了增殖闸
+        # 7) 选择：**两轴准入**（能力轴 ∪ 减负轴，取「或」）
+        #    ⛔ 两轴**不加权求和**：reward 的单位是分、load 的单位是条，
+        #      把它们换算成同一个数 ⇒ 换算比例是编出来的 ⇒ 系统只是去
+        #      讨好那个比例（与"held-out 参与选择 ⇒ 闸自我取消"同形态）。
         best: Optional[Candidate] = None
+        best_gain = -1e9
+        best_load = -1e9
         for c in scored:
-            if c.advantage <= self.cfg.min_advantage:
-                c.reason = c.reason or f"no_advantage({c.advantage:.3f})"
-                continue
             gain = c.reward - base_reward
-            if gain < self.cfg.min_reward_gain:
-                c.reason = f"below_capability_floor(gain={gain:.4f})"
-                continue
-            growth = c.blast.get("size_delta", 0) / max(1, h.size())
-            if growth > self.cfg.max_size_growth_ratio and gain < 0.1:
-                c.reason = f"proliferation_gate(growth={growth:.2f}, gain={gain:.4f})"
-                continue
-            if best is None or c.reward > best.reward:
+            if c.is_cleanup:
+                # ── 减负轴 ─────────────────────────────────────
+                #: ⛔ **不判"组内优势"**：组内相对优势是为**有噪声的 reward
+                #:    采样**设计的（同一任务多次采样才需要归一化）。死条目数
+                #:    是**确定性计数**，没有采样噪声要归一化 ⇒ 拿它去跟
+                #:    能力候选比 z-score，是把两种量纲塞进同一把尺子。
+                if c.load_gain < self.cfg.min_load_gain:
+                    c.reason = (f"cleanup_no_load_gain(load_gain="
+                                f"{c.load_gain:.0f} < "
+                                f"{self.cfg.min_load_gain:.0f})"
+                                f" ⇒ 这次清理不可测")
+                    continue
+                if gain < 0:
+                    c.reason = (f"cleanup_regresses(gain={gain:.4f}) ⇒ "
+                                f"清理不得伴随能力下降（减负不是降质的借口）")
+                    continue
+                #: ⛔ 增殖闸对清理**结构性不适用**：它防的是体积膨胀，
+                #:    而清理的产物必然变小（size_delta < 0）。不写这条
+                #:    判断，是因为写了它永远不触发（看着有闸，实际是空闸）。
+            else:
+                # ── 能力轴（原判据，一个字都不改）────────────────
+                if c.advantage <= self.cfg.min_advantage:
+                    c.reason = c.reason or f"no_advantage({c.advantage:.3f})"
+                    continue
+                if gain < self.cfg.min_reward_gain:
+                    c.reason = f"below_capability_floor(gain={gain:.4f})"
+                    continue
+                growth = c.blast.get("size_delta", 0) / max(1, h.size())
+                if growth > self.cfg.max_size_growth_ratio and gain < 0.1:
+                    c.reason = (f"proliferation_gate(growth={growth:.2f}, "
+                                f"gain={gain:.4f})")
+                    continue
+            #: ⛔ 排序键 (gain, load_gain) ⇒ **能力优先**。
+            #:    一个真让 reward 涨了的候选永远排在"只是少一台机器"前面
+            #:    ⇒ 清理只在**没有能力可涨**的那些轮才上位。这正是要的
+            #:    努力分配：有得涨就涨，没得涨就收拾。
+            if best is None or (gain, c.load_gain) > (best_gain, best_load):
                 best = c
+                best_gain = gain
+                best_load = c.load_gain
         if best is not None:
             best.accepted = True
             best.reason = "accepted"
@@ -1266,12 +1438,19 @@ class EvolutionLoop:
         if best is not None and self.heldout is not None:
             new_h_probe = apply_capsule(
                 h, next(cp for cp in capsules if cp.name == best.capsule_name))
-            pr = self.heldout.probe(
-                h, new_h_probe, self.runner,
-                dev_gain=best.reward - base_reward,
-                # ⛔ 同层对照：没有它，"能力边界"会被误判成"挑食"，
-                #    通用修法将永远过不了闸 ⇒ 进化循环永久空转。
-                dev_by_difficulty=best.dev_by_difficulty or None)
+            if best.is_cleanup:
+                #: ⛔ 清理走泛化闸的**退化面**（`probe_removal`：held-out
+                #:    不许变差）。走 `probe()` 必得 `no_gain` ⇒ blocks
+                #:    ⇒ 清理永远提交不了 —— 那不是闸严，是**用错了闸**：
+                #:    overfit 问的是"涨的是不是真的"，而清理根本不涨。
+                pr = self.heldout.probe_removal(h, new_h_probe, self.runner)
+            else:
+                pr = self.heldout.probe(
+                    h, new_h_probe, self.runner,
+                    dev_gain=best.reward - base_reward,
+                    # ⛔ 同层对照：没有它，"能力边界"会被误判成"挑食"，
+                    #    通用修法将永远过不了闸 ⇒ 进化循环永久空转。
+                    dev_by_difficulty=best.dev_by_difficulty or None)
             best.generalization = pr.to_dict()
             rep.generalization = pr.to_dict()
             rep.ledger_seqs.append(self.ledger.append(
@@ -1581,6 +1760,14 @@ class EvolutionLoop:
                      "note": "预算耗尽 ⇒ 提前终止（不是失败，也不是空转）"},
                     actor="evolution")
                 break
+
+        #: ── 源码侧自指负载：每**次运行**扫一次（很贵，不许每轮扫）────
+        #:    ⛔ 这是"12 个零消费方接口 / 10 个只写不读属性"那两个读数的家。
+        #:      此前它们只活在 `caps cleanup propose` 这条**手工命令**里
+        #:      ⇒ "系统的债是在涨还是在消"这个问题**没有任何时间序列**
+        #:      能回答 —— 每次看都是一个人肉快照。这也正是"只能靠人回头
+        #:      发现"的机制形态。
+        self._record_source_load(reports)
 
         #: ⛔ 落点要兑现：写了 checkpoint 却没有任何读数 ⇒ "我开了续跑"
         #:    与"续跑真的可用"在外部无法区分（假仪表）。这里记一条事件，

@@ -225,6 +225,7 @@ def main():
                          mem_runner, FixedProposer([cap]), caliber=cal,
                          heldout=ho,
                          config=EvolutionConfig(group_size=2,
+                                                cleanup_enabled=False,
                                                 attribute_layers=True))
     #: ⛔ runner 要求 `python_exec` 在工具白名单里：不给的话候选与基线
     #:    reward 都是 0 ⇒ advantage 恒 0 ⇒ 永远不提交 ⇒ 归因分支根本走不到
@@ -345,6 +346,7 @@ def main():
                           mem_runner, FixedProposer([cap]), caliber=cal,
                           heldout=ho,
                           config=EvolutionConfig(group_size=2,
+                                                 cleanup_enabled=False,
                                                  attribute_layers=True))
     orig_attr2 = AT2.attribute_layers
     AT2.attribute_layers = boom

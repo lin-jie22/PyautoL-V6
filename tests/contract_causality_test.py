@@ -200,6 +200,7 @@ def main():
                              mem_runner, FixedProposer([cap]), caliber=cal,
                              heldout=ho,
                              config=EvolutionConfig(group_size=2,
+                                                    cleanup_enabled=False,
                                                     attribute_layers=True,
                                                     attribution_tasks=3))
         rep = loop.run_round(h0, round_no=1)
@@ -230,7 +231,8 @@ def main():
         ck("E4 关掉归因开关 ⇒ 不产生 layer_credit（开关有效）",
            EvolutionLoop(led, NonRegressionGate(frozen, base), dev, mem_runner,
                          FixedProposer([cap]), caliber=cal, heldout=ho,
-                         config=EvolutionConfig(attribute_layers=False)
+                         config=EvolutionConfig(attribute_layers=False,
+                                                cleanup_enabled=False)
                          ).run_round(H(), round_no=2).layer_credit is None)
 
     # ── F 组：跨轮经验记忆进入因果链 ──────────────────────────────

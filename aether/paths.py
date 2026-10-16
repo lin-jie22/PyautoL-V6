@@ -32,6 +32,8 @@ ROOT: Path = Path(__file__).resolve().parent.parent
 DATA_DIRNAME = "data"
 #: 能力候选档案文件名（见 `paths()` 的 `candidates` 键）。
 CANDIDATES_NAME = "candidates.json"
+#: 清理提案档案文件名（见 `paths()` 的 `cleanup` 键）。
+CLEANUP_NAME = "cleanup_proposals.json"
 TASKS_DIRNAME = "tasks"
 BACKUPS_DIRNAME = "backups"
 CONSOLE_DIRNAME = "console"
@@ -99,6 +101,9 @@ def paths(root: Union[str, Path], *, default_env: str = "textscore"
         #: 调用方手拼 `root / "data" / "x.json"` 会被静态闸拦下
         #: （实测踩过：`cli.py` 里手拼一次就被 `contract_entrypoints` 抓了）。
         "candidates": r / DATA_DIRNAME / CANDIDATES_NAME,
+        #: 清理提案档案（同 `candidates`：不是事实源，事实源是账本的
+        #: `cleanup.proposal` 事件；但**位置**必须只有一处定义）。
+        "cleanup": r / DATA_DIRNAME / CLEANUP_NAME,
     }
 
 

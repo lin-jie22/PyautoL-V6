@@ -69,7 +69,8 @@ def _runner(h, spec):
 def main():
     from aether.evolution import EvolutionConfig, EvolutionLoop
     from aether.generalization import (GeneralizationGate, HeldOutSuite,
-                                       ProbeResult, VERDICTS, make_heldout)
+                                       PASS_VERDICTS, ProbeResult, VERDICTS,
+                                       make_heldout)
     from aether.genome import Capsule, Gene, Harness
     from aether.ledger import Ledger
     from aether.nongression import Baseline, FrozenTask, NonRegressionGate
@@ -109,9 +110,16 @@ def main():
                         verdicts={t.task_id: _runner(Harness(), t.spec)
                                   for t in frozen},
                         harness_id="seed")
+        #: ⛔ 本契约只测**泛化轴**，显式关掉清理轴（与 contract_evolution_test
+        #:    的 D 组同纪律）：清理提案器是常设的、不看 weakness，开着它会在
+        #:    C 组混入"减负候选" ⇒ 泛化闸的裁决对象不再单一。
+        #:    清理走泛化闸的**退化面**（`probe_removal`），由
+        #:    contract_cleanup_test 的 E 组单独覆盖。
         return EvolutionLoop(led, NonRegressionGate(frozen, base), dev_tasks(),
                              _runner, FixedProposer(caps), caliber=cal,
-                             heldout=heldout, config=EvolutionConfig(group_size=3))
+                             heldout=heldout,
+                             config=EvolutionConfig(group_size=3,
+                                                    cleanup_enabled=False))
 
     def run_once(tmp, caps, heldout, ledger=None):
         loop = mk_loop(tmp, caps, heldout, ledger)
@@ -133,17 +141,45 @@ def main():
 
     # ⛔ 这条刻意写死：新增一个裁决取值，必须**有人来这里确认是有意的**。
     #    （改成 `>=` 就废了这条闸 —— 那时任何人都能悄悄加一种"放行"态。）
-    #    2026-10-13 人工确认新增 `partial`：总体涨但只在部分难度层涨
-    #    （典型：只会修 easy 题）。它**拦截**，不放行。见 contract_difficulty_test。
-    ck("A3 裁决取值是封闭集合（新增取值须人工确认，此处已确认 partial）",
+    #    人工确认记录：
+    #      2026-10-13 `partial`       —— 总体涨但只在部分难度层涨
+    #                                   （典型：只会修 easy 题）。
+    #                                   **拦截**，不放行。
+    #                                   见 contract_difficulty_test。
+    #      2026-10-16 `removal_safe`  —— 清理候选：held-out **不许变差**
+    #                                   （不要求涨）。**放行**。
+    #      2026-10-16 `removal_regress` —— 清理候选：held-out 真的掉了
+    #                                   ⇒ 删错了。**拦截**。
+    #      ⛔ 后两个的由来（别当成"给清理开后门"）：泛化闸问的是
+    #         "发展集上涨的那部分是真的吗"，而清理**根本不涨** ⇒ 走
+    #         `probe()` 必得 `no_gain` ⇒ 清理在结构上永远提交不了。
+    #         那不是闸太严，是**用错了闸**：对清理该问"删完变差没有"。
+    #         见 aether/generalization.py 的 `probe_removal` 与
+    #         contract_cleanup_test 的 E 组。
+    ck("A3 裁决取值是封闭集合（新增取值须人工确认，"
+       "已确认 partial / removal_safe / removal_regress）",
        set(VERDICTS) == {"generalize", "overfit", "partial", "no_gain",
-                         "inconclusive"}, f"{VERDICTS}")
+                         "inconclusive", "removal_safe", "removal_regress"},
+       f"{VERDICTS}")
     ck("A3b partial 是**拦截**态（新增取值不得偷偷放行）",
        ProbeResult(verdict="partial").blocks is True)
-    ck("A4 blocks 语义：只有 generalize 放行（未知一律拦，fail-closed）",
-       ProbeResult(verdict="generalize").blocks is False
-       and all(ProbeResult(verdict=v).blocks for v in VERDICTS
-               if v != "generalize"))
+    #: ⛔ A4 同样刻意写死：它守的是**放行集合**，与 A3 的"取名集合"是两件事。
+    #:    若改成从 `PASS_VERDICTS` 派生 ⇒ 有人往 `PASS_VERDICTS` 里加一项，
+    #:    这条闸会跟着变绿 ⇒ 放行权被悄悄扩大而无人确认。
+    #:    ⇒ 这里从 `ProbeResult.blocks` 的**实测行为**反推出放行集合，
+    #:      再与写死的期望比对（A4b 才去核对源码常量）。
+    _pass_observed = {v for v in VERDICTS if not ProbeResult(verdict=v).blocks}
+    ck("A4 ⛔ blocks 实测：放行集合恰好 = generalize + removal_safe"
+       "（多一个放行态 ⇒ 此处转红，须人工确认）",
+       _pass_observed == {"generalize", "removal_safe"}, f"{_pass_observed}")
+    ck("A4b 实测放行集合与源码 PASS_VERDICTS 一致"
+       "（改了源码忘改这里 / 反之 ⇒ 转红，两处不许漂移）",
+       _pass_observed == set(PASS_VERDICTS),
+       f"实测 {_pass_observed} vs 源码 {set(PASS_VERDICTS)}")
+    ck("A4c 集合外的未知裁决一律拦（fail-closed）",
+       ProbeResult(verdict="__根本不存在的裁决__").blocks is True)
+    ck("A4d removal_regress 是**拦截**态（清理删错了必须拦下）",
+       ProbeResult(verdict="removal_regress").blocks is True)
     ck("A5 held-out 任务数不足 ⇒ inconclusive 且拦截",
        mk_gate(min_tasks=99).probe(Harness(), Harness(), _runner,
                                    dev_gain=1.0).verdict == "inconclusive")

@@ -1120,6 +1120,91 @@ def cmd_caps(args) -> int:
             print(" ".join(argv))
             return 0
 
+    if cmd == "cleanup":
+        #: ⛔ 本命令**只在显式 approve --yes 之后才给出补丁**，而且
+        #:    **从不改源码** —— 删错了是不可逆的，账本只能留痕不能还原。
+        from . import cleanup as CL
+        cpath = _paths(Path(args.root))["cleanup"]
+        saved = CL.load(cpath)
+        sub = getattr(args, "cleanup_cmd", "propose")
+
+        def _save(props):
+            CL.save(cpath, props)
+
+        if sub == "propose":
+            props = CL.build(limit=int(getattr(args, "limit", 20) or 20))
+            for p in props:
+                CL.record(led, p)
+            _save({p.prop_id: p for p in props})
+            if getattr(args, "json", False):
+                print(json.dumps([p.to_dict() for p in props],
+                                 ensure_ascii=False, indent=2))
+                return 0
+            if not props:
+                print("✅ 没有清理提案：自指负载扫描没发现零消费方接口/只写不读属性")
+                return 0
+            print(f"清理提案 {len(props)} 条（已进账本，state=pending）→ {cpath}")
+            for p in props[:12]:
+                print(f"  [{p.kind}] {p.target} @ {p.where}")
+            if len(props) > 12:
+                print(f"  … 还有 {len(props) - 12} 条")
+            print("⛔ 下一步：`aether caps cleanup validate`，"
+                  "然后 `approve --id … --by 你 --yes`")
+            return 0
+
+        if sub == "validate":
+            pid = getattr(args, "pid", "") or ""
+            targets = ([saved[pid]] if pid and pid in saved
+                       else list(saved.values()))
+            if not targets:
+                print("（没有可校验的提案：先跑 `caps cleanup propose`）")
+                return 2
+            bad = 0
+            for p in targets:
+                p = CL.validate(p)
+                saved[p.prop_id] = p
+                CL.record(led, p)
+                mark = "✅" if p.gate_passed else "❌"
+                print(f"{mark} [{p.kind}] {p.target} @ {p.where} "
+                      f"state={p.state} 减负={p.evidence.get('load_delta')}")
+                for r in p.gate_reasons:
+                    print(f"     ⇒ {r}")
+                bad += 0 if p.gate_passed else 1
+            _save(saved)
+            return 1 if bad else 0
+
+        if sub == "approve":
+            pid = getattr(args, "pid", "")
+            p = saved.get(pid)
+            if p is None:
+                _log.warning(f"[cleanup] 没有提案 {pid!r}（先跑 propose/validate）")
+                return 2
+            p = CL.validate(p)
+            p = CL.apply_patch(p, approved_by=getattr(args, "by", "") or "",
+                               yes=bool(getattr(args, "yes", False)))
+            saved[pid] = p
+            _save(saved)
+            CL.record(led, p)
+            if p.state != CL.APPLIED:
+                _log.warning("[cleanup] 未推进："
+                             + (p.gate_reasons[-1] if p.gate_reasons else "?"))
+                return 1
+            print(f"✅ 已批准（**源码仍未改动**）：{p.target} @ {p.where} "
+                  f"by {p.evidence.get('approved_by')}")
+            print("   补丁（请**人工**执行）：")
+            for ln in p.patch.splitlines():
+                print("     " + ln)
+            return 0
+
+        # patch
+        p = saved.get(getattr(args, "pid", ""))
+        if p is None or p.state != CL.APPLIED:
+            print(f"（没有可执行的补丁：提案状态="
+                  f"{p.state if p else '不存在'}。先 validate + approve --yes）")
+            return 1
+        print(p.patch)
+        return 0
+
     if cmd == "discover":
         #: ⛔ 只**发现**，不下载不安装（见 `aether/discover.py` 的说明）。
         #:    探到的每个工具都带"在哪、哪一版、用什么命令探出来的"。
@@ -1423,6 +1508,25 @@ def build_parser() -> argparse.ArgumentParser:
                      help="显式批准：本系统不代你决定装什么")
     cgh = cgs.add_parser("hint", help="打印给人执行的安装命令（本命令不执行它）")
     cgh.add_argument("--tool", required=True)
+    #: ⛔ 清理提案器：让"自己的产出该收拾"变成可被提议、可被裁决的一件事。
+    #:    判据不是"通过测试"（删代码不会让 reward 变高 ⇒ 按增益判永远提不出来），
+    #:    而是"**减少自指负载**且**不动判据集**"。详见 `aether/cleanup.py`。
+    cl = cs.add_parser(
+        "cleanup",
+        help="清理提案：找零消费方接口/只写不读属性（**只提案，不改源码**）")
+    cls_ = cl.add_subparsers(dest="cleanup_cmd", required=True)
+    clb = cls_.add_parser("propose", help="扫描并生成清理提案（只读）")
+    clb.add_argument("--limit", type=int, default=20)
+    clb.add_argument("--json", action="store_true")
+    clv = cls_.add_parser("validate", help="对提案过闸（不许碰判据集/减负可测/非回归/可执行）")
+    clv.add_argument("--id", dest="pid", default="", help="提案 id（不传则全跑）")
+    cla = cls_.add_parser("approve", help="**人批准**（没有 --yes 一律不推进）")
+    cla.add_argument("--id", dest="pid", required=True)
+    cla.add_argument("--by", default="", help="批准人（必须留名）")
+    cla.add_argument("--yes", action="store_true",
+                     help="显式批准：本系统不代你决定删什么")
+    cap_ = cls_.add_parser("patch", help="打印给人执行的补丁（本命令不执行）")
+    cap_.add_argument("--id", dest="pid", required=True)
     cs.add_parser("list", help="列出已注册能力")
     sh = cs.add_parser("show", help="查看一个能力的声明")
     sh.add_argument("id")

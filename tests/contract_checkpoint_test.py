@@ -56,7 +56,13 @@ def main():
     #: ⛔ 造数据也要守被测对象的闸：cfg 指纹必须按**真实**算法算出来。
     #:    第一版我图省事写了字面量 "cfgfp" ⇒ C 组的 cfg 校验永远先失配
     #:    ⇒ 后面"账本回退""完全一致"两条根本没被测到（假红）。
-    CFG = EvolutionConfig(group_size=2)
+    #: ⛔ 本契约只测**断点续跑**，显式关掉清理轴（与 contract_evolution_test
+    #:    的 D 组同纪律）：这一组 stub 提交后会挂着一个"词汇表外的技能名"
+    #:    ⇒ 清理提案器每轮都会提一条候选 ⇒ 续跑的轮号/账本 seq 会被
+    #:    另一个轴的产物推动，测到的就不再是"断点续跑"本身。
+    #:    ⛔ CFG 与 `new_loop` 里的 cfg 必须**逐字相同**（`CP.verify` 比的是
+    #:    `asdict` 指纹）⇒ 改一处漏一处会立刻假红。
+    CFG = EvolutionConfig(group_size=2, cleanup_enabled=False)
 
     def mk(passed, name="c"):
         return Verdict(passed=passed, checks=(Check(name, passed, "ev"),),
@@ -81,7 +87,8 @@ def main():
             "useless_skill": "没用的技能"})
         return EvolutionLoop(led, gate, dev, runner, proposer, store=None,
                              caliber=cal if cal is not None else CAL,
-                             config=cfg or EvolutionConfig(group_size=2),
+                             config=cfg or EvolutionConfig(
+                                 group_size=2, cleanup_enabled=False),
                              checkpoint_path=cp_path)
 
     # ── A 组：指纹与往返 ────────────────────────────────────────

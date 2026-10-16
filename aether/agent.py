@@ -58,6 +58,58 @@ DIRECTIVES: Dict[str, Tuple[str, ...]] = {
 #: 完成任务**至少**需要的工具。缺一个 ⇒ 连源码都读不到 / 判据都跑不了。
 REQUIRED_TOOLS: Tuple[str, ...] = ("read_file", "python_exec")
 
+#: ⛔⛔ **策略名词汇表（唯一事实源）** —— `_apply_one` 按名字分派，
+#:    清理扫描器（`aether/cleanup.py::genome_dead_entries`）按它判
+#:    "幽灵技能名"。名单只有这一份，两边**共用**。
+#:
+#:    为什么这张表值得存在（实测推出来的两个后果，都比"看起来"严重）：
+#:
+#:      ① 名字不在表里 ⇒ `_apply_one` 走最后一行的 `return src, True`
+#:         —— **恒等变换**，而且被记为**"适用"**；
+#:      ② `active` 因此非空 ⇒ `if not active and self.memory is not None:`
+#:         这条 L4 记忆通路**被压制**。
+#:
+#:    ⇒ 一个幽灵技能名比"没有技能"更糟：没有技能时 L4 还能兜底，
+#:      挂着一个不认识的技能反而把唯一的退路堵死了。
+#:      这正是"每轮都在评估候选、没人在自己的产出上花力"的产物形态：
+#:      它不破坏任何断言、也不改进任何东西，只是让系统悄悄少一条路。
+KNOWN_STRATEGIES: Tuple[str, ...] = (
+    "fix_control_flow", "fix_literals", "fix_boolops", "memory_hint",
+)
+
+#: 前缀型策略（`uci:<cid>` / `patch:<env_id>`）。
+#: ⛔ `patch:` 后面必须**直接**跟 env_id。`patch::x` 切出来是 `":x"`，
+#:    永不等于任何 env_id ⇒ 结构上永不生效 —— 它是死名，不是定点修法。
+STRATEGY_PREFIXES: Tuple[str, ...] = ("uci:", "patch:")
+
+
+def is_known_strategy(name: str) -> bool:
+    """`_apply_one` 认不认这个名字。
+
+    ⛔ 与 `_apply_one` **同源**：它的分派顺序就是本函数的判据来源。
+       改词汇表 ⇒ 执行体的能力与扫描器的口径一起变，不可能只变一边。
+       （`tests/contract_cleanup_test.py` 的 C 组就是把两边钉在一起那道闸：
+        喂一个名字进 `_apply_one`，断言"词汇表说认识 ⇒ 真有动作"。）
+
+    ⛔⛔ 为什么 `patch::x` 要判 False 而不是 True：
+       它 `startswith("patch:")` 成立 ⇒ 会走进 `_apply_one` 的 patch 分支，
+       但 `strategy[len("patch:"):] == env.env_id` 恒不成立 ⇒ 返回
+       `(src, False)`（"不适用"）。把它算成"认识"，扫描器就会放过它，
+       于是这条死条目永远没人提 —— 而它恰恰是最需要被提出来的那种：
+       单看名字，它长得跟一个正常的定点修法一模一样。
+    """
+    if not name:
+        return False
+    if name in KNOWN_STRATEGIES:
+        return True
+    for p in STRATEGY_PREFIXES:
+        if name.startswith(p):
+            rest = name[len(p):]
+            if not rest or rest.startswith(":"):
+                return False          # `uci:` / `patch:` / `patch::x`
+            return True
+    return False
+
 
 def banned_by_L0(strategy: str, ds: FrozenSet[str]) -> bool:
     """L0 元规则是否**禁用**这个策略。

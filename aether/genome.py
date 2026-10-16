@@ -672,3 +672,34 @@ def gene_tune(key: str, delta: Any, rationale: str = "") -> Gene:
             f"gene_tune 的 delta 必须是数字，实得 {type(delta).__name__}")
     return Gene(op="tune", target=_t_policy(key), value=delta,
                 rationale=rationale or f"调参 {key} {delta:+}")
+
+
+# ──────────────────────────────────────────────────────────────────
+# 删除算子（清理提案器用）
+# ──────────────────────────────────────────────────────────────────
+#: ⛔⛔ **不新增 `_t_*` 函数**：`contract_genome_source_test` 的 A4 把
+#:    target 字面量的落点集合**写死**成 `_t_policy/_t_route/_t_skill/_t_tools`
+#:    这 4 个，多一个都红。所以这里一律复用已有的 `_t_skill` / `_t_route`。
+#:    ⇒ 新增算子不产生新的 target 字面量，A1–A4 全绿。
+
+def gene_remove_skill(name: str, rationale: str = "") -> Gene:
+    """删掉一个技能（L3.skills.<name>）。
+
+    ⛔ `op="remove"` 在 `apply_gene` 的层-op 白名单里早已就位
+       （`_ALLOWED_OPS_BY_LAYER["skills"]` 含 remove），且对**不存在**的
+       键是 `pop(name, None)` ⇒ 幂等、不抛错。
+    """
+    return Gene(op="remove", target=_t_skill(name), value=None,
+                rationale=rationale or f"删除技能 {name}")
+
+
+def gene_route_remove(kind: str, skill: str, rationale: str = "") -> Gene:
+    """从一条路由链上**摘掉**某个技能（不是删整条路由）。
+
+    ⛔ 语义与 `op="remove", value=None` 的"删整条路由"是两回事
+       （见 `apply_gene` 的 routing 分支：value=None ⇒ pop 整个 kind）。
+       这里 value=技能名 ⇒ 只摘这一项，链上其它项保留；摘空了
+       ⇒ `route_with` 自己会把这个 key 整个去掉，不留幽灵路由。
+    """
+    return Gene(op="remove", target=_t_route(kind), value=skill,
+                rationale=rationale or f"{kind} 链上摘掉 {skill}")

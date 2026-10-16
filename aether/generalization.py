@@ -38,7 +38,18 @@ Runner = Callable[[Harness, Dict[str, Any]], Verdict]
 
 #: 裁决取值。**封闭集合**：出现集合外的值说明有新的失败形态没被归类。
 #: `partial` = 整体涨了但**只在部分难度层涨**（典型：只会修简单题）。
-VERDICTS = ("generalize", "overfit", "partial", "no_gain", "inconclusive")
+#:
+#: ⛔ 后面两个是**清理候选**专用的：`removal_safe` / `removal_regress`。
+#:    为什么不复用 `generalize`：泛化闸问的是"发展集上涨的那部分是真的吗"，
+#:    而清理**根本不涨**（删掉死条目 reward 不变）⇒ 它在 `_probe_inner` 的
+#:    第一道 `dev_gain <= dev_floor` 就会被判 `no_gain` ⇒ `blocks=True`
+#:    ⇒ 清理在结构上永远无法提交。不是闸太严，是**用错了闸**：
+#:    对清理该问的是"删完之后 held-out 变差没有"，不是"涨了没有"。
+VERDICTS = ("generalize", "overfit", "partial", "no_gain", "inconclusive",
+            "removal_safe", "removal_regress")
+
+#: 放行的裁决。**封闭集合**（与 VERDICTS 同源）。
+PASS_VERDICTS = ("generalize", "removal_safe")
 
 
 @dataclass(frozen=True)
@@ -125,8 +136,14 @@ class ProbeResult:
 
     @property
     def blocks(self) -> bool:
-        """是否拦截提交。⛔ 未知裁决一律拦截（fail-closed）。"""
-        return self.verdict != "generalize"
+        """是否拦截提交。⛔ 未知裁决一律拦截（fail-closed）。
+
+        ⛔ 从 `PASS_VERDICTS` 派生，不写死 `== "generalize"`：
+           新增 `removal_safe` 后，"放行"有两个名字，写死就会把
+           **合法通过的清理**判成拦截 —— 而那种失败不会报错，只是
+           清理永远提交不了，看起来像"清理没用"。
+        """
+        return self.verdict not in PASS_VERDICTS
 
     def to_dict(self) -> Dict[str, Any]:
         return {"verdict": self.verdict,
@@ -224,8 +241,13 @@ class GeneralizationGate:
         return out
 
     # ── 判别力兜底：只降级"放行"，不覆盖已有的拦截结论 ──────────────
-    def _downgrade_if_flat(self, res: ProbeResult) -> ProbeResult:
+    def _downgrade_if_flat(self, res: ProbeResult,
+                           pass_verdict: str = "generalize") -> ProbeResult:
         """把一次**本来要放行**的裁决，在 held-out 无跨度时降级为拦截。
+
+        ⛔ `pass_verdict` 只影响**文案**：放行有两条路径（能力泛化 / 清理
+           安全），它们"本来要判的那个值"不同，但"held-out 没跨度 ⇒ 这个
+           放行不可信"这条判据是同一个。⇒ 降级逻辑共用，只有措辞分叉。
 
         ⛔⛔ 为什么只作用在这一条路径上：
           · `overfit` / `partial` / `no_gain` 都是**有确凿证据**的拦截
@@ -245,6 +267,11 @@ class GeneralizationGate:
         """
         if self.suite.discriminative is not False:
             return res
+        #: ⛔ 两条路径"无法区分的两件事"不同 ⇒ 文案必须分叉，
+        #:    否则清理的放行理由会写成"无法区分真泛化"（答非所问）。
+        what = ("「真泛化」与「只会修这一类题」" if pass_verdict == "generalize"
+                else "「删掉的确实是死条目」与「删掉的东西只在没测到的"
+                     "难度层上才被用到」")
         return ProbeResult(
             verdict="inconclusive", dev_gain=res.dev_gain,
             heldout_gain=res.heldout_gain, base_heldout=res.base_heldout,
@@ -253,8 +280,9 @@ class GeneralizationGate:
             dev_by_difficulty=res.dev_by_difficulty,
             out_of_reach=res.out_of_reach, discriminative=False,
             reason=(f"held-out 有难度标签但只有一层 {sorted(self.suite.levels)}"
-                    f" ⇒ 它无法区分「真泛化」与「只会修这一类题」⇒ 本可判 "
-                    f"generalize（ho {res.heldout_gain:+.4f}），但放行结论不可信"
+                    f" ⇒ 它无法区分{what} ⇒ 本可判 "
+                    f"{pass_verdict}（ho {res.heldout_gain:+.4f}），"
+                    f"但放行结论不可信"
                     f" ⇒ 按拦截处理。出路：先把 held-out 补采样到有难度跨度"
                     f"（--max-tasks 或 grow_for_difficulty），不要放宽判据"))
 
@@ -407,6 +435,61 @@ class GeneralizationGate:
                            reason=f"发展集 +{dev_gain:.4f} 且 held-out {ho_gain:+.4f}"
                                   + (f"（分层 {by_diff}）" if by_diff else "")
                                   + " ⇒ 泛化，放行"))
+
+
+    # ── 清理候选：held-out **不许变差**（不要求涨）────────────────────
+    def probe_removal(self, base_h: Harness, cand_h: Harness,
+                      runner: Runner) -> ProbeResult:
+        """清理候选的泛化裁决：**删完之后 held-out 不许变差**。
+
+        ⛔⛔ 为什么不走 `probe()`：`probe()` 的第一道判据是
+            `dev_gain <= dev_floor ⇒ no_gain`（`_probe_inner` 第 319 行）。
+            而清理的 dev_gain **恒为 0** —— 删掉一个死条目不改变 reward，
+            这正是它"看起来无用"的原因 ⇒ 走 `probe()` 必得 `no_gain`
+            ⇒ `blocks=True` ⇒ **清理在结构上永远无法提交**。
+            那不是"闸在工作"，是**用错了闸**：`overfit` 的定义是
+            "发展集涨了但 held-out 没跟着涨"，而清理根本没涨，
+            谈不上"讨好判据"。
+
+        ⛔ 所以对清理，held-out 的职责从**「要涨」换成「不许掉」**：
+            删掉一个"看起来没人用、其实在 held-out 那个环境里真被用到"
+            的条目 ⇒ held-out reward 会掉 ⇒ 这里会响。
+            ⇒ 这不是放松判据，是**换了职责**：它防的是"删错了"，
+            不是"涨得假"。两者共用同一张 held-out，不是一个旁路。
+
+        ⛔ 与 `probe()` 共用：同一套 held-out、同一个 `min_tasks`、
+           同一条判别力降级（held-out 只有一层难度 ⇒ 放行不可信）
+           ⇒ 是同一张表的另一种读法，不是第二张表。
+        """
+        if self.suite.n_tasks < self.min_tasks:
+            return ProbeResult(
+                verdict="inconclusive", n_tasks=self.suite.n_tasks,
+                reason=f"held-out 任务数 {self.suite.n_tasks} < 最小要求 "
+                       f"{self.min_tasks} ⇒ 无法裁决，按拦截处理")
+        base_ho, base_vs = self.evaluate(base_h, runner)
+        cand_ho, cand_vs = self.evaluate(cand_h, runner)
+        ho_gain = cand_ho - base_ho
+        #: ⛔ 容差：浮点求和得到的 -1e-17 不是"变差"。
+        if ho_gain < -1e-9:
+            return ProbeResult(
+                verdict="removal_regress", heldout_gain=ho_gain,
+                base_heldout=base_ho, cand_heldout=cand_ho,
+                n_tasks=self.suite.n_tasks,
+                by_difficulty=self._gain_by_difficulty(base_vs, cand_vs),
+                discriminative=self.suite.discriminative,
+                reason=(f"清理后 held-out {ho_gain:+.4f}"
+                        f"（{base_ho:.2f}→{cand_ho:.2f}）⇒ 删掉的条目在 "
+                        f"held-out 环境里是真被用到的 ⇒ 不提交"))
+        res = ProbeResult(
+            verdict="removal_safe", heldout_gain=ho_gain,
+            base_heldout=base_ho, cand_heldout=cand_ho,
+            n_tasks=self.suite.n_tasks,
+            by_difficulty=self._gain_by_difficulty(base_vs, cand_vs),
+            reason=(f"清理后 held-out {ho_gain:+.4f}（{base_ho:.2f}→"
+                    f"{cand_ho:.2f}）⇒ 没变差 ⇒ 放行（减负，不要求增益）"))
+        if res.discriminative is None:
+            res.discriminative = self.suite.discriminative
+        return self._downgrade_if_flat(res, pass_verdict="removal_safe")
 
 
 def make_heldout(env_id: str, tasks: List[FrozenTask], name: str = "",

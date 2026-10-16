@@ -26,6 +26,9 @@ from typing import (Any, Callable, Dict, List, Optional, Protocol, Sequence,
 from .genome import (Capsule, Gene, Harness, gene_add_skill, gene_route_append,
                      gene_tool, gene_tune, parse_route)
 from .runtime import Trajectory
+#: ⛔ 清理提案器需要它。依赖方向：`providers → cleanup → agent → genome`，
+#:    链条上没有回指 providers 的边（有则会循环导入）。
+from . import cleanup as _cleanup
 
 
 def _accepts(fn: Any, arg: str) -> bool:
@@ -371,6 +374,65 @@ class TemplateProposer:
             out.append(Capsule(name="noop", genes=(), rationale="无可用变异",
                                origin="mined"))
         return out[:max(1, n)]
+
+
+# ──────────────────────────────────────────────────────────────────
+# 清理提案器（常设，不看 weakness）
+# ──────────────────────────────────────────────────────────────────
+@dataclass
+class CleanupProposer:
+    """清理提案器：把"收拾自己的产出"变成**可被提议的变异**。
+
+    ═══ 它与其它提议器最不一样的一点：**它不看 weakness** ═══
+
+        · `TemplateProposer` / `LLMProposer` 是 **weakness-driven**：
+          有失败证据 ⇒ 补能力。dev 全绿 ⇒ 它们无事可做。
+        · 码健康是**维护轴**，不是失败信号：它不会因为 dev 全绿就消失。
+          ⇒ 本提案器是**常设**的（standing proposer），**每轮都跑**。
+
+    ⛔ 存在理由（努力分配）：
+       进化循环每轮都在**评估候选**，而没有任何东西在自己的产出上花一点力。
+       机制上是因为**判据只认增益、不认减负** —— 删掉一个死条目 reward
+       不变 ⇒ 按现有判据它永远提不出来 ⇒ "通过测试但不产生增益"的机制
+       只增不减。本提案器把"减负"变成候选，但**能不能提交仍由闸决定**。
+
+    ⛔⛔ 它**不自己判**，候选走**同一套闸**（由 `evolution` 保证）：
+         · 非回归闸 —— 删错了东西，冻结套件会响；
+         · 泛化闸的**退化面** —— held-out 不许变差（不要求涨）；
+         · 两轴准入 —— reward 涨 **或** 自指负载降，且不许伴随 reward 下降。
+       ⇒ 它不是"绕过闸的清理通道"。想靠它把有用的东西删掉，闸照样会响。
+
+    ⛔ 保守：扫描挂在 `cleanup.genome_dead_entries`（与 `agent` 词汇表同源），
+       扫不到就**不提**（返回空列表）—— 不提 ≠ 没问题，调用方要能分辨。
+    """
+    name: str = "cleanup"
+
+    def propose(self, weakness: Dict[str, Any], harness: Harness,
+                n: int = 1) -> List[Capsule]:
+        #: ⛔ 显式忽略 weakness。形参保留是为了与其它提议器**同协议**
+        #:    （可互换：`MemoryAwareProposer` 包它、evolution 统一调
+        #:    `propose(w.to_dict(), h, n=...)`）。不看 weakness 是特性。
+        del weakness
+        try:
+            scan = _cleanup.genome_dead_entries(harness)
+        except Exception:                              # noqa: BLE001
+            #: ⛔ 扫描挂了 ⇒ 这一轮不提清理。**不抛** —— 编码层的故障
+            #:    不该让进化循环在最需要保守停手的那一刻整体炸掉。
+            return []
+        out: List[Capsule] = []
+        for entry in (scan.get("dead_entries") or [])[:max(1, n)]:
+            genes = _cleanup.cleanup_genes(harness, entry)
+            if not genes:
+                continue
+            out.append(Capsule(
+                name=f"cleanup:{entry.get('kind')}:{entry.get('name')}",
+                genes=genes,
+                rationale=str(entry.get("reason") or "")[:300],
+                origin="cleanup"))
+        return out
+
+    def diagnostics(self) -> Dict[str, Any]:
+        return {"name": self.name, "kind": "standing（不看 weakness）"}
 
 
 # ──────────────────────────────────────────────────────────────────

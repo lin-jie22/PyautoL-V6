@@ -244,8 +244,20 @@ def main():
     proposer = TemplateProposer(skills={
         "restore_from_baseline": "恢复到基线实现",
         "useless_skill": "没用的技能"})
+    #: ⛔⛔ D 组是**能力轴**的对照组，必须显式关掉清理轴
+    #:    （`cleanup_enabled=False`）。
+    #:    理由（"每加一道闸，所有对照组都要重审"）：清理提案器是**常设**的
+    #:    —— 它不看 weakness，每轮都跑。开着它，第二轮"无失败证据"时
+    #:    仍会提清理候选并可能提交 ⇒ D6 的 `"no_weakness" in revert_reason`
+    #:    翻红。那是**新机制按设计在工作**，不是回归；但它会让这条断言
+    #:    测到的不再是它声称测的东西（"能力侧有无在硬凑变异"）。
+    #:    ⇒ 单变量对照：这里只测能力轴，清理轴由 contract_cleanup_test 覆盖。
+    #:    ⛔ 只传 `cleanup=None` 不够 —— 那样 `__init__` 会**自动再造一个**
+    #:    （默认开的开关不能用"不传"来关，否则就是假仪表）。
     loop = EvolutionLoop(led, gate, dev, runner, proposer, store=store,
-                         caliber=CAL, config=EvolutionConfig(group_size=2))
+                         caliber=CAL,
+                         config=EvolutionConfig(group_size=2,
+                                                cleanup_enabled=False))
     h = Harness(meta_rules="元规则", memory_policy={"recall_topk": 5})
     rep1 = loop.run_round(h, round_no=1)
     ck("D1 第一轮挖到弱点并提交", rep1.improved, rep1.revert_reason)
@@ -267,6 +279,41 @@ def main():
        (not rep2.improved) and "no_weakness" in rep2.revert_reason,
        rep2.revert_reason)
 
+    #: D7 反证：**打开**清理 ⇒ 同一个"已修好、无弱点"的轮次**会**提交。
+    #:    ⛔ 没有这条，D6 的"不提交"可能只是"这循环本来就动不了"
+    #:       ⇒ 它同时证明 D6 里那个 `cleanup_enabled=False` **真的在起作用**
+    #:       （关掉它行为就变 —— 否则那是个恒真的空闸）。
+    #:    ⛔ 夹具要点：runner 只认 `restore_from_baseline`（撑住 reward ⇒ 全绿
+    #:       ⇒ 无弱点），另挂一条永不可达的技能当清理靶子。
+    #:       ⛔ 靶子名必须排在 `restore_from_baseline` **之前** —— 扫描按
+    #:       sorted 走、`cleanup_group_size=1` 只取第一条 ⇒ 否则清掉的就是
+    #:       撑 reward 的那条 ⇒ `cleanup_regresses` ⇒ 测不到想测的东西。
+    h_cl = Harness(skills={"aaa_ghost": "y",
+                           "restore_from_baseline": "x"})
+    loop_cl = EvolutionLoop(led, gate, dev, runner, proposer, store=None,
+                            caliber=CAL,
+                            config=EvolutionConfig(group_size=2,
+                                                   cleanup_enabled=True))
+    rep_cl = loop_cl.run_round(h_cl, round_no=1)
+    ck("D7 ⛔ 反证：打开清理 ⇒ 无弱点也会提清理并提交"
+       "（D6 的『不提交』是关掉清理的结果，不是循环本就动不了）",
+       rep_cl.improved and rep_cl.cleanup_proposed >= 1
+       and "no_weakness" not in rep_cl.revert_reason,
+       f"cleanup_proposed={rep_cl.cleanup_proposed} "
+       f"committed={rep_cl.committed} reason={rep_cl.revert_reason}")
+    ck("D7b 提交的是**清理**候选（不是又提了个能力变异）",
+       any(c.is_cleanup for c in rep_cl.candidates if c.accepted),
+       f"{[(c.capsule_name, c.is_cleanup, c.reason) for c in rep_cl.candidates]}")
+    ck("D7c 清理候选带**减负读数**且 >= 1（有读数才放行，不是「感觉少了」）",
+       any(c.is_cleanup and c.load_gain >= 1.0
+           for c in rep_cl.candidates if c.accepted),
+       f"{[(c.capsule_name, c.load_gain) for c in rep_cl.candidates]}")
+    ck("D7d 清掉的是**靶子**不是撑 reward 的那条（reward 没掉）",
+       all(c.reward >= rep_cl.baseline_reward
+           for c in rep_cl.candidates if c.is_cleanup),
+       f"{[(c.capsule_name, c.reward) for c in rep_cl.candidates]}"
+       f" base={rep_cl.baseline_reward}")
+
     # ── E 组：L0 阻断 + 非回归闸是准入 ────────────────────────────
     print("E 组：L0 阻断 + 闸为准入")
     cap_l0 = Capsule(name="touch_L0",
@@ -274,7 +321,8 @@ def main():
                                  value="新元规则"),))
     led2 = Ledger(tmp / "l2.jsonl")
     loop2 = EvolutionLoop(led2, gate, dev, runner,
-                          _FixedProposer(cap_l0), store=None, caliber=CAL)
+                          _FixedProposer(cap_l0), store=None, caliber=CAL,
+                          config=EvolutionConfig(cleanup_enabled=False))
     rep3 = loop2.run_round(h, round_no=1)
     ck("E1 触碰 L0 ⇒ 被阻断且不提交",
        (not rep3.improved)
@@ -293,7 +341,8 @@ def main():
                               name="c", genes=(Gene(op="set",
                                                     target="L3.skills.k",
                                                     value="v"),))),
-                          store=None, caliber=CAL)
+                          store=None, caliber=CAL,
+                          config=EvolutionConfig(cleanup_enabled=False))
     rep4 = loop3.run_round(h, round_no=1)
     ck("E3 候选让冻结任务变红 ⇒ 闸拦下",
        any((not c.gate_passed) and c.gate_regressions for c in rep4.candidates),
@@ -348,7 +397,12 @@ def main():
         lp = EvolutionLoop(l, gate, dev, runner_always_fail,
                            TemplateProposer(skills={"restore_from_baseline": "x"}),
                            store=None, caliber=CAL,
-                           config=EvolutionConfig(group_size=2), budget=budget)
+                           #: ⛔ 同 D 组：本契约只测能力轴，清理轴单独有契约。
+                           #:    G4 数的是**评估次数** —— 多一个清理候选就多
+                           #:    两次 eval ⇒ 预算闸的读数会被另一个轴污染。
+                           config=EvolutionConfig(group_size=2,
+                                                  cleanup_enabled=False),
+                           budget=budget)
         return lp, lp.run(h, rounds=rounds)
 
     from aether.evolution import RunBudget  # noqa: E402

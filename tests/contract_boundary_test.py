@@ -241,7 +241,9 @@ def group_c() -> None:
             led, gate, dev, _Runner(ag),
             TemplateProposer(skills={"restore_from_baseline": "恢复到基线实现"}),
             store=None, caliber=cal,
+            #: ⛔ 本组只测"归因不静默"，显式关掉清理轴（同 D 组纪律）
             config=EvolutionConfig(group_size=2,
+                                   cleanup_enabled=False,
                                    attribute_layers=attribute_layers))
         rep = loop.run_round(
             Harness(meta_rules="元规则", memory_policy={"recall_topk": 5}),

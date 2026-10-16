@@ -102,6 +102,7 @@ def group_a() -> None:
                          base_fails_cand_fails, FixedProposer([cap]),
                          caliber=CAL, heldout=ho,
                          config=EvolutionConfig(group_size=2,
+                                                cleanup_enabled=False,
                                                 stop_on_saturation=False))
     rep = loop.run_round(Harness(tools=("read_file", "write_file",
                                         "python_exec")), round_no=1)
@@ -137,7 +138,8 @@ def group_a() -> None:
     led2 = Ledger(d / "l2.jsonl", session="sess-SAT2")
     loop2 = EvolutionLoop(led2, NonRegressionGate(frozen, base), dev, cand_wins,
                           FixedProposer([cap]), caliber=CAL, heldout=ho,
-                          config=EvolutionConfig(group_size=2))
+                          config=EvolutionConfig(group_size=2,
+                                                 cleanup_enabled=False))
     rep2 = loop2.run_round(Harness(tools=("read_file", "write_file",
                                           "python_exec")), round_no=1)
     ck("A6 反证：候选能超过基线 ⇒ 不得报饱和（那是该提交，不是到顶）",
@@ -155,7 +157,9 @@ def group_a() -> None:
     led4 = Ledger(d / "l4.jsonl", session="sess-SAT4")
     loop4 = EvolutionLoop(led4, NonRegressionGate(frozen, base), dev,
                           dev_win_ho_lose, FixedProposer([cap]), caliber=CAL,
-                          heldout=ho, config=EvolutionConfig(group_size=2))
+                          heldout=ho,
+                          config=EvolutionConfig(group_size=2,
+                                                 cleanup_enabled=False))
     rep4 = loop4.run_round(Harness(tools=("read_file", "write_file",
                                           "python_exec")), round_no=1)
     ck("A7 反证：被泛化闸拦下 ⇒ 报拦下原因，不是饱和（失败≠停滞）",
@@ -196,6 +200,7 @@ def group_b() -> None:
                          base_fails_cand_fails, FixedProposer(), caliber=CAL,
                          heldout=ho,
                          config=EvolutionConfig(group_size=2,
+                                                cleanup_enabled=False,
                                                 stop_on_saturation=True))
     _, reports = loop.run(Harness(tools=("read_file", "write_file",
                                          "python_exec")), rounds=6)

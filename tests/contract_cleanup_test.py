@@ -1,0 +1,272 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""契约：清理是**可被提议的变异**，而且走**同一套闸**。
+
+═══ 它回答的那个「努力分配」问题 ═══
+
+进化循环每轮都在**评估候选**，而没有任何东西在自己的产出上花一点力。
+机制根源不是"没人想起去做"，而是**判据只认增益、不认减负**：
+
+    · 非回归闸      —— 拦"变坏"，清理不变坏 ⇒ 过；
+    · 组内相对优势  —— 为有噪声的 reward 采样设计 ⇒ 清理恒 0；
+    · 能力地板      —— `gain < 0.01` ⇒ 清理（gain=0）**必死在这一条**；
+    · 泛化闸        —— `dev_gain <= 0 ⇒ no_gain ⇒ blocks` ⇒ 清理又被拦一次。
+
+⇒ 四条里三条按构造就拦不死它，一条（能力地板）按构造就必死。
+  结果是"通过测试但不产生增益"的机制只增不减。
+
+═══ 本契约守的三件事 ═══
+
+  ① 自指负载真的**扫得出来**（保守口径，宁可漏报不可冤报）；
+  ② 清理候选真的**删得干净**（摘链 + 删技能，不留幽灵路由）；
+  ③ 减负轴的两道新闸**有判别力**（不是橡皮图章）：
+       · 删对了 ⇒ `removal_safe`（放行）
+       · 删错了 ⇒ `removal_regress`（held-out 掉了 ⇒ 拦）
+     ⛔ 走旧的 `probe()` 会 100% 得 `no_gain` ⇒ 清理永远提交不了。
+       那不是闸严，是**用错了闸**：overfit 问的是"涨的是不是真的"，
+       而清理根本不涨 ⇒ 对清理该问的是"删完之后 held-out 变差没有"。
+
+跑法：
+    python tests/contract_cleanup_test.py
+"""
+import sys
+import tempfile
+from pathlib import Path
+
+#: ⛔ 声明这份契约支持哪些模式（`aether check` 静态读这一行）：
+#:    未声明 ≠ 只有一种模式 —— 前者是"还没接线"，报告里会被点名。
+SUPPORTED_MODES = ("default",)
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+FAILS = []
+
+
+def ck(name, cond, detail=""):
+    print(f"  {'PASS' if cond else 'FAIL'} {name} {detail if not cond else ''}")
+    if not cond:
+        FAILS.append(name)
+
+
+def main():
+    import aether.agent as AG
+    import aether.generalization as GV
+    from aether.cleanup import (cleanup_genes, genome_dead_entries,
+                                genome_load)
+    from aether.environment import Environment, mutate_source
+    from aether.genome import (Capsule, Harness, apply_capsule, apply_gene,
+                               gene_remove_skill, gene_route_append,
+                               parse_route)
+
+    def H(skills=None, routing=None, **kw):
+        base = dict(meta_rules="V6 元规则：奖励只来自执行判据。",
+                    tools=("read_file", "write_file", "python_exec"),
+                    skills=dict(skills or {}), routing=dict(routing or {}),
+                    memory_policy={})
+        base.update(kw)
+        return Harness(**base)
+
+    # ── A 组：扫描器的判别力（保守口径）────────────────────────────
+    print("A 组：基因组死条目扫描（保守口径：宁可漏报，不可冤报）")
+    h_clean = H({"fix_control_flow": "保守通用修法"},
+                {"repair": "fix_control_flow"})
+    ck("A1 干净 harness（技能在链上 + 名字在词汇表）⇒ 0 条死条目",
+       genome_load(h_clean) == 0, f"n={genome_load(h_clean)}")
+
+    h_unrouted = H({"fix_control_flow": "x", "fix_literals": "y"},
+                   {"repair": "fix_control_flow"})
+    e_un = genome_dead_entries(h_unrouted)
+    ck("A2 不在任何路由链上的技能 ⇒ 判为 unrouted_skill（装载了也轮不到）",
+       [x["kind"] for x in e_un["dead_entries"]] == ["unrouted_skill"]
+       and e_un["dead_entries"][0]["name"] == "fix_literals",
+       str(e_un["dead_entries"]))
+
+    h_ghost = H({"fix_x": "没人认的技能"}, {"repair": "fix_x"})
+    e_gh = genome_dead_entries(h_ghost)
+    ck("A3 词汇表外的技能名（且在链上）⇒ ghost_skill，且带它所在的链",
+       e_gh["dead_entries"] and e_gh["dead_entries"][0]["kind"] == "ghost_skill"
+       and e_gh["dead_entries"][0]["carrying_routes"] == ["repair"],
+       str(e_gh["dead_entries"]))
+
+    h_dc = H({"patch::textscore": "定点修法"}, {"repair": "patch::textscore"})
+    e_dc = genome_dead_entries(h_dc)
+    ck("A4 ⛔ patch::（双冒号）必被报 —— agent 切出来是 ':x'，永不等于 env_id",
+       [x["name"] for x in e_dc["dead_entries"]] == ["patch::textscore"],
+       str(e_dc["dead_entries"]))
+
+    ck("A5 uci: 前缀 ⇒ 不报（保守豁免：接入层可能不挂路由，静态不可判）",
+       genome_load(H({"uci:ext.fixer": "外部能力"}, {})) == 0,
+       f"n={genome_load(H({'uci:ext.fixer': 'x'}, {}))}")
+
+    #: 反证：A2 那个技能接上链 ⇒ 它活了。用的是**真实基因操作**，
+    #: 顺带证明扫描器读的是基因组本身，而不是某个独立缓存。
+    h_fixed = apply_gene(h_unrouted, gene_route_append("repair", "fix_literals"))
+    ck("A6 反证：把 A2 那条技能挂上路由 ⇒ 它活了（证明扫描器在判，不是全报）",
+       genome_load(h_fixed) == 0, f"n={genome_load(h_fixed)}")
+
+    # ── B 组：清理基因真的删干净 ───────────────────────────────────
+    print("B 组：清理候选真的删干净（不留幽灵路由）")
+    if not e_gh["dead_entries"]:
+        ck("B0 扫描器报出了 A3 的幽灵技能（否则下面全是空真）", False,
+           "e_gh 为空")
+        return 1
+    genes = cleanup_genes(h_ghost, e_gh["dead_entries"][0])
+    layers = sorted(g.target.split(".")[0] for g in genes)
+    ck("B1 在链上的死技能 ⇒ 基因是【摘链 + 删技能】两条（缺一 ⇒ 制造死条目）",
+       layers == ["L1", "L3"] and all(g.op == "remove" for g in genes),
+       str([(g.op, g.target, g.value) for g in genes]))
+    h_after = apply_capsule(h_ghost, Capsule(name="c", genes=genes,
+                                             origin="cleanup"))
+    ck("B2 ⛔ 清完后链上不再有已删项（不留幽灵路由）",
+       "fix_x" not in parse_route(h_after.routing.get("repair"))
+       and "fix_x" not in h_after.skills,
+       f"routing={h_after.routing} skills={list(h_after.skills)}")
+    ck("B3 减负读数**现扫复核**：真的少 1 条（不是提案自报的数）",
+       genome_load(h_ghost) - genome_load(h_after) == 1,
+       f"{genome_load(h_ghost)}→{genome_load(h_after)}")
+    #: 反证：只删技能不摘链 ⇒ B2 立刻会红 ⇒ B2 不是恒真。
+    h_half = apply_capsule(h_ghost, Capsule(
+        name="c", genes=(gene_remove_skill("fix_x"),), origin="cleanup"))
+    ck("B4 反证：只删技能不摘链 ⇒ 留下幽灵路由（B2 因此不是恒真）",
+       "fix_x" in parse_route(h_half.routing.get("repair"))
+       and "fix_x" not in h_half.skills,
+       f"routing={h_half.routing}")
+    #: 链被摘空 ⇒ 整个路由键也要去掉，不留空壳键。
+    h_one = H({"fix_x": "x"}, {"repair": "fix_x"})
+    e_one = genome_dead_entries(h_one)
+    h_none = apply_capsule(h_one, Capsule(
+        name="c", genes=cleanup_genes(h_one, e_one["dead_entries"][0]),
+        origin="cleanup"))
+    ck("B5 链被摘空 ⇒ 整个路由键也去掉（不留空壳键）",
+       "repair" not in h_none.routing, f"routing={h_none.routing}")
+
+    # ── C 组：词汇表与执行体同源（扫描器不许另抄一份名单）────────────
+    print("C 组：词汇表与 `_apply_one` 同源")
+    env = Environment.from_dir(ROOT / "tasks" / "textscore")
+    broken, _ = mutate_source(env.source, which=2)
+    from aether.agent import HarnessAgent
+    agent = HarnessAgent({env.env_id: env})
+    spec = {"env_id": env.env_id, "broken_source": broken,
+            "topic": env.env_id, "task_class": "repair"}
+
+    out_ok, ok_ok = agent._apply_one("fix_control_flow", broken, env, spec, [])
+    ck("C1 词汇表认可的 fix_control_flow 在破损源码上**真改了东西**",
+       ok_ok and out_ok != broken, f"ok={ok_ok} changed={out_ok != broken}")
+    #: 幽灵名字：恒等，但**被记为"适用"** ⇒ active 非空 ⇒ L4 被压制。
+    out_gh, ok_gh = agent._apply_one("totally_made_up", broken, env, spec, [])
+    ck("C2 词汇表外的名字 ⇒ `_apply_one` 恒等、**且被记为『适用』**"
+       "（正是它压制 L4 记忆通路的原因）",
+       out_gh == broken and ok_gh is True, f"ok={ok_gh} changed={out_gh != broken}")
+    out_dc, ok_dc = agent._apply_one("patch::textscore", broken, env, spec, [])
+    ck("C3 ⛔ patch::x ⇒ 判为『不适用』（结构上永不生效）",
+       ok_dc is False and out_dc == broken, f"ok={ok_dc}")
+    #: 词汇表与扫描器的一致性：表里认可的名字，扫描器不许报它是幽灵。
+    bad = [nm for nm in AG.KNOWN_STRATEGIES if nm != "memory_hint"
+           and any(x["name"] == nm and x["kind"] == "ghost_skill"
+                   for x in genome_dead_entries(
+                       H({nm: "x"}, {"repair": nm}))["dead_entries"])]
+    ck("C4 词汇表认可的每一个名字 ⇒ 扫描器都不报它是幽灵（两份名单一致）",
+       not bad, f"不一致={bad}")
+
+    # ── D 组：进化循环真的把清理当候选提（且不被「无弱点」短路）──────
+    print("D 组：清理是**可被提议的变异**（常设，不看 weakness）")
+    from aether.evolution import EvolutionConfig, EvolutionLoop
+    from aether.ledger import Ledger
+    from aether.nongression import Baseline, FrozenTask, NonRegressionGate
+    from aether.providers import TemplateProposer
+    from aether.verifier import Check, Verdict
+
+    tmp = Path(tempfile.mkdtemp(prefix="v6_cleanup_"))
+    CAL = {"seed": 0}
+
+    def mk(passed, name="c"):
+        return Verdict(passed=passed, checks=(Check(name, passed, "ev"),),
+                       evidence={"n": 1})
+
+    def runner_green(h, spec=None):
+        """发展集/held-out **全绿** ⇒ 挖不到弱点 ⇒ 走原来的 noop 路径。"""
+        return mk(True)
+
+    ft = FrozenTask("t1", {})
+    gate = NonRegressionGate([ft],
+                             Baseline(caliber=CAL, verdicts={"t1": mk(True)}))
+    h_dirty = H({"fix_control_flow": "x", "fix_x": "没人认的"},
+                {"repair": "fix_control_flow|fix_x"})
+
+    loop = EvolutionLoop(ledger=Ledger(tmp / "l_a.jsonl"), gate=gate,
+                         dev_suite=[ft], runner=runner_green,
+                         proposer=TemplateProposer(skills={}), caliber=CAL,
+                         config=EvolutionConfig(cleanup_group_size=2))
+    rep = loop.run_round(h_dirty, round_no=1)
+    ck("D1 发展集全绿（无弱点）时，循环**不再直接 return**，仍走到清理候选",
+       rep.cleanup_proposed >= 1, f"cleanup_proposed={rep.cleanup_proposed}")
+    cleanup_cands = [c for c in rep.candidates if c.is_cleanup]
+    ck("D2 清理候选真的进过闸（被评估、被记账），不是只提不算",
+       bool(cleanup_cands),
+       str([(c.capsule_name, c.is_cleanup, c.reason) for c in rep.candidates]))
+    ck("D3 减负读数是**现扫**出来的 + 清理候选**不是**因 no_advantage 被拦",
+       bool(cleanup_cands) and cleanup_cands[0].load_gain >= 1
+       and not any("no_advantage" in (c.reason or "") for c in cleanup_cands),
+       str([(c.capsule_name, c.load_gain, c.reason) for c in cleanup_cands]))
+    ck("D4 全绿且清理有效 ⇒ 这一轮**提交了**（不再空转 9 轮）",
+       rep.improved, f"committed={rep.committed} revert={rep.revert_reason}")
+
+    #: 反证：关掉清理 ⇒ 回到原行为。
+    loop_off = EvolutionLoop(ledger=Ledger(tmp / "l_off.jsonl"), gate=gate,
+                             dev_suite=[ft], runner=runner_green,
+                             proposer=TemplateProposer(skills={}), caliber=CAL,
+                             cleanup=None,
+                             config=EvolutionConfig(cleanup_enabled=False))
+    rep_off = loop_off.run_round(h_dirty, round_no=1)
+    ck("D5 反证：cleanup_enabled=False 且未注入 ⇒ 回到原 noop 行为"
+       "（D1 因此不是恒真）",
+       rep_off.cleanup_proposed == 0 and rep_off.idle
+       and rep_off.revert_reason.startswith("no_weakness_evidence"),
+       f"proposed={rep_off.cleanup_proposed} idle={rep_off.idle} "
+       f"reason={rep_off.revert_reason}")
+
+    # ── E 组：泛化闸的**退化面**（不是放宽，是换职责）────────────────
+    print("E 组：清理走泛化闸的退化面（held-out 不许变差）")
+    ho = GV.HeldOutSuite(name="ho", tasks=(FrozenTask("h1", {}),),
+                         env_id="eventflow")
+    g = GV.GeneralizationGate(ho, dev_task_ids=("t1",))
+    h_clean_after = apply_capsule(h_dirty, Capsule(
+        name="c",
+        genes=cleanup_genes(h_dirty, genome_dead_entries(
+            h_dirty)["dead_entries"][0]), origin="cleanup"))
+
+    pr_old = g.probe(h_dirty, h_clean_after, runner_green, dev_gain=0.0)
+    ck("E1 清理候选走旧 `probe()` ⇒ 必被判 no_gain 拦下（这就是原来的死结）",
+       pr_old.verdict == "no_gain" and pr_old.blocks, f"{pr_old.verdict}")
+    pr_new = g.probe_removal(h_dirty, h_clean_after, runner_green)
+    ck("E2 改走 `probe_removal` ⇒ 放行（held-out 没变差）",
+       pr_new.verdict == "removal_safe" and not pr_new.blocks,
+       f"{pr_new.verdict} ho={pr_new.heldout_gain:+.2f}")
+
+    #: 反证：删掉一个在 held-out 上**真被用到**的条目 ⇒ 必须拦。
+    def runner_uses_dead(h, spec=None):
+        """held-out 上真的会用到那个"看起来没人用"的技能。"""
+        return mk("fix_x" in (h.skills or {}))
+
+    pr_bad = g.probe_removal(h_dirty, h_clean_after, runner_uses_dead)
+    ck("E3 反证：删掉在 held-out 上真被用到的条目 ⇒ removal_regress（拦）",
+       pr_bad.verdict == "removal_regress" and pr_bad.blocks,
+       f"{pr_bad.verdict} ho={pr_bad.heldout_gain:+.2f}")
+    ck("E4 反证（续）：E2 与 E3 的裁决不同 ⇒ E2 不是橡皮图章",
+       pr_new.verdict != pr_bad.verdict, f"{pr_new.verdict} vs {pr_bad.verdict}")
+    ck("E5 新裁决名已登记进封闭集合（否则 blocks 会把合法放行判成拦截）",
+       {"removal_safe", "removal_regress"} <= set(GV.VERDICTS)
+       and "removal_safe" in GV.PASS_VERDICTS,
+       f"VERDICTS={GV.VERDICTS} PASS={GV.PASS_VERDICTS}")
+
+    print()
+    if FAILS:
+        print(f"❌ 失败 {len(FAILS)} 条：{FAILS}")
+    else:
+        print("✅ 全部通过")
+    return 1 if FAILS else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

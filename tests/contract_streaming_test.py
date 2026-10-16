@@ -885,7 +885,7 @@ def _mk_deadend_loop(ledger: Any) -> Any:
     用 `EvolutionLoop.__new__` 手工塞属性会绕过这件事 —— 哪天有人删了
     `__init__` 里那两行，测试照样全绿而生产直接崩（假绿）。
     """
-    from aether.evolution import EvolutionLoop
+    from aether.evolution import EvolutionConfig, EvolutionLoop
     from aether.nongression import Baseline, FrozenTask, NonRegressionGate
     from aether.verifier import Verdict
 
@@ -896,8 +896,12 @@ def _mk_deadend_loop(ledger: Any) -> Any:
     frozen = [FrozenTask(task_id="fz", spec={"env": "A", "frozen": True})]
     cal = {"seed": 0}
     base = Baseline(caliber=cal, verdicts={}, harness_id="seed")
+    #: ⛔ 本组只测"死路账是增量的"，显式关掉清理轴（同 D 组纪律）：
+    #:    常设提案器每轮都会往账本里塞候选事件 ⇒ 那会让"扫了多少条"这个
+    #:    读数被另一个轴推动，测到的就不再是死路账本身。
     return EvolutionLoop(ledger, NonRegressionGate(frozen, base), dev,
-                         runner, _FixedProposer([]), caliber=cal)
+                         runner, _FixedProposer([]), caliber=cal,
+                         config=EvolutionConfig(cleanup_enabled=False))
 
 
 def group_m() -> None:
