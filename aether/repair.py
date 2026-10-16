@@ -24,6 +24,7 @@ held-out 也可能是**偏的**：如果 held-out 全是 easy 题，一个"只�
 from __future__ import annotations
 
 import ast
+from collections.abc import Mapping
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from .environment import Environment, numeric_literals, verify_source
@@ -249,7 +250,14 @@ def difficulty_report(env: Environment, tasks: List[Any],
     for t in tasks:
         src = None
         spec = getattr(t, "spec", None)
-        if isinstance(spec, dict):
+        #: ⛔⛔ 必须是 `Mapping` 而不是 `dict`：发展集/held-out 的任务都是
+        #:    `FrozenTask`，而 `FrozenTask.__post_init__` 会把 spec 包成
+        #:    `MappingProxyType`（冻结基线承诺）—— 它**不是** dict 子类。
+        #:    ⇒ 写 `isinstance(spec, dict)` 时 labels **恒为空** ⇒ 难度
+        #:    分层静默失效 ⇒ 泛化闸拿不到同层对照 ⇒ "放行"变成无条件。
+        #:    与 `nongression.FrozenTask.fingerprint` 里那个坑**完全同形**
+        #:    （上轮只修了那一处，这是同一个错误的第二次出现）。
+        if isinstance(spec, Mapping):
             src = spec.get("broken_source")
         if src is None:
             src = getattr(t, "broken_source", None)
