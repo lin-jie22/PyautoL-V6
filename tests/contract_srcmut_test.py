@@ -374,9 +374,16 @@ def main():
     #:       **永远**拿不到裁决 ⇒ 提议 127 次 / 过闸 0 次 / 执行 0 次。
     #:       那不是"保守"，是**死闸**：连事件都在记（n_probed=0），
     #:       只是永远记 0。⇒ 默认值改为 >= 1，由本条钉住。
-    ck("H2 ⛔ 生产默认 max_source_probes >= 1"
-       "（=0 ⇒ 唯一可证明的那类恒红 ⇒ 提议得过、闸过不了 ⇒ 死闸）",
-       EvolutionConfig().max_source_probes >= 1)
+    #: ⛔ 钉住**默认值本身**（第 94 条纪律：默认开的开关不能用「不传」来关，
+    #:    默认关的验证同理 —— 也不能靠"没人提"来维持）。
+    #:    这里钉的是 **0**：循环只提议、不对拍；对拍由 CLI 承担。
+    #:    ⛔ 为什么不是 1：放开实测过 ⇒ 全量回归由
+    #:       `pass=50 fail=0 timeout=1` 退化为 `pass=46 fail=1 timeout=4`
+    #:       （见 README 第 98 条）。改动这里 ⇒ 必须同时改本条断言与
+    #:       受影响契约的 timeout，否则回归会被拖垮而没人知道原因。
+    ck("H2 ⛔ 生产默认 max_source_probes == 0"
+       "（循环 = 提议器；对拍 = CLI 的活儿。翻成 1 ⇒ 这里必须转红）",
+       EvolutionConfig().max_source_probes == 0)
     ck("H3 反证：显式关 ⇒ 真的关掉（不是常量）",
        EvolutionConfig(source_cleanup_enabled=False).source_cleanup_enabled
        is False
