@@ -34,6 +34,7 @@ V6 相对这些工作多做的三件事（来自 V5 的硬教训 + 2026 文献�
 """
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -426,6 +427,14 @@ class RunBudget:
                 "exhausted": self.exhausted()}
 
 
+#: ⛔ **可重入守卫的环境变量**（跨进程）。
+#:    对拍（`srcmut.probe`）是**起子进程**跑冻结契约的；而契约里有若干份
+#:    自己会 `EvolutionLoop.run(...)` ⇒ run() → 清理 pass → probe → 子进程
+#:    → run() → … ⇒ **无限递归**。类旗子挡不住子进程，只能靠环境变量
+#:    （`contract_runner` 复制 `os.environ` ⇒ 会被继承）。
+_GUARD_ENV = "V6_SOURCE_CLEANUP_ACTIVE"
+
+
 class EvolutionLoop:
     """Self-Harness 进化循环。
 
@@ -468,6 +477,15 @@ class EvolutionLoop:
     #:    「预算 > 0 时**真的**对拍了」（第 5 条：有机制 ≠ 这条路被走到）。
     _probe_runner_factory: Optional[Callable[..., Callable[[Any],
                                                            Dict[str, Any]]]] = None
+    #: ⛔ **可重入守卫**（类级，与 `_deadend_cache` 同形态）。
+    #:    `_source_cleanup_pass` 由 `run()` 调用，而它对拍跑的契约里又有调
+    #:    `run()` 的 ⇒ 没有这面旗子就是无限递归。详见该方法 docstring。
+    _in_source_cleanup: bool = False
+    #: ⛔ **进程级一次性闩锁**：对拍的前提是"源码未变"，而同一进程内源码
+    #:    不会变 ⇒ **第二次及以后重跑对拍零信息量**，只是把分钟级成本乘上
+    #:    调用次数（实测：契约里 run() 被调多次 ⇒ 4 份契约集体超时）。
+    #:    ⛔ 与守卫是**两件事**：守卫挡"嵌套"，闩锁挡"重复"。
+    _probed_once: bool = False
 
     def __init__(self, ledger: Ledger, gate: NonRegressionGate,
                  dev_suite: List[FrozenTask], runner: Runner,
@@ -1181,9 +1199,58 @@ class EvolutionLoop:
 
         ⛔ 扫描挂了 ⇒ **记失败事件**，不静默跳过：
            "没扫"与"扫了没有"必须能分辨（否则它又是一个假仪表）。
+
+        ⛔⛔ **可重入守卫**（2026-10-16 实测踩到，代价是 108 个失控进程）：
+           本 pass 由 `run()` 在末尾调用；而对拍跑的**冻结契约里有若干份自己
+           会调用 `run()`**（`contract_evolution_test` / `contract_checkpoint_test`
+           都在进程内构造 `EvolutionLoop` 并 `run(...)`）。
+               ⇒ run() → 本 pass → probe → 子进程跑契约 → 契约里 run()
+                 → 本 pass → probe → … ⇒ **无限递归**（不是慢，是不终止）。
+           ⛔ 这也是当初 `max_source_probes=0` **承重的真正原因**：它不是
+              "太贵所以关掉"，而是**关掉它恰好把递归压住了**。⇒ 光"因为
+              实测只要 160s 就放开默认值"会把递归一起放出来（已实测复现）。
+           ⇒ 正解是**可重入守卫**：嵌套调用直接跳过并**显式记账**
+              （`cleanup.source_skipped` / reason=`reentrant`），
+              而**不是**靠预算默认值去兜底 —— 兜底这件事不该由一个
+              成本参数承担，它与安全性正交。
         """
         if not self.cfg.source_cleanup_enabled:
             return
+        #: 双重守卫：**进程内**用类旗子，**跨进程**用环境变量。
+        #: ⛔⛔ 为什么环境变量不可省：对拍是**起子进程**跑契约的，类旗子
+        #:    活在父进程的内存里 ⇒ 子进程看到的是初始值 False。
+        #:    只加类旗子 ⇒ 递归照旧（已实测：108 个进程失控）。
+        #:    `contract_runner` 用 `env = dict(os.environ)` 生成子进程环境
+        #:    ⇒ 这里设的环境变量**会**被子进程继承 ⇒ 能挡住跨进程递归。
+        if type(self)._in_source_cleanup or os.environ.get(_GUARD_ENV) == "1":
+            #: ⛔ 跳过的**必须**记账：否则"嵌套里没扫"和"扫了没有问题"
+            #:    在外部完全等价（第 11 条：跳过是最会撒谎的那种通过）。
+            self._append_safe("cleanup.source_skipped", {
+                "rounds": len(reports),
+                "reason": "reentrant",
+                "note": ("嵌套的 run() 里不再重复扫源码（对拍跑的契约自己会调 run()"
+                         "⇒ 不守卫就是无限递归）。**这不是通过，是没有读数**。")})
+            return
+        _prev = os.environ.get(_GUARD_ENV)
+        os.environ[_GUARD_ENV] = "1"
+        type(self)._in_source_cleanup = True
+        try:
+            return self._source_cleanup_pass_inner(reports)
+        finally:
+            type(self)._in_source_cleanup = False
+            if _prev is None:
+                os.environ.pop(_GUARD_ENV, None)
+            else:
+                os.environ[_GUARD_ENV] = _prev
+
+    def _source_cleanup_pass_inner(self, reports: List[RoundReport]) -> None:
+        """真正的实现体。⛔ **只能**被 `_source_cleanup_pass` 调用。
+
+        拆成两层是**可重入守卫**的实现需要：外层负责"要不要做 + 记账"，
+        内层只管"怎么做"。把守卫和业务逻辑写在一个函数里 ⇒ `return`
+        散落多处，迟早漏掉 `finally` 复位（与「退化分支要整段进守卫」
+        同族事故）。
+        """
         try:
             from . import cleanup as _cl
             from . import srcmut as _sm
@@ -1227,8 +1294,26 @@ class EvolutionLoop:
             verdict = None
             code = ""
             if p.edits:
-                if probed < self.cfg.max_source_probes:
+                if probed >= self.cfg.max_source_probes:
+                    code = "over_budget"
+                    p.evidence["nonregression"] = {
+                        "ok": False, "unverified": True,
+                        "reason": (f"超出本次对拍预算（max_source_probes="
+                                   f"{self.cfg.max_source_probes}）⇒ 未验证")}
+                elif type(self)._probed_once:
+                    #: ⛔ **进程级一次性闩锁**：对拍的前提是"源码未变"，
+        #:    而**同一进程内源码不会变** ⇒ 第二次及以后重跑对拍
+        #:    **零信息量**，只是把分钟级成本乘上调用次数
+        #:    （实测：契约里 run() 被调多次 ⇒ 4 份契约集体超时）。
+        #:    ⛔ 与可重入守卫是**两件事**：守卫挡"嵌套"，闩锁挡"重复"。
+                    code = "already_probed"
+                    p.evidence["nonregression"] = {
+                        "ok": False, "unverified": True,
+                        "reason": ("本进程已对拍过一次 ⇒ 源码未变，"
+                                   "重跑无信息量（想强制重跑请换进程）")}
+                else:
                     probed += 1
+                    type(self)._probed_once = True
                     eds = [_sm.Edit.from_dict(x) for x in p.edits]
                     sel, why = _sm.select_contracts(
                         _root, [e.file for e in eds])
@@ -1246,12 +1331,6 @@ class EvolutionLoop:
                         else "probe_unverified")
                     if not sel:
                         code = "no_contracts"
-                else:
-                    code = "over_budget"
-                    p.evidence["nonregression"] = {
-                        "ok": False, "unverified": True,
-                        "reason": (f"超出本次对拍预算（max_source_probes="
-                                   f"{self.cfg.max_source_probes}）⇒ 未验证")}
             else:
                 #: ⛔ 前两类是**启发式** ⇒ 拿不出可应用的编辑 ⇒ 无从对拍。
                 #:    它们本来就该红 —— 这不是缺陷，是判据的边界：

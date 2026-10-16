@@ -74,10 +74,20 @@ MUTANTS: tuple = (
         "source_cleanup_enabled: bool = False",
         "tests/contract_srcmut_test.py",
         "整根源码清理轴空转 ⇒ '债是在涨还是在消'重新变得没人回答"),
-    Mut("aether/evolution.py", "max_source_probes: int = 0",
+    #: ⛔ 两个方向都要盯：这个开关**向上向下漂都是事故** ——
+    #:    · 0 → 3：循环里开始对拍 ⇒ 每次运行末尾多花分钟级时间（朝贵的方向漂）
+    #:    · 1 → 0：循环里一条都不对拍 ⇒ 唯一可证明的那类**永远**拿不到裁决
+    #:      ⇒ 提议得过、闸过不了 ⇒ 整条流水线变死闸（第 98 条实测）
+    #:    只盯一个方向 ⇒ 另一半漂移是零覆盖。
+    Mut("aether/evolution.py", "max_source_probes: int = 1",
         "max_source_probes: int = 3",
         "tests/contract_srcmut_test.py",
         "循环里开始对拍 ⇒ 每次运行末尾多花分钟级时间（默认值朝贵的方向漂）"),
+    Mut("aether/evolution.py", "max_source_probes: int = 1",
+        "max_source_probes: int = 0",
+        "tests/contract_srcmut_test.py",
+        "⛔⛔ 循环里一条都不对拍 ⇒ 可证明的那类恒红 ⇒ 提议 127 次 / 过闸 0 次"
+        "（死闸复现，见第 98 条）"),
 )
 
 #: ⛔ 反证（探针自检）：这一条**必须**转红。它坏了 ⇒ 上面全是假读数。

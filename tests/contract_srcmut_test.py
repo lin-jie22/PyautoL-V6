@@ -40,6 +40,7 @@ V6 的 `tests/contract_*.py` 是**可执行脚本**（自带 `_main()`，退出�
 """
 import inspect
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -393,6 +394,8 @@ def main():
 
     # ══ I 组：⛔⛔ 「没跑」与「跑了但没过」必须可分辨（死闸显性化）════
     print("I 组：未验证原因码可分辨（预算为 0 ⇒ 必须记 over_budget）")
+    from aether import evolution as _EV
+    _GUARD = _EV._GUARD_ENV
     from aether.evolution import EvolutionLoop as _EL
     from aether.ledger import Ledger as _Lg
     #: ⛔ 受控原因码：**封闭集合**，新增分支必须同时加到这里，
@@ -400,11 +403,14 @@ def main():
     _CODES = frozenset({"verified_ok", "verified_fail",
                         "probe_unverified", "no_contracts",
                         "over_budget", "heuristic_no_edits"})
-    src = inspect.getsource(_EL._source_cleanup_pass)
+    #: ⛔ 原因码记在**内层实现**里（外层只剩可重入守卫）⇒ 静态检查必须
+    #:    扫对函数，否则又是一条"扫错对象"的恒真断言（第 92 / 97 条）。
+    _inner = inspect.getsource(_EL._source_cleanup_pass_inner)
     ck("I1 ⛔ 源码里出现全部 5 个原因码（少一个 ⇒ 有分支没被记账）",
-       all(c in src for c in ("verified_ok", "verified_fail", "no_contracts",
-                              "over_budget", "heuristic_no_edits")),
-       f"{[c for c in sorted(_CODES) if c not in src]}")
+       all(c in _inner for c in ("verified_ok", "verified_fail",
+                                 "no_contracts", "over_budget",
+                                 "heuristic_no_edits")),
+       f"{[c for c in sorted(_CODES) if c not in _inner]}")
     with tempfile.TemporaryDirectory() as _td:
         _lg = _Lg(_td + "/l.jsonl")
         _lp = _EL(ledger=_lg, gate=None, dev_suite=[], runner=None,
@@ -462,6 +468,108 @@ def main():
     #:    用行为断言表达它需要跑一整轮循环，而勉强写成静态断言会得到一条
     #:    恒真的检查 —— 那正是本契约要消灭的东西。⇒ 它记在 `_source_cleanup_pass`
     #:    的 docstring 与 README 里，由人读，不由断言假装守住。
+
+    # ══ J 组：⛔⛔ 可重入守卫（跨进程递归）══════════════════════════
+    print("J 组：源码清理的可重入守卫（对拍跑的契约自己会调 run()）")
+    src = inspect.getsource(_EL._source_cleanup_pass)
+    #: ⛔ 为什么必须**跨进程**也挡住：对拍是起子进程跑契约的，
+    #:    而 `contract_evolution_test` / `contract_checkpoint_test` 都在
+    #:    进程内构造 `EvolutionLoop` 并 `run(...)` ⇒
+    #:    run() → 本 pass → probe → 子进程 → run() → … 无限递归。
+    #:    2026-10-16 实测：只加类旗子 ⇒ 失控到 **108 个进程**仍未终止。
+    #: ⛔ 钉的是**常量名**不是值：源码里只出现名字，值活在模块级常量里。
+    #:    （第一版我写成拿值去找 ⇒ 恒真，J1 会永远绿 —— 又一条没牙的断言。）
+    ck("J1 ⛔ 守卫是**双份**：进程内类旗子 + 跨进程环境变量",
+       "_in_source_cleanup" in src and "_GUARD_ENV" in src,
+       f"guard={_GUARD}")
+    ck("J2 ⛔ 置位与复位配成 try/finally（异常路径也必须复位，"
+       "否则一次抛错就永久卡死清理轴）",
+       "finally" in src and "_source_cleanup_pass_inner" in src)
+
+    def _kinds(path):
+        return [json.loads(x).get("kind")
+                for x in open(path, encoding="utf-8") if x.strip()]
+
+    def _nest_factory(sel_paths):
+        """廉价 runner：**第一遍**里嵌套调一次清理 pass（模拟契约里 run()）。
+
+        ⛔⛔ 为什么只嵌套一次：真递归是 run() → 清理 → probe（2 遍）
+           → 每遍起子进程 → 子进程里 run() → … ⇒ 每层的子进程数 = 契约份数，
+           层数无上限。这个实验**只**验证"第二层被拦下" ⇒ 层数封顶为 2。
+        """
+        state = {"done": False}
+
+        def _run(root):
+            if not state["done"]:
+                state["done"] = True
+                _lp_i._source_cleanup_pass([])      #: ← 嵌套的那一次
+            return {"ok": True, "failed": [], "rc": 0, "error": ""}
+        return _run
+
+    with tempfile.TemporaryDirectory() as _td:
+        _prev = os.environ.get(_GUARD)
+        os.environ[_GUARD] = "1"
+        try:
+            _lg = _Lg(_td + "/g.jsonl")
+            _lp = _EL(ledger=_lg, gate=None, dev_suite=[], runner=None,
+                      proposer=None,
+                      config=EvolutionConfig(source_cleanup_enabled=True,
+                                             max_source_probes=1))
+            _lp._source_cleanup_pass([])
+            ks = _kinds(_td + "/g.jsonl")
+            ck("J3 ⛔ 守卫置位 ⇒ 跳过**，且必须记账** cleanup.source_skipped"
+               "（不记账 ⇒ 与『扫了没有问题』不可分辨）",
+               "cleanup.source_skipped" in ks and "cleanup.scan" not in ks,
+               str(ks))
+        finally:
+            if _prev is None:
+                os.environ.pop(_GUARD, None)
+            else:
+                os.environ[_GUARD] = _prev
+        #: ⛔ 反证：清掉守卫 ⇒ 真的会扫（否则 J3 是一条恒真的"总是跳过"）
+        os.environ.pop(_GUARD, None)
+        _lg2 = _Lg(_td + "/h.jsonl")
+        _lp2 = _EL(ledger=_lg2, gate=None, dev_suite=[], runner=None,
+                   proposer=None,
+                   config=EvolutionConfig(source_cleanup_enabled=True,
+                                          max_source_probes=0))
+        _lp2._source_cleanup_pass([])
+        ks2 = _kinds(_td + "/h.jsonl")
+        ck("J4 ⛔⛔ 反证：守卫未置位 ⇒ 真的扫了（cleanup.scan 存在）"
+           "⇒ J3 不是恒真",
+           "cleanup.scan" in ks2
+           and "cleanup.source_skipped" not in ks2, str(ks2))
+
+        #: ⛔⛔ **真正的嵌套实验**：注入廉价 runner，让它在"删前基线"里
+        #:    嵌套调一次 `_source_cleanup_pass`（模拟契约自己 run()）。
+        #:    守卫生效 ⇒ 嵌套那次**只记 skipped、不 scan** ⇒ 不递归。
+        #:    ⛔ 这个实验**只能**用廉价 runner 做：用真对拍做 ⇒ 子进程里
+        #:       再起子进程 ⇒ 实测失控到 108 个进程且不终止。
+        _lg_i = _Lg(_td + "/i.jsonl")
+        _lp_i = _EL(ledger=_lg_i, gate=None, dev_suite=[], runner=None,
+                    proposer=None,
+                    config=EvolutionConfig(source_cleanup_enabled=True,
+                                           max_source_probes=1))
+        _EL._probe_runner_factory = _nest_factory
+        try:
+            #: ⛔ 进程级闩锁**必须显式复位**才能再测一次：I 组的 I6 已经
+            #:    用掉了本进程唯一的那次对拍 ⇒ 不清掉 ⇒ J5 永远拿不到 probe。
+            _EL._probed_once = False
+            _lg3 = _Lg(_td + "/k.jsonl")
+            _lp3 = _EL(ledger=_lg3, gate=None, dev_suite=[], runner=None,
+                       proposer=None,
+                       config=EvolutionConfig(source_cleanup_enabled=True,
+                                              max_source_probes=1))
+            _lp3._source_cleanup_pass([])
+            ks3 = _kinds(_td + "/k.jsonl")
+            ci = _kinds(_td + "/i.jsonl")
+            ck("J5 ⛔⛔ 嵌套的清理 pass 被守卫拦下 ⇒ 只记 skipped、不 scan"
+               "（否则 run()→清理→probe→契约→run() 无限递归）",
+               ci == ["cleanup.source_skipped"]
+               and "cleanup.scan" in ks3, f"nested={ci} outer={ks3}")
+        finally:
+            _EL._probe_runner_factory = None
+            _EL._probed_once = False
 
     print()
     if FAILS:

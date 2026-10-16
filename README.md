@@ -1579,16 +1579,19 @@ EvolutionLoop(..., config=EvolutionConfig(cleanup_enabled=False))   # 对照组
 
 ```
 循环 = 提议器   source_cleanup_enabled=True（默认开）
-               扫描 → 提议 → 记账，max_source_probes=0 ⇒ 不对拍
+               扫描 → 提议 → 记账，max_source_probes=1 ⇒ 每轮对拍 1 条
 CLI  = 验证器   aether caps cleanup validate ⇒ 花时间给出真裁决
 ```
 
-⛔ 这不是"默认关的开关"那种假仪表：关掉的是**昂贵的可选验证**，机制本身
-   是开的，且"这次没对拍"被显式记进 `cleanup.source_pass` 的 `n_probed=0`
-   —— 看得见的关闭（与 `parallel_workers=0` 同形态）。
+⛔⛔ **本条已由第 98 条推翻，别照这里改回去**：r40 交付时 `max_source_probes`
+   默认是 **0**（"循环只提议、不对拍，对拍交给 CLI"），依据是「一次对拍 ≈
+   10 分钟」。实测那是一条**未跑完**的取证留下的依据，真实成本 **159.7s**。
+   更关键的是：预算 0 ⇒ 唯一可证明的那类**永远**拿不到裁决 ⇒ 提议 127 次 /
+   过闸 0 次 ⇒ 整条"过闸 → 等人执行"的流水线是**死的**。
+   ⇒ 默认值现为 **1**；`contract_srcmut_test` 的 H2 钉住它。
 
 常驻探针新增两个 mutant：`source_cleanup_enabled` True→False（整轴空转）、
-`max_source_probes` 0→3（默认值朝贵的方向漂）。
+`max_source_probes` 1→0（默认值朝便宜方向漂 ⇒ 死闸复现）。
 
 ---
 
@@ -1703,6 +1706,127 @@ if not src:
 **顺带确认**：`contract_streaming_test.py` 在全量回归里 timeout=1（>600s），
 单独跑 **66/66 全绿 / 2m15s**；已 grep 确认其完全不涉及 repair / difficulty /
 evolve ⇒ 归因并发负载，非本次改动（与第 96 条① 同形）。
+
+---
+
+## 5-quater-7. 第 98 条：**默认关的「可选验证」比默认关的开关更隐蔽 —— 它让整条流水线恒红**
+
+第 94 条钉的是"默认开的开关不许静默关掉"。这一条是它的**镜像**：
+
+```
+第 94 条   默认**开**的开关 ⇒ 不能用「不传」来关（会被 __init__ 再造）
+第 98 条   默认**关**的验证 ⇒ 不能用「太贵」来关（会让下游恒红，且恒红看起来
+                                                  跟「没有问题」一模一样）
+```
+
+⛔⛔ **而"太贵"还不是它真正承重的原因** —— 本轮把默认值放开后实测撞到了
+     更硬的那一条：**跨进程无限递归**。详见下面「真正的承重原因」。
+
+**实测经过**
+
+r40 把源码清理的对拍预算默认设成 `max_source_probes=0`，依据是「一次对拍 ≈
+10 分钟」。但真正的来源是一次**没跑完**的取证（11m54s 被 kill）—— 未完成的
+耗时被当成了测得的耗时。本次实测：
+
+| 项 | 实测 |
+|---|---|
+| 删前基线（8 份冻结契约） | **29.7s** |
+| 端到端（复制仓库 + 删前 + 删后） | **159.7s**，裁决 `ok=True, applied_lines=36` |
+
+⇒ 与"太贵"这条依据差 **4.5 倍**。而它的代价不是"慢一点"：
+
+```
+源码清理里**只有** unreachable 这一类带可执行编辑
+（dead_api / write_only 是启发式，本就过不了闸）
+        ↓ 预算 = 0
+它永远拿不到裁决 ⇒ validate 第 ③ 条 fail-closed
+        ↓
+提议 127 次 / 过闸 0 次 / 执行 0 次
+```
+
+`cleanup.source_pass` 连续 3 次均为 `n_proposed 9 / n_probed 0 / n_passed 0`。
+**它有事件、有读数、看起来很健康 —— 只是永远记 0。** 这比"默认关的开关"更
+隐蔽：后者至少能被 `EvolutionConfig()` 直接戳穿。
+
+**修法（三条，缺一条仍是死闸 / 会失控）**
+
+- **A**：默认预算 `0 → 1`。明码标价：单次 evolve 由 ~40s 变为 ~200s。
+- **A′ ⛔⛔ 真正的承重原因：可重入守卫**（见下）。
+- **B**：「没跑」必须**可分辨** ——
+  - 每条提案记 `reason_code`（受控集合：`verified_ok` / `verified_fail` /
+    `probe_unverified` / `no_contracts` / `over_budget` / `heuristic_no_edits`）
+  - `cleanup.source_pass` 新增 `probe_budget` / `n_provable` / `unverified_reasons`
+  - 预算为 0 时 `note` 自带警告 ⇒ 外部能区分「闸被关着」与「没有债」
+
+⛔ **注入点必须在类上，不能进 `EvolutionConfig`**：配置会被 `asdict()` →
+   `fingerprint()` JSON 化，塞一个函数进去 ⇒ TypeError ⇒ 被 `except` 兜住
+   ⇒ **指纹静默退成空串** ⇒ checkpoint 续跑的一致性校验从此恒过。
+   ⇒ 机制（可注入）与事实源（可序列化）必须分开存放。
+
+---
+
+### 98-bis. ⛔⛔ **真正的承重原因是「可重入」，不是「太贵」**
+
+放开默认值后，一次 `evolve --rounds 5` 跑了 **12 分钟仍未结束**，账本停在
+`cleanup.proposal` 之后一动不动，`pgrep` 显示 **108 个** `tests/contract_*.py`
+进程在增长。逐个隔离后定位到：
+
+```
+run()  →  _source_cleanup_pass()  →  srcmut.probe()
+                                          ↓ 起**子进程**跑冻结契约
+        contract_evolution_test / contract_checkpoint_test
+              → 进程内构造 EvolutionLoop 并 run(...)   ← 回到第一行
+```
+
+⛔ **对拍是跨进程的**，所以"进程内旗子"挡不住：子进程的内存从 `os.environ`
+复制，看到的是初始值 `False` ⇒ 第二层继续 probe ⇒ 继续起子进程 ⇒ 层数无上限。
+
+⇒ 这也解释了为什么当初 `max_source_probes=0` 能一直"正常工作"：
+   **它不是因为太贵被关掉，而是关掉它恰好把递归压住了。**
+   一个成本参数在隐式承担安全性职责 —— 这两件事正交，不该由它兜底。
+
+**修法**：把守卫做成**双份**，`_source_cleanup_pass`（外层）负责
+"要不要做 + 记账"，`_source_cleanup_pass_inner`（内层）只管"怎么做"：
+
+| 层 | 机制 | 挡住什么 |
+|---|---|---|
+| 进程内 | 类旗子 `_in_source_cleanup` | 同一进程里重入 |
+| **跨进程** | **环境变量 `V6_SOURCE_CLEANUP_ACTIVE`** | **子进程里再跑一遍（真正的递归）** |
+
+⛔ 拆成两个函数是必需的：守卫与业务逻辑写在一个函数里 ⇒ `return` 散落多处，
+迟早漏掉 `finally` 复位（与「退化分支要整段进守卫」同族事故）。
+
+⛔ **`contract_runner` 用 `env = dict(os.environ)` 生成子进程环境** ⇒ 这里设的
+   环境变量会被子进程继承 ⇒ 这才让"跨进程守卫"成立（也是它当初清掉
+   `PYTHONPATH` 的同一个机制，见 `srcmut.py` docstring）。
+
+**实测对照**（同一份 `contract_checkpoint_test.py`，单变量）：
+
+| 配置 | 结果 |
+|---|---|
+| 改动前（`max_source_probes=0`） | **27s 全绿** |
+| 只放开默认值（无守卫） | **>7min 不终止**，失控到 108 个进程 |
+| 放开默认值 **+ 守卫** | **2m26s 全绿** |
+
+**契约落点**：新增 **J 组 5 条**，其中 J5 是**运行时嵌套实验**——注入廉价
+runner 在"删前基线"里再调一次 `_source_cleanup_pass`，断言嵌套那次**只记
+`cleanup.source_skipped`、不 `cleanup.scan`**（即递归层数封顶为 2）。
+⛔ 这个实验**只能**用廉价 runner 做：用真对拍做 ⇒ 子进程里再起子进程
+   ⇒ 就是那 108 个进程。
+
+⛔ 顺带修掉一条我自己刚写下的**恒真断言**：J1 第一版拿常量的**值**
+   （`"V6_SOURCE_CLEANUP_ACTIVE"`）去源码里找，而源码里只有常量的**名** ⇒
+   恒真、永远绿。改回按名检查后才对。（这正是第 92 / 97 条在契约侧的重演。）
+
+---
+
+⛔⛔ **附带结论（关于第 97 条的呼应）**：本轮"到顶"复跑与修复前**逐轮一致**
+（0.0→0.6→1.0→1.0，第 4 轮空转停止）⇒ 泛化闸修复**不改变进化轨迹**，
+只恢复了一个恒空读数。因为 weakness 只吃 `eval.verdict` 的**失败**证据，
+不吃难度分层。⇒ **"到顶"是题面到顶，不是能力到顶**：每次 evolve 只在
+`--dev-env textscore`（**10 条 test**）上跑，`--depth 1`、`--proposer
+template`，第 3 轮把 10 条全解掉 ⇒ 无失败 ⇒ idle。要看更长的曲线，
+得加题或换 proposer，不是修闸。
 
 ---
 
