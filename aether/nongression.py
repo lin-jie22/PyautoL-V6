@@ -160,6 +160,9 @@ class GateResult:
     errors: List[str] = field(default_factory=list)
     #: ⛔ 与 errors 分开：**不拦**但要说清这次裁决的判别力（例如基线全 0）
     warnings: List[str] = field(default_factory=list)
+    #: ⛔ 本次裁决**真正参与回归判定**的题数（= 基线通过集大小）。
+    #:    它 <= n_tasks：其余题仍会执行（崩溃要可见），但判定用不上。
+    n_judged: int = 0
 
     @property
     def passed(self) -> bool:
@@ -179,6 +182,7 @@ class GateResult:
             "n_tasks": len(self.verdicts),
             "errors": list(self.errors),
             "warnings": list(self.warnings),
+            "n_judged": self.n_judged,
             #: ⛔ `verdicts` 有意不导出 —— 逐条 Verdict 已在 evaluate 的
             #:    返回值里，`to_dict` 是给账本/日志的**摘要**，不是数据备份。
             #:    需要完整判定的消费者直接读 `result.verdicts`。
@@ -283,6 +287,17 @@ class NonRegressionGate:
 
         verdicts: Dict[str, Verdict] = {}
         errors: List[str] = []
+        #: ⛔⛔ **不许跳过"基线没通过"的题**（2026-10-17 实测打回）：
+        #:    它的结果确实不参与回归判定（下面 `if base.reward <= 0:
+        #:    continue`），看着像纯浪费，于是我做过一版"跳过不执行"的优化
+        #:    —— `contract_nongression_test` 的 C2 / G5 **立刻转红**：
+        #:      · C2 崩溃被记账 3 条 ⇒ 跳过后只剩 2 条（t3 基线红被跳过）
+        #:      · G5 基线全 0 时 runner 全崩 ⇒ 跳过后一条都不跑 ⇒
+        #:        `errors` 为空 ⇒ **闸放行** —— 这正是"跑挂了 ≠ 没回归"
+        #:        这条 fail-closed 纪律要挡的事，被优化悄悄开了口子。
+        #:    ⇒ 执行的意义不止"产生 delta"：**崩溃必须可见**。省成本只能
+        #:    省在**套件大小**上（见 `cli.FROZEN_BROKEN_PER_ENV`），
+        #:    不能省在"这条题要不要跑"上。
         for t in self.suite:
             #: ⛔ 捕获 SelfReportDetected 单独一类：它不是"runner 崩了"，
             #:    而是"runner 返回的 Verdict 里混了自述键" —— 归因不同。
@@ -334,15 +349,28 @@ class NonRegressionGate:
                     f"{tid}: {base.reward:.0f}→{cur.reward:.0f}"
                     + (f" ({err})" if err else ""))
 
+        #: ⛔ 判别力**上限**必须写在读数里：基线没通过的题不参与回归判定
+        #:    （它们仍会执行 —— 崩溃要可见 —— 但判定用不上）。不写这条，
+        #:    "套件 12 条"看起来就有 12 条判别力，实际可能只有 4 条。
+        n_judged = sum(1 for v in self.baseline.verdicts.values()
+                       if v.reward > 0)
+        warns: List[str] = []
+        if no_passing:
+            warns.append("baseline_all_red: 基线里没有一条原本通过的任务 ⇒"
+                         " 本次闸**无回归可判**（不等于『已证明无回归』）")
+        elif n_judged < len(self.suite):
+            warns.append(
+                f"partial_discrimination: {len(self.suite)} 条冻结题里只有 "
+                f"{n_judged} 条在基线上通过 ⇒ 本次判别力上限 = {n_judged} "
+                f"（其余仍在执行，崩溃照样拦，但不参与回归判定）")
         return GateResult(
             regressions=regressions,
             caliber_ok=True,
             deltas=deltas,
             verdicts=verdicts,
             errors=errors,
-            warnings=([("baseline_all_red: 基线里没有一条原本通过的任务 ⇒"
-                        " 本次闸**无回归可判**（不等于『已证明无回归』）")]
-                      if no_passing else []),
+            warnings=warns,
+            n_judged=n_judged,
         )
 
 

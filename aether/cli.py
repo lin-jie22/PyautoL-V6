@@ -49,6 +49,25 @@ DEFAULT_ENVS = ("textscore", "eventflow", "stateflow", "scheduler")
 #: 任务类别。**路由按它来**，不按环境名 —— 见 TemplateProposer.route_key。
 TASK_CLASS = "repair"
 
+#: ⛔ 种子**不许预置修法**（2026-10-17 实测证伪，别再加回来）：给种子装
+#:    `fix_control_flow` 能立刻换来闸的判别力，但进化活动直接减半
+#:    （3 轮对照：事件 155→70、闸门裁决 10→3、提交 2→1）—— 外部预置的
+#:    能力会**掩盖**"系统还没有它"这个真实弱点。判别力应由
+#:    `evolution._rebaseline`（基线随 best 升级）取得，不由预置取得。
+
+#: 冻结套件 v2 的合成参数。`max_n` 必须给够：每个环境前几次变异很可能
+#: "没让测试变红"（rejected_no_failure），max_n=2 时只有 scheduler 出题
+#: ⇒ 会误判成"另外三个环境合成不出任务"（实测：textscore 7 次尝试中
+#: 4 次无效、eventflow 6 次中 3 次无效）。
+FROZEN_SYNTH_N = 8
+#: ⛔ 每环境 1 条而不是 2 条：冻结套件的大小就是**每份契约的付费项**
+#:    （闸对**每个候选**都要跑满整套）。12 条时 `evolve --rounds 3`
+#:    与相关契约的执行量直接翻倍，而判别力只从 8 涨到 12 ⇒ 不划算。
+#:    ⛔ 省成本只能省在这里 —— **不能省在"这条题要不要执行"上**：
+#:    跳过"基线没通过"的题会把 `runner 全崩` 变成静默放行（实测被
+#:    `contract_nongression_test` C2/G5 当场抓红）。
+FROZEN_BROKEN_PER_ENV = 1
+
 
 # ──────────────────────────────────────────────────────────────────
 # 各子命令
@@ -527,22 +546,61 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         _log.info(f"💾 记忆装载：{mem_load['note']}")
     runner = _default_runner(envs, memory=mem)
 
+    #: ⛔⛔ 变异参数**默认与既有口径完全一致**（depth=1 / kinds=默认三种）。
+    #:    `which` 是全局遍历序编号，任何默认行为的改动都会让历史账本
+    #:    与基线不可比 ⇒ 新口径只能由命令行**显式**开启，算作新实验。
+    _kinds: Tuple[str, ...] = tuple(
+        x.strip() for x in (getattr(args, "kinds", "") or "").split(",")
+        if x.strip()) or DEFAULT_MUTATION_KINDS
+    _depth = int(getattr(args, "depth", "1") or "1")
+
     # ⛔ 种子 harness **必须先建**：冻结基线要用它跑。
     #    用空 `Harness()` 跑基线 ⇒ 连工具都没有 ⇒ 基线全红 ⇒
     #    非回归闸"没有原本通过的任务"⇒ 对任何候选都放行的空闸（V5 同款陷阱）。
+    #: ⛔⛔ **种子不许预置修法**（2026-10-17 实测证伪）：给种子装
+    #:    `fix_control_flow` 确实能让冻结晶线有判别力，但代价是进化活动
+    #:    直接减半（同样 3 轮：事件 155→70、闸门裁决 10→3、提交 2→1）——
+    #:    与"记忆预置修法 ⇒ 候选增益 0 ⇒ 空转"是同一条纪律：外部预置的
+    #:    能力会**掩盖**"这个系统还没有它"这个真实弱点。
+    #:    ⇒ 判别力由**基线随 best 升级**取得（见 `evolution._rebaseline`），
+    #:    不由预置取得。
     h0 = Harness(meta_rules="V6 元规则：奖励只来自执行判据；改 L0 需人工审批。",
                  tools=("read_file", "write_file", "python_exec"),
                  memory_policy={"recall_topk": 5, "min_content_len": 150})
 
-    # 冻结套件：**两个环境**的原始源码都应当全绿
+    # 冻结套件 v2 = 原始源码（防"读不到/跑不动"这类**粗**回归）
+    #              + 真破坏题（防"已具备的修法被顶掉"这类**细**回归）
+    #: ⛔ v1 只有原始源码 ⇒ 裸种子的通过集 = {本来就不需要修的题}
+    #:    ⇒ 提案器只会装技能/改路由/改元规则，全都碰不到这个集合
+    #:    ⇒ 账本 234 条 `gate.result` 全 True、`gate.blocked` 0 次。
+    #:    ⛔ 破坏题**不按种子筛**：种子现在修不好，best 装上修法后就修得
+    #:    好 —— 基线一升级，它们自动进入"必须守住"的通过集
+    #:    （见 `evolution._rebaseline`）。按种子筛会把它们永久筛掉。
     frozen = [FrozenTask(task_id=f"frozen::{name}",
                          spec={"env_id": name, "broken_source": e.source,
                                "topic": name, "task_class": TASK_CLASS})
               for name, e in envs.items()]
-    caliber = {"seed": int(args.seed), "timeout": 10.0, "split": "frozen"}
+    _broken: List[FrozenTask] = []
+    for name, e in envs.items():
+        rep_f = synthesize_tasks(e, max_n=FROZEN_SYNTH_N, timeout=10.0,
+                                 depth=1, kinds=_kinds)
+        for i, t in enumerate(rep_f.tasks[:FROZEN_BROKEN_PER_ENV]):
+            _broken.append(FrozenTask(
+                task_id=f"frozen::{name}::m{i}",
+                spec={"env_id": name, "broken_source": t.broken_source,
+                      "topic": name, "task_class": TASK_CLASS}))
+    frozen = frozen + _broken
+    led.append("frozen_suite.built", {
+        "suite": "v2", "n_source": len(envs), "n_broken": len(_broken),
+        "broken": [t.task_id for t in _broken],
+        "note": "v1 只有原始源码 ⇒ 裸种子基线在天花板 ⇒ 闸对真实变异"
+                "零判别力（实测 234 条 gate.result 全绿）"},
+        actor="cli")
+    caliber = {"seed": int(args.seed), "timeout": 10.0, "split": "frozen",
+               "frozen_suite": "v2"}
     baseline = Baseline(
         caliber=caliber,
-        verdicts={t.task_id: runner(h0, t.spec) for t in frozen},
+        verdicts={t.task_id: runner(h0, dict(t.spec)) for t in frozen},
         harness_id="seed")
     gate = NonRegressionGate(frozen, baseline)
 
@@ -557,13 +615,6 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     #: ⛔ held-out 补采样记录。没有它，"泛化闸判 inconclusive"和
     #:    "held-out 采样不够"在输出里长得一模一样。
     grow_ho_report: Dict[str, Any] = {}
-    #: ⛔⛔ 变异参数**默认与既有口径完全一致**（depth=1 / kinds=默认三种）。
-    #:    `which` 是全局遍历序编号，任何默认行为的改动都会让历史账本
-    #:    与基线不可比 ⇒ 新口径只能由命令行**显式**开启，算作新实验。
-    _kinds: Tuple[str, ...] = tuple(
-        x.strip() for x in (getattr(args, "kinds", "") or "").split(",")
-        if x.strip()) or DEFAULT_MUTATION_KINDS
-    _depth = int(getattr(args, "depth", "1") or "1")
     if args.heldout == "on":
         rep_ho = synthesize_tasks(envs[ho_name], max_n=int(args.max_tasks),
                                   depth=_depth, kinds=_kinds)

@@ -1390,6 +1390,58 @@ class EvolutionLoop:
         except Exception:                                  # noqa: BLE001
             return -1
 
+    # ── 基线随 best 升级 ────────────────────────────────────────
+    def _rebaseline(self, h: Harness, round_no: int, reason: str) -> None:
+        """把非回归基线 supersede 到**当前 best** harness。
+
+        ⛔⛔ 为什么必须有这一步（2026-10-17 实测）：基线停在**种子**时，
+            它守的永远是"种子能力"。裸种子（只有工具、没有修法）的通过集
+            只含"本来就不需要修的题"（= 原始源码那 4 条）⇒ 提案器能产生
+            的变异（装技能 / 改路由 / 改元规则）**全部**不改变这类题的
+            判定 ⇒ 闸在结构上恒绿：账本 234 条 `gate.result` 全 True、
+            `gate.blocked` 0 次、`deltas` 全 0。
+            ⛔ 闸不是没牙 —— 砍工具 / 砍 python_exec / 口径漂移都会红
+            （`scripts/probe_gate_discrimination.py` 反证组 4/5 红）。
+            缺的是**判据集与变异空间相交**：只有基线跟着 best 走，
+            "best 已经具备的修法被顶掉 / 链被清空"才会变成可观测的回归。
+
+        ⛔ 反向对照（同一轮实测，别走回头路）：想靠"给种子预置一条修法
+            链"取得判别力，代价是进化活动直接减半（3 轮：事件 155→70、
+            闸门裁决 10→3、提交 2→1）—— 与"记忆预置修法 ⇒ 候选增益 0"
+            同一条纪律：外部预置的能力会**掩盖**真实弱点。
+
+        ⛔ 被 supersede 的旧基线会**拒绝一切对比**（`check_caliber` 首行）
+            ⇒ 必须同步替换 `gate.baseline`，不能只标记旧的。
+        """
+        try:
+            from .nongression import Baseline
+            old = self.gate.baseline
+            vs = {t.task_id: self.runner(h, dict(t.spec))
+                  for t in self.gate.suite}
+            new_b = Baseline(caliber=dict(self.caliber), verdicts=vs,
+                             harness_id=h.harness_id)
+            n_old = sum(1 for v in old.verdicts.values() if v.reward > 0)
+            n_new = sum(1 for v in vs.values() if v.reward > 0)
+            self.gate.baseline = new_b
+            self.ledger.append("baseline.superseded", {
+                "round_no": round_no, "reason": reason,
+                "from_harness": old.harness_id, "to_harness": h.harness_id,
+                "n_passing_before": n_old, "n_passing_after": n_new,
+                "delta": n_new - n_old,
+                "shrank": n_new < n_old,
+                "note": ("基线随 best 升级 ⇒ 闸守的是『当前已具备的能力』"
+                         + ("⚠️ 通过集缩小 ⇒ 有题从『必须守住』里掉出去了，"
+                            "这是一次能力倒退被放行（fail-open 边缘）"
+                            if n_new < n_old else ""))},
+                actor="evolution")
+        except Exception as e:                             # noqa: BLE001
+            #: ⛔ 升级失败不得静默，也不得拖垮已经完成的提交
+            self.ledger.append("baseline.supersede_failed", {
+                "round_no": round_no, "reason": reason,
+                "harness_id": h.harness_id,
+                "error": f"{type(e).__name__}: {e}"},
+                actor="evolution")
+
     def _run_round(self, h: Harness, round_no: int = 0) -> RoundReport:
         rep = RoundReport(round_no=round_no)
 
@@ -1770,6 +1822,12 @@ class EvolutionLoop:
             self.store.save_snapshot(new_h.harness_id, new_h.to_dict(),
                                      parent_id=h.harness_id, accepted=True,
                                      round_no=round_no)
+
+        # 8b) ⛔ 基线必须跟着 best 升级 —— 否则非回归闸永远只守"种子
+        #     能力"（裸种子只修得好"不用修的题"）⇒ 判据集与变异空间
+        #     不相交 ⇒ 闸结构上恒绿（详见 `_rebaseline` 的实测注释）。
+        self._rebaseline(new_h, round_no,
+                         reason=f"commit:{best.capsule_name}")
 
         # 9) 反事实层归因 —— **提交之后**才算，且**绝不参与选择**。
         #    ⛔ 顺序与 held-out 同理：归因一旦进入 group_relative 或 best
