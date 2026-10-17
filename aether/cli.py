@@ -779,9 +779,26 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                   f" ⇒ 泛化闸将判 inconclusive 并拦截"
                   f"（提高 --max-tasks 或换环境以获得同层对照）", file=sys.stderr)
 
-    proposer = MemoryAwareProposer(proposer, mem)
+    #: ⛔⛔ ledger 必须**显式注入**（2026-10-17）：以前这里没传 ⇒ 经验闭环
+    #:    的三个事件一条都进不了账本 ⇒ 全量扫描显示 `evolution:reject` 写入
+    #:    仅 5 条、"因学到而少提了几个候选"完全无数 ⇒ 这条线在读数上是瞎的。默认 None 是 no-op（有机制不等于这条路被走到，第 4 条）。
+    proposer = MemoryAwareProposer(proposer, mem, ledger=led)
 
     _consolidated_total = 0
+
+    #: ⛔⛔ `KnowledgeLearner` 以前**在进化循环里从未被构造过**（全量账本
+    #:    `knowledge.ingested` 0 次）⇒ 它的四道闸（去重 / 最短内容 / 配额
+    #:    截断 / 可达性取证）在生产路径上一次都没生效，循环里的经验写都是
+    #:    **裸 write** 绕过去的 —— 与 V5「两次 39x 重复」同族。这里把它接
+    #:    进循环；⛔ 只接**本就属 learner 通道**的写入（下面 weakness 那条），
+    #:    L4/system 的轮次摘要仍走原路（不改通道语义）。
+    from .learner import KnowledgeItem, KnowledgeLearner
+    _learner = KnowledgeLearner(mem, ledger=led, default_tier="L3",
+                                max_items=int(getattr(args, "max_tasks", 6) or 6) * 4)
+    #: ⛔ 跨轮**汇总**（单条在 learner 自己的 `knowledge.ingested` 里）：
+    #:    只有把每轮报告加起来，才看得出"这几轮到底学进去了多少"。
+    _ingest_total = {"input": 0, "written": 0, "deduped": 0, "rejected": 0,
+                     "below_min": 0, "truncated": 0, "unretrievable": 0}
 
     def _remember_round(rep) -> None:
         """把一轮的**执行经验**写进记忆 —— 记忆只能由执行填充。
@@ -948,11 +965,26 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                   f"易层增益 {_easy:+.2f}，难层增益 {_hard:+.2f}，"
                   f"空转 {1 if r.idle else 0}",
                   channel="system", source=f"round{r.round_no}")
+        #: ⛔ 这条本来就是 **learner 通道**（弱点是"学到的事实"），以前却是
+        #:    裸 `mem.write` ⇒ 去重闸 / 最短内容闸 / 配额闸 / 可达性取证
+        #:    全没生效，账本里也认不出这是"一次学习"。改走 KnowledgeLearner：
+        #:    通道语义不变，四条闸与 `knowledge.ingested` 读数同时上线。
+        #:    ⛔ `ingest` 的返回值必须**用起来**（不许只调用不看报告）：
+        #:    写入侧放行 ≠ 真的进去了 —— 被去重/过短的条数要能读出来。
         if r.weakness:
-            mem.write("L3",
-                      f"{r.weakness.kind} / {r.weakness.topic}："
-                      f"{'; '.join(r.weakness.evidence[:2])}",
-                      channel="learner", source=f"round{r.round_no}")
+            _rep = _learner.ingest([KnowledgeItem(
+                content=(f"{r.weakness.kind} / {r.weakness.topic}："
+                         f"{'; '.join(r.weakness.evidence[:2])}"),
+                source=f"round{r.round_no}", tier="L3",
+                tags=("experience", "weakness"), trust=0.5)])
+            _ingest_total["input"] += _rep.n_input
+            _ingest_total["written"] += _rep.n_written
+            _ingest_total["deduped"] += _rep.n_deduped
+            _ingest_total["rejected"] += _rep.n_rejected
+            _ingest_total["below_min"] += _rep.n_below_min_content
+            _ingest_total["truncated"] += _rep.n_truncated
+            if _rep.retrievable is False:
+                _ingest_total["unretrievable"] += 1
 
     # 对抗验证演示：verifier 的职责是**证伪**，找不到反证才提升
     promoted = []
@@ -1026,6 +1058,11 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         #: ⛔ 记忆是否真的进了因果链：跳过数 > 0 才证明它被走到过
         "memory_causal": proposer.diagnostics() if hasattr(
             proposer, "diagnostics") else {},
+        #: ⛔⛔ **学习闭环读数**（2026-10-17 新增）。以前经验写进记忆之后
+        #:    是否被下一轮用上，只有内存里的列表记得 ⇒ 账本无从查证。这里把
+        #:    **写入侧**（摄入/去重/过短/配额/写后读不到）汇总到输出，配合
+        #:    `experience_loop` 的**起效侧**读数，闭环两端才第一次同时可见。
+        "learning_ingest": dict(_ingest_total),
         "memory_promote": promoted,
         "memory_promote_without_verifier": no_verifier_why,
         "memory_consolidated": len(consolidated),

@@ -2006,6 +2006,64 @@ F1 必须转红，证明它有牙）。
 
 ---
 
+### 101. 「会学习」的真缺口：机制在跑，**账上看不见它跑没跑**
+
+回答"还缺什么"时用的机器化差分（AST 扫 `aether/` 里所有 `append()` 事件名
+− 4853 条账本实到）给出 14 个零次事件。按「会学习 / 会创造 / 会使用工具」
+三条能力线归类后，`knowledge.ingested` 与 `world_fact.promoted` 落在"学习"上，
+而它们的根因是**同一件事**：
+
+`providers.MemoryAwareProposer` 的 docstring 写着"记忆进入因果链"，但它把
+学习效果**只存在 Python 实例属性里**（`self.skipped` / `self.asked`）——
+进程一退出就蒸发。于是账本给出的画像是：
+
+| 读数 | 值 | 含义 |
+|---|---|---|
+| `evolution:reject` 写入（`source`） | **5 条** | 累计只记过 5 次失败 |
+| `knowledge.ingested` | **0 条** | `KnowledgeLearner` 在循环里从未被构造 |
+| "因学到而少提了几个候选" | **没有这个数** | 只能用 grep 代码推断，不能用账本读 |
+
+⇒ **看不出这个系统到底有没有在学**。这同时犯了第 4 条（有机制 ≠ 这条路
+被走到）和第 10 条（三态必须分开：`search` 抛异常时这里静默
+`return []`，"检索崩了 ⇒ 本轮照提重复候选"和"查了、没有这条失败史"
+在后续完全不可分辨）。
+
+**修法：把闭环两端各自记账**（`experience.remembered` / `experience.propose`）
+
+- 写入侧：`key / reason / disposition / deduped`。
+  ⛔ `disposition` 必须留下来：第二条同样内容的失败会被记忆层判 `deduped`
+  ⇒ **没有新增知识**，而事件照样写 ⇒ 不分开就会把「记了 1 条」读成
+  「学了 N 次」（V5 的 39x 重复同族）。写入崩 ⇒ `write_failed`。
+- 起效侧：`n_in / n_out / n_skipped / n_known_history / skipped_sample`
+  + **`recall` 三态**：`ok` / `degraded`（读崩 ⇒ 放行，**必须可见**）/
+  `no_memory`（压根没装记忆，**也必须有事件**，否则"没学"和"没装"都是
+  "没有事件"，无法分辨 —— 这正是改动前的原状）。
+- `cmd_evolve` 里 `MemoryAwareProposer(proposer, mem)` ⇒ 显式 `ledger=led`。
+  ⛔ 不传就是 no-op ⇒ **有机制、没被走到**。
+
+**同时把 `KnowledgeLearner` 接进循环**：`weakness` 那条写本来就是
+`channel="learner"`，以前却是裸 `mem.write` ⇒ learner 的四道闸（去重 /
+最短内容 / 配额截断 / 可达性取证）在生产上一次都没生效。改走 learner 后
+`knowledge.ingested` 从 0 → 3，且立刻暴露一条以前看不见的事实：
+
+```
+round1 written  retrievable=True   # 真学到了
+round2 deduped                     # ⛔ 与 round1 弱点完全相同 ⇒ 第二轮在同一条弱点上空转
+round3 written  retrievable=True
+```
+
+⛔ `ingest()` 的返回值必须**用起来**：跨轮汇总（`learning_ingest`）才看得出
+"这几轮到底学进去了多少"，只看单轮报告会把它读成"每轮都成功"。
+
+**对照（同一 tmp 根、同 seed、4 轮）**：`memory.write` 11 条常数不变
+（written 10 / deduped 1）⇒ **写入行为零改变**，只是多了一层可读账。
+
+**契约落点**：新增 `tests/contract_experience_loop_test.py` **A–F 组 19 条**，
+F 组为反证（把 `memory.search` 换成恒空 ⇒ A2「记之后不再提议它」必须转红，
+否则它就是恒真断言）。探针 `scripts/probe_experience_loop.py` 同源 19/19。
+
+---
+
 ## 6. 与 V5 的关系
 
 V6 不是 V5 的替代品，是它的**结构化重写**：

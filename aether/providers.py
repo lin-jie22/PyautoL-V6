@@ -183,12 +183,51 @@ class MemoryAwareProposer:
     ⛔ 与内层提议器**同协议**可互换：闸一个不少（它只筛候选，不改判据）。
     """
 
-    def __init__(self, inner: Any, memory: Any, marker: str = "tried"):
+    #: ⛔⛔ 明星 mechanism ≠ 这条路被走到（第 4 条）。这个类曾只在**内存**
+    #:    里维护 `skipped` ⇒ 「这一轮的候选集是不是真被上一轮的失败改变
+    #:    过」在账本里**读不出来**：2026-10-17 全量账本扫描，`evolution:reject`
+    #:    写入仅 5 条、`knowledge.ingested` 0 条，而"因学到而少提了几个候选"
+    #:    根本没有数 ⇒ 闭环两侧都是盲的。以下三个事件补齐两侧读数。
+    EVENT_REMEMBERED = "experience.remembered"
+    EVENT_PROPOSE = "experience.propose"
+    #: 名单只做**取证**：有界窗口，不承担计数职责（计数在 `stats` 里）
+    EVIDENCE_WINDOW = 20
+
+    def __init__(self, inner: Any, memory: Any, marker: str = "tried",
+                 ledger: Any = None):
         self.inner = inner
         self.memory = memory
         self.marker = marker
         self.skipped: List[str] = []
         self.asked = 0
+        #: 类级注入点（与 `MemoryOS.ledger` 同形态）：None ⇒ no-op。
+        #: ⛔ 构造函数里 `self.ledger = ledger` 会**覆盖类级注入**
+        #:    ⇒ 显式传 None 时不能写（第 7 条：默认开的开关不能靠"不传"关）。
+        if ledger is not None:
+            self.ledger = ledger
+        #: ⛔ 计数与 evidence 分开存（第 14 条）：`skipped` 列表会被下一个
+        #:    例子在这儿开始挤掉样本，但**总数**必须不丢。
+        self.stats: Dict[str, int] = {
+            "remembered": 0, "asked": 0, "skipped": 0, "recall_failed": 0}
+        #: 上一次 `_rejected_for` 是否因检索崩溃而返回空 —— 见该方法注释
+        self._last_recall_ok: bool = True
+
+    def _emit(self, kind: str, payload: Dict[str, Any]) -> None:
+        """记一条经验闭环事件。⛔ 记账失败**不许**拖垮提议（但要留痕）。"""
+        led = getattr(self, "ledger", None)
+        if led is None:
+            return
+        try:
+            led.append(kind, payload, actor="experience")
+        except Exception as e:                              # noqa: BLE001
+            #: 没有 ledger_error 字段可读 ⇒ 静默丢事件会被读成"没发生"。
+            try:
+                led.append("experience.ledger_failed",
+                           {"kind": kind,
+                            "error": f"{type(e).__name__}: {e}"},
+                           actor="experience")
+            except Exception:                               # noqa: BLE001
+                pass
 
     @staticmethod
     def _key(weakness: Dict[str, Any], cap_name: str) -> str:
@@ -205,16 +244,40 @@ class MemoryAwareProposer:
         if not any(m in (reason or "") for m in bad_marks):
             return
         key = self._key(weakness, cap_name)
-        self.memory.write(
-            "L4",
-            f"{self.marker}:{key} —— 上一轮该变异被拒（{reason[:80]}），"
-            f"本轮不再重复提议，避免把算力反复花在同一条死路上。",
-            channel="system", source="evolution:reject",
-            tags=("experience", "exec"))
+        #: ⛔ 写入 ≠ 记进去。`memory.write` 返回的 disposition 可能是
+        #:    `deduped`（同一条失败被反复记）⇒ 那时**没有新增知识**，
+        #:    而记账仍会写事件 ⇒ 读数会把「记了 1 条」读成「学了 N 次」
+        #:    （V5 第 39x 重复同族）。三种处置必须分开（第 10 条）。
+        disp = "unknown"
+        note_id = ""
+        try:
+            note, disp = self.memory.write(
+                "L4",
+                f"{self.marker}:{key} —— 上一轮该变异被拒（{reason[:80]}），"
+                f"本轮不再重复提议，避免把算力反复花在同一条死路上。",
+                channel="system", source="evolution:reject",
+                tags=("experience", "exec"))
+            note_id = getattr(note, "note_id", "") or ""
+        except Exception as e:                              # noqa: BLE001
+            #: ⛔ 写失败 ≠ 没写过。沉默会让"记忆崩了"和"没有失败可记"
+            #:    在读数里长得一模一样（fail-open 的第二种形态）。
+            self.stats["recall_failed"] += 1
+            self._emit(self.EVENT_REMEMBERED, {
+                "key": key, "reason": (reason or "")[:80],
+                "disposition": "write_failed",
+                "error": f"{type(e).__name__}: {e}",
+                "note_id": "", "deduped": False})
+            return
+        self.stats["remembered"] += 1
+        self._emit(self.EVENT_REMEMBERED, {
+            "key": key, "reason": (reason or "")[:80],
+            "disposition": str(disp), "note_id": note_id,
+            "deduped": bool(disp != "written")})
 
     def propose(self, weakness: Dict[str, Any], harness: Harness,
                 n: int = 3) -> List[Capsule]:
         self.asked += 1
+        self.stats["asked"] += 1
         #: ⛔ 先把失败史**交给模型**，再筛。顺序有讲究：
         #    对 LLM 提议器来说，只筛不说是浪费 —— 模型白跑一次推理，
         #    产出的还是同一条死路（下一轮继续撞）。说清楚"这些方案试过、
@@ -226,28 +289,59 @@ class MemoryAwareProposer:
         else:
             caps = list(self.inner.propose(weakness, harness, n))
         if self.memory is None:
+            #: ⛔⛔ **没有记忆也必须记账**：不记 ⇒ "这一轮没学到东西"
+            #:    和"根本没装记忆"在账本里都是"没有事件"，无法分辨
+            #:    （这正是本 r45 之前的原状）。
+            self._emit(self.EVENT_PROPOSE, {
+                "asked": self.asked, "recall": "no_memory",
+                "n_in": len(caps), "n_out": len(caps), "n_skipped": 0,
+                "n_known_history": 0, "skipped_sample": []})
             return caps
         out = []
         for c in caps:
             key = self._key(weakness, c.name)
+            ok = True
             try:
                 hits = self.memory.search(f"{self.marker}:{key}", top_k=3)
             except Exception:  # noqa: BLE001 —— 记忆不可用 ⇒ 不筛，照原样提
+                #: ⛔⛔ fail-open 必须**可见**：这里放行是有意为之（一个读
+                #:    失败不该让整轮停摆），但它和"查了、没有这条失败史"
+                #:    的后果完全不同 —— 前者意味着本轮的重复提议**没被拦**。
                 hits = []
-            if any(f"{self.marker}:{key}" in (x.content or "") for x in hits):
+                ok = False
+                self.stats["recall_failed"] += 1
+            if ok and any(f"{self.marker}:{key}" in (x.content or "")
+                          for x in hits):
                 self.skipped.append(c.name)
+                self.stats["skipped"] += 1
                 continue
             out.append(c)
+        #: ⛔ 三态分开（第 10 条）：`ok` / `degraded`（读崩 ⇒ 放行）/
+        #:    `no_memory`（压根没记忆）。合成一个 bool 就会把「拦不住」读成
+        #:    「没撞上」。
+        recall = "ok" if self._last_recall_ok else "degraded"
+        self._emit(self.EVENT_PROPOSE, {
+            "asked": self.asked,
+            "recall": recall,
+            "n_in": len(caps), "n_out": len(out),
+            "n_skipped": len(caps) - len(out),
+            "n_known_history": len(rejected),
+            "skipped_sample": [c.name for c in caps
+                               if c not in out][:self.EVIDENCE_WINDOW]})
         return out
 
     def _rejected_for(self, weakness: Dict[str, Any]) -> List[Tuple[str, str]]:
         """取出与本轮弱点相关的失败史（变异名 + 被拒原因）。"""
+        self._last_recall_ok = True
         if self.memory is None:
             return []
         try:
             notes = self.memory.search(
                 f"{self.marker} 被拒 overfit partial 变异", top_k=8)
         except Exception:  # noqa: BLE001
+            #: ⛔ 以前这里静默 `return []` ⇒ "检索崩了"和"没有失败史"在后续
+            #:    完全不可分辨 ⇒ 本轮照提重复候选，而账本显示绿色运行。
+            self._last_recall_ok = False
             return []
         out: List[Tuple[str, str]] = []
         for nt in notes or []:
