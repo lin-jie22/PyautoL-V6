@@ -937,6 +937,18 @@ _FLIP_OPS = {
 }
 
 
+#: `string` 算子的候选改写。**必须每一种都可逆**（有技能能修回来），
+#: 否则产生的任务是无解的噪音 —— 而 F2P 只保证"会被打穿"，不保证"能修"。
+#: ⛔ 不改 `len` 以外的语义层级：换行/大小写/去尾/去空格都是"串就是这样，
+#: 但你拿错了那个串"的经典 bug 形态。
+def _string_variant(v: str) -> Optional[str]:
+    cands = [v.swapcase(), v + "\n", v[:-1], v.replace(" ", "")]
+    for c in cands:
+        if c != v:
+            return c
+    return None
+
+
 class _ConstantCollector(ast.NodeVisitor):
     """按 `NodeTransformer` 的 **DFS 序**收集数值常量。
 
@@ -957,6 +969,34 @@ class _ConstantCollector(ast.NodeVisitor):
         if isinstance(node.value, (int, float)):
             self.out.append(node)
         #: 常量无子节点，无需 generic_visit
+
+
+class _StringCollector(_ConstantCollector):
+    """按同一份 DFS 序收集**字符串**常量 —— 与 `_Mutator` 的 `string`
+    算子口径同源（都由 `isinstance(value, str)` 判定）。
+
+    ⛔ 为什么必须单独一个类而不是复用 `_ConstantCollector`：那个收集器的
+       口径是"数值"，两条选点口径若共用一个 muddle 出来的实现，
+       `revert_*` 与 `_Mutator` 的序列就会错位 ⇒ 修法反过来把没坏的地方
+       改坏（这正是 `numeric_literals` docstring 里记过的那个自洽性 bug）。
+    """
+    def __init__(self) -> None:
+        super().__init__()
+
+    def visit_Constant(self, node: ast.Constant):
+        if isinstance(node.value, str):
+            self.out.append(node)
+
+
+def string_literals(tree: ast.AST) -> List[ast.Constant]:
+    """按 `_Mutator` 的 DFS 序收集字符串常量节点（给 `revert_strings` 用）。
+
+    ⛔ 与 `numeric_literals` 同一套纪律：入参是**已解析的树**（就地改值），
+       顺序必须与变异器同源，否则对齐会整体错位。
+    """
+    c = _StringCollector()
+    c.visit(tree)
+    return c.out
 
 
 def numeric_literals(tree: ast.AST) -> List[ast.Constant]:
@@ -1006,7 +1046,7 @@ def numeric_literals(tree: ast.AST) -> List[ast.Constant]:
 #:    （等于偷偷改了考卷）。要扩种类必须**显式传** `kinds=`，那是新实验。
 DEFAULT_MUTATION_KINDS: Tuple[str, ...] = ("compare", "binop", "constant")
 ALL_MUTATION_KINDS: Tuple[str, ...] = ("compare", "binop", "constant",
-                                       "boolop", "unaryop")
+                                       "boolop", "unaryop", "string")
 
 
 class _Mutator(ast.NodeTransformer):
@@ -1094,6 +1134,22 @@ class _Mutator(ast.NodeTransformer):
         return node
 
     def visit_Constant(self, node: ast.Constant):
+        #: ⛔ **字符串常量**单独一种（`string`），默认关闭。分出来的原因：
+        #:    `_ConstantCollector` / `numeric_literals` 那条链是给**数值**用的，
+        #:    如果把 str 并进去，常量序列长度与含义都会变 ⇒ `which` 口径漂移
+        #:    ⇒ 既有账本不可比。⇒ 必须作为**独立且默认关闭**的算子。
+        if isinstance(node.value, str):
+            if self.done or "string" not in self.kinds:
+                return node
+            self.seen += 1
+            if self.seen - 1 == self.which:
+                new = _string_variant(node.value)
+                if new is not None:
+                    self.done = True
+                    self.desc = (f"字符串常量 "
+                                 f"{node.value[:14]!r}→{new[:14]!r}")
+                    node.value = new
+            return node
         if self.done or "constant" not in self.kinds \
                 or not isinstance(node.value, (int, float)):
             return node

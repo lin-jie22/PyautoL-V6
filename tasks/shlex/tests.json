@@ -1,0 +1,82 @@
+{
+  "env_id": "shlex",
+  "note": "由 aether/shlex.py 切片自动生成：6 条经 F2P 验证的判据（另有 6 条对变异免疫，已剔除）。expect 为生成时刻的实现行为（characterization），非规格。",
+  "oracle": "characterization",
+  "generated_by": "scripts/worldgen.py",
+  "generated_at": "2026-10-17T14:33:03",
+  "source_origin": "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/lib/python3.13/shlex.py",
+  "tests": [
+    {
+      "name": "split_0",
+      "call": "split",
+      "args": [
+        "",
+        false,
+        true
+      ],
+      "expect": []
+    },
+    {
+      "name": "split_1",
+      "call": "split",
+      "args": [
+        "a",
+        false,
+        true
+      ],
+      "expect": [
+        "a"
+      ]
+    },
+    {
+      "name": "split_2",
+      "call": "split",
+      "args": [
+        "abc def",
+        false,
+        true
+      ],
+      "expect": [
+        "abc",
+        "def"
+      ]
+    },
+    {
+      "name": "split_3",
+      "call": "split",
+      "args": [
+        "Hello World",
+        false,
+        true
+      ],
+      "expect": [
+        "Hello",
+        "World"
+      ]
+    },
+    {
+      "name": "split_4",
+      "call": "split",
+      "args": [
+        "x,y,z",
+        false,
+        true
+      ],
+      "expect": [
+        "x,y,z"
+      ]
+    },
+    {
+      "name": "split_5",
+      "call": "split",
+      "args": [
+        "  pad  ",
+        false,
+        true
+      ],
+      "expect": [
+        "pad"
+      ]
+    }
+  ]
+}

@@ -44,7 +44,34 @@ def _setup_logging(level: str, json_output: bool = False) -> None:
 #: 自带环境。**四个是刻意的**：两个只能区分"变强"与"讨好一个环境"，
 #: 四个才能让 held-out 有难度跨度、且 dev/held-out 可以任意配对。
 #: 解法形状刻意不同：数值归一化 / 流式聚合 / 图搜索 / 扫描线+贪心。
+#:
+#: ⛔⛔ 但"四个"同时也是 **r47 找到的能力天花板的直接来源**：2026-10-17
+#:    实测这台引擎走到第 2 代就不再进化 —— 不是机器不行，是**世界只有四个
+#:    小函数**（每份 task.py 3–10 条判据），两个胶囊就把 dev 集打满，
+#:    轮 3 起 `no_weakness_evidence` 主动停机。⇒ 见下方 `discover_envs`。
 DEFAULT_ENVS = ("textscore", "eventflow", "stateflow", "scheduler")
+
+
+def discover_envs(tasks_root: "Path") -> Tuple[str, ...]:
+    """扫出所有合法环境目录（含 `task.py` + `tests.json`）。
+
+    ⛔ **顺序必须稳定且历史可比**：`DEFAULT_ENVS` 里存在的一律排在前，
+    其余按名字追加。若按目录 mtime 或直接 `sorted()` 混排，既有
+    `run_id` 与冻结基线的对齐会漂移 ⇒ 账本不可复现。
+
+    ⛔ 这个函数**不是**默认口径：`cmd_evolve` 仍默认只用 `DEFAULT_ENVS`
+    四个。扩大世界必须显式传 `--envs auto`（见第 103 条：新口径显式开启，
+    否则历史对照失效）。
+    """
+    try:
+        subs = [d for d in tasks_root.iterdir() if d.is_dir()]
+    except OSError:
+        return DEFAULT_ENVS
+    found = {d.name for d in subs
+             if (d / "task.py").is_file() and (d / "tests.json").is_file()}
+    head = tuple(n for n in DEFAULT_ENVS if n in found)
+    tail = tuple(sorted(found - set(head)))
+    return head + tail
 
 def resume_window(target_rounds: Any, ck_round_no: Any,
                   ) -> Optional[Tuple[int, int]]:
@@ -506,8 +533,22 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     from .store import Store
 
     p = _paths(Path(args.root))
+    #: ⛔⛔ **世界规模是效用第一的实验变量**（r47）。默认四个 ⇒ 与历史同口径；
+    #:    `--envs auto` / 显式名单 ⇒ 新实验，账本里的 `envs` 字段会如实记录。
+    _want = str(getattr(args, "envs", "") or "").strip()
+    if _want == "auto":
+        names = discover_envs(p["tasks_root"])
+    elif _want:
+        names = tuple(x.strip() for x in _want.split(",") if x.strip())
+    else:
+        names = DEFAULT_ENVS
+    missing = [n for n in names
+               if not (p["tasks_root"] / n / "task.py").is_file()]
+    if missing:
+        raise SystemExit(f"环境目录不存在或缺 task.py：{missing}"
+                         f"；可用 {sorted(discover_envs(p['tasks_root']))}")
     envs = {name: Environment.from_dir(p["tasks_root"] / name)
-            for name in DEFAULT_ENVS}
+            for name in names}
     dev_name = args.dev_env
     ho_name = args.heldout_env
     if dev_name not in envs or ho_name not in envs:
@@ -745,6 +786,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "fix_control_flow": "保守通用修法：只恢复控制流（比较/运算），不动字面量",
         "fix_literals": "通用字面量修法：只把数值常量对齐基线，不动结构/字符串",
         "fix_boolops": "通用布尔运算修法：只把 and/or 对齐基线，不动比较/运算/常量",
+        "fix_strings": "通用字符串修法：只把字符串常量对齐基线，不动结构/数值/bool",
         f"patch:{dev_name}": f"定点修法：{dev_name} 整个文件换回基线（换环境即失效）",
     }
     #: ⛔ 三类并列，前两类都是**通用**的（不点名环境），第三类是定点的：
@@ -977,6 +1019,12 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                    for k in ("max_rounds", "max_seconds", "max_propose",
                              "max_eval_runs")},
         "checkpoint": cp_path or None,
+        #: ⛔ **世界规模必须进账本**（r47）：进化走到第几代，天花板在机器
+        #:    还是在世界的判定，全靠这个读数。不记 ⇒ "这次是几个环境的
+        #:    实验"要靠猜 ⇒ 账本失去可比性。
+        "n_envs": len(names),
+        "envs": list(names),
+        "world": "auto" if _want == "auto" else ("custom" if _want else "default4"),
         #: ⛔ 记 `0` 而不是 `None`：None 分不清「不是续跑」和「忘了记」。
         #:    （与 checkpoint 的 `n_below_min_content` 同源纪律：读数要么
         #:    是确认过的值，要么带原因，不许用空值冒充"已确认没有"。）
@@ -1755,13 +1803,20 @@ def build_parser() -> argparse.ArgumentParser:
                         "2=双点（需要【叠加】才能修好 ⇒ 抬高天花板）")
     e.add_argument("--kinds", default="",
                    help="变异种类，逗号分隔：compare,binop,constant,boolop,"
-                        "unaryop。留空=默认三种（与既有基线同口径）")
+                        "unaryop,string。留空=默认三种（与既有基线同口径）"
+                        "；string 是后加的算子：真实代码里字符串处理是常态，"
+                        "而默认三种打不穿纯字符串处理函数")
     e.add_argument("--capsules", default="both",
                    choices=["both", "general", "narrow"],
                    help="提议池：both=两类都给（定点修法必赢）/ general / narrow")
     e.add_argument("--seed", default="0")
     e.add_argument("--dev-env", default="textscore", help="发展集所在环境")
     e.add_argument("--heldout-env", default="eventflow", help="held-out 环境（不参与选择）")
+    #: ⛔ 世界规模是**实验变量**，不是常量。默认仍是 `DEFAULT_ENVS` 四个
+    #:    ⇒ 与既有账本/基线同口径（见第 103 条纪律：新口径必须显式开启）。
+    e.add_argument("--envs", default="",
+                   help="参与这次进化的环境：`auto`=扫 tasks/ 下全部合法目录，"
+                        "或逗号分隔的名字。留空=默认四个（历史口径）")
     e.add_argument("--heldout", default="on", choices=["on", "off"],
                    help="off ⇒ 关闭泛化闸（用于对照：过拟合候选会被提交）")
     e.add_argument("--proposer", default="template", choices=["template", "llm"],

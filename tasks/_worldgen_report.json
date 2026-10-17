@@ -1,0 +1,112 @@
+[
+  {
+    "env": "doctest",
+    "n_tests": 6,
+    "n_functions": 3,
+    "n_source_lines": 637,
+    "n_synth_valid": 1,
+    "n_synth_attempted": 8,
+    "n_weak_dropped": 1,
+    "fail_to_pass": [
+      "register_optionflag_0",
+      "register_optionflag_1",
+      "register_optionflag_2",
+      "register_optionflag_3",
+      "register_optionflag_4",
+      "register_optionflag_5"
+    ]
+  },
+  {
+    "env": "editor",
+    "n_tests": 6,
+    "n_functions": 4,
+    "n_source_lines": 58,
+    "n_synth_valid": 1,
+    "n_synth_attempted": 10,
+    "n_weak_dropped": 0,
+    "fail_to_pass": [
+      "index2line_0",
+      "index2line_1",
+      "index2line_2",
+      "index2line_3",
+      "index2line_4",
+      "index2line_5"
+    ]
+  },
+  {
+    "env": "encoder",
+    "n_tests": 12,
+    "n_functions": 2,
+    "n_source_lines": 33,
+    "n_synth_valid": 1,
+    "n_synth_attempted": 10,
+    "n_weak_dropped": 0,
+    "fail_to_pass": [
+      "py_encode_basestring_0",
+      "py_encode_basestring_1",
+      "py_encode_basestring_2",
+      "py_encode_basestring_3",
+      "py_encode_basestring_4",
+      "py_encode_basestring_5",
+      "py_encode_basestring_ascii_0",
+      "py_encode_basestring_ascii_1",
+      "py_encode_basestring_ascii_2",
+      "py_encode_basestring_ascii_3",
+      "py_encode_basestring_ascii_4",
+      "py_encode_basestring_ascii_5"
+    ]
+  },
+  {
+    "env": "shlex",
+    "n_tests": 6,
+    "n_functions": 3,
+    "n_source_lines": 292,
+    "n_synth_valid": 1,
+    "n_synth_attempted": 9,
+    "n_weak_dropped": 6,
+    "fail_to_pass": [
+      "split_0",
+      "split_1",
+      "split_2",
+      "split_3",
+      "split_4",
+      "split_5"
+    ]
+  },
+  {
+    "env": "_writer",
+    "n_tests": 6,
+    "n_functions": 1,
+    "n_source_lines": 43,
+    "n_synth_valid": 2,
+    "n_synth_attempted": 8,
+    "n_weak_dropped": 0,
+    "fail_to_pass": [
+      "format_key_part_0",
+      "format_key_part_1",
+      "format_key_part_2",
+      "format_key_part_3",
+      "format_key_part_4",
+      "format_key_part_5"
+    ]
+  },
+  {
+    "env": "chaos",
+    "n_tests": 8,
+    "n_functions": 3,
+    "n_source_lines": 8,
+    "n_synth_valid": 9,
+    "n_synth_attempted": 9,
+    "n_weak_dropped": 4,
+    "fail_to_pass": [
+      "f_0",
+      "f_1",
+      "f_2",
+      "f_3",
+      "g_0",
+      "g_1",
+      "g_2",
+      "g_3"
+    ]
+  }
+]

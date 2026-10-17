@@ -1,0 +1,106 @@
+{
+  "env_id": "encoder",
+  "note": "由 aether/encoder.py 切片自动生成：12 条经 F2P 验证的判据（另有 0 条对变异免疫，已剔除）。expect 为生成时刻的实现行为（characterization），非规格。",
+  "oracle": "characterization",
+  "generated_by": "scripts/worldgen.py",
+  "generated_at": "2026-10-17T14:33:01",
+  "source_origin": "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/lib/python3.13/encoder.py",
+  "tests": [
+    {
+      "name": "py_encode_basestring_0",
+      "call": "py_encode_basestring",
+      "args": [
+        ""
+      ],
+      "expect": "\"\""
+    },
+    {
+      "name": "py_encode_basestring_1",
+      "call": "py_encode_basestring",
+      "args": [
+        "a"
+      ],
+      "expect": "\"a\""
+    },
+    {
+      "name": "py_encode_basestring_2",
+      "call": "py_encode_basestring",
+      "args": [
+        "abc def"
+      ],
+      "expect": "\"abc def\""
+    },
+    {
+      "name": "py_encode_basestring_3",
+      "call": "py_encode_basestring",
+      "args": [
+        "Hello World"
+      ],
+      "expect": "\"Hello World\""
+    },
+    {
+      "name": "py_encode_basestring_4",
+      "call": "py_encode_basestring",
+      "args": [
+        "x,y,z"
+      ],
+      "expect": "\"x,y,z\""
+    },
+    {
+      "name": "py_encode_basestring_5",
+      "call": "py_encode_basestring",
+      "args": [
+        "  pad  "
+      ],
+      "expect": "\"  pad  \""
+    },
+    {
+      "name": "py_encode_basestring_ascii_0",
+      "call": "py_encode_basestring_ascii",
+      "args": [
+        ""
+      ],
+      "expect": "\"\""
+    },
+    {
+      "name": "py_encode_basestring_ascii_1",
+      "call": "py_encode_basestring_ascii",
+      "args": [
+        "a"
+      ],
+      "expect": "\"a\""
+    },
+    {
+      "name": "py_encode_basestring_ascii_2",
+      "call": "py_encode_basestring_ascii",
+      "args": [
+        "abc def"
+      ],
+      "expect": "\"abc def\""
+    },
+    {
+      "name": "py_encode_basestring_ascii_3",
+      "call": "py_encode_basestring_ascii",
+      "args": [
+        "Hello World"
+      ],
+      "expect": "\"Hello World\""
+    },
+    {
+      "name": "py_encode_basestring_ascii_4",
+      "call": "py_encode_basestring_ascii",
+      "args": [
+        "x,y,z"
+      ],
+      "expect": "\"x,y,z\""
+    },
+    {
+      "name": "py_encode_basestring_ascii_5",
+      "call": "py_encode_basestring_ascii",
+      "args": [
+        "  pad  "
+      ],
+      "expect": "\"  pad  \""
+    }
+  ]
+}

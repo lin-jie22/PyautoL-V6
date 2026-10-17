@@ -45,7 +45,8 @@ from .memory import MemoryOS
 from .runtime import Trajectory
 #: ⛔ 唯一事实源：`revert_control_flow` 难度分层也用它，改动会同时
 #:    改变"什么算 easy"的定义。
-from .repair import revert_boolops, revert_control_flow, revert_literals
+from .repair import (revert_boolops, revert_control_flow, revert_literals,
+                     revert_strings)
 from .verifier import Verdict, error_verdict
 
 #: L0 元规则指令表。**指令是有后果的**，不是注释。
@@ -74,7 +75,8 @@ REQUIRED_TOOLS: Tuple[str, ...] = ("read_file", "python_exec")
 #:      这正是"每轮都在评估候选、没人在自己的产出上花力"的产物形态：
 #:      它不破坏任何断言、也不改进任何东西，只是让系统悄悄少一条路。
 KNOWN_STRATEGIES: Tuple[str, ...] = (
-    "fix_control_flow", "fix_literals", "fix_boolops", "memory_hint",
+    "fix_control_flow", "fix_literals", "fix_boolops", "fix_strings",
+    "memory_hint",
 )
 
 #: 前缀型策略（`uci:<cid>` / `patch:<env_id>`）。
@@ -482,6 +484,11 @@ class HarnessAgent:
             #: 第三维：**布尔运算**（and/or）。与前两维修的不是同一类节点，
             #:    所以既能被单独提名进链，也不该顺手把别的层的题修好。
             return revert_boolops(src, env.source), True
+        if strategy == "fix_strings":
+            #: 第四维：**字符串常量**。⛔ 它是 `string` 变异算子的对称修法
+            #:    —— 没有它，`string` 造出来的题**没有任何技能修得回来**
+            #:    ⇒ delta 恒 0 ⇒ 那是注水题源，不是任务世界（r48 实测）。
+            return revert_strings(src, env.source), True
         if strategy.startswith("patch:"):
             # ⛔ 定点修法必须**校验环境是否匹配**。不校验的话它会在任何环境
             #    都"生效" ⇒ 定点退化成通用 ⇒ 泛化闸再也发现不了它。

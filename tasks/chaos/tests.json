@@ -1,0 +1,74 @@
+{
+  "env_id": "chaos",
+  "note": "由 aether/chaos.py 切片自动生成：8 条经 F2P 验证的判据（另有 4 条对变异免疫，已剔除）。expect 为生成时刻的实现行为（characterization），非规格。",
+  "oracle": "characterization",
+  "generated_by": "scripts/worldgen.py",
+  "generated_at": "2026-10-17T14:33:35",
+  "source_origin": "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/lib/python3.13/chaos.py",
+  "tests": [
+    {
+      "name": "f_0",
+      "call": "f",
+      "args": [
+        0.0
+      ],
+      "expect": 0.0
+    },
+    {
+      "name": "f_1",
+      "call": "f",
+      "args": [
+        0.5
+      ],
+      "expect": 0.975
+    },
+    {
+      "name": "f_2",
+      "call": "f",
+      "args": [
+        2.5
+      ],
+      "expect": -14.625
+    },
+    {
+      "name": "f_3",
+      "call": "f",
+      "args": [
+        -1.0
+      ],
+      "expect": -7.8
+    },
+    {
+      "name": "g_0",
+      "call": "g",
+      "args": [
+        0.0
+      ],
+      "expect": 0.0
+    },
+    {
+      "name": "g_1",
+      "call": "g",
+      "args": [
+        0.5
+      ],
+      "expect": 0.975
+    },
+    {
+      "name": "g_2",
+      "call": "g",
+      "args": [
+        2.5
+      ],
+      "expect": -14.625
+    },
+    {
+      "name": "g_3",
+      "call": "g",
+      "args": [
+        -1.0
+      ],
+      "expect": -7.8
+    }
+  ]
+}

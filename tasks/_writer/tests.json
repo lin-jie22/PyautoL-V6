@@ -1,0 +1,58 @@
+{
+  "env_id": "_writer",
+  "note": "由 aether/_writer.py 切片自动生成：6 条经 F2P 验证的判据（另有 0 条对变异免疫，已剔除）。expect 为生成时刻的实现行为（characterization），非规格。",
+  "oracle": "characterization",
+  "generated_by": "scripts/worldgen.py",
+  "generated_at": "2026-10-17T14:33:30",
+  "source_origin": "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/lib/python3.13/_writer.py",
+  "tests": [
+    {
+      "name": "format_key_part_0",
+      "call": "format_key_part",
+      "args": [
+        ""
+      ],
+      "expect": "\"\""
+    },
+    {
+      "name": "format_key_part_1",
+      "call": "format_key_part",
+      "args": [
+        "a"
+      ],
+      "expect": "a"
+    },
+    {
+      "name": "format_key_part_2",
+      "call": "format_key_part",
+      "args": [
+        "abc def"
+      ],
+      "expect": "\"abc def\""
+    },
+    {
+      "name": "format_key_part_3",
+      "call": "format_key_part",
+      "args": [
+        "Hello World"
+      ],
+      "expect": "\"Hello World\""
+    },
+    {
+      "name": "format_key_part_4",
+      "call": "format_key_part",
+      "args": [
+        "x,y,z"
+      ],
+      "expect": "\"x,y,z\""
+    },
+    {
+      "name": "format_key_part_5",
+      "call": "format_key_part",
+      "args": [
+        "  pad  "
+      ],
+      "expect": "\"  pad  \""
+    }
+  ]
+}

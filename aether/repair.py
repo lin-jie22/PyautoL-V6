@@ -27,7 +27,8 @@ import ast
 from collections.abc import Mapping
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from .environment import Environment, numeric_literals, verify_source
+from .environment import (Environment, numeric_literals, string_literals,
+                          verify_source)
 
 Repair = Callable[[str, str], str]      # (broken_source, base_source) -> fixed
 
@@ -137,6 +138,40 @@ def revert_boolops(broken_src: str, base_src: str) -> str:
         return broken_src
     for i in range(len(bo)):
         bo[i].op = type(go[i].op)()
+    ast.fix_missing_locations(b)
+    return ast.unparse(b)
+
+
+def revert_strings(broken_src: str, base_src: str) -> str:
+    """**第四个正交维度**：只把**字符串常量**按遍历序对齐到基线。
+
+    ⛔ 它存在的理由是可逆性，不是"多一种修法"（2026-10-17 实测）：
+        `string` 变异算子刚加上时，配套的修法并没有跟着加 ⇒ 变异能造出
+        真失败的任务（F2P 通过），但**没有任何技能修得回来** ⇒ 这类题在
+        dev 与 held-out 上 delta 恒 0 ⇒ 造出来的是**注水的题源**，比没有
+        更坏 —— 它让"世界变大了"这件事在账面上成立、在 reward 里完全看
+        不见。⇒ **加一个变异维度，必须同时加它的对称修法。**
+
+    ⛔ 与另外三个维度正交，四者各管一类节点：
+
+        revert_control_flow ⇒ 比较符 / 运算符
+        revert_literals     ⇒ 数值常量
+        revert_boolops      ⇒ and / or
+        revert_strings      ⇒ 字符串常量
+
+        正交在这里是可判定的：任取一维修另一维造的题 ⇒ reward 必须为 0。
+
+    ⛔ 与 `revert_literals` 同理，**刻意不进** `GENERIC_REPAIRS`（已实测）：
+        它进那个集合 ⇒ 字符串题从 hard 变 easy ⇒ 发展集与 held-out 的
+        难度跨度消失 ⇒ 泛化闸退化。它只作为**技能**进 proposer 池。
+    """
+    b = ast.parse(broken_src)
+    g = ast.parse(base_src)
+    bo, go = string_literals(b), string_literals(g)
+    if len(bo) != len(go):
+        return broken_src        #: fail-closed：树形已变 ⇒ 不许错位对齐
+    for i in range(len(bo)):
+        bo[i].value = go[i].value
     ast.fix_missing_locations(b)
     return ast.unparse(b)
 
