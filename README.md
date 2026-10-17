@@ -2064,6 +2064,67 @@ F 组为反证（把 `memory.search` 换成恒空 ⇒ A2「记之后不再提议
 
 ---
 
+### 102. ⛔⛔ **0 次没有一阶信息**：把零次事件分成三类，逐个注入验证
+
+上一条的差分找出 14 个零次事件。**但它们 0 次的含义完全不同**，混在一起
+就会误判 —— 上一次踩的坑正是把三者当成一类：
+
+| 类别 | 含义 | 处置 |
+|---|---|---|
+| ① 参数驱动 | 没人传过参 | 传一次参就能区分好/坏 |
+| ② 退避（fallback）分支 | 从没出错过 | **必须注入**：验不出来就是死代码 |
+| ③ 功能路径 | 条件从未同时成立 | 用生产数据复算条件是否真的满足 |
+
+②是最危险的：V5 的 `will_delete` 恒 0、`aging_events["pruned"]` 恒 0 都是
+这一类 —— **一个静默归零的读数比没有读数更坏**，因为它持续冒充"没问题"。
+
+**实测结果**（`scripts/audit_zero_events.py`，全部注入而非推断）：
+
+| 事件 | 结论 |
+|---|---|
+| `evolution.checkpoint` / `budget_stop` | ✅ 传 `--checkpoint` / `--max-seconds` 立刻触发 ⇒ 健康，**0 次=没人用** |
+| `evolution.checkpoint_failed` | ✅ 指向不可写路径 ⇒ 2 条、精确归因 `ENOENT` ⇒ **有牙** |
+| `memory.pruned` | ✅ `prune --apply` ⇒ 68 条逐条留痕 ⇒ **有牙** |
+| `baseline.supersede_failed` | ✅ 单元注入 ⇒ **有牙**（契约 A 组） |
+| `experience.ledger_failed` | ⚠️ **结构上写不出**：用**同一条坏通道**记自己的失败 |
+| `deadend.cooldown` / `world_fact.promoted` | ⚠️ 生产账本上 `_in_cooldown` 返回 `cooling=True`（streak=3 达标）⇒ **机制通**，只是没出现"达标且同轮仍被提议" |
+
+⛔ **诚实未验证 8 个**（`world_fact.promote_failed` / `cleanup.propose_failed` /
+`attribution.*` / `gate.blocked` 等）：它们的记账点都在 `_run_round` 内部，
+单元级注入进不去。⛔ B 组的教训 —— 最初我在测试里替被测代码补写那条事件，
+那是**测试伪造结果**。现已改回只验"异常会冒出这一层"，并在输出里标注
+"此层验不到最终记账"。
+
+**一条没修的真发现（属设计取舍，写在代码注释里了）**
+
+同一个 capsule 的失败史被 key 的**默认值**劈开：
+
+```
+add_skill:patch:textscore|unknown              streak=15   ← 历史缺 env_pair
+add_skill:patch:textscore|textscore->eventflow streak= 3   ← 读取侧只查这个
+```
+
+⇒ 15/18（**83%**）的死路证据**永久不可读**（写入点 evolution.py:1757 现在
+已必带 `env_pair`，所以这是历史包袱，未来不会再产生）。
+⛔ **不修**：把 `|unknown` 并入任意 env_pair = 退回注释 1755–1756 明确否决
+过的设计（"缺了 env_pair ⇒ 冷却按候选全局生效 ⇒ 换环境后被误伤"）。
+⇒ 取舍的代价是这批证据作废，换来的是**不会跨环境误伤**。这笔账要留下，
+不要为了"数据看起来能用"把它改回去。
+
+**契约落点**：新增 `tests/contract_fallback_reachability_test.py` A–E 组 7 条
+（含 D 组反证：不注入时 failure 事件**不许**出现，否则是误报）。
+
+**本轮两次自我纠错**（都写进记忆，别重犯）：
+
+1. 续跑实验用 `tail[-40:]` 看 gen.probe ⇒ **把历史尾部当成本轮新增**，
+   误判"streak 达标却没冷却"。精确按"续跑前行数"切分后，本轮 `gen.probe`
+   只有 1 条，`patch:textscore` 本轮压根没被提议 ⇒ **没有矛盾**。
+2. 看到 prune 剪掉的笔记 `access_count` 高达 1383 ⇒ 怀疑"剪枝剪掉了最有用
+   的知识"。实测保留的 5 条是 1441–1604（最热），剪掉的中位数是 6 ⇒
+   **策略正确，是我怀疑错了**。⛔ 可疑 ≠ 坏，先验再判。
+
+---
+
 ## 6. 与 V5 的关系
 
 V6 不是 V5 的替代品，是它的**结构化重写**：
