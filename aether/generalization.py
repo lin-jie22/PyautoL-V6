@@ -142,6 +142,14 @@ class ProbeResult:
     #: ⛔ 与 `out_of_reach`（能力边界）分开：两者都不处罚，但**出路不同**
     #:    —— 这条要去补 held-out 该层的题数，那条是能力到此为止。
     thin: Tuple[str, ...] = ()
+    #: ⛔ **完全饱和层**（r54）：该层基线**已全部修好**（可提升空间 = 0）
+    #:   ⇒ 这一层的 held-out 增益**必然**是 0，承载不了任何信息。
+    #:   ⛔ 与 `thin` 是两件事，不许合并：
+    #:     · `thin`      = 还剩几条能涨，但太少 ⇒ 统计上不可判别（要补题）；
+    #:     · `saturated` = 一条都涨不了 ⇒ 读数必然为 0（要换更难的题/换环境）。
+    #:     合并后"该去补题"与"该去换环境"这两条出路会一起消失，而账面
+    #:     仍然显示"这一层被豁免了"（第 14 条：两种含义共用一个字段 ⇒ 读错）。
+    saturated: Tuple[str, ...] = ()
 
     @property
     def blocks(self) -> bool:
@@ -169,6 +177,7 @@ class ProbeResult:
                 "out_of_reach": list(self.out_of_reach),
                 "headroom": dict(self.headroom),
                 "thin": list(self.thin),
+                "saturated": list(self.saturated),
                 "reason": self.reason}
 
 
@@ -475,6 +484,11 @@ class GeneralizationGate:
             by_difficulty=res.by_difficulty,
             dev_by_difficulty=res.dev_by_difficulty,
             out_of_reach=res.out_of_reach, discriminative=False,
+            #: ⛔ 重建时**从 res 继承**这三个读数：不继承的话，一次"降级"
+            #:    就把 headroom/thin/saturated 全抹成空 ⇒ 观测侧看见的
+            #:    inconclusive 与放行分支不同形 ⇒ 又一处"只有放行记得填"。
+            headroom=dict(res.headroom), thin=res.thin,
+            saturated=res.saturated,
             reason=(f"held-out 有难度标签但只有一层 {sorted(self.suite.levels)}"
                     f" ⇒ 它无法区分{what} ⇒ 本可判 "
                     f"{pass_verdict}（ho {res.heldout_gain:+.4f}），"
@@ -538,6 +552,34 @@ class GeneralizationGate:
         ho_gain = cand_ho - base_ho
         by_diff = self._gain_by_difficulty(base_vs, cand_vs)
 
+        # ⛔⛔ r54：**分层诊断提到所有分支之前**，成为公共事实。
+        #    此前它只存在于「总体已涨」的那条路径上，`overfit`（总体未涨）
+        #    在任何分层逻辑**之前**就早退了 ⇒ 同一个候选只因 ho 总体增益
+        #    差 0.01，就一个享受完整同层对照、另一个被零信息判决。
+        #    判据在临界点不连续 ⇒ 这次拦得对不对，全看浮点落在哪一侧。
+        #: 该层里基线**尚未修好**的题数 = 这一层真正能涨的空间（r52）。
+        base_by_id = {tid: v.reward
+                      for tid, v in zip(self.suite.task_ids, base_vs)}
+        headroom = {
+            lv: sum(1 for t in self.suite.ids_of(lv)
+                    if base_by_id.get(t, 0.0) < 1.0)
+            for lv in by_diff}
+        #: ⛔ 与 `headroom_of()` 同判据（`reward < 1.0`），不许各写一份。
+        lagging_all = sorted(lv for lv in by_diff
+                             if by_diff[lv] <= self.heldout_floor)
+        thin = sorted(lv for lv in lagging_all
+                      if headroom.get(lv, 0) < self.min_level_headroom)
+        all_thin = bool(by_diff) and all(
+            headroom.get(lv, 0) < self.min_level_headroom for lv in by_diff)
+        #: ⛔ r54：**完全饱和层**（该层基线已全部修好 ⇒ 任何变化都测不出来）。
+        #:    与 `thin`（样本不足，统计上不可判别）是**两件事**：
+        #:      · thin     = 还有几条能涨，但太少 ⇒ 涨没涨都说不清；
+        #:      · saturated= 一条都涨不了 ⇒ 这一层的读数**必然**是 0。
+        #:    它们在裁决里的处置相同（不作证也不作反证、必须点名），
+        #:    但出路不同：thin 要补题，saturated 要换更难的题（或换环境）。
+        saturated = sorted(lv for lv in lagging_all
+                           if headroom.get(lv, 0) == 0)
+
         # ⛔ 与 heldout_floor 同一个口径：**等于地板也算"没涨"**。
         #    两侧口径不一致会让"dev 涨 0"和"ho 涨 0"得到相反的对待。
         if dev_gain <= self.dev_floor:
@@ -559,37 +601,35 @@ class GeneralizationGate:
         # ⛔ 用 `<=`：等于地板也算"没跟着涨"。用 `<` 的话 0 增益会被判成
         #    泛化 —— 那正好放过最典型的一种 reward hacking（dev 涨、held-out 纹丝不动）。
         if ho_gain <= self.heldout_floor:
+            #: ⛔⛔ r54：这里原先**带走了 `by_diff` 却丢掉了 `headroom`
+            #:    / `thin` / `dev_by_difficulty`** —— 而进化循环是把
+            #:    `dev_by_difficulty` 一路传进来的（evolution.py 的
+            #:    `probe(dev_by_difficulty=cand.dev_by_difficulty)`）。
+            #:    结果：观测侧看到的 overfit 裁决里 `headroom={}`、
+            #:    `dev={}`（实测轮 5），于是"这一轮闸判得对不对"**根本
+            #:    无从复核** —— 而 partial 分支三个字段全在。
+            #:    ⛔ 这不是"少记了几个字段"：判据用到的量必须进 `to_dict`
+            #:    （第 35d 条），只活在 reason 文案里的量，改一次措辞
+            #:    就让所有下游同时失真。
             return ProbeResult(
                 verdict="overfit", dev_gain=dev_gain, heldout_gain=ho_gain,
                 base_heldout=base_ho, cand_heldout=cand_ho,
                 n_tasks=self.suite.n_tasks, by_difficulty=by_diff,
+                dev_by_difficulty=dict(dev_by_difficulty or {}),
+                headroom=dict(headroom), thin=tuple(thin),
+                saturated=tuple(saturated),
                 reason=(f"发展集 +{dev_gain:.4f} 但 held-out {ho_gain:+.4f} "
                         f"（{base_ho:.2f}→{cand_ho:.2f}）⇒ 讨好判据，不提交"))
         # ⛔ 分层裁决：总体涨了，但某一难度层没涨 ⇒ **不能直接判挑食**，
         #    必须与发展集的同层增益对照（理由见 docstring 的"自指死锁"）。
-        #: 该层里基线**尚未修好**的题数 = 这一层真正能涨的空间（r52）。
-        base_by_id = {tid: v.reward
-                      for tid, v in zip(self.suite.task_ids, base_vs)}
-        headroom = {
-            lv: sum(1 for t in self.suite.ids_of(lv)
-                    if base_by_id.get(t, 0.0) < 1.0)
-            for lv in by_diff}
-        #: ⛔ 样本量不足的层：它能涨的题太少 ⇒ "没涨"**不可判别**
-        #:    ⇒ 既不进 lagging（不作反证），也要在裁决里**点名**（不作证）。
-        #:    ⛔ 只对**未涨**的层谈样本量：已经涨了的层不需要这层豁免
-        #:    （第一版对全部层判 ⇒ easy 涨了也被算进 out_of_reach ⇒
-        #:      E1b 的"放行必须点名 out_of_reach"直接被污染）。
+        #: ⛔ 上面的 `headroom` / `lagging_all` / `thin` / `all_thin` 已在
+        #:    **分支之前**算好（r54），这里**不再各算一份** —— 两处同形却
+        #:    互不相干 ⇒ 改一处必漏一处，而漏的那处不报错，只是某个分支的
+        #:    裁决悄悄失去依据（第 13 条：判据名单 build 与 validate 同源）。
+        #:    ⛔ 未涨的层里，样本不足（`thin`）的**不作反证**，但要在裁决里
+        #:    **点名**（不作证）。已经涨了的层不需要这层豁免。
         #:    ⛔ 与 `undecidable`（发展集没这一层）分开：处置相同，但出路
         #:       完全不同 —— 这条要去补 held-out 该层的**题数**，不是补层。
-        lagging_all = sorted(lv for lv in by_diff
-                             if by_diff[lv] <= self.heldout_floor)
-        thin = sorted(lv for lv in lagging_all
-                      if headroom.get(lv, 0) < self.min_level_headroom)
-        #: ⛔ 每一层的可提升空间都不足 ⇒ 这套 held-out 在这道题上**整体**
-        #:   无判别力 ⇒ fail-closed（与 `discriminative=False` 同形态，
-        #:   但那是"没有难度标签"，这是"有标签但每层样本都不够"）。
-        all_thin = bool(by_diff) and all(
-            headroom.get(lv, 0) < self.min_level_headroom for lv in by_diff)
         lagging = [lv for lv in lagging_all if lv not in thin]
         if lagging or thin:
             out_of_reach: List[str] = []
@@ -616,6 +656,7 @@ class GeneralizationGate:
                     dev_by_difficulty=dict(dev_by_difficulty or {}),
                     out_of_reach=tuple(out_of_reach),
                     headroom=dict(headroom), thin=tuple(thin),
+                    saturated=tuple(saturated),
                     reason=(f"总体 held-out {ho_gain:+.4f}，但 {shown} 未涨，"
                             f"且发展集同层有增益（{ {lv: round((dev_by_difficulty or {}).get(lv, 0.0), 4) for lv in cherry} }"
                             f"）⇒ 只在部分难度上泛化（挑食），不提交"))
@@ -630,6 +671,7 @@ class GeneralizationGate:
                     by_difficulty=by_diff,
                     dev_by_difficulty=dict(dev_by_difficulty or {}),
                     out_of_reach=(), headroom=dict(headroom), thin=tuple(thin),
+                    saturated=tuple(saturated),
                     reason=(f"held-out 的 {undecidable} 层未涨，但发展集**没有"
                             f"该难度层** ⇒ 无从对照，无法区分「能力边界」与"
                             f"「挑食」⇒ 按拦截处理（补该难度的 dev 任务后再判）"))
@@ -646,6 +688,7 @@ class GeneralizationGate:
                     by_difficulty=by_diff,
                     dev_by_difficulty=dict(dev_by_difficulty or {}),
                     headroom=dict(headroom), thin=tuple(thin),
+                    saturated=tuple(saturated),
                     reason=(f"held-out **每层**的可提升空间都不足 "
                             f"{self.min_level_headroom} 条（{shown}）⇒ 这次"
                             f"裁决没有任何一层的证据可用 ⇒ 按拦截处理。"
@@ -672,6 +715,7 @@ class GeneralizationGate:
                                dev_by_difficulty=dict(dev_by_difficulty or {}),
                                out_of_reach=tuple(out_of_reach),
                                headroom=dict(headroom), thin=tuple(thin),
+                               saturated=tuple(saturated),
                                reason=(f"发展集 +{dev_gain:.4f} 且 held-out {ho_gain:+.4f}"
                                        f"（分层 {by_diff}）⇒ 泛化，放行。"
                                        f" {shown} 未涨但发展集同层同样未涨"
@@ -683,6 +727,7 @@ class GeneralizationGate:
                            by_difficulty=by_diff,
                            dev_by_difficulty=dict(dev_by_difficulty or {}),
                            headroom=dict(headroom), thin=tuple(thin),
+                           saturated=tuple(saturated),
                            reason=f"发展集 +{dev_gain:.4f} 且 held-out {ho_gain:+.4f}"
                                   + (f"（分层 {by_diff}）" if by_diff else "")
                                   + " ⇒ 泛化，放行"))

@@ -48,6 +48,19 @@ sys.path.insert(0, str(ROOT))
 
 import aether.providers as providers  # noqa: E402
 from aether.cli import main as cli_main  # noqa: E402
+from aether.evolution import EvolutionLoop as _Loop  # noqa: E402
+
+#: ⛔ r54：冷却记录。提名了却没被评估的候选，只有这里能说清是
+#:   「连续被拦达标」还是别的原因 —— 否则"池子枯竭"会被读成"没有候选了"。
+_CD: list = []
+_orig_cd = _Loop._in_cooldown
+
+
+def _patched_cd(self, cap_name, env_pair, deadend, round_no):
+    cooled, streak = _orig_cd(self, cap_name, env_pair, deadend, round_no)
+    _CD.append({"round": round_no, "cap": cap_name, "streak": streak,
+                "cooled": bool(cooled)})
+    return cooled, streak
 
 #: ⛔ 记录器挂在**类方法**上：`cmd_evolve` 在函数内部 `from .providers
 #:    import TemplateProposer` 取的是同一个类对象 ⇒ 包一层即可，不用改生产代码。
@@ -80,13 +93,16 @@ def _patched(self, weakness, harness, n=3):
 def run_once(argv: list) -> dict:
     """跑一次真实 `evolve`，返回它打印的 JSON。"""
     _LOG.clear()
+    _CD.clear()
     providers.TemplateProposer.propose = _patched
+    _Loop._in_cooldown = _patched_cd
     buf = io.StringIO()
     try:
         with contextlib.redirect_stdout(buf):
             rc = cli_main(argv)
     finally:
         providers.TemplateProposer.propose = _orig_propose
+        _Loop._in_cooldown = _orig_cd
     s = buf.getvalue()
     if rc != 0 and "{" not in s:
         raise SystemExit(f"evolve 失败 rc={rc}\n{s[-2000:]}")
@@ -116,18 +132,69 @@ def show(out: dict, tag: str) -> dict:
     # ── B · 每轮裁决 + D · 队列长度 ─────────────────────────────
     print("\nB · 每轮裁决（reward / advantage / reason）")
     queue_lens = []
+    #: ⛔ 每轮「提名了却没被评估」的候选：这是 r54 的核心读数 ——
+    #:    没有它，"这一轮只剩 1 个候选"会被读成"没有候选了"。
+    dropped_all: list = []
     for r in rounds:
         cands = r.get("candidates") or []
         elig = [c for c in cands if not c.get("reason")]
         queue_lens.append(len(elig))
+        #: ⛔ r54：提名了 3 个却只评估了 1 个 ⇒ 差额就是**被冷却吞掉**的。
+        #:   不打印这个差集，"池子枯竭"会被读成"没有候选了"。
+        nom = set(_LOG[r.get("round_no", 0) - 1]["capsules"]) \
+            if 0 < r.get("round_no", 0) <= len(_LOG) else set()
+        got = {c.get("capsule") for c in cands}
+        dropped = sorted(nom - got)
+        dropped_all.append(dropped)
         print(f"  轮{r.get('round_no')} 基线 {r.get('baseline_reward')}"
-              f" 提交={r.get('committed')} 提名 {len(cands)} 候选"
-              f" 准入队列 {len(elig)}")
+              f" 提交={r.get('committed')} 提名 {len(nom)}"
+              f" 评估 {len(cands)} 准入队列 {len(elig)}"
+              + (f" ⛔未评估（冷却/去重）= {dropped}" if dropped else ""))
         for c in cands:
             print(f"      {c.get('capsule'):<28} rew={c.get('reward'):<8}"
                   f" adv={c.get('advantage'):<8}"
                   f" gate={'✓' if c.get('gate_passed') else '✗'}"
                   f" reason={c.get('reason') or '(准入)'}")
+        #: ⛔ r54：把**分层**读数打出来。没有它，「ho 该层已饱和」与
+        #:   「ho 该层有空间却不涨」在总体层面完全同形 ⇒ 无从判断闸判得对不对。
+        #:   ⛔ 数据源是 `candidates[].generalization`（`ProbeResult.to_dict()`
+        #:      的完整副本）—— `gate_probes[]` 只留了摘要，没有分层字段。
+        for c in cands:
+            g2 = c.get("generalization") or {}
+            if not g2:
+                continue
+            print(f"      └ 分层[{c.get('capsule')}] {g2.get('verdict')}"
+                  f" ho={g2.get('by_difficulty')}"
+                  f" dev={g2.get('dev_by_difficulty')}"
+                  f" headroom={g2.get('headroom')} thin={g2.get('thin')}"
+                  f" oor={g2.get('out_of_reach')}")
+
+    # ── F · 死路晋升（r54：误判会不会被固化成制度）────────────────
+    print("\nF · 死路晋升（哪些「被拦」被写成**可继承**的基因组事实）")
+    _prom: Counter = Counter()
+    for r in rounds:
+        for p in (r.get("facts_promoted") or []):
+            _prom[p.get("capsule")] += 1
+            print(f"  轮{r.get('round_no')} 晋升 {p.get('capsule')}"
+                  f" env_pair={p.get('env_pair')}"
+                  f" observations={p.get('observations')}")
+    for r in rounds:
+        wf = r.get("world_facts") or {}
+        keys = [k for k in (wf.get("keys") or {}) if "deadend" in str(k)]
+        if keys:
+            print(f"  轮{r.get('round_no')} 基因组里已有死路事实 {len(keys)} 条"
+                  f"：{keys[:6]}")
+            break
+    print(f"      ⇒ 晋升总数 {sum(_prom.values())}"
+          f"  涉及候选 {sorted(_prom) or '（无）'}")
+
+    # ── G · 冷却实录（提名了 ≠ 被评估）──────────────────────────
+    print("\nG · 冷却实录（`_in_cooldown` 的每一次真实判定）")
+    for d in _CD:
+        print(f"  轮{d['round']} {d['cap']:<28} streak={d['streak']}"
+              f" {'⛔冷却（本轮不评估）' if d['cooled'] else '正常评估'}")
+    if not _CD:
+        print("     （一次都没判过 ⇒ 候选减少与冷却无关）")
 
     # ── C · 跨轮提名计数 ────────────────────────────────────────
     print("\nC · 跨轮提名计数（谁从来没被提名过）")
@@ -162,6 +229,7 @@ def show(out: dict, tag: str) -> dict:
     return {"queue_lens": queue_lens,
             "nominated": dict(cnt),
             "never": never,
+            "dropped": dropped_all,
             "commits": sum(1 for r in rounds if r.get("committed")),
             "rewards": [r.get("baseline_reward") for r in rounds]}
 
@@ -178,8 +246,11 @@ def main() -> int:
     ap.add_argument("--balanced", action="store_true")
     ap.add_argument("--ho-grow", action="store_true",
                     help="开 held-out 判别力自愈（r53 新口径）")
+    ap.add_argument("--retry-every", default="0",
+                    help="⛔ r54 新口径（默认 0 = 现状）：被闸拒过的候选每被"
+                         "跳过这么多轮就放行一次让闸重审")
     ap.add_argument("--compare", action="store_true",
-                    help="同时跑对照组（不开 --ho-grow，其余完全相同）")
+                    help="同时跑对照组（唯一变量 = 最后一个开关）")
     args = ap.parse_args()
 
     base = ["--root", "@TMP@", "evolve",
@@ -191,6 +262,12 @@ def main() -> int:
         base.append("--balanced")
     if args.ho_grow:
         base.append("--ho-grow")
+    #: ⛔ `--retry-every N` 占 **两个** argv 元素：对照时两个都要摘掉，
+    #:    只摘一个 ⇒ 下一个参数被当成它的值吃掉 ⇒ 对照组跑的是别的口径，
+    #:    而命令行看起来"只是少了个开关"（最难发现的一种对照污染）。
+    _retry_on = int(args.retry_every or 0) > 0
+    if _retry_on:
+        base += ["--retry-every", str(int(args.retry_every))]
 
     roots = []
     try:
@@ -206,13 +283,31 @@ def main() -> int:
         if args.compare:
             r2 = make_root()
             roots.append(r2)
-            b2 = [x for x in base if x != "--ho-grow"]
+            if _retry_on:
+                #: ⛔ 摘掉 `--retry-every` 及其值（**两个**元素，见上）。
+                b2, _skip = [], 0
+                for x in base:
+                    if _skip:
+                        _skip = 0
+                        continue
+                    if x == "--retry-every":
+                        _skip = 1
+                        continue
+                    b2.append(x)
+                ctag = "对照组（不开 --retry-every，其余逐字相同）"
+                var = "--retry-every"
+            else:
+                b2 = [x for x in base if x != "--ho-grow"]
+                ctag = "对照组（不开 --ho-grow，其余逐字相同）"
+                var = "--ho-grow"
             out2 = run_once([x.replace("@TMP@", r2) for x in b2])
-            res2 = show(out2, "对照组（不开 ho-grow，其余逐字相同）")
-            print("\n【决定性对照】唯一变量 = --ho-grow")
+            res2 = show(out2, ctag)
+            print(f"\n【决定性对照】唯一变量 = {var}")
             print(f"   提交代数 {res['commits']} vs {res2['commits']}")
             print(f"   reward 轨迹 {res['rewards']}")
             print(f"              {res2['rewards']}")
+            print(f"   被吞候选   {res.get('dropped')}")
+            print(f"              {res2.get('dropped')}")
             print(f"   队列长度 {res['queue_lens']} vs {res2['queue_lens']}")
     finally:
         for d in roots:

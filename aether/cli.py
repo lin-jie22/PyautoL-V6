@@ -641,6 +641,10 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     _ho_grow = bool(getattr(args, "ho_grow", False))
     _ho_grow_max_n = int(getattr(args, "ho_grow_max_n", "64") or 64)
     _ho_grow_max_tasks = int(getattr(args, "ho_grow_max_tasks", "96") or 96)
+    #: ⛔ `retry_every`（被拒候选的 probation 出口）**默认 0 = 永久不重提**
+    #:    （r54）：与 `deadend_probation_every` 同形、同样默认关闭 ⇒ 默认
+    #:    口径与历史逐字可比。它不改任何判据，只改"要不要再给一次机会"。
+    _retry_every = int(getattr(args, "retry_every", "0") or 0)
 
     # ⛔ 种子 harness **必须先建**：冻结基线要用它跑。
     #    用空 `Harness()` 跑基线 ⇒ 连工具都没有 ⇒ 基线全红 ⇒
@@ -940,7 +944,12 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     #: ⛔⛔ ledger 必须**显式注入**（2026-10-17）：以前这里没传 ⇒ 经验闭环
     #:    的三个事件一条都进不了账本 ⇒ 全量扫描显示 `evolution:reject` 写入
     #:    仅 5 条、"因学到而少提了几个候选"完全无数 ⇒ 这条线在读数上是瞎的。默认 None 是 no-op（有机制不等于这条路被走到，第 4 条）。
-    proposer = MemoryAwareProposer(proposer, mem, ledger=led)
+    #: ⛔ `retry_every` 从 args 直接取（不依赖上面的临时变量）：这个包装器
+    #:    是**提议器层的开关**，它必须跟着命令行走，不能因为某次重构挪了
+    #:    变量定义位置就悄悄变成默认值 ⇒ 开关的位置与开关的读数必须同处。
+    proposer = MemoryAwareProposer(
+        proposer, mem, ledger=led,
+        retry_every=int(getattr(args, "retry_every", "0") or 0))
 
     _consolidated_total = 0
 
@@ -1118,6 +1127,9 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "ho_grow": bool(_ho_grow),
         "ho_grow_max_n": int(_ho_grow_max_n) if _ho_grow else 0,
         "ho_grow_max_tasks": int(_ho_grow_max_tasks) if _ho_grow else 0,
+        #: ⛔ 换的是"要不要再给一次机会"，不是判据 ⇒ 同样必须进 run_config
+        #:    （第 40 条：实验变量必须进账本，否则口径差异不可复现）。
+        "retry_every": int(_retry_every),
         "parallel": getattr(args, "parallel", "0"),
         "embedder": args.embedder,
         "budget": {k: (getattr(args, k, "") or "")
@@ -1952,6 +1964,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="补采样的合成 max_n 封顶（合成要真跑变异体 ⇒ 必须封顶）")
     e.add_argument("--ho-grow-max-tasks", default="96",
                    help="补采样后 held-out 的总题数封顶")
+    e.add_argument("--retry-every", default="0",
+                   help="⛔ 新实验口径（默认 0 = 现状，即**永久**不重提）：\n"
+                        "被闸拒过的候选，每被跳过这么多轮就**放行一次**让闸\n"
+                        "重审。0 ⇒ 与历史逐字同口径。\n"
+                        "存在理由（r54 实测）：`partial`/`overfit` 的结论依赖\n"
+                        "当时的 held-out 卷子，而卷子会随基线长（--ho-grow）\n"
+                        "⇒ 旧判定会失效，可这条 skip 没有失效机制；而下游\n"
+                        "`deadend_probation_every` 的出口实测 **一次都没被走到**\n"
+                        "（13 次 _in_cooldown 判定全 streak=0），因为候选在上游\n"
+                        "就被永久 skip 了。它与那个出口同形、同样默认关闭。")
     e.add_argument("--gate-tries", default="1",
                    help="⛔ 新实验口径（默认 1 = 现状）：一轮内最多让几个候选\n"
                         "去闯泛化闸。1 ⇒ best 被拦就整轮作废，下一轮因为排序\n"

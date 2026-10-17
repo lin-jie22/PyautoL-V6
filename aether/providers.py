@@ -194,12 +194,38 @@ class MemoryAwareProposer:
     EVIDENCE_WINDOW = 20
 
     def __init__(self, inner: Any, memory: Any, marker: str = "tried",
-                 ledger: Any = None):
+                 ledger: Any = None, retry_every: int = 0):
         self.inner = inner
         self.memory = memory
         self.marker = marker
         self.skipped: List[str] = []
         self.asked = 0
+        #: ⛔⛔ **被跳过的候选必须能重审**（r54 实测缺口）。
+        #:   `0` ⇒ 与历史逐字同口径（**永久**不重提）；`>0` ⇒ 每被跳过
+        #:   `retry_every` 轮，放行一次（与 `EvolutionConfig.
+        #:   deadend_probation_every` 完全同形）。
+        #:
+        #:   为什么必须给它出口（三条实测证据）：
+        #:   ① `partial` / `overfit` 的结论依赖**当时的 held-out 卷子**，
+        #:      而 r53 起卷子会随基线长（`--ho-grow`）⇒ 旧判定会失效，
+        #:      可这条 skip **没有失效机制**（与第 35c 条同构：随被测对象
+        #:      变化的量，不许只量一次）。
+        #:   ② `deadend_probation_every` 出口的存在，说明**设计者自己承认**
+        #:      「被拦 N 次后情况可能变化」—— 但那套出口在**下游**
+        #:      （`_in_cooldown`），而本层的 skip 在**上游**先触发
+        #:      ⇒ 实测 13 次 `_in_cooldown` 判定**全部 streak=0**，
+        #:      冷却机制与其出口**一次都没被走到**（第 4 条）。
+        #:   ③ 损失可量化：轮 2 的 `fix_control_flow` rew=0.7143（基线
+        #:      0.381，+0.33）被判 `partial` ⇒ 从第 3 轮起永久消失。
+        #:
+        #:   ⛔ 更正确的做法是「**卷子指纹变了就重审**」（因果维度），
+        #:      但需要跨层把卷子身份传到提议器 —— 本轮不做，先给时间
+        #:      维度的出口（保守、可验证、默认关闭），缺口如实记录。
+        self.retry_every = int(retry_every or 0)
+        #: 每个 key 被连续跳过了多少轮（只对 retry_every > 0 有意义）。
+        self._skip_age: Dict[str, int] = {}
+        #: 本轮因 probation 而**重新放行**的候选（读数，不是判据）。
+        self.probation_released: List[str] = []
         #: 类级注入点（与 `MemoryOS.ledger` 同形态）：None ⇒ no-op。
         #: ⛔ 构造函数里 `self.ledger = ledger` 会**覆盖类级注入**
         #:    ⇒ 显式传 None 时不能写（第 7 条：默认开的开关不能靠"不传"关）。
@@ -208,7 +234,10 @@ class MemoryAwareProposer:
         #: ⛔ 计数与 evidence 分开存（第 14 条）：`skipped` 列表会被下一个
         #:    例子在这儿开始挤掉样本，但**总数**必须不丢。
         self.stats: Dict[str, int] = {
-            "remembered": 0, "asked": 0, "skipped": 0, "recall_failed": 0}
+            "remembered": 0, "asked": 0, "skipped": 0, "recall_failed": 0,
+            #: ⛔ 单独计数（第 16 条）：「因 probation 重审」与「被 skip」
+            #:    是两件事，合并成一个数 ⇒ 出口到底走了几次，永远读不出来。
+            "probation_released": 0}
         #: 上一次 `_rejected_for` 是否因检索崩溃而返回空 —— 见该方法注释
         self._last_recall_ok: bool = True
 
@@ -278,6 +307,10 @@ class MemoryAwareProposer:
                 n: int = 3) -> List[Capsule]:
         self.asked += 1
         self.stats["asked"] += 1
+        #: ⛔ 每轮清空：`probation_released` 是**本轮**的读数，跨轮累积会让
+        #:    "第 3 轮到底放行了谁"在账本里读不出来（与 `skipped` 的区别：
+        #:    那个是有界窗口的取证名单，这个必须是本轮切片）。
+        self.probation_released = []
         #: ⛔ 先把失败史**交给模型**，再筛。顺序有讲究：
         #    对 LLM 提议器来说，只筛不说是浪费 —— 模型白跑一次推理，
         #    产出的还是同一条死路（下一轮继续撞）。说清楚"这些方案试过、
@@ -312,20 +345,47 @@ class MemoryAwareProposer:
                 self.stats["recall_failed"] += 1
             if ok and any(f"{self.marker}:{key}" in (x.content or "")
                           for x in hits):
+                age = self._skip_age.get(key, 0) + 1
+                self._skip_age[key] = age
+                #: ⛔ probation 出口：每被跳过 `retry_every` 轮，放行一次
+                #:    让闸**重新审**这个旧判定（理由见 `__init__` 的注释）。
+                #:    ⛔ 不清除记忆条目：记忆记的是"曾经被拒"这个事实，
+                #:      它没变；变的是"这张卷子还作不作数"。清掉记忆 ⇒
+                #:      把「学过」这件事也一起删了（第 17 条：能力验收看
+                #:      账本里有没有它的读数）。
+                if self.retry_every > 0 and age % self.retry_every == 0:
+                    self.stats["probation_released"] += 1
+                    self.probation_released.append(c.name)
+                    out.append(c)
+                    continue
                 self.skipped.append(c.name)
                 self.stats["skipped"] += 1
                 continue
+            #: 已不在失败史里 ⇒ 它已被重新采纳 ⇒ 重审计数归零。
+            self._skip_age.pop(key, None)
             out.append(c)
         #: ⛔ 三态分开（第 10 条）：`ok` / `degraded`（读崩 ⇒ 放行）/
         #:    `no_memory`（压根没记忆）。合成一个 bool 就会把「拦不住」读成
         #:    「没撞上」。
         recall = "ok" if self._last_recall_ok else "degraded"
+        #: ⛔ 第一版这里写成 `len(self.skipped) - _skipped_before`，理由是
+        #:    "probation 放行的候选会漏算" —— **那个理由是错的**：被放行的
+        #:    候选也在 `out` 里 ⇒ `len(caps) - len(out)` 恒等于本轮 skip 数
+        #:    （既有契约 `contract_experience_loop_test` 的 B6 正是断言此式）。
+        #:    ⇒ 撤回：不为一句想错的理由引入与既有断言冲突的第二种算法。
+        #:    ⛔ 真正需要的独立读数是 **probation_released**（下面），
+        #:      因为"放行过谁"确实无法从两个长度里推出来。
+        n_skipped = len(caps) - len(out)
         self._emit(self.EVENT_PROPOSE, {
             "asked": self.asked,
             "recall": recall,
             "n_in": len(caps), "n_out": len(out),
-            "n_skipped": len(caps) - len(out),
+            "n_skipped": n_skipped,
             "n_known_history": len(rejected),
+            #: ⛔ 出口走了几次必须出得来（第 35d 条）：只活在内存里 ⇒
+            #:    "这个候选为什么这轮又出现了"在账本里查不到。
+            "retry_every": self.retry_every,
+            "probation_released": list(self.probation_released),
             "skipped_sample": [c.name for c in caps
                                if c not in out][:self.EVIDENCE_WINDOW]})
         return out

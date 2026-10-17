@@ -23,6 +23,7 @@
   D 组  写入崩 ⇒ `disposition=write_failed`，不冒充 `written`
   E 组  去重 ≠ 学到：同一条失败记两次 ⇒ 第二条的 deduped 必须为 True
   F 组  **反证**：把检索换成恒空 ⇒ A2 必须转红（证明它不是恒真断言）
+  G 组  **被拒候选必须能重审**（r54）：`--retry-every` 出口 + 默认关闭
 
 用法：
     python tests/contract_experience_loop_test.py
@@ -176,6 +177,74 @@ def main() -> int:
                f"broken_propose={broken}")
         finally:
             mem.search = orig_search
+
+    # ══ G 组：被拒候选必须能**重审**（r54 实测缺口）══════════════
+    #: ⛔ 独立临时目录：A–F 组的记忆里已经记着 `add_skill` 的失败，
+    #:    复用会把"新机制有没有生效"读成"旧记忆还在起作用"。
+    print("\nG 组：被闸拒过的候选必须能重审（probation 出口）")
+    with tempfile.TemporaryDirectory() as td2:
+        tmp2 = Path(td2)
+        led2 = Ledger(tmp2 / "ledger.jsonl")
+        mem2, _ = MemoryOS.load(tmp2 / "mem.json",
+                                HashingEmbedder(dim=256), min_content_len=0)
+        #: ⛔⛔ 为什么必须有这个出口（三条实测证据，见 providers.py 注释）：
+        #:   ① `partial`/`overfit` 的结论依赖**当时的 held-out 卷子**，而
+        #:      卷子会随基线长（`--ho-grow`）⇒ 旧判定会失效，可这条 skip
+        #:      **没有失效机制**；② 下游 `deadend_probation_every` 的出口
+        #:      实测**一次都没被走到**（13 次 `_in_cooldown` 判定全
+        #:      streak=0），因为候选在上游就被永久 skip 了；③ 损失可量化：
+        #:      轮 2 的 `fix_control_flow` rew=0.7143（基线 0.381，+0.33）
+        #:      被判 `partial` ⇒ 从第 3 轮起永久消失。
+        p0 = MemoryAwareProposer(_Stub(), mem2, ledger=led2)   # 默认 = 现状
+        p0.remember(w, "add_skill", reason)
+        runs0 = [[c.name for c in p0.propose(w, h)] for _ in range(5)]
+        ck("G1 ⛔ 默认 retry_every=0 ⇒ **永久**不重提（与历史逐字同口径）",
+           all("add_skill" not in r for r in runs0),
+           str([("add_skill" in r) for r in runs0]))
+        ck("G1b 默认下 probation 一次都没放行（新机制默认关闭）",
+           p0.stats["probation_released"] == 0,
+           str(p0.stats["probation_released"]))
+
+        led3 = Ledger(tmp2 / "ledger3.jsonl")
+        mem3, _ = MemoryOS.load(tmp2 / "mem3.json",
+                                HashingEmbedder(dim=256), min_content_len=0)
+        p2 = MemoryAwareProposer(_Stub(), mem3, ledger=led3, retry_every=2)
+        p2.remember(w, "add_skill", reason)
+        r1 = [c.name for c in p2.propose(w, h)]   # age=1 ⇒ 跳
+        r2 = [c.name for c in p2.propose(w, h)]   # age=2 ⇒ 放行（重审）
+        r3 = [c.name for c in p2.propose(w, h)]   # age=3 ⇒ 跳
+        r4 = [c.name for c in p2.propose(w, h)]   # age=4 ⇒ 放行
+        ck("G2 ⛔ retry_every=2 ⇒ 每被跳过 2 轮放行一次（重审旧判定）",
+           ("add_skill" not in r1) and ("add_skill" in r2)
+           and ("add_skill" not in r3) and ("add_skill" in r4),
+           f"{[('add_skill' in r) for r in (r1, r2, r3, r4)]}")
+        ck("G3 ⛔ 放行**不清除**记忆条目（记的是『曾被拒』这个事实，它没变）",
+           any("tried:" in (x.content or "")
+               for x in mem3.search("tried:", top_k=8)),
+           "放行后记忆条目没了 ⇒ 把『学过』也一起删了（第 17 条）")
+        ck("G4 出口走了几次可读（stats.probation_released == 2）",
+           p2.stats["probation_released"] == 2,
+           str(p2.stats["probation_released"]))
+        evs3 = [e for e in led3.events() if e.kind == "experience.propose"]
+        last3 = evs3[-1].payload
+        ck("G5 ⛔ 出口读数进账本（只活在内存里 ⇒ 查不到『它为什么又出现了』）",
+           last3.get("probation_released") == ["add_skill"]
+           and last3.get("retry_every") == 2,
+           str({k: last3.get(k) for k in ("probation_released",
+                                          "retry_every")}))
+        ck("G6 n_skipped 仍是 n_in - n_out（出口不污染既有计数）",
+           last3.get("n_skipped") == last3.get("n_in") - last3.get("n_out"),
+           f"{last3.get('n_in')}→{last3.get('n_out')} "
+           f"skipped={last3.get('n_skipped')}")
+        #: ⛔ 反证：G2 的判据必须能区分"有出口"与"没出口"。
+        ck("G7 ⛔ 反证：G2 的判据对默认实例为**假**（不是恒真断言）",
+           not (("add_skill" not in runs0[0]) and ("add_skill" in runs0[1])),
+           "默认实例也满足 G2 ⇒ 该断言没牙")
+    cli_src = (ROOT / "aether" / "cli.py").read_text(encoding="utf-8")
+    ck("G8 ⛔ CLI 默认 0（新口径默认关，与历史同表可比）",
+       'e.add_argument("--retry-every", default="0"' in cli_src)
+    ck("G9 开关进 run_config（换的是机会不是判据 ⇒ 必须在账本里可查）",
+       '"retry_every": int(_retry_every)' in cli_src)
 
     print("\n" + "=" * 60)
     if FAILS:
