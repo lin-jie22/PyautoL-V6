@@ -133,6 +133,15 @@ class ProbeResult:
     #: ⛔ False 出现在一个 `generalize` 裁决里 ⇒ 那个放行**不可信**，
     #:   必须是 bug。观测侧要能一眼看见，不能只看 verdict。
     discriminative: Optional[bool] = None
+    #: ⛔⛔ **每层还剩几条能涨**（r53）。此前它只活在 `reason` 的文案里
+    #:    （「easy(可提升空间 0 条)」）⇒ 观测侧要拿它做趋势/告警，只能去
+    #:    正则解析一句给人看的话 —— 改一次措辞，所有下游读数同时失真。
+    #:    ⇒ 判据用到的量**必须**是结构化字段，文案只是它的一种渲染。
+    headroom: Dict[str, int] = field(default_factory=dict)
+    #: 因「可提升空间 < min_level_headroom」而未计入裁决的层（样本不足）。
+    #: ⛔ 与 `out_of_reach`（能力边界）分开：两者都不处罚，但**出路不同**
+    #:    —— 这条要去补 held-out 该层的题数，那条是能力到此为止。
+    thin: Tuple[str, ...] = ()
 
     @property
     def blocks(self) -> bool:
@@ -158,6 +167,8 @@ class ProbeResult:
                 "dev_by_difficulty": {k: round(v, 4)
                                       for k, v in self.dev_by_difficulty.items()},
                 "out_of_reach": list(self.out_of_reach),
+                "headroom": dict(self.headroom),
+                "thin": list(self.thin),
                 "reason": self.reason}
 
 
@@ -170,7 +181,12 @@ class GeneralizationGate:
                  dev_floor: float = 0.0,
                  min_tasks: int = 1,
                  base_at_ceiling: Optional[float] = None,
-                 min_level_headroom: int = 3):
+                 min_level_headroom: int = 3,
+                 grow_fn: Optional[Callable[[int], List[FrozenTask]]] = None,
+                 difficulty_fn: Optional[
+                     Callable[[List[FrozenTask]], Dict[str, str]]] = None,
+                 grow_ceiling: int = 64,
+                 grow_max_tasks: int = 96):
         # H2：结构性不重叠。重叠 ⇒ 这套闸自我取消 ⇒ 构造期就炸，不靠自觉。
         dev_ids = set(dev_task_ids or ())
         overlap = sorted(set(suite.task_ids) & dev_ids)
@@ -203,6 +219,25 @@ class GeneralizationGate:
         #:    一字未改（G2 守着它）；对没样本的层，它本来就不适用。
         #:    ⛔ 默认 3：不小于 3 条才有资格谈"这一层涨没涨"。
         self.min_level_headroom = int(min_level_headroom)
+        #: ── r53：判别力**自愈**的入口 ──────────────────────────────
+        #: `all_thin` 分支（每层可提升空间都不足）报的出路一直是
+        #: 「补 held-out 的题数，不是放宽判据」，但**系统自己没有这个出口**
+        #: ⇒ 明知有 +0.4 的增益，也只能三轮逐字重复地拦着（r52 实测）。
+        #:
+        #: ⛔⛔ 补题的筛选判据是「**当前基线**做不对」—— 它是**基线**的属性，
+        #:    不是候选的属性 ⇒ 不看候选 ⇒ **不给任何候选优待**（与 dev 侧
+        #:    `grow_for_difficulty` 同形态：那边补的是"层"，这边补的是"空间"）。
+        #:    ⇒ H1（held-out 不参与选择）一条没动：补出来的题不进发展集、
+        #:      不进排序、不进 `group_relative`，只用于裁决。
+        #:
+        #: ⛔ 两个函数都**由调用方注入**（None ⇒ 不自愈，与历史逐字同口径）：
+        #:    本闸不 import `environment` / `repair`，否则会成循环依赖，
+        #:    而且合成参数（depth / kinds / balanced）属于**实验口径**，
+        #:    只能由CLI 决定 —— 闸不该知道这次实验用什么口径造题。
+        self.grow_fn = grow_fn
+        self.difficulty_fn = difficulty_fn
+        self.grow_ceiling = int(grow_ceiling)
+        self.grow_max_tasks = int(grow_max_tasks)
 
     @property
     def env_pair(self) -> str:
@@ -255,6 +290,150 @@ class GeneralizationGate:
             b = sum(base_by_id.get(t, 0.0) for t in sel) / len(sel)
             c = sum(cand_by_id.get(t, 0.0) for t in sel) / len(sel)
             out[level] = c - b
+        return out
+
+    # ── r53：判别力体检 + 自愈 ────────────────────────────────────────
+    def headroom_of(self, h: Harness, runner: Runner) -> Dict[str, int]:
+        """每层**还剩几条基线没修好**的题 = 这一层真正能涨的空间。
+
+        ⛔ 与 `_probe_inner` 里那个 `headroom` **同源**（同一份判据：
+        `reward < 1.0`），不许各写一份 —— 两处口径一漂，"闸说没空间"
+        和"体检说还有空间"就会同时成立，而两边看起来都对。
+        """
+        _mean, vs = self.evaluate(h, runner)
+        by_id = {tid: v.reward for tid, v in zip(self.suite.task_ids, vs)}
+        return {
+            lv: sum(1 for t in self.suite.ids_of(lv)
+                    if by_id.get(t, 0.0) < 1.0)
+            for lv in self.suite.levels}
+
+    def ensure_headroom(self, h: Harness, runner: Runner,
+                        min_headroom: Optional[int] = None,
+                        round_no: int = 0) -> Dict[str, Any]:
+        """把 held-out 补到「每层都还有 ≥ min_headroom 条能涨的题」。
+
+        ⛔⛔ 为什么必须在**循环内**做（每轮一次），不能建卷时做一次：
+            headroom 是「基线还没修好几条」⇒ 它随能力提升而**缩小**
+            （实测：轮 1 装上 fix_control_flow 后，held-out easy 层
+            可提升空间立刻从 N 变 0）。建卷时用种子基线量 ⇒ 基线最弱
+            ⇒ headroom 最大 ⇒ 永远达标 ⇒ 这个读数完全没有意义。
+            ⇒ **尺子要跟着被测对象长**（与第 42 条"基线随 best 升级
+            才有判别力"是对称的两件事：那边长的是基线，这边长的是卷子）。
+
+        ⛔ 补题**只看当前基线**：不用候选、不用发展集、不用 reward 排序
+            ⇒ 不给任何候选优待，只解决"这张卷子已经考不出差别了"。
+
+        ⛔ 到顶仍补不齐 ⇒ **如实报缺失**（`missing`），绝不假装补齐：
+            "卷子不够"必须能被看见，否则它会被读成"候选不好"。
+        """
+        want = int(min_headroom if min_headroom is not None
+                   else self.min_level_headroom)
+        if self.grow_fn is None or self.difficulty_fn is None:
+            return {"enabled": False, "grew": 0,
+                    "note": "未注入补采样函数 ⇒ 不自愈（与历史同口径）"}
+        head0 = self.headroom_of(h, runner)
+        if not self.suite.levels:
+            return {"enabled": True, "grew": 0, "headroom": head0,
+                    "note": "held-out 没有难度标签 ⇒ 无从谈层内空间"}
+        deficit = sorted(lv for lv, c in head0.items() if c < want)
+        rep: Dict[str, Any] = {"enabled": True, "round_no": round_no,
+                               "want": want, "headroom_before": dict(head0),
+                               "deficit": list(deficit), "steps": [],
+                               "grew": 0, "missing": []}
+        if not deficit:
+            rep["note"] = "每层空间都够 ⇒ 不补"
+            return rep
+
+        n = max(self.suite.n_tasks, 4)
+        seen = set(self.suite.task_ids)
+        tasks = list(self.suite.tasks)
+        labels = dict(self.suite.difficulty)
+        head = dict(head0)
+        while deficit and n < self.grow_ceiling and len(tasks) < self.grow_max_tasks:
+            n = min(self.grow_ceiling, n * 2)
+            try:
+                cand = [t for t in (self.grow_fn(n) or [])
+                        if getattr(t, "task_id", "") not in seen]
+            except Exception as e:                             # noqa: BLE001
+                #: ⛔ 合成挂了 ⇒ **记账并停手**，不许静默跳过（第 10 条）：
+                #:   "补不动"与"不用补"在输出里必须可分辨。
+                rep["steps"].append({"max_n": n, "error":
+                                     f"{type(e).__name__}: {e}"})
+                break
+            if not cand:
+                rep["steps"].append({"max_n": n, "n_new": 0})
+                continue
+            try:
+                lab = self.difficulty_fn(cand) or {}
+            except Exception as e:                             # noqa: BLE001
+                rep["steps"].append({"max_n": n, "error":
+                                     f"{type(e).__name__}: {e}"})
+                break
+            added = 0
+            for t in cand:
+                if len(tasks) >= self.grow_max_tasks:
+                    break
+                lv = str(lab.get(getattr(t, "task_id", ""), "") or "")
+                #: ⛔ 只收**缺空间的层**，且**不与已有/发展集重复**（H2）。
+                if lv not in deficit:
+                    continue
+                if getattr(t, "task_id", "") in set(self.dev_task_ids):
+                    continue
+                #: 判据同源：这条题**当前基线做不对**才算"还有空间"。
+                try:
+                    v = runner(h, dict(t.spec))
+                except Exception:                              # noqa: BLE001
+                    continue
+                if float(getattr(v, "reward", 0.0) or 0.0) >= 1.0:
+                    continue
+                seen.add(t.task_id)
+                tasks.append(t)
+                labels[t.task_id] = lv
+                added += 1
+                if head.get(lv, 0) >= want:
+                    deficit.remove(lv)
+                    if not deficit:
+                        break
+            rep["steps"].append({"max_n": n, "n_cand": len(cand),
+                                 "n_added": added})
+            if added:
+                head = self._recompute_headroom(tasks, labels, h, runner)
+                deficit = sorted(lv for lv, c in head.items() if c < want)
+        n_before = self.suite.n_tasks
+        if len(tasks) != n_before:
+            #: ⛔ 重建 suite 而不是就地改：`HeldOutSuite` 是 frozen（内容寻址
+            #:    的承诺）。`replace` 保持其它字段不变 ⇒ 不会悄悄丢 env_id。
+            import dataclasses as _dc
+            self.suite = _dc.replace(
+                self.suite, tasks=tuple(tasks),
+                difficulty=tuple(sorted(labels.items())))
+        rep["grew"] = len(self.suite.tasks) - n_before
+        rep["headroom_after"] = dict(self.headroom_of(h, runner))
+        rep["n_tasks"] = self.suite.n_tasks
+        rep["missing"] = sorted(lv for lv, c in
+                                rep["headroom_after"].items() if c < want)
+        rep["note"] = ("补到每层空间 ≥ %d" % want if not rep["missing"]
+                       else "补到上限仍缺：%s（这是卷子的上限，不是候选的错）"
+                       % "/".join(rep["missing"]))
+        return rep
+
+    def _recompute_headroom(self, tasks: List[FrozenTask],
+                            labels: Dict[str, str], h: Harness,
+                            runner: Runner) -> Dict[str, int]:
+        """按 (任务集, 标签) 重算每层可提升空间（与 `headroom_of` 同判据）。"""
+        out: Dict[str, int] = {}
+        for lv in sorted({str(v) for v in labels.values()}):
+            n = 0
+            for t in tasks:
+                if str(labels.get(t.task_id, "")) != lv:
+                    continue
+                try:
+                    v = runner(h, dict(t.spec))
+                except Exception:                              # noqa: BLE001
+                    continue
+                if float(getattr(v, "reward", 0.0) or 0.0) < 1.0:
+                    n += 1
+            out[lv] = n
         return out
 
     # ── 判别力兜底：只降级"放行"，不覆盖已有的拦截结论 ──────────────
@@ -436,6 +615,7 @@ class GeneralizationGate:
                     n_tasks=self.suite.n_tasks, by_difficulty=by_diff,
                     dev_by_difficulty=dict(dev_by_difficulty or {}),
                     out_of_reach=tuple(out_of_reach),
+                    headroom=dict(headroom), thin=tuple(thin),
                     reason=(f"总体 held-out {ho_gain:+.4f}，但 {shown} 未涨，"
                             f"且发展集同层有增益（{ {lv: round((dev_by_difficulty or {}).get(lv, 0.0), 4) for lv in cherry} }"
                             f"）⇒ 只在部分难度上泛化（挑食），不提交"))
@@ -449,7 +629,7 @@ class GeneralizationGate:
                     cand_heldout=cand_ho, n_tasks=self.suite.n_tasks,
                     by_difficulty=by_diff,
                     dev_by_difficulty=dict(dev_by_difficulty or {}),
-                    out_of_reach=(),
+                    out_of_reach=(), headroom=dict(headroom), thin=tuple(thin),
                     reason=(f"held-out 的 {undecidable} 层未涨，但发展集**没有"
                             f"该难度层** ⇒ 无从对照，无法区分「能力边界」与"
                             f"「挑食」⇒ 按拦截处理（补该难度的 dev 任务后再判）"))
@@ -465,10 +645,14 @@ class GeneralizationGate:
                     cand_heldout=cand_ho, n_tasks=self.suite.n_tasks,
                     by_difficulty=by_diff,
                     dev_by_difficulty=dict(dev_by_difficulty or {}),
+                    headroom=dict(headroom), thin=tuple(thin),
                     reason=(f"held-out **每层**的可提升空间都不足 "
                             f"{self.min_level_headroom} 条（{shown}）⇒ 这次"
                             f"裁决没有任何一层的证据可用 ⇒ 按拦截处理。"
-                            f"出路：补 held-out 的题数，不是放宽判据"))
+                            f"出路：补 held-out 的题数，不是放宽判据"
+                            + ("（开了 --ho-grow 则由闸自己补，仍补不齐才会到这一步）"
+                               if self.grow_fn is not None else
+                               "（可开 --ho-grow 让闸自己补采样）")))
             # 未涨的层全是"发展集也修不动" ⇒ 能力边界，不是挑食 ⇒ 放行
             shown = sorted(f"{lv}{by_diff[lv]:+.4f}" for lv in out_of_reach)
             thin_note = ""
@@ -487,6 +671,7 @@ class GeneralizationGate:
                                by_difficulty=by_diff,
                                dev_by_difficulty=dict(dev_by_difficulty or {}),
                                out_of_reach=tuple(out_of_reach),
+                               headroom=dict(headroom), thin=tuple(thin),
                                reason=(f"发展集 +{dev_gain:.4f} 且 held-out {ho_gain:+.4f}"
                                        f"（分层 {by_diff}）⇒ 泛化，放行。"
                                        f" {shown} 未涨但发展集同层同样未涨"
@@ -494,9 +679,10 @@ class GeneralizationGate:
         return self._downgrade_if_flat(ProbeResult(
                            verdict="generalize", dev_gain=dev_gain,
                            heldout_gain=ho_gain, base_heldout=base_ho,
-                           cand_heldout=cand_ho, n_tasks=self.suite.n_tasks,
+                           cand_heldout=cand_ho,                            n_tasks=self.suite.n_tasks,
                            by_difficulty=by_diff,
                            dev_by_difficulty=dict(dev_by_difficulty or {}),
+                           headroom=dict(headroom), thin=tuple(thin),
                            reason=f"发展集 +{dev_gain:.4f} 且 held-out {ho_gain:+.4f}"
                                   + (f"（分层 {by_diff}）" if by_diff else "")
                                   + " ⇒ 泛化，放行"))

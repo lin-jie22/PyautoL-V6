@@ -636,6 +636,11 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     #:    的判据集不能随采样实验漂移（V5 教训：判据不能被退化 run 重建）。
     #:    ⇒ 本轮唯一的变量是 dev / held-out 的采样顺序。
     _balanced = bool(getattr(args, "balanced", False))
+    #: ⛔ `ho_grow`（held-out 判别力自愈）**默认关闭**（r53）：它换的是
+    #:    held-out 的**题数**（考卷），不是判据 ⇒ 开了就与历史基线不可比。
+    _ho_grow = bool(getattr(args, "ho_grow", False))
+    _ho_grow_max_n = int(getattr(args, "ho_grow_max_n", "64") or 64)
+    _ho_grow_max_tasks = int(getattr(args, "ho_grow_max_tasks", "96") or 96)
 
     # ⛔ 种子 harness **必须先建**：冻结基线要用它跑。
     #    用空 `Harness()` 跑基线 ⇒ 连工具都没有 ⇒ 基线全红 ⇒
@@ -825,12 +830,38 @@ def cmd_evolve(args: argparse.Namespace) -> int:
               file=sys.stderr)
 
     if rep_ho is not None and rep_ho.tasks and diff_report is not None:
+        #: ── r53：held-out 判别力自愈的两个注入点 ──────────────────
+        #: ⛔ **由 CLI 注入而不是闸自己 import**：合成口径（depth / kinds /
+        #:    balanced / require_behavior）是**实验变量**，只有命令行知道
+        #:    这次跑的是什么口径。闸自己 import 一份 ⇒ 补出来的题与本次
+        #:    实验的题**不同源** ⇒ "补采样"变成悄悄换了一把尺子。
+        #: ⛔ 两个函数与上面建 held-out 用的是**同一份** `synthesize_tasks`
+        #:    参数 ⇒ 补出来的题与原有题同分布（只差"基线做不对"这一筛选）。
+        def _ho_synth(n: int):
+            return [FrozenTask(
+                task_id=t.task_id,
+                spec={"env_id": ho_name, "broken_source": t.broken_source,
+                      "topic": ho_name, "task_class": TASK_CLASS})
+                for t in synthesize_tasks(
+                    envs[ho_name], max_n=int(n), depth=_depth, kinds=_kinds,
+                    require_behavior=_require_behavior,
+                    balanced=_balanced).tasks]
+
+        def _ho_labels(pending) -> Dict[str, str]:
+            return difficulty_report(envs[ho_name], list(pending))["labels"]
+
         heldout = GeneralizationGate(
             make_heldout(ho_name, ho_tasks,
                          difficulty=diff_report["labels"]),
             dev_task_ids=[t.task_id for t in dev],
             heldout_floor=float(args.heldout_floor),
-            base_at_ceiling=1.0)
+            base_at_ceiling=1.0,
+            #: ⛔ 默认 `ho_grow=False`（CLI 默认关）⇒ 不注入 ⇒ 与历史
+            #:    逐字同口径。开了才注入，且进 `run_config`（实验变量）。
+            grow_fn=(_ho_synth if _ho_grow else None),
+            difficulty_fn=(_ho_labels if _ho_grow else None),
+            grow_ceiling=int(_ho_grow_max_n),
+            grow_max_tasks=int(_ho_grow_max_tasks))
 
     # ⛔ 两类技能刻意并列：通用但保守 vs 定点但只此一地。
     #    在**发展集**上后者严格更好 ⇒ 一定会被选中 ⇒ 一定会被提交，
@@ -1012,6 +1043,10 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                              #:    不参与排序（H1 不动）。见 r52。
                              gate_tries=int(
                                  getattr(args, "gate_tries", "1") or 1),
+                             #: ⛔ 默认 False ⇒ 与历史基线逐字同口径（r53）。
+                             ho_grow=bool(_ho_grow),
+                             ho_grow_max_n=int(_ho_grow_max_n),
+                             ho_grow_max_tasks=int(_ho_grow_max_tasks),
                              #: ⛔ 默认 0 = 串行（与历史基线同口径）。并行只
                              #:    包住 runner 计算，记账仍串行（见 §23.5）。
                              parallel_workers=int(
@@ -1078,6 +1113,11 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         #:    换的是世界"（与 `n_envs` 同族：世界规模也是实验变量）。
         "balanced": bool(_balanced),
         "require_behavior": bool(_require_behavior),
+        #: ⛔ 判别力自愈是**实验变量**（换了考卷）⇒ 必须进账本，否则
+        #:    "这次为什么能多提交一代"事后无从分辨是机器变好还是卷子变了。
+        "ho_grow": bool(_ho_grow),
+        "ho_grow_max_n": int(_ho_grow_max_n) if _ho_grow else 0,
+        "ho_grow_max_tasks": int(_ho_grow_max_tasks) if _ho_grow else 0,
         "parallel": getattr(args, "parallel", "0"),
         "embedder": args.embedder,
         "budget": {k: (getattr(args, k, "") or "")
@@ -1902,6 +1942,16 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--llm-model", default="", help="真模型名（默认 Qwen3.5-4B:latest）")
     e.add_argument("--heldout-floor", default="0.0",
                    help="held-out 增益地板（低于它判 overfit）")
+    e.add_argument("--ho-grow", action="store_true",
+                   help="⛔ 新实验口径（默认关）：**held-out 判别力自愈**。\n"
+                        "每轮用当前基线体检 held-out，某层「能涨的题」少于\n"
+                        "min_level_headroom 就补采样（只补基线也做不对的题\n"
+                        "⇒ 与候选无关 ⇒ 不给任何候选优待，H1 不动）。\n"
+                        "它换的是**考卷**不是判据 ⇒ 开了不与历史同表比。")
+    e.add_argument("--ho-grow-max-n", default="64",
+                   help="补采样的合成 max_n 封顶（合成要真跑变异体 ⇒ 必须封顶）")
+    e.add_argument("--ho-grow-max-tasks", default="96",
+                   help="补采样后 held-out 的总题数封顶")
     e.add_argument("--gate-tries", default="1",
                    help="⛔ 新实验口径（默认 1 = 现状）：一轮内最多让几个候选\n"
                         "去闯泛化闸。1 ⇒ best 被拦就整轮作废，下一轮因为排序\n"

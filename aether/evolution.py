@@ -252,6 +252,10 @@ class RoundReport:
     #: ⛔ 与 `load_gain` 是两件事：这是**存量**，那些是**增量**。
     #:    只看增量 ⇒ 不知道债是在减少还是在增加。
     genome_load_before: int = -1
+    #: ⛔ 本轮 held-out **判别力体检 / 自愈**的结果（r53；None = 未启用）。
+    #:    "卷子还考得出差别吗"必须每轮可见 —— 它不可见时，连续几轮
+    #:    `inconclusive` 会被读成"候选不好"，而真因是卷子已经满了。
+    heldout_grow: Optional[Dict[str, Any]] = None
 
     @property
     def improved(self) -> bool:
@@ -278,7 +282,8 @@ class RoundReport:
                 "facts_promoted": self.facts_promoted,
                 #: 减负轴的两个读数：本轮提了几个清理候选 + 清理前的存量
                 "cleanup_proposed": self.cleanup_proposed,
-                "genome_load_before": self.genome_load_before}
+                "genome_load_before": self.genome_load_before,
+                "heldout_grow": self.heldout_grow}
 
 
 @dataclass
@@ -374,6 +379,23 @@ class EvolutionConfig:
     #:    账本 append 有 flock 安全，但**事件顺序**必须保持确定性 ⇒
     #:    顺序漂移会让账本不可复现，而账本是唯一事实源）。
     parallel_workers: int = 0
+    #: ⛔⛔ **held-out 判别力自愈**（r53）。默认 **关** ⇒ 与历史逐字同口径。
+    #:
+    #:    r52 把「层内可提升空间 < 3 ⇒ 不作反证」修好之后，暴露出下一个
+    #:    天花板：当 held-out **每层**都没空间时，闸判 `inconclusive` 并
+    #:    报「出路：补 held-out 的题数，不是放宽判据」—— 但**系统自己
+    #:    没有这个出口**。实测（4 环境 / depth2 / 6 轮）：轮 2 有 +0.4 的
+    #:    发展集增益可用，轮 2–4 三轮逐字重复地被同一条理由拦下。
+    #:
+    #:    ⇒ 开它：每轮用**当前基线**体检 held-out，某层能涨的题少于
+    #:      `min_level_headroom` 就补采样（只补"基线也做不对"的题 ⇒
+    #:      与候选无关 ⇒ 不给任何候选优待；H1 一条没动）。
+    #:    ⛔ 它改的是**考卷**，不是判据 ⇒ 开了就是新口径，不与历史同表比。
+    ho_grow: bool = False
+    #: 补采样的封顶（合成 max_n 与总题数）。⛔ 必须封顶：合成要真跑变异体
+    #:    （执行一次判据）⇒ 不封顶就是把挂钟交给循环自己。
+    ho_grow_max_n: int = 64
+    ho_grow_max_tasks: int = 96
 
 
 @dataclass
@@ -1474,6 +1496,32 @@ class EvolutionLoop:
         #:    还是在增加（背着债还在涨，与没背债在涨，是两件不同的事）。
         base_load = self._genome_load(h)
         rep.genome_load_before = base_load
+
+        # 1.5) **held-out 判别力体检**（r53，默认关）
+        #
+        #      ⛔ 位置有讲究：必须在**基线评估之后、提议之前**。
+        #        · 在基线之后 —— 体检问的是"基线还剩几条做不对"，
+        #          没有这一步的判定就得再跑一遍（重复成本）；
+        #        · 在提议之前 —— 补题用的是**当前基线**的属性，
+        #          此时还没有任何候选 ⇒ "给某个候选优待"在结构上不可能。
+        #
+        #      ⛔ 为什么默认关：它换的是**考卷**（held-out 的题数），
+        #        不是判据 ⇒ 开了就与历史基线不可比（第 33/34 条）。
+        if bool(getattr(self.cfg, "ho_grow", False)) and self.heldout is not None:
+            try:
+                gr = self.heldout.ensure_headroom(
+                    h, self.runner, round_no=round_no)
+            except Exception as e:                             # noqa: BLE001
+                #: ⛔ 补采样失败**不许静默**：与"不用补"必须可分辨
+                #:    （第 10 条：环境故障被读成"等价"是这一类病）。
+                gr = {"enabled": True, "grew": 0,
+                      "error": f"{type(e).__name__}: {e}"}
+            rep.heldout_grow = gr
+            rep.ledger_seqs.append(self.ledger.append(
+                "heldout.grow",
+                {"round_no": round_no, "harness_id": h.harness_id,
+                 "env_pair": self.heldout.env_pair, **gr},
+                actor="gate").seq)
 
         # 2) MINE —— 弱点必须由**这一轮、这个 harness 的**失败证据支撑。
         #
