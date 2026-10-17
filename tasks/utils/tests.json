@@ -1,0 +1,58 @@
+{
+  "env_id": "utils",
+  "note": "由 aether/utils.py 切片自动生成：6 条经 F2P 验证的判据（另有 0 条对变异免疫，已剔除）。expect 为生成时刻的实现行为（characterization），非规格。",
+  "oracle": "characterization",
+  "generated_by": "scripts/worldgen.py",
+  "generated_at": "2026-10-17T16:21:26",
+  "source_origin": "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/lib/python3.13/utils.py",
+  "tests": [
+    {
+      "name": "get_encodings_from_content_6",
+      "call": "get_encodings_from_content",
+      "args": [
+        ""
+      ],
+      "expect": []
+    },
+    {
+      "name": "get_encodings_from_content_7",
+      "call": "get_encodings_from_content",
+      "args": [
+        "a"
+      ],
+      "expect": []
+    },
+    {
+      "name": "get_encodings_from_content_8",
+      "call": "get_encodings_from_content",
+      "args": [
+        "x,y,z"
+      ],
+      "expect": []
+    },
+    {
+      "name": "get_encodings_from_content_9",
+      "call": "get_encodings_from_content",
+      "args": [
+        "abc def"
+      ],
+      "expect": []
+    },
+    {
+      "name": "get_encodings_from_content_10",
+      "call": "get_encodings_from_content",
+      "args": [
+        "  pad  "
+      ],
+      "expect": []
+    },
+    {
+      "name": "get_encodings_from_content_11",
+      "call": "get_encodings_from_content",
+      "args": [
+        "Hello World"
+      ],
+      "expect": []
+    }
+  ]
+}

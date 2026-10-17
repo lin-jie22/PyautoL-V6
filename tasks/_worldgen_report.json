@@ -1,112 +1,279 @@
 [
   {
-    "env": "doctest",
+    "env": "utils",
     "n_tests": 6,
-    "n_functions": 3,
-    "n_source_lines": 637,
-    "n_synth_valid": 1,
-    "n_synth_attempted": 8,
-    "n_weak_dropped": 1,
-    "fail_to_pass": [
-      "register_optionflag_0",
-      "register_optionflag_1",
-      "register_optionflag_2",
-      "register_optionflag_3",
-      "register_optionflag_4",
-      "register_optionflag_5"
-    ]
-  },
-  {
-    "env": "editor",
-    "n_tests": 6,
-    "n_functions": 4,
-    "n_source_lines": 58,
-    "n_synth_valid": 1,
-    "n_synth_attempted": 10,
+    "n_functions": 7,
+    "n_source_lines": 119,
+    "n_synth_valid": 2,
+    "n_synth_attempted": 30,
     "n_weak_dropped": 0,
     "fail_to_pass": [
-      "index2line_0",
-      "index2line_1",
-      "index2line_2",
-      "index2line_3",
-      "index2line_4",
-      "index2line_5"
-    ]
+      "get_encodings_from_content_10",
+      "get_encodings_from_content_11",
+      "get_encodings_from_content_6",
+      "get_encodings_from_content_7",
+      "get_encodings_from_content_8",
+      "get_encodings_from_content_9"
+    ],
+    "pick": {
+      "mode": "kill",
+      "n_mutants": 2,
+      "n_killed": 2,
+      "kill_rate": 1.0
+    }
   },
   {
     "env": "encoder",
     "n_tests": 12,
     "n_functions": 2,
     "n_source_lines": 33,
-    "n_synth_valid": 1,
-    "n_synth_attempted": 10,
+    "n_synth_valid": 4,
+    "n_synth_attempted": 30,
     "n_weak_dropped": 0,
     "fail_to_pass": [
-      "py_encode_basestring_0",
-      "py_encode_basestring_1",
-      "py_encode_basestring_2",
-      "py_encode_basestring_3",
-      "py_encode_basestring_4",
-      "py_encode_basestring_5",
-      "py_encode_basestring_ascii_0",
-      "py_encode_basestring_ascii_1",
-      "py_encode_basestring_ascii_2",
-      "py_encode_basestring_ascii_3",
-      "py_encode_basestring_ascii_4",
-      "py_encode_basestring_ascii_5"
-    ]
+      "py_encode_basestring_10",
+      "py_encode_basestring_11",
+      "py_encode_basestring_6",
+      "py_encode_basestring_7",
+      "py_encode_basestring_8",
+      "py_encode_basestring_9",
+      "py_encode_basestring_ascii_10",
+      "py_encode_basestring_ascii_11",
+      "py_encode_basestring_ascii_6",
+      "py_encode_basestring_ascii_7",
+      "py_encode_basestring_ascii_8",
+      "py_encode_basestring_ascii_9"
+    ],
+    "pick": {
+      "mode": "kill",
+      "n_mutants": 3,
+      "n_killed": 3,
+      "kill_rate": 1.0
+    }
+  },
+  {
+    "env": "_parser",
+    "n_tests": 6,
+    "n_functions": 1,
+    "n_source_lines": 5,
+    "n_synth_valid": 4,
+    "n_synth_attempted": 7,
+    "n_weak_dropped": 0,
+    "fail_to_pass": [
+      "is_unicode_scalar_value_10",
+      "is_unicode_scalar_value_11",
+      "is_unicode_scalar_value_6",
+      "is_unicode_scalar_value_7",
+      "is_unicode_scalar_value_8",
+      "is_unicode_scalar_value_9"
+    ],
+    "pick": {
+      "mode": "kill",
+      "n_mutants": 4,
+      "n_killed": 4,
+      "kill_rate": 1.0
+    }
   },
   {
     "env": "shlex",
-    "n_tests": 6,
+    "n_tests": 12,
     "n_functions": 3,
     "n_source_lines": 292,
-    "n_synth_valid": 1,
-    "n_synth_attempted": 9,
-    "n_weak_dropped": 6,
+    "n_synth_valid": 3,
+    "n_synth_attempted": 27,
+    "n_weak_dropped": 0,
     "fail_to_pass": [
-      "split_0",
-      "split_1",
-      "split_2",
-      "split_3",
-      "split_4",
-      "split_5"
-    ]
+      "quote_10",
+      "quote_11",
+      "quote_6",
+      "quote_7",
+      "quote_8",
+      "quote_9",
+      "split_10",
+      "split_11",
+      "split_6",
+      "split_7",
+      "split_8",
+      "split_9"
+    ],
+    "pick": {
+      "mode": "kill",
+      "n_mutants": 2,
+      "n_killed": 2,
+      "kill_rate": 1.0
+    }
+  },
+  {
+    "env": "core",
+    "n_tests": 18,
+    "n_functions": 5,
+    "n_source_lines": 71,
+    "n_synth_valid": 9,
+    "n_synth_attempted": 28,
+    "n_weak_dropped": 10,
+    "fail_to_pass": [
+      "check_bidi_10",
+      "check_bidi_11",
+      "check_bidi_6",
+      "check_bidi_7",
+      "check_bidi_8",
+      "check_bidi_9",
+      "valid_label_length_10",
+      "valid_label_length_11",
+      "valid_label_length_6",
+      "valid_label_length_7",
+      "valid_label_length_8",
+      "valid_label_length_9",
+      "valid_string_length_10",
+      "valid_string_length_11",
+      "valid_string_length_6",
+      "valid_string_length_7",
+      "valid_string_length_8",
+      "valid_string_length_9"
+    ],
+    "pick": {
+      "mode": "kill",
+      "n_mutants": 9,
+      "n_killed": 9,
+      "kill_rate": 1.0
+    }
+  },
+  {
+    "env": "token",
+    "n_tests": 15,
+    "n_functions": 3,
+    "n_source_lines": 10,
+    "n_synth_valid": 4,
+    "n_synth_attempted": 5,
+    "n_weak_dropped": 0,
+    "fail_to_pass": [
+      "ISEOF_5",
+      "ISEOF_6",
+      "ISEOF_7",
+      "ISEOF_8",
+      "ISEOF_9",
+      "ISNONTERMINAL_5",
+      "ISNONTERMINAL_6",
+      "ISNONTERMINAL_7",
+      "ISNONTERMINAL_8",
+      "ISNONTERMINAL_9",
+      "ISTERMINAL_5",
+      "ISTERMINAL_6",
+      "ISTERMINAL_7",
+      "ISTERMINAL_8",
+      "ISTERMINAL_9"
+    ],
+    "pick": {
+      "mode": "kill",
+      "n_mutants": 4,
+      "n_killed": 4,
+      "kill_rate": 1.0
+    }
+  },
+  {
+    "env": "_inspect",
+    "n_tests": 10,
+    "n_functions": 3,
+    "n_source_lines": 25,
+    "n_synth_valid": 5,
+    "n_synth_attempted": 12,
+    "n_weak_dropped": 0,
+    "fail_to_pass": [
+      "get_object_types_mro_as_strings_4",
+      "get_object_types_mro_as_strings_5",
+      "get_object_types_mro_as_strings_6",
+      "get_object_types_mro_as_strings_7",
+      "is_object_one_of_types_10",
+      "is_object_one_of_types_11",
+      "is_object_one_of_types_6",
+      "is_object_one_of_types_7",
+      "is_object_one_of_types_8",
+      "is_object_one_of_types_9"
+    ],
+    "pick": {
+      "mode": "kill",
+      "n_mutants": 5,
+      "n_killed": 5,
+      "kill_rate": 1.0
+    }
   },
   {
     "env": "_writer",
     "n_tests": 6,
     "n_functions": 1,
     "n_source_lines": 43,
-    "n_synth_valid": 2,
-    "n_synth_attempted": 8,
+    "n_synth_valid": 4,
+    "n_synth_attempted": 29,
     "n_weak_dropped": 0,
     "fail_to_pass": [
-      "format_key_part_0",
-      "format_key_part_1",
-      "format_key_part_2",
-      "format_key_part_3",
-      "format_key_part_4",
-      "format_key_part_5"
-    ]
+      "format_key_part_10",
+      "format_key_part_11",
+      "format_key_part_6",
+      "format_key_part_7",
+      "format_key_part_8",
+      "format_key_part_9"
+    ],
+    "pick": {
+      "mode": "kill",
+      "n_mutants": 3,
+      "n_killed": 3,
+      "kill_rate": 1.0
+    }
+  },
+  {
+    "env": "textwrap",
+    "n_tests": 7,
+    "n_functions": 2,
+    "n_source_lines": 55,
+    "n_synth_valid": 4,
+    "n_synth_attempted": 15,
+    "n_weak_dropped": 5,
+    "fail_to_pass": [
+      "dedent_6",
+      "indent_10",
+      "indent_11",
+      "indent_6",
+      "indent_7",
+      "indent_8",
+      "indent_9"
+    ],
+    "pick": {
+      "mode": "kill",
+      "n_mutants": 4,
+      "n_killed": 4,
+      "kill_rate": 1.0
+    }
   },
   {
     "env": "chaos",
-    "n_tests": 8,
+    "n_tests": 15,
     "n_functions": 3,
     "n_source_lines": 8,
-    "n_synth_valid": 9,
-    "n_synth_attempted": 9,
-    "n_weak_dropped": 4,
+    "n_synth_valid": 15,
+    "n_synth_attempted": 15,
+    "n_weak_dropped": 0,
     "fail_to_pass": [
-      "f_0",
-      "f_1",
-      "f_2",
-      "f_3",
-      "g_0",
-      "g_1",
-      "g_2",
-      "g_3"
-    ]
+      "f_5",
+      "f_6",
+      "f_7",
+      "f_8",
+      "f_9",
+      "g_5",
+      "g_6",
+      "g_7",
+      "g_8",
+      "g_9",
+      "h_5",
+      "h_6",
+      "h_7",
+      "h_8",
+      "h_9"
+    ],
+    "pick": {
+      "mode": "kill",
+      "n_mutants": 15,
+      "n_killed": 15,
+      "kill_rate": 1.0
+    }
   }
 ]

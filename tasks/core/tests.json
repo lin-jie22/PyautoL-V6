@@ -1,0 +1,166 @@
+{
+  "env_id": "core",
+  "note": "由 aether/core.py 切片自动生成：18 条经 F2P 验证的判据（另有 10 条对变异免疫，已剔除）。expect 为生成时刻的实现行为（characterization），非规格。",
+  "oracle": "characterization",
+  "generated_by": "scripts/worldgen.py",
+  "generated_at": "2026-10-17T16:26:22",
+  "source_origin": "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/lib/python3.13/core.py",
+  "tests": [
+    {
+      "name": "check_bidi_6",
+      "call": "check_bidi",
+      "args": [
+        "a",
+        true
+      ],
+      "expect": true
+    },
+    {
+      "name": "valid_label_length_6",
+      "call": "valid_label_length",
+      "args": [
+        ""
+      ],
+      "expect": true
+    },
+    {
+      "name": "valid_string_length_6",
+      "call": "valid_string_length",
+      "args": [
+        "",
+        true
+      ],
+      "expect": true
+    },
+    {
+      "name": "check_bidi_7",
+      "call": "check_bidi",
+      "args": [
+        "",
+        false
+      ],
+      "expect": true
+    },
+    {
+      "name": "check_bidi_8",
+      "call": "check_bidi",
+      "args": [
+        "x,y,z",
+        true
+      ],
+      "expect": true
+    },
+    {
+      "name": "check_bidi_9",
+      "call": "check_bidi",
+      "args": [
+        "  pad  ",
+        false
+      ],
+      "expect": true
+    },
+    {
+      "name": "check_bidi_10",
+      "call": "check_bidi",
+      "args": [
+        "abc def",
+        false
+      ],
+      "expect": true
+    },
+    {
+      "name": "check_bidi_11",
+      "call": "check_bidi",
+      "args": [
+        "Hello World",
+        false
+      ],
+      "expect": true
+    },
+    {
+      "name": "valid_label_length_7",
+      "call": "valid_label_length",
+      "args": [
+        "a"
+      ],
+      "expect": true
+    },
+    {
+      "name": "valid_label_length_8",
+      "call": "valid_label_length",
+      "args": [
+        "x,y,z"
+      ],
+      "expect": true
+    },
+    {
+      "name": "valid_label_length_9",
+      "call": "valid_label_length",
+      "args": [
+        "abc def"
+      ],
+      "expect": true
+    },
+    {
+      "name": "valid_label_length_10",
+      "call": "valid_label_length",
+      "args": [
+        "  pad  "
+      ],
+      "expect": true
+    },
+    {
+      "name": "valid_string_length_7",
+      "call": "valid_string_length",
+      "args": [
+        "",
+        false
+      ],
+      "expect": true
+    },
+    {
+      "name": "valid_string_length_8",
+      "call": "valid_string_length",
+      "args": [
+        "a",
+        true
+      ],
+      "expect": true
+    },
+    {
+      "name": "valid_string_length_9",
+      "call": "valid_string_length",
+      "args": [
+        "a",
+        false
+      ],
+      "expect": true
+    },
+    {
+      "name": "valid_label_length_11",
+      "call": "valid_label_length",
+      "args": [
+        "Hello World"
+      ],
+      "expect": true
+    },
+    {
+      "name": "valid_string_length_10",
+      "call": "valid_string_length",
+      "args": [
+        "x,y,z",
+        true
+      ],
+      "expect": true
+    },
+    {
+      "name": "valid_string_length_11",
+      "call": "valid_string_length",
+      "args": [
+        "x,y,z",
+        false
+      ],
+      "expect": true
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "env_id": "textwrap",
+  "note": "由 aether/textwrap.py 切片自动生成：7 条经 F2P 验证的判据（另有 5 条对变异免疫，已剔除）。expect 为生成时刻的实现行为（characterization），非规格。",
+  "oracle": "characterization",
+  "generated_by": "scripts/worldgen.py",
+  "generated_at": "2026-10-17T16:27:29",
+  "source_origin": "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/lib/python3.13/textwrap.py",
+  "tests": [
+    {
+      "name": "dedent_6",
+      "call": "dedent",
+      "args": [
+        "  pad  "
+      ],
+      "expect": "pad  "
+    },
+    {
+      "name": "indent_6",
+      "call": "indent",
+      "args": [
+        "a",
+        "",
+        null
+      ],
+      "expect": "a"
+    },
+    {
+      "name": "indent_7",
+      "call": "indent",
+      "args": [
+        "a",
+        "a",
+        null
+      ],
+      "expect": "aa"
+    },
+    {
+      "name": "indent_8",
+      "call": "indent",
+      "args": [
+        "x,y,z",
+        "",
+        null
+      ],
+      "expect": "x,y,z"
+    },
+    {
+      "name": "indent_9",
+      "call": "indent",
+      "args": [
+        "a",
+        "x,y,z",
+        null
+      ],
+      "expect": "x,y,za"
+    },
+    {
+      "name": "indent_10",
+      "call": "indent",
+      "args": [
+        "x,y,z",
+        "a",
+        null
+      ],
+      "expect": "ax,y,z"
+    },
+    {
+      "name": "indent_11",
+      "call": "indent",
+      "args": [
+        "abc def",
+        "",
+        null
+      ],
+      "expect": "abc def"
+    }
+  ]
+}

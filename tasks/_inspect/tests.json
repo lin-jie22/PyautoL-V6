@@ -1,0 +1,129 @@
+{
+  "env_id": "_inspect",
+  "note": "由 aether/_inspect.py 切片自动生成：10 条经 F2P 验证的判据（另有 0 条对变异免疫，已剔除）。expect 为生成时刻的实现行为（characterization），非规格。",
+  "oracle": "characterization",
+  "generated_by": "scripts/worldgen.py",
+  "generated_at": "2026-10-17T16:26:32",
+  "source_origin": "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/lib/python3.13/_inspect.py",
+  "tests": [
+    {
+      "name": "get_object_types_mro_as_strings_4",
+      "call": "get_object_types_mro_as_strings",
+      "args": [
+        {}
+      ],
+      "expect": [
+        "builtins.dict",
+        "builtins.object"
+      ]
+    },
+    {
+      "name": "is_object_one_of_types_6",
+      "call": "is_object_one_of_types",
+      "args": [
+        {},
+        []
+      ],
+      "expect": false
+    },
+    {
+      "name": "get_object_types_mro_as_strings_5",
+      "call": "get_object_types_mro_as_strings",
+      "args": [
+        {
+          "a": 1
+        }
+      ],
+      "expect": [
+        "builtins.dict",
+        "builtins.object"
+      ]
+    },
+    {
+      "name": "get_object_types_mro_as_strings_6",
+      "call": "get_object_types_mro_as_strings",
+      "args": [
+        {
+          "x": "y"
+        }
+      ],
+      "expect": [
+        "builtins.dict",
+        "builtins.object"
+      ]
+    },
+    {
+      "name": "get_object_types_mro_as_strings_7",
+      "call": "get_object_types_mro_as_strings",
+      "args": [
+        {
+          "a": 1,
+          "b": 2
+        }
+      ],
+      "expect": [
+        "builtins.dict",
+        "builtins.object"
+      ]
+    },
+    {
+      "name": "is_object_one_of_types_7",
+      "call": "is_object_one_of_types",
+      "args": [
+        {},
+        [
+          "x"
+        ]
+      ],
+      "expect": false
+    },
+    {
+      "name": "is_object_one_of_types_8",
+      "call": "is_object_one_of_types",
+      "args": [
+        {
+          "a": 1
+        },
+        []
+      ],
+      "expect": false
+    },
+    {
+      "name": "is_object_one_of_types_9",
+      "call": "is_object_one_of_types",
+      "args": [
+        {},
+        [
+          1,
+          2,
+          3
+        ]
+      ],
+      "expect": false
+    },
+    {
+      "name": "is_object_one_of_types_10",
+      "call": "is_object_one_of_types",
+      "args": [
+        {},
+        [
+          3,
+          1,
+          2
+        ]
+      ],
+      "expect": false
+    },
+    {
+      "name": "is_object_one_of_types_11",
+      "call": "is_object_one_of_types",
+      "args": [
+        {
+          "x": "y"
+        },
+        []
+      ],
+      "expect": false
+    }
+  ]
+}

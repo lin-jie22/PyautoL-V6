@@ -1,21 +1,21 @@
 {
   "env_id": "chaos",
-  "note": "由 aether/chaos.py 切片自动生成：8 条经 F2P 验证的判据（另有 4 条对变异免疫，已剔除）。expect 为生成时刻的实现行为（characterization），非规格。",
+  "note": "由 aether/chaos.py 切片自动生成：15 条经 F2P 验证的判据（另有 0 条对变异免疫，已剔除）。expect 为生成时刻的实现行为（characterization），非规格。",
   "oracle": "characterization",
   "generated_by": "scripts/worldgen.py",
-  "generated_at": "2026-10-17T14:33:35",
+  "generated_at": "2026-10-17T16:27:44",
   "source_origin": "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/lib/python3.13/chaos.py",
   "tests": [
     {
-      "name": "f_0",
-      "call": "f",
+      "name": "h_5",
+      "call": "h",
       "args": [
-        0.0
+        1.0
       ],
       "expect": 0.0
     },
     {
-      "name": "f_1",
+      "name": "f_5",
       "call": "f",
       "args": [
         0.5
@@ -23,31 +23,7 @@
       "expect": 0.975
     },
     {
-      "name": "f_2",
-      "call": "f",
-      "args": [
-        2.5
-      ],
-      "expect": -14.625
-    },
-    {
-      "name": "f_3",
-      "call": "f",
-      "args": [
-        -1.0
-      ],
-      "expect": -7.8
-    },
-    {
-      "name": "g_0",
-      "call": "g",
-      "args": [
-        0.0
-      ],
-      "expect": 0.0
-    },
-    {
-      "name": "g_1",
+      "name": "g_5",
       "call": "g",
       "args": [
         0.5
@@ -55,7 +31,47 @@
       "expect": 0.975
     },
     {
-      "name": "g_2",
+      "name": "h_6",
+      "call": "h",
+      "args": [
+        0.5
+      ],
+      "expect": 0.975
+    },
+    {
+      "name": "h_7",
+      "call": "h",
+      "args": [
+        2.5
+      ],
+      "expect": -14.625
+    },
+    {
+      "name": "h_8",
+      "call": "h",
+      "args": [
+        -1.0
+      ],
+      "expect": -7.8
+    },
+    {
+      "name": "f_6",
+      "call": "f",
+      "args": [
+        2.5
+      ],
+      "expect": -14.625
+    },
+    {
+      "name": "f_7",
+      "call": "f",
+      "args": [
+        -1.0
+      ],
+      "expect": -7.8
+    },
+    {
+      "name": "g_6",
       "call": "g",
       "args": [
         2.5
@@ -63,12 +79,52 @@
       "expect": -14.625
     },
     {
-      "name": "g_3",
+      "name": "g_7",
       "call": "g",
       "args": [
         -1.0
       ],
       "expect": -7.8
+    },
+    {
+      "name": "f_8",
+      "call": "f",
+      "args": [
+        1.0
+      ],
+      "expect": 0.0
+    },
+    {
+      "name": "h_9",
+      "call": "h",
+      "args": [
+        0.0
+      ],
+      "expect": 0.0
+    },
+    {
+      "name": "g_8",
+      "call": "g",
+      "args": [
+        1.0
+      ],
+      "expect": 0.0
+    },
+    {
+      "name": "f_9",
+      "call": "f",
+      "args": [
+        0.0
+      ],
+      "expect": 0.0
+    },
+    {
+      "name": "g_9",
+      "call": "g",
+      "args": [
+        0.0
+      ],
+      "expect": 0.0
     }
   ]
 }

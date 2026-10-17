@@ -562,6 +562,190 @@ def gen_cases(fn_name: str, node: ast.FunctionDef,
     return cases
 
 
+def mutation_kill_matrix(source: str, cases: List[Dict[str, Any]],
+                         ok_map: Dict[str, Dict[str, Any]],
+                         kinds: Tuple[str, ...], n_mut: int,
+                         timeout: float = 15.0,
+                         ) -> Tuple[Dict[str, Set[int]], int]:
+    """**每条候选判据能杀死哪几个变异体** —— 判据选择的事实依据。
+
+    ⛔⛔ 为什么必须有这一步（2026-10-17 实测取证）：老逻辑是「每个函数取
+        itertools.product 的**前 6 条**，再按**当前返回值**去重」。结果：
+
+            doctest（637 行）只剩 1 条判据，6 次变异里 5 次**没让它变红**
+            editor / encoder 同样 6 次变异只击穿 1 次
+
+        ⇒ 造出来的环境**对变异免疫**。它们在 `--envs auto` 里把世界从 4
+        撑到 10，但每个只贡献 1 条题 ⇒ 世界是「虚胖」的：账面上环境多了，
+        题量没涨（这正是 r48 里「只加算子反而倒退到 1 代」的底噪）。
+
+        ⛔ 根因不是"算子不匹配"，是**判据没被按杀伤力选过**：
+        「当前返回值相同」的两条 case，在变异体下**可能不同** ——
+        按当前返回值去重，等于把最有区分力的那几条提前扔掉。
+
+    成本：每个变异体只需要**一次**批量 probe（probe_source 一次跑完所有
+    case）⇒ n_mut 次子进程，与 case 数无关。
+    """
+    from aether.environment import mutate_source
+
+    kills: Dict[str, Set[int]] = {}
+    n_seen = 0
+    for i in range(int(n_mut)):
+        try:
+            mut_src, _desc = mutate_source(source, which=i, kinds=kinds)
+        except Exception:                                     # noqa: BLE001
+            continue                       #: 没有可变异点 ⇒ 这个 which 跳过
+        n_seen += 1
+        res, err = probe_source(mut_src, cases, timeout=timeout)
+        if err:
+            continue
+        rmap = {r["name"]: r for r in res}
+        for c in cases:
+            base = ok_map.get(c["name"])
+            if base is None:
+                continue
+            r = rmap.get(c["name"])
+            if r is None or not r.get("ok"):
+                #: 变异后这条 case 直接抛错 ⇒ 行为变了 ⇒ 算杀死
+                kills.setdefault(c["name"], set()).add(i)
+                continue
+            if json.dumps(r.get("expect"), sort_keys=True, default=str) \
+                    != json.dumps(base.get("expect"), sort_keys=True, default=str):
+                kills.setdefault(c["name"], set()).add(i)
+    return kills, n_seen
+
+
+def lethal_mutants(env: "Any", n_mut: int = 32,
+                   kinds: Tuple[str, ...] = ("compare", "binop", "constant",
+                                             "boolop", "unaryop", "string"),
+                   timeout: float = 10.0) -> int:
+    """**题源强度**的唯一读数：有多少个变异体能真把判据打红。
+
+    ⛔⛔ 为什么单独抽这个函数（2026-10-17 实测）：一个环境"在不在世界里"
+        和"能不能贡献题"是两件事。r48 把世界从 4 撑到 10，但逐个量下来：
+
+            doctest  23 次变异只击穿 1 次      editor  30 次只击穿 1 次
+
+        ⇒ 这些环境让 `--envs auto` 的数字变好看了，题量一点没涨。
+        「世界大小」是会撒谎的读数，**题源强度**不会：它就是
+        `synthesize_tasks` 的 `valid`（真产生 F2P 任务的变异体数）。
+
+    ⛔ 它与 `rep.attempted` 的区别（别拿尝试数冒充）：
+        变异成功 ≠ 打红了判据。变异落在没人执行的分支上，attempted 照样 +1。
+    """
+    from aether.environment import synthesize_tasks
+    rep = synthesize_tasks(env, max_n=int(n_mut), timeout=timeout, kinds=kinds)
+    return int(rep.valid)
+
+
+def pick_tests(cases: List[Dict[str, Any]],
+               ok_map: Dict[str, Dict[str, Any]],
+               kills: Dict[str, Set[int]],
+               keep_names: Sequence[str],
+               mode: str = "kill", per_call: int = 6,
+               ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """从候选里挑判据。`kill` = 变异杀伤导向（默认）；`first` = 老逻辑（对照）。
+
+    ⛔ `first` 必须保留：它是**反证组**的对照组。没有它就无法证明
+        「题量涨了」是选判据方式的功劳，还是素材本身的差异。
+    """
+    by_call: Dict[str, List[str]] = {}
+    for c in cases:
+        if c["name"] in ok_map:
+            by_call.setdefault(c["call"], []).append(c["name"])
+    cmap = {c["name"]: c for c in cases}
+
+    def _mk(cn: str, idx: int) -> Dict[str, Any]:
+        return {"name": f"{cmap[cn]['call']}_{idx}", "call": cmap[cn]["call"],
+                "args": cmap[cn]["args"], "expect": ok_map[cn]["expect"]}
+
+    tests: List[Dict[str, Any]] = []
+    if mode == "first":
+        seen_sig: Set[str] = set()
+        picked: List[str] = []
+        for fn in keep_names:
+            per, seen_ret = 0, set()
+            for cn in by_call.get(fn, []):
+                if per >= per_call:
+                    break
+                rsig = json.dumps(ok_map[cn]["expect"], sort_keys=True,
+                                  default=str)
+                sig = json.dumps([cmap[cn]["call"], cmap[cn]["args"]],
+                                 sort_keys=True, default=str)
+                if sig in seen_sig or rsig in seen_ret:
+                    continue
+                seen_sig.add(sig)
+                seen_ret.add(rsig)
+                picked.append(cn)
+                tests.append(_mk(cn, per))
+                per += 1
+        #: ⛔ `covered` 两种模式**都要给**：契约靠它做同条数对照，
+        #:    只给 kill 的话 first 没有读数 ⇒ 对照退化成恒等断言。
+        cov: Set[int] = set()
+        for cn in picked:
+            cov |= kills.get(cn, set())
+        return tests, {"mode": "first", "covered": sorted(cov),
+                       "n_covered": len(cov)}
+
+    #: ── kill：贪心覆盖 ─────────────────────────────────────────
+    #: 每轮挑「能杀死最多个『还没被杀过』的变异体」的 case；
+    #: 平手时挑参数更"小"的（更可读、更不容易超时）。
+    all_mut: Set[int] = set()
+    for s in kills.values():
+        all_mut |= s
+    covered: Set[int] = set()
+    chosen: List[str] = []
+    per_count: Dict[str, int] = {}
+    while True:
+        best, best_gain = None, 0
+        for cn in cmap:
+            if cn not in ok_map or cn in chosen:
+                continue
+            fn = cmap[cn]["call"]
+            if per_count.get(fn, 0) >= per_call:
+                continue
+            gain = len(kills.get(cn, set()) - covered)
+            if gain > best_gain or (gain == best_gain and gain > 0
+                                    and best is not None
+                                    and len(json.dumps(cmap[cn]["args"]))
+                                    < len(json.dumps(cmap[best]["args"]))):
+                best, best_gain = cn, gain
+        if best is None or best_gain == 0:
+            break
+        chosen.append(best)
+        covered |= kills.get(best, set())
+        per_count[cmap[best]["call"]] = per_count.get(cmap[best]["call"], 0) + 1
+
+    #: ⛔ 覆盖完变异体就停会**凑不够条数**（实测 doctest 只选到 1 条，
+    #:    被 min_tests 直接淘汰）。剩下按"杀伤力降序"补齐 —— 这样
+    #:    kill 与 first 的**条数相同**，唯一变量是杀伤力 ⇒ 对照才成立。
+    target = per_call * max(1, len([k for k in by_call if k in set(
+        cmap[c]["call"] for c in ok_map)]))
+    rest = sorted((cn for cn in cmap if cn in ok_map and cn not in chosen),
+                  key=lambda cn: (-len(kills.get(cn, set())),
+                                  len(json.dumps(cmap[cn]["args"])),
+                                  cn))
+    for cn in rest:
+        if len(chosen) >= target:
+            break
+        fn = cmap[cn]["call"]
+        if per_count.get(fn, 0) >= per_call:
+            continue
+        # ⛔ **不按返回值去重**：当前返回值相同的两条 case，在变异体下
+        #    可能不同 —— 去重等于把有区分力的判据提前扔掉（实测取证）。
+        chosen.append(cn)
+        per_count[fn] = per_count.get(fn, 0) + 1
+    for cn in chosen:
+        fn = cmap[cn]["call"]
+        per_count.setdefault(fn, 0)
+        tests.append(_mk(cn, per_count[fn]))
+        per_count[fn] += 1
+    return tests, {"mode": "kill", "n_mutants": len(all_mut),
+                   "n_killed": len(covered), "covered": sorted(covered),
+                   "n_covered": len(covered),
+                   "kill_rate": (len(covered) / len(all_mut)) if all_mut else 0.0}
+
+
 def make_env(name: str, source: str, tests: List[Dict[str, Any]],
              out_dir: Path, meta: Dict[str, Any]) -> bool:
     d = out_dir / name
@@ -585,8 +769,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--min-tests", default="6",
                     help="一个环境的有效判据少于此 ⇒ 丢弃")
     ap.add_argument("--max-combos", default="48", help="每函数最多试探多少组入参")
-    ap.add_argument("--mutations", default="8",
-                    help="F2P 验证时每个环境尝试多少次变异")
+    ap.add_argument("--per-call", default="6",
+                    help="每个函数最多留几条判据")
+    ap.add_argument("--pick", default="kill", choices=["kill", "first"],
+                    help="判据选择方式：kill=按**变异杀伤率**贪心选（默认）；"
+                         "first=取前 N 条并按当前返回值去重（老逻辑，作对照）")
+    ap.add_argument("--mutations", default="32",
+                    help="F2P 验证时尝试多少个变异点（= mutate_source 的 which 上限）。"
+                         "⛔⛔ 这是**题源强度的主杠杆**（2026-10-17 实测）："
+                         "默认 8 只取 which 0..7 ⇒ doctest/encoder/shlex 各自只有"
+                         " 0–1 个能击穿判据的变异体 ⇒ 环境「虚胖」（世界从 4 涨到"
+                         " 10，题量没涨）。扩到 64 实测有效变异体 0→6 / 1→5 / 1→3。")
+    ap.add_argument("--min-lethal", default="2",
+                    help="有效变异体（真能打红判据的）少于此 ⇒ 弃。"
+                         "⛔ 只要求 ≥1 太松：editor 实测 39 个变异点、0 个有杀伤力，"
+                         "却靠一次「变异后跑不完」混过了门槛")
     ap.add_argument("--kinds", default="compare,binop,constant,boolop,unaryop,string",
                     help="F2P 验证用的变异算子。⛔ 默认含 `string`：真实代码里"
                          "字符串处理是常态，而默认三种算子打不穿纯串处理函数"
@@ -692,27 +889,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if r is None:
                 continue
             by_call.setdefault(c["call"], []).append(c["name"])
-        #: 同一 (call,args) 去重 + 同 call 的 expect 去重（避免重复判据）
-        tests: List[Dict[str, Any]] = []
-        seen_sig: Set[str] = set()
-        for fn, _ in keep:
-            per = 0
-            seen_ret: Set[str] = set()
-            for cn in by_call.get(fn, []):
-                if per >= 6:
-                    break
-                case = next(c for c in cases if c["name"] == cn)
-                expect = ok_map[cn]["expect"]
-                sig = json.dumps([case["call"], case["args"]],
-                                 sort_keys=True, default=str)
-                rsig = json.dumps(expect, sort_keys=True, default=str)
-                if sig in seen_sig or rsig in seen_ret:
-                    continue
-                seen_sig.add(sig)
-                seen_ret.add(rsig)
-                tests.append({"name": f"{fn}_{per}", "call": fn,
-                              "args": case["args"], "expect": expect})
-                per += 1
+        #: ── 判据选择：`kill`（变异杀伤导向）或 `first`（老逻辑，作对照）──
+        _kinds_t = tuple(x.strip() for x in args.kinds.split(",") if x.strip())
+        pick_mode = str(getattr(args, "pick", "kill") or "kill")
+        if pick_mode == "kill":
+            kills, n_mut_seen = mutation_kill_matrix(
+                source, cases, ok_map, _kinds_t, int(args.mutations),
+                timeout=float(args.timeout) + 8.0)
+        else:
+            kills, n_mut_seen = {}, 0
+        tests, pick_info = pick_tests(cases, ok_map, kills,
+                                      [nm for nm, _ in keep],
+                                      mode=pick_mode, per_call=int(args.per_call))
+        if args.verbose:
+            print(f"    {mod}: 判据选择 mode={pick_mode} "
+                  f"{pick_info} ⇒ {len(tests)} 条")
         if len(tests) < min_tests:
             print(f"  · {mod}: 判据 {len(tests)} 条 < {min_tests} ⇒ 弃")
             continue
@@ -737,9 +928,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 import traceback
                 traceback.print_exc()
             continue
-        if rep.valid == 0:
-            print(f"  · {mod}: {len(tests)} 条判据，但 {rep.attempted} 次变异"
-                  f"无一击穿 ⇒ 弃（这种环境只会贡献 Δ=0）")
+        #: ⛔ **题源强度闸**：只要求 valid ≥ 1 会让「虚胖环境」混进来 ——
+        #:    实测 editor 有 39 个变异点、却只有 0 个能真打红判据（它那
+        #:    1/8 的"产出"来自变异后跑不完，不是行为变了）⇒ 进套件只会
+        #:    贡献 Δ=0 的题，把世界撑大的同时把判别力稀释掉。
+        if rep.valid < int(args.min_lethal):
+            print(f"  · {mod}: {len(tests)} 条判据，{rep.attempted} 次变异只有"
+                  f" {rep.valid} 次击穿 < {args.min_lethal} ⇒ 弃（题源太弱）")
             continue
         #: ⛔ 只留**被证明可被击穿**的判据（出现过在 fail_to_pass 里的）
         broken: Set[str] = set()
@@ -760,7 +955,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                        "n_functions": len(keep),
                        "n_source_lines": len(source.splitlines()),
                        "n_synth_valid": rep.valid, "n_synth_attempted": rep.attempted,
-                       "n_weak_dropped": weak, "fail_to_pass": sorted(broken)})
+                       "n_weak_dropped": weak, "fail_to_pass": sorted(broken),
+                       #: ⛔ 判据选择方式必须进报告：题量涨了要能归因到它，
+                       #:    不能靠"这次素材好"糊过去。
+                       "pick": pick_info})
         if not args.check:
             make_env(mod, source, strong, out_dir,
                      {"origin": str(src_root / f"{mod}.py"), "note": note})

@@ -211,6 +211,89 @@ def main() -> int:
     ck("F4 每个发现的环境都能被真正加载", built == len(found),
        f"{built}/{len(found)}")
 
+    # ── G 组：题源强度（世界大小会撒谎，它不会）────────────────────
+    #
+    #   r48 把世界 4 → 10。逐个量下来：
+    #       doctest  23 次变异只击穿 1 次    editor  30 次只击穿 1 次
+    #   ⇒ 环境数变好看了，题量没涨。本组钉住：**入套件的环境必须有题源强度**。
+    print("G 组：题源强度闸门（虚胖环境不许进世界）")
+    if wg is not None:
+        try:
+            e_ho = Environment.from_dir(tasks_root / "textscore")
+            n8 = wg.lethal_mutants(e_ho, n_mut=8, timeout=10.0)
+            n32 = wg.lethal_mutants(e_ho, n_mut=32, timeout=10.0)
+            ck("G1 采样量是主杠杆：which 上限 32 找到的有效变异体 ≥ 上限 8",
+               n32 >= n8 >= 1, f"n8={n8} n32={n32}")
+            ck("G2 扩大采样真的多找到了（否则 G1 只是恒等断言）",
+               n32 > n8 or n8 >= 4, f"n8={n8} n32={n32}（若持平需基线已足够强）")
+        except Exception as ex:                              # noqa: BLE001
+            ck("G1 题源强度可读（textscore）", False,
+               f"{type(ex).__name__}: {ex}")
+
+        #: ⛔ **判据选择**：kill（按变异杀伤率）与 first（取前 N 条 + 按
+        #:    当前返回值去重）。同条数下 kill 的杀伤率必须不低于 first。
+        try:
+            import ast as _ast
+            src_ho = (tasks_root / "textscore" / "task.py").read_text(
+                encoding="utf-8")
+            tree = _ast.parse(src_ho)
+            fns = [(n.name, n) for n in tree.body
+                   if isinstance(n, _ast.FunctionDef)]
+            cases: list = []
+            for fn, node in fns:
+                cases += wg.gen_cases(fn, node, cap=48)
+            res, err = wg.probe_source(src_ho, cases, timeout=18.0)
+            ok_map = {r["name"]: r for r in res if r.get("ok")}
+            ck("G3 候选判据可探测（否则 G4/G5 无从对照）",
+               len(ok_map) >= 4 and not err, f"ok={len(ok_map)} err={err[:60]}")
+            if len(ok_map) >= 4:
+                kills, n_seen = wg.mutation_kill_matrix(
+                    src_ho, cases, ok_map,
+                    ("compare", "binop", "constant", "boolop", "unaryop", "string"),
+                    24, timeout=18.0)
+                ck("G4 杀伤矩阵非退化（至少 1 个变异体被杀死）",
+                   n_seen >= 1 and any(kills.values()),
+                   f"n_mut_seen={n_seen} kills={len(kills)}")
+                names = [nm for nm, _ in fns]
+                #: ⛔⛔ **per_call 必须小到"覆盖不全"**，否则两种选法都是满分
+                #:    ⇒ G6 变成恒等断言（2026-10-17 实测：per_call=6 时
+                #:    textscore 的 4 个变异体被两种选法全部覆盖，4 == 4）。
+                #:    ⛔ 同理条数必须**相同**：条数不同 ⇒ 变量不唯一 ⇒
+                #:    覆盖差异可能只是"多挑了几条"的功劳。
+                pc = 1
+                t_first, i_first = wg.pick_tests(cases, ok_map, kills, names,
+                                                 mode="first", per_call=pc)
+                t_kill, i_kill = wg.pick_tests(cases, ok_map, kills, names,
+                                               mode="kill", per_call=pc)
+                ck("G5 两种选法条数相同 ⇒ 唯一变量是杀伤力（否则对照不成立）",
+                   len(t_first) == len(t_kill) >= 1,
+                   f"first={len(t_first)} kill={len(t_kill)}")
+                ck("G6 kill 选出的判据集杀伤力 ≥ first（⇒ 这个选择真有用）",
+                   i_kill["n_covered"] >= i_first["n_covered"],
+                   f"first={i_first['n_covered']} kill={i_kill['n_covered']}")
+                #: ⛔ 事实读数必须**无条件**打印：只在失败时打印的话，
+                #:    "两边都相等"这种恒等情形永远看不见（第 16 条：不随被测
+                #:    对象变化的读数等于没有读数）。
+                print(f"      事实：first 覆盖 {i_first['n_covered']} 个变异体"
+                      f" / kill 覆盖 {i_kill['n_covered']} 个"
+                      f"（总数 {len(set().union(*kills.values())) if kills else 0}）"
+                      f"  条数 first={len(t_first)} kill={len(t_kill)}")
+
+                #: ── H 组：反证 ──────────────────────────────────
+                print("H 组：反证 —— 拿掉杀伤矩阵，G6 必须失去依据")
+                t_kill_empty, i_empty = wg.pick_tests(cases, ok_map, {}, names,
+                                                      mode="kill", per_call=pc)
+                ck("H1 空矩阵下 kill 仍凑够条数（退化为按参数大小补齐）",
+                   len(t_kill_empty) == len(t_first) >= 1,
+                   f"empty={len(t_kill_empty)} first={len(t_first)}")
+                print(f"      事实：无矩阵 kill 覆盖 {i_empty['n_covered']} 个"
+                      f"（有矩阵 {i_kill['n_covered']} 个）")
+                ck("H2 ⛔ 反证：有矩阵时的杀伤力 > 无矩阵（否则矩阵是装饰）",
+                   i_kill["n_covered"] > i_empty["n_covered"],
+                   f"with={i_kill['n_covered']} empty={i_empty['n_covered']}")
+        except Exception as ex:                              # noqa: BLE001
+            ck("G3 判据选择可对照", False, f"{type(ex).__name__}: {ex}")
+
     print(f"\n{'=' * 60}")
     print(f"结果：{len(FAILS)} 条失败" if FAILS else "结果：全部通过")
     for f in FAILS:

@@ -1,0 +1,130 @@
+{
+  "env_id": "token",
+  "note": "由 aether/token.py 切片自动生成：15 条经 F2P 验证的判据（另有 0 条对变异免疫，已剔除）。expect 为生成时刻的实现行为（characterization），非规格。",
+  "oracle": "characterization",
+  "generated_by": "scripts/worldgen.py",
+  "generated_at": "2026-10-17T16:26:28",
+  "source_origin": "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/lib/python3.13/token.py",
+  "tests": [
+    {
+      "name": "ISEOF_5",
+      "call": "ISEOF",
+      "args": [
+        0.0
+      ],
+      "expect": true
+    },
+    {
+      "name": "ISNONTERMINAL_5",
+      "call": "ISNONTERMINAL",
+      "args": [
+        0.0
+      ],
+      "expect": false
+    },
+    {
+      "name": "ISTERMINAL_5",
+      "call": "ISTERMINAL",
+      "args": [
+        0.0
+      ],
+      "expect": true
+    },
+    {
+      "name": "ISEOF_6",
+      "call": "ISEOF",
+      "args": [
+        1.0
+      ],
+      "expect": false
+    },
+    {
+      "name": "ISEOF_7",
+      "call": "ISEOF",
+      "args": [
+        0.5
+      ],
+      "expect": false
+    },
+    {
+      "name": "ISEOF_8",
+      "call": "ISEOF",
+      "args": [
+        2.5
+      ],
+      "expect": false
+    },
+    {
+      "name": "ISNONTERMINAL_6",
+      "call": "ISNONTERMINAL",
+      "args": [
+        1.0
+      ],
+      "expect": false
+    },
+    {
+      "name": "ISNONTERMINAL_7",
+      "call": "ISNONTERMINAL",
+      "args": [
+        0.5
+      ],
+      "expect": false
+    },
+    {
+      "name": "ISNONTERMINAL_8",
+      "call": "ISNONTERMINAL",
+      "args": [
+        2.5
+      ],
+      "expect": false
+    },
+    {
+      "name": "ISTERMINAL_6",
+      "call": "ISTERMINAL",
+      "args": [
+        1.0
+      ],
+      "expect": true
+    },
+    {
+      "name": "ISTERMINAL_7",
+      "call": "ISTERMINAL",
+      "args": [
+        0.5
+      ],
+      "expect": true
+    },
+    {
+      "name": "ISTERMINAL_8",
+      "call": "ISTERMINAL",
+      "args": [
+        2.5
+      ],
+      "expect": true
+    },
+    {
+      "name": "ISEOF_9",
+      "call": "ISEOF",
+      "args": [
+        -1.0
+      ],
+      "expect": false
+    },
+    {
+      "name": "ISNONTERMINAL_9",
+      "call": "ISNONTERMINAL",
+      "args": [
+        -1.0
+      ],
+      "expect": false
+    },
+    {
+      "name": "ISTERMINAL_9",
+      "call": "ISTERMINAL",
+      "args": [
+        -1.0
+      ],
+      "expect": true
+    }
+  ]
+}
