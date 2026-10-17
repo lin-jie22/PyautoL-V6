@@ -28,7 +28,8 @@ V6 的处理方式：**另开一个从不参与选择的环境**，只在裁决�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import (Any, Callable, Dict, Iterable, List, Optional, Sequence,
+                    Tuple)
 
 from .genome import Harness
 from .nongression import FrozenTask
@@ -195,7 +196,9 @@ class GeneralizationGate:
                  difficulty_fn: Optional[
                      Callable[[List[FrozenTask]], Dict[str, str]]] = None,
                  grow_ceiling: int = 64,
-                 grow_max_tasks: int = 96):
+                 grow_max_tasks: int = 96,
+                 grow_variant_fns: Optional[
+                     Sequence[Callable[[int], List[FrozenTask]]]] = None):
         # H2：结构性不重叠。重叠 ⇒ 这套闸自我取消 ⇒ 构造期就炸，不靠自觉。
         dev_ids = set(dev_task_ids or ())
         overlap = sorted(set(suite.task_ids) & dev_ids)
@@ -245,6 +248,28 @@ class GeneralizationGate:
         #:    只能由CLI 决定 —— 闸不该知道这次实验用什么口径造题。
         self.grow_fn = grow_fn
         self.difficulty_fn = difficulty_fn
+        #: ── r55：**换采样口径**（不是加大采样量）────────────────────
+        #: ⛔⛔ 为什么需要它（实测 `probe_headroom_source` A/E/G 段）：
+        #:    单个环境在**一个**采样口径下的题源有**硬上限**：
+        #:
+        #:        max_n = 16/32/64/128/256 ⇒ 产出恒定 26 条（新增 0）
+        #:        depth = 2/3/4           ⇒ 产出恒定 26 条（新增 0）
+        #:
+        #:    ⇒ r53 那条「加大 `max_n` 补题」的自愈，撞上这个顶之后**静默
+        #:      失败**（实测 `steps` 三档 `n_added` 全是 0，而 note 只说
+        #:      「补到上限仍缺」—— "题源没了" 与 "没补对层" 在文案里同形）。
+        #:
+        #:    但换一个采样口径（`balanced` 取反）在同一环境上产出的是
+        #:    **完全不重叠**的另一批题（实测新增 26 条，重叠 0 条）
+        #:    —— 与第 29 条那个「`which` 序号挤压」同构：**换顺序会换一批题**。
+        #:
+        #: ⛔ 这里刻意**不换环境**：换环境会动 held-out 的语义（H1 的
+        #:    "另一个环境"是这套闸的定义），而换采样口径只换"从同一个
+        #:    环境里取哪几个变异点"，语义不变、与候选依旧无关。
+        #:
+        #: ⛔ 默认 None/空 ⇒ 只用 `grow_fn` 一个口径 ⇒ 与 r53/r54 逐字
+        #:    同口径（第 40 条：默认口径保持原样，新口径显式开启）。
+        self.grow_variant_fns = tuple(grow_variant_fns or ())
         self.grow_ceiling = int(grow_ceiling)
         self.grow_max_tasks = int(grow_max_tasks)
 
@@ -353,61 +378,80 @@ class GeneralizationGate:
             rep["note"] = "每层空间都够 ⇒ 不补"
             return rep
 
-        n = max(self.suite.n_tasks, 4)
         seen = set(self.suite.task_ids)
         tasks = list(self.suite.tasks)
         labels = dict(self.suite.difficulty)
         head = dict(head0)
-        while deficit and n < self.grow_ceiling and len(tasks) < self.grow_max_tasks:
-            n = min(self.grow_ceiling, n * 2)
-            try:
-                cand = [t for t in (self.grow_fn(n) or [])
-                        if getattr(t, "task_id", "") not in seen]
-            except Exception as e:                             # noqa: BLE001
-                #: ⛔ 合成挂了 ⇒ **记账并停手**，不许静默跳过（第 10 条）：
-                #:   "补不动"与"不用补"在输出里必须可分辨。
-                rep["steps"].append({"max_n": n, "error":
-                                     f"{type(e).__name__}: {e}"})
+        #: ⛔ r55：口径序列 = 主口径 + 备选口径（默认只有主口径 ⇒ 历史同形）。
+        variants = (self.grow_fn,) + tuple(self.grow_variant_fns)
+        rep["n_variants"] = len(variants)
+        #: ⛔ 「建卷外有题、但它的层已经达标」的题数。没有这个读数，
+        #:    `grew=0` 读不出是"题源没了"还是"有题但那层不缺"—— 而这两者
+        #:    的出路完全相反（换题源 vs 什么都不用做）。第 10 条同形病。
+        outside_deficit = 0
+        for vi, gfn in enumerate(variants):
+            if not deficit:
                 break
-            if not cand:
-                rep["steps"].append({"max_n": n, "n_new": 0})
-                continue
-            try:
-                lab = self.difficulty_fn(cand) or {}
-            except Exception as e:                             # noqa: BLE001
-                rep["steps"].append({"max_n": n, "error":
-                                     f"{type(e).__name__}: {e}"})
-                break
-            added = 0
-            for t in cand:
-                if len(tasks) >= self.grow_max_tasks:
-                    break
-                lv = str(lab.get(getattr(t, "task_id", ""), "") or "")
-                #: ⛔ 只收**缺空间的层**，且**不与已有/发展集重复**（H2）。
-                if lv not in deficit:
-                    continue
-                if getattr(t, "task_id", "") in set(self.dev_task_ids):
-                    continue
-                #: 判据同源：这条题**当前基线做不对**才算"还有空间"。
+            #: ⛔ 每个口径都从**当前卷子大小**重新起步：`n` 是合成器的
+            #:    "最多取几个变异点"，不该继承上一个口径的进度。
+            n = max(len(tasks), 4)
+            while deficit and n < self.grow_ceiling and len(tasks) < self.grow_max_tasks:
+                n = min(self.grow_ceiling, n * 2)
                 try:
-                    v = runner(h, dict(t.spec))
-                except Exception:                              # noqa: BLE001
+                    cand = [t for t in (gfn(n) or [])
+                            if getattr(t, "task_id", "") not in seen]
+                except Exception as e:                         # noqa: BLE001
+                    #: ⛔ 合成挂了 ⇒ **记账并停手**，不许静默跳过（第 10 条）：
+                    #:   "补不动"与"不用补"在输出里必须可分辨。
+                    #:   ⛔ r55：这里只跳出**当前口径**的 while，for 会继续
+                    #:   试下一个口径 —— 一个口径的合成器挂了，不等于别的
+                    #:   口径也挂了。每次失败都留在 `steps` 的 error 里，
+                    #:   不会因为有退路就变得不可见。
+                    rep["steps"].append({"variant": vi, "max_n": n, "error":
+                                         f"{type(e).__name__}: {e}"})
+                    break
+                if not cand:
+                    rep["steps"].append({"variant": vi, "max_n": n,
+                                         "n_new": 0})
                     continue
-                if float(getattr(v, "reward", 0.0) or 0.0) >= 1.0:
-                    continue
-                seen.add(t.task_id)
-                tasks.append(t)
-                labels[t.task_id] = lv
-                added += 1
-                if head.get(lv, 0) >= want:
-                    deficit.remove(lv)
-                    if not deficit:
+                try:
+                    lab = self.difficulty_fn(cand) or {}
+                except Exception as e:                         # noqa: BLE001
+                    rep["steps"].append({"variant": vi, "max_n": n, "error":
+                                         f"{type(e).__name__}: {e}"})
+                    break
+                added = 0
+                for t in cand:
+                    if len(tasks) >= self.grow_max_tasks:
                         break
-            rep["steps"].append({"max_n": n, "n_cand": len(cand),
-                                 "n_added": added})
-            if added:
-                head = self._recompute_headroom(tasks, labels, h, runner)
-                deficit = sorted(lv for lv, c in head.items() if c < want)
+                    lv = str(lab.get(getattr(t, "task_id", ""), "") or "")
+                    #: ⛔ 只收**缺空间的层**，且**不与已有/发展集重复**（H2）。
+                    if lv not in deficit:
+                        outside_deficit += 1
+                        continue
+                    if getattr(t, "task_id", "") in set(self.dev_task_ids):
+                        continue
+                    #: 判据同源：这条题**当前基线做不对**才算"还有空间"。
+                    try:
+                        v = runner(h, dict(t.spec))
+                    except Exception:                          # noqa: BLE001
+                        continue
+                    if float(getattr(v, "reward", 0.0) or 0.0) >= 1.0:
+                        continue
+                    seen.add(t.task_id)
+                    tasks.append(t)
+                    labels[t.task_id] = lv
+                    added += 1
+                    if head.get(lv, 0) >= want:
+                        deficit.remove(lv)
+                        if not deficit:
+                            break
+                rep["steps"].append({"variant": vi, "max_n": n,
+                                     "n_cand": len(cand), "n_added": added})
+                if added:
+                    head = self._recompute_headroom(tasks, labels, h, runner)
+                    deficit = sorted(lv for lv, c in head.items() if c < want)
+        rep["outside_deficit"] = outside_deficit
         n_before = self.suite.n_tasks
         if len(tasks) != n_before:
             #: ⛔ 重建 suite 而不是就地改：`HeldOutSuite` 是 frozen（内容寻址
@@ -421,9 +465,23 @@ class GeneralizationGate:
         rep["n_tasks"] = self.suite.n_tasks
         rep["missing"] = sorted(lv for lv, c in
                                 rep["headroom_after"].items() if c < want)
-        rep["note"] = ("补到每层空间 ≥ %d" % want if not rep["missing"]
-                       else "补到上限仍缺：%s（这是卷子的上限，不是候选的错）"
-                       % "/".join(rep["missing"]))
+        if not rep["missing"]:
+            rep["note"] = "补到每层空间 ≥ %d" % want
+        elif rep["outside_deficit"]:
+            #: ⛔ 这条分支此前**不存在**：`grew=0` 只有一句「补到上限仍缺」，
+            #:    于是"题源没了"与"有题但那层不缺"在输出里完全同形（实测
+            #:    F 段：题源里明明有 13 条建卷外的题，其中 3 条正是缺空间
+            #:    那层能用的，却因为该层当时不在 deficit 里被拒掉了）。
+            rep["note"] = ("仍缺 %s：题源里还有 %d 条建卷外的题，但它们不在"
+                           "缺空间的层里 ⇒ 出路是**换采样口径**（同一环境的"
+                           "另一种取点顺序会给出几乎不重叠的一批题），"
+                           "加大 max_n 无效 —— 单口径题源已到顶"
+                           % ("/".join(rep["missing"]),
+                              rep["outside_deficit"]))
+        else:
+            rep["note"] = ("补到上限仍缺：%s（单采样口径的题源已到顶 —— 加大"
+                           " max_n / depth 都不再产出新题；这是卷子的上限，"
+                           "不是候选的错）" % "/".join(rep["missing"]))
         return rep
 
     def _recompute_headroom(self, tasks: List[FrozenTask],

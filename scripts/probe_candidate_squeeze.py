@@ -234,6 +234,25 @@ def show(out: dict, tag: str) -> dict:
             "rewards": [r.get("baseline_reward") for r in rounds]}
 
 
+def _strip(base: list, flag: str) -> list:
+    """摘掉 `--flag 值`（**两个** argv 元素）。
+
+    ⛔⛔ 只摘一个 ⇒ 下一个参数被当成它的值吃掉 ⇒ 对照组跑的是别的口径，
+        而命令行看起来"只是少了个开关"（最难发现的一种对照污染）。
+        三个新口径开关（ho-grow / retry-every / ho-grow-variants）都走这里。
+    """
+    out, skip = [], 0
+    for x in base:
+        if skip:
+            skip = 0
+            continue
+        if x == flag:
+            skip = 1
+            continue
+        out.append(x)
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rounds", default="6")
@@ -249,8 +268,11 @@ def main() -> int:
     ap.add_argument("--retry-every", default="0",
                     help="⛔ r54 新口径（默认 0 = 现状）：被闸拒过的候选每被"
                          "跳过这么多轮就放行一次让闸重审")
+    ap.add_argument("--ho-grow-variants", default="1",
+                    help="⛔ r55 新口径（默认 1 = 现状）：主口径题源撞顶后"
+                         "换一种取点顺序再取一批 held-out 题")
     ap.add_argument("--compare", action="store_true",
-                    help="同时跑对照组（唯一变量 = 最后一个开关）")
+                    help="同时跑对照组（唯一变量 = 最后一个新口径开关）")
     args = ap.parse_args()
 
     base = ["--root", "@TMP@", "evolve",
@@ -268,6 +290,9 @@ def main() -> int:
     _retry_on = int(args.retry_every or 0) > 0
     if _retry_on:
         base += ["--retry-every", str(int(args.retry_every))]
+    _variants = max(1, int(args.ho_grow_variants or 1))
+    if _variants > 1:
+        base += ["--ho-grow-variants", str(_variants)]
 
     roots = []
     try:
@@ -283,17 +308,12 @@ def main() -> int:
         if args.compare:
             r2 = make_root()
             roots.append(r2)
-            if _retry_on:
-                #: ⛔ 摘掉 `--retry-every` 及其值（**两个**元素，见上）。
-                b2, _skip = [], 0
-                for x in base:
-                    if _skip:
-                        _skip = 0
-                        continue
-                    if x == "--retry-every":
-                        _skip = 1
-                        continue
-                    b2.append(x)
+            if _variants > 1:
+                b2 = _strip(base, "--ho-grow-variants")
+                ctag = "对照组（--ho-grow-variants 1，其余逐字相同）"
+                var = "--ho-grow-variants"
+            elif _retry_on:
+                b2 = _strip(base, "--retry-every")
                 ctag = "对照组（不开 --retry-every，其余逐字相同）"
                 var = "--retry-every"
             else:

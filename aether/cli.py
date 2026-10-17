@@ -641,6 +641,8 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     _ho_grow = bool(getattr(args, "ho_grow", False))
     _ho_grow_max_n = int(getattr(args, "ho_grow_max_n", "64") or 64)
     _ho_grow_max_tasks = int(getattr(args, "ho_grow_max_tasks", "96") or 96)
+    #: ⛔ r55：换采样口径的档数。1 = 只用主口径（与 r53/r54 逐字同口径）。
+    _ho_grow_variants = max(1, int(getattr(args, "ho_grow_variants", "1") or 1))
     #: ⛔ `retry_every`（被拒候选的 probation 出口）**默认 0 = 永久不重提**
     #:    （r54）：与 `deadend_probation_every` 同形、同样默认关闭 ⇒ 默认
     #:    口径与历史逐字可比。它不改任何判据，只改"要不要再给一次机会"。
@@ -841,15 +843,32 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         #:    实验的题**不同源** ⇒ "补采样"变成悄悄换了一把尺子。
         #: ⛔ 两个函数与上面建 held-out 用的是**同一份** `synthesize_tasks`
         #:    参数 ⇒ 补出来的题与原有题同分布（只差"基线做不对"这一筛选）。
+        def _ho_synth_with(balanced: bool):
+            """按给定采样口径合成 held-out 候选题（与建卷同源的入参）。"""
+            def _fn(n: int):
+                return [FrozenTask(
+                    task_id=t.task_id,
+                    spec={"env_id": ho_name,
+                          "broken_source": t.broken_source,
+                          "topic": ho_name, "task_class": TASK_CLASS})
+                    for t in synthesize_tasks(
+                        envs[ho_name], max_n=int(n), depth=_depth,
+                        kinds=_kinds, require_behavior=_require_behavior,
+                        balanced=balanced).tasks]
+            return _fn
+
         def _ho_synth(n: int):
-            return [FrozenTask(
-                task_id=t.task_id,
-                spec={"env_id": ho_name, "broken_source": t.broken_source,
-                      "topic": ho_name, "task_class": TASK_CLASS})
-                for t in synthesize_tasks(
-                    envs[ho_name], max_n=int(n), depth=_depth, kinds=_kinds,
-                    require_behavior=_require_behavior,
-                    balanced=_balanced).tasks]
+            return _ho_synth_with(_balanced)(n)
+
+        #: ⛔ r55：**换采样口径**，不是加大采样量。
+        #:    实测（probe_headroom_source A/E 段）：单个环境在一种口径下
+        #:    题源有硬顶（max_n 64→256、depth 2→4 产出恒定 26 条）；
+        #:    而 `balanced` 取反后在同一环境上给出**完全不重叠**的 26 条
+        #:    （G 段实测重叠 0 条）。⇒ 撞顶时唯一有效的方向是换口径。
+        #:    ⛔ 刻意**不换环境**：held-out 的"另一个环境"是这套闸的定义
+        #:    （H1），换环境等于换尺子的单位；换取点顺序不换单位。
+        def _ho_synth_alt(n: int):
+            return _ho_synth_with(not _balanced)(n)
 
         def _ho_labels(pending) -> Dict[str, str]:
             return difficulty_report(envs[ho_name], list(pending))["labels"]
@@ -864,6 +883,10 @@ def cmd_evolve(args: argparse.Namespace) -> int:
             #:    逐字同口径。开了才注入，且进 `run_config`（实验变量）。
             grow_fn=(_ho_synth if _ho_grow else None),
             difficulty_fn=(_ho_labels if _ho_grow else None),
+            #: ⛔ 默认 1 档 ⇒ `grow_variant_fns=()` ⇒ 与 r53/r54 逐字同口径。
+            grow_variant_fns=((_ho_synth_alt,) if (_ho_grow and
+                                                   _ho_grow_variants >= 2)
+                              else ()),
             grow_ceiling=int(_ho_grow_max_n),
             grow_max_tasks=int(_ho_grow_max_tasks))
 
@@ -1127,6 +1150,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "ho_grow": bool(_ho_grow),
         "ho_grow_max_n": int(_ho_grow_max_n) if _ho_grow else 0,
         "ho_grow_max_tasks": int(_ho_grow_max_tasks) if _ho_grow else 0,
+        "ho_grow_variants": int(_ho_grow_variants) if _ho_grow else 1,
         #: ⛔ 换的是"要不要再给一次机会"，不是判据 ⇒ 同样必须进 run_config
         #:    （第 40 条：实验变量必须进账本，否则口径差异不可复现）。
         "retry_every": int(_retry_every),
@@ -1964,6 +1988,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="补采样的合成 max_n 封顶（合成要真跑变异体 ⇒ 必须封顶）")
     e.add_argument("--ho-grow-max-tasks", default="96",
                    help="补采样后 held-out 的总题数封顶")
+    e.add_argument("--ho-grow-variants", default="1",
+                   help="r55：补采样可用的**采样口径**档数（默认 1 = 只用主"
+                        "口径，与 r53/r54 逐字同口径；≥2 时在主口径题源撞顶"
+                        "后换一种取点顺序再取一批题）")
     e.add_argument("--retry-every", default="0",
                    help="⛔ 新实验口径（默认 0 = 现状，即**永久**不重提）：\n"
                         "被闸拒过的候选，每被跳过这么多轮就**放行一次**让闸\n"
