@@ -101,7 +101,7 @@ def main():
         def propose(self, weakness, harness, n=3):
             return list(self.caps)
 
-    def mk_loop(tmp, caps, heldout, ledger=None):
+    def mk_loop(tmp, caps, heldout, ledger=None, **cfg):
         led = ledger or Ledger(Path(tmp) / "ledger.jsonl")
         frozen = [FrozenTask(task_id="frozen::A", spec={"env": DEV, "frozen": True}),
                   FrozenTask(task_id="frozen::B", spec={"env": HO, "frozen": True})]
@@ -119,10 +119,11 @@ def main():
                              _runner, FixedProposer(caps), caliber=cal,
                              heldout=heldout,
                              config=EvolutionConfig(group_size=3,
-                                                    cleanup_enabled=False))
+                                                    cleanup_enabled=False,
+                                                    **cfg))
 
-    def run_once(tmp, caps, heldout, ledger=None):
-        loop = mk_loop(tmp, caps, heldout, ledger)
+    def run_once(tmp, caps, heldout, ledger=None, **cfg):
+        loop = mk_loop(tmp, caps, heldout, ledger, **cfg)
         rep = loop.run_round(Harness(), round_no=1)
         return loop, rep
 
@@ -298,8 +299,11 @@ def main():
     #    修法：分层裁决要与发展集**同层**对照，区分「能力边界」与「挑食」。
     print("\nE 组：难度分层同层对照 —— 能力边界 ≠ 挑食")
 
-    def mk_diff_gate(base_map, cand_map, difficulty):
-        """按 (task_id → reward) 精确控制 base/cand 在 held-out 的表现。"""
+    def mk_diff_gate(base_map, cand_map, difficulty, **kw):
+        """按 (task_id → reward) 精确控制 base/cand 在 held-out 的表现。
+
+        `**kw` 透传给 `GeneralizationGate`（G 组要用它改 `min_level_headroom`）。
+        """
         tasks = [FrozenTask(task_id=t, spec={"env": HO, "probe": 1})
                  for t in sorted(base_map)]
         suite = make_heldout(HO, tasks, difficulty=difficulty)
@@ -314,16 +318,23 @@ def main():
                        for t in sorted(base_map)]
         g = GeneralizationGate(
             make_heldout(HO, suite_tasks, difficulty=difficulty),
-            dev_task_ids=["dev0"], base_at_ceiling=None)
+            dev_task_ids=["dev0"], base_at_ceiling=None, **kw)
         base_h = Harness(meta_rules="BASE")
         cand_h = Harness(meta_rules="CAND")
         return g, base_h, cand_h, _probe_runner
 
-    DIFF = {"h_easy": "easy", "h_hard1": "hard", "h_hard2": "hard"}
+    #: ⛔ hard 层**刻意放 3 条**（r52 前是 2 条）。`min_level_headroom=3`
+    #:    生效后，层内可提升空间不足 3 条会被判「不可判别」⇒ E2 这种
+    #:    「必须判挑食」的场景会被它抢先（实测 E2 当场转 inconclusive）。
+    #:    ⇒ 改判据后对照组必须重审：这里把层扩到样本足够的规模，让 E2
+    #:      考的还是它原本要考的那件事（挑食），而不是"样本恰好只有 2 条"。
+    #:      「样本不足确实不判挑食」由 G1 专门守，「样本足够仍判挑食」
+    #:      由 G2 专门守 —— 两件事分开，不再挤在同一条里。
+    DIFF = {"h_easy": "easy", **{f"h_hard{i}": "hard" for i in range(1, 4)}}
     # E1：通用修法 —— held-out easy 涨、hard 不涨；发展集 hard **同样**不涨
     #     ⇒ 那是能力边界，不是挑食 ⇒ 必须放行（否则进化永久空转）
-    base_map = {"h_easy": 0.0, "h_hard1": 0.0, "h_hard2": 0.0}
-    cand_map = {"h_easy": 1.0, "h_hard1": 0.0, "h_hard2": 0.0}
+    base_map = {"h_easy": 0.0, **{f"h_hard{i}": 0.0 for i in range(1, 4)}}
+    cand_map = {"h_easy": 1.0, **{f"h_hard{i}": 0.0 for i in range(1, 4)}}
     g_e, b_h, c_h, pr_runner = mk_diff_gate(base_map, cand_map, DIFF)
     p_e = g_e.probe(b_h, c_h, pr_runner, dev_gain=0.6,
                     dev_by_difficulty={"easy": 1.0, "hard": 0.0})
@@ -350,6 +361,139 @@ def main():
        p_e3.verdict == "inconclusive" and p_e3.blocks, f"{p_e3.verdict}")
     ck("E3b inconclusive 的理由必须点明『发展集没有该难度层』（可据以补数据）",
        "没有" in p_e3.reason and "难度层" in p_e3.reason, p_e3.reason[:60])
+
+    # ── H 组：被泛化闸拦下 ≠ 这一轮结束（r52）──────────────────────
+    #
+    # ⛔ 背景（r51 的 depth2+均衡口径实测）：`best` 被闸拦 ⇒ 整轮作废、
+    #    回滚、下一轮**再提同一个**（基线没变 ⇒ 发展集排序不变 ⇒ best 恒定）
+    #    ⇒ 6 轮里 4 轮提同一个 `fix_control_flow`、每次同一句 partial。
+    #    ⛔ 修法不是放松闸，而是"这个不行 ⇒ 试下一个（按**发展集**排序的
+    #    下一个）" ⇒ H1（held-out 不参与选择）一条没动。
+    print("\nH 组：被拦 ⇒ 同轮试下一个（闸一条没少）")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        #: 两个候选在**发展集**上一样好（都是 1.0 ⇒ 都过 advantage）：
+        #:   `narrow:A` = 只修发展环境 ⇒ 过不了 held-out（overfit）
+        #:   `gen`      = 两个环境都修 ⇒ 真泛化
+        #: ⇒ 按发展集排序两者并列，遍历序在前的是 narrow ⇒ gate_tries=1 时
+        #:   整轮作废；=2 时同轮轮到 gen ⇒ 提交。
+        caps_h = [capsule("narrow", DEV), capsule("gen")]
+        loop_h1, rep_h1 = run_once(tmp, caps_h, mk_gate())
+        ck("H1 默认口径（gate_tries=1）：best 被拦 ⇒ 不提交（与历史一致）",
+           rep_h1.committed is None, f"{rep_h1.committed}")
+
+        loop_h2, rep_h2 = run_once(tmp, caps_h, mk_gate(), gate_tries=2)
+        ck("H2 gate_tries=2：同轮试下一个 ⇒ **提交**（被拦不再等于整轮作废）",
+           rep_h2.committed is not None, f"{rep_h2.revert_reason[:80]}")
+        acc = [c for c in rep_h2.candidates if c.accepted]
+        ck("H3 提交的必须是 `gen`（真泛化），不是 `narrow`（讨好发展集）",
+           len(acc) == 1 and acc[0].capsule_name == "gen",
+           f"{[c.capsule_name for c in acc]}")
+        ck("H4 ⛔ H1 纪律不破：队列顺序来自**发展集**，不是 held-out"
+           "（两个候选 dev 并列 ⇒ 序遍历，闸只做准入）",
+           [c.capsule_name for c in rep_h2.candidates[:2]] == ["narrow", "gen"],
+           f"{[c.capsule_name for c in rep_h2.candidates]}")
+        #: ⛔ 死路账此前只记 best ⇒ 其它候选**永远**进不了账 ⇒ 冷却几乎
+        #:    从不触发。这里钉住"每个闯过闸的候选都记一条"。
+        n_probe = sum(1 for l in open(Path(tmp) / "ledger.jsonl",
+                                      encoding="utf-8") if '"gen.probe"' in l)
+        ck("H5 每个闯过闸的候选都记 `gen.probe`（死路账覆盖非 best）",
+           n_probe >= 2, f"gen.probe 只记了 {n_probe} 条")
+        ck("H6 `gate_probes` 读数出得来（「试了几个」可观测，不是靠猜）",
+           len(rep_h2.gate_probes) >= 2, f"{rep_h2.gate_probes}")
+
+        #: H7 反证：把闸换成恒放行 ⇒ gate_tries=1 也会提交（H1 不是恒不提交）
+        class _AlwaysPass:
+            def probe(self, *a, **k):
+                return ProbeResult(verdict="generalize", dev_gain=1.0,
+                                   heldout_gain=1.0, n_tasks=3)
+        _orig_probe = GeneralizationGate.probe
+        GeneralizationGate.probe = lambda self, *a, **k: ProbeResult(
+            verdict="generalize", dev_gain=1.0, heldout_gain=1.0, n_tasks=3)
+        try:
+            _, rep_h7 = run_once(tmp, caps_h, mk_gate())
+            ck("H7 反证：闸恒放行 ⇒ gate_tries=1 也提交（H1 不是恒不提交）",
+               rep_h7.committed is not None, f"{rep_h7.revert_reason[:60]}")
+        finally:
+            GeneralizationGate.probe = _orig_probe
+
+        #: H8 默认值本身（第 12 条：默认开的开关不许只靠"不传"来验证）
+        ck("H8 ⛔ `EvolutionConfig()` 的 gate_tries 默认是 1（默认=现状）",
+           EvolutionConfig().gate_tries == 1,
+           str(EvolutionConfig().gate_tries))
+
+    # ── G 组：分层裁决的**样本量**（r52：0/1 与 4/9 在统计上同形）────
+    #
+    # ⛔ 背景（r51 的 depth2+均衡口径实测）：轮 2 起 held-out 的 hard 层
+    #    **只剩 1 条**未解题（7 条里 6 条已被上一代修好），而发展集同层还
+    #    剩 9 条 ⇒ 候选在 dev 修好 4/9（+0.138）、在 ho 修好 0/1（+0.000）
+    #    ⇒ 闸判「发展集同层涨了 ⇒ 挑食」，**连续 4 轮同一个结论**。
+    #    分母是 1 的时候，"没涨"根本不是证据 —— 那是不可判别，不是有罪。
+    print("\nG 组：层内可提升空间 —— 样本不足 ⇒ 不可判别，不是挑食")
+
+    #: hard 层 6 条，其中 5 条基线**已经**修好 ⇒ 可提升空间只有 1 条
+    DIFF_G = {f"g_hard{i}": "hard" for i in range(6)}
+    DIFF_G["g_easy"] = "easy"
+    base_g = {"g_easy": 0.0, **{f"g_hard{i}": 1.0 for i in range(5)},
+              "g_hard5": 0.0}
+    cand_g = {"g_easy": 1.0, **{f"g_hard{i}": 1.0 for i in range(5)},
+              "g_hard5": 0.0}
+    g_g1, b_g1, c_g1, pr_g1 = mk_diff_gate(base_g, cand_g, DIFF_G)
+    p_g1 = g_g1.probe(b_g1, c_g1, pr_g1, dev_gain=0.3,
+                      dev_by_difficulty={"easy": 1.0, "hard": 0.1379})
+    ck("G1 层内只剩 1 条可提升 ⇒ 判 inconclusive（不是 partial）",
+       p_g1.verdict == "inconclusive", f"{p_g1.verdict} / {p_g1.reason[:70]}")
+    ck("G1b 仍然**拦截**（不可判别 ≠ 放行）", p_g1.blocks, p_g1.reason[:70])
+    ck("G1c 理由必须点明『可提升空间』与出路（补题，不是放宽判据）",
+       "可提升空间" in p_g1.reason and "补" in p_g1.reason,
+       p_g1.reason[:90])
+
+    #: G2 反证（闸要有牙）：同一形态，但可提升空间 = 3 ⇒ 必须回到挑食
+    base_g2 = {"g_easy": 0.0, **{f"g_hard{i}": 0.0 for i in range(3)},
+               **{f"g_hard{i}": 1.0 for i in range(3, 6)}}
+    cand_g2 = dict(base_g2)
+    cand_g2["g_easy"] = 1.0
+    g_g2, b_g2, c_g2, pr_g2 = mk_diff_gate(base_g2, cand_g2, DIFF_G)
+    p_g2 = g_g2.probe(b_g2, c_g2, pr_g2, dev_gain=0.3,
+                      dev_by_difficulty={"easy": 1.0, "hard": 0.1379})
+    ck("G2 反证：可提升空间 = 3 ⇒ **仍然**判 partial（说明 G1 不是放宽）",
+       p_g2.verdict == "partial" and p_g2.blocks,
+       f"{p_g2.verdict} / {p_g2.reason[:70]}")
+
+    #: G3：门槛调到 0 ⇒ 回到改动前的行为（判据可回退，不是写死）
+    g_g3, b_g3, c_g3, pr_g3 = mk_diff_gate(base_g, cand_g, DIFF_G,
+                                           min_level_headroom=0)
+    p_g3 = g_g3.probe(b_g3, c_g3, pr_g3, dev_gain=0.3,
+                      dev_by_difficulty={"easy": 1.0, "hard": 0.1379})
+    ck("G3 `min_level_headroom=0` ⇒ 回到旧口径（partial）⇒ 判据可回退",
+       p_g3.verdict == "partial", f"{p_g3.verdict}")
+    #: G5：**r51 轮 2 的真实形态** —— easy 层样本足够且涨了，hard 层只剩
+    #:    1 条可提升且没涨 ⇒ hard 不作反证 ⇒ 放行，但**必须点名**（否则
+    #:    "样本不足就跳过"会变成悄悄放宽判据的一条暗门）。
+    DIFF_G5 = {"g5_easy1": "easy", "g5_easy2": "easy", "g5_easy3": "easy",
+               **{f"g5_hard{i}": "hard" for i in range(6)}}
+    base_g5 = {**{f"g5_easy{i}": 0.0 for i in range(1, 4)},
+               **{f"g5_hard{i}": 1.0 for i in range(5)}, "g5_hard5": 0.0}
+    cand_g5 = {**{f"g5_easy{i}": 1.0 for i in range(1, 4)},
+               **{f"g5_hard{i}": 1.0 for i in range(5)}, "g5_hard5": 0.0}
+    g_g5, b_g5, c_g5, pr_g5 = mk_diff_gate(base_g5, cand_g5, DIFF_G5)
+    p_g5 = g_g5.probe(b_g5, c_g5, pr_g5, dev_gain=0.22,
+                      dev_by_difficulty={"easy": 1.0, "hard": 0.1379})
+    ck("G5 部分层样本不足（另有层样本足够且涨了）⇒ 放行（不作反证）",
+       p_g5.verdict == "generalize", f"{p_g5.verdict} / {p_g5.reason[:70]}")
+    ck("G5b ⛔ 放行的同时**必须点名**样本不足的层（不许悄悄跳过）",
+       "样本不足" in p_g5.reason and "可提升" in p_g5.reason,
+       p_g5.reason[:110])
+    ck("G5c 样本不足的层**不许**混进 out_of_reach（那是能力边界，两回事）",
+       "hard" not in p_g5.out_of_reach, f"{p_g5.out_of_reach}")
+
+    ck("G4 ⛔ 默认值本身：默认门槛是 3（不传参时真的生效）",
+       GeneralizationGate(make_heldout(HO, [FrozenTask(
+           task_id="z", spec={"env": HO})]), dev_task_ids=["dev0"]
+       ).min_level_headroom == 3,
+       str(GeneralizationGate(make_heldout(HO, [FrozenTask(
+           task_id="z", spec={"env": HO})]),
+           dev_task_ids=["dev0"]).min_level_headroom))
 
     # E4 反证：把对照判据反过来（发展集涨 ⇒ 当作超纲）⇒ E1/E2 必须翻转
     g_e4, b4, c4, pr4 = mk_diff_gate(base_map, cand_map, DIFF)

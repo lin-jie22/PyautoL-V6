@@ -213,6 +213,10 @@ class RoundReport:
     ledger_seqs: List[int] = field(default_factory=list)
     #: 本轮 best 候选的泛化裁决（None = 没跑到这一步）
     generalization: Optional[Dict[str, Any]] = None
+    #: ⛔ 本轮**每个**闯过闸的候选的裁决摘要（r52）。空 = 没跑到这一步。
+    #:    没有它，「闸拦了 1 个」与「闸拦了 3 个」在输出里长得一样 ⇒
+    #:    「同轮试下一个」到底有没有真的发生过，无从验证（第 4 条）。
+    gate_probes: List[Dict[str, Any]] = field(default_factory=list)
     #: 提交后的**反事实层归因**（None = 没提交 / 未启用）
     layer_credit: Optional[Dict[str, Any]] = None
     #: step 级信用分配（`runtime.assign_credit` 的 turn-level）。
@@ -261,6 +265,9 @@ class RoundReport:
                 "committed": self.committed, "revert_reason": self.revert_reason,
                 "ledger_seqs": self.ledger_seqs,
                 "generalization": self.generalization,
+                #: ⛔ 「同轮试了几个候选过闸」必须出得来（r52）：不出的话
+                #:    「被拦就换下一个」到底是发生了还是没发生，无从验证。
+                "gate_probes": self.gate_probes,
                 "layer_credit": self.layer_credit,
                 "step_credit": self.step_credit,
                 "saturated": self.saturated, "saturation": self.saturation,
@@ -339,6 +346,16 @@ class EvolutionConfig:
     #: 死路冷却：同一 (候选, 环境对) **连续**被泛化闸拦下这么多次后，
     #: 本轮不再为它花探测预算（实测：某候选 15 次探测 / 15 次 overfit /
     #: 0 次通过，占掉 55% 预算）。⛔ 不是永久封死 —— 见下。
+    #: ⛔⛔ **一轮内最多让几个候选去闯泛化闸**（r52）。默认 `1` = 现状：
+    #:    best 被拦 ⇒ 整轮作废、回滚、下一轮**再提同一个**（因为基线没变，
+    #:    发展集排序也不变 ⇒ best 恒定）。实测（r51 的 depth2+均衡口径）
+    #:    6 轮里有 4 轮在提同一个 `fix_control_flow`、每次都判 partial，
+    #:    而同一个发展集上 `+fix_unaryops` 是能过闸的（扫描 31 个修法子集
+    #:    里 28 个 generalize）⇒ **代数是被"一次拦截吃掉一整轮"锁死的**。
+    #:    ⛔ 这不放松闸：闸一条没少，只是"这个不行 ⇒ 试下一个（按发展集
+    #:    排序的下一个）"，held-out 依旧**不参与排序**（H1 不动）。
+    #:    ⛔ 默认 1 ⇒ 默认口径零影响、历史基线可比（第 33/34 条）。
+    gate_tries: int = 1
     deadend_streak: int = 3
     #: 出口：冷却后每逢这个轮次**允许试探一次**（否则环境换了、能力涨了
     #: 也永远不再试 ⇒ 与「难度分层自指死锁」同形态的永久封死）。
@@ -1723,44 +1740,108 @@ class EvolutionLoop:
                 best = c
                 best_gain = gain
                 best_load = c.load_gain
+        #: ⛔ `accepted` 必须在**这里**就打上：7.5 只在装了 held-out 时才跑，
+        #:    没装 held-out 的运行（`--heldout off` 与若干契约场景）根本走不
+        #:    到那儿 ⇒ 候选永远不会被标记 ⇒ 提交照旧但"谁被接受了"在报告里
+        #:    读不出来（实测契约 D2/D7b/D7c 当场转红）。
         if best is not None:
             best.accepted = True
             best.reason = "accepted"
 
-        # 7.5) 跨环境泛化闸 —— **在 best 选出之后**才跑，且只跑一次。
+        #: ⛔ 准入通过的**全部**候选（按同一把尺子排序），不再只留一个。
+        #:    原实现到这里只留 `best` ⇒ 它被闸拦下就等于"这一轮结束"，
+        #:    而下一轮的排序**完全相同**（基线没变、发展集没变）⇒ 又提它
+        #:    ⇒ 同一条死路被反复走（r51 实测 6 轮里 4 轮提同一个候选）。
+        eligible = sorted(
+            (c for c in scored if c.reason in ("", "accepted")),
+            key=lambda c: (c.reward - base_reward, c.load_gain), reverse=True)
+        #: ⛔ 排序键与上面选 best 的时刻**必须一致**：两把尺子 ⇒ "同轮
+        #:    试下一个"试的顺序就不是发展集顺序 ⇒ H1 会被悄悄绕过。
+        front = best
+
+        # 7.5) 跨环境泛化闸 —— **在 best 选出之后**才跑。
         #      ⛔ 顺序不能反：held-out 的 reward 一旦参与选 best，
         #      它就变成了第二张发展集，闸自我取消（见 generalization.py H1）。
+        #
+        #      ⛔⛔ r52：被拦**不等于这一轮结束**。按 `gate_tries` 依次让
+        #      排序里的下一个候选去闯闸（held-out 仍然**不参与排序** ——
+        #      顺序来自发展集，闸只做准入）。
+        #      ⛔ 默认 `gate_tries=1` ⇒ 与改动前**逐字等价**（历史可比）。
         overfit_reason = ""
         if best is not None and self.heldout is not None:
-            new_h_probe = apply_capsule(
-                h, next(cp for cp in capsules if cp.name == best.capsule_name))
-            if best.is_cleanup:
-                #: ⛔ 清理走泛化闸的**退化面**（`probe_removal`：held-out
-                #:    不许变差）。走 `probe()` 必得 `no_gain` ⇒ blocks
-                #:    ⇒ 清理永远提交不了 —— 那不是闸严，是**用错了闸**：
-                #:    overfit 问的是"涨的是不是真的"，而清理根本不涨。
-                pr = self.heldout.probe_removal(h, new_h_probe, self.runner)
+            tries = max(1, int(getattr(self.cfg, "gate_tries", 1) or 1))
+            queue = eligible[:tries] or [front]
+            probes: List[Dict[str, Any]] = []
+            passed: Optional[Candidate] = None
+            first_blocked: Optional[Dict[str, Any]] = None
+            for cand in queue:
+                new_h_probe = apply_capsule(
+                    h, next(cp for cp in capsules
+                            if cp.name == cand.capsule_name))
+                if cand.is_cleanup:
+                    #: ⛔ 清理走泛化闸的**退化面**（`probe_removal`：held-out
+                    #:    不许变差）。走 `probe()` 必得 `no_gain` ⇒ blocks
+                    #:    ⇒ 清理永远提交不了 —— 那不是闸严，是**用错了闸**：
+                    #:    overfit 问的是"涨的是不是真的"，而清理根本不涨。
+                    pr = self.heldout.probe_removal(h, new_h_probe,
+                                                    self.runner)
+                else:
+                    pr = self.heldout.probe(
+                        h, new_h_probe, self.runner,
+                        dev_gain=cand.reward - base_reward,
+                        # ⛔ 同层对照：没有它，"能力边界"会被误判成"挑食"，
+                        #    通用修法将永远过不了闸 ⇒ 进化循环永久空转。
+                        dev_by_difficulty=cand.dev_by_difficulty or None)
+                cand.generalization = pr.to_dict()
+                #: ⛔⛔ 每个被拦的候选**都要**记 `gen.probe`：死路账的维度
+                #:    是 (候选, 环境对)，而此前只有 `best` 会被记 ⇒ 其余
+                #:    候选**永远**进不了死路账 ⇒ 冷却只对"每轮第一名"生效
+                #:    ⇒ 冷却几乎从不触发（这也是同一个候选能连提 4 轮的
+                #:    另一半原因）。
+                rep.ledger_seqs.append(self.ledger.append(
+                    "gen.probe",
+                    {"round_no": round_no, "capsule": cand.capsule_name,
+                     "harness_id": cand.harness_id,
+                     #: ⛔ 环境对是死路冷却的维度：缺了它，冷却只能
+                     #:    按候选全局生效 ⇒ 换环境后被误伤。
+                     "env_pair": env_pair,
+                     "try_index": len(probes), "queue_size": len(queue),
+                     **pr.to_dict()}, actor="gate").seq)
+                probes.append({"capsule": cand.capsule_name,
+                               "verdict": pr.verdict,
+                               "blocks": bool(pr.blocks),
+                               "dev_gain": round(cand.reward - base_reward, 4),
+                               "heldout_gain": round(pr.heldout_gain, 4)})
+                if not pr.blocks:
+                    passed = cand
+                    cand.accepted = True
+                    cand.reason = "accepted"
+                    break
+                cand.reason = f"{pr.verdict}: {pr.reason}"
+                #: ⛔ 被闸拦下 ⇒ 清掉准入时打上的 accepted（否则"被拦"
+                #:    与"被接受"会在同一轮里同时成立）。
+                cand.accepted = False
+                if first_blocked is None:
+                    first_blocked = {"cand": cand, "pr": pr}
+            rep.gate_probes = probes
+            if passed is not None:
+                best = passed
+                rep.generalization = best.generalization
             else:
-                pr = self.heldout.probe(
-                    h, new_h_probe, self.runner,
-                    dev_gain=best.reward - base_reward,
-                    # ⛔ 同层对照：没有它，"能力边界"会被误判成"挑食"，
-                    #    通用修法将永远过不了闸 ⇒ 进化循环永久空转。
-                    dev_by_difficulty=best.dev_by_difficulty or None)
-            best.generalization = pr.to_dict()
-            rep.generalization = pr.to_dict()
-            rep.ledger_seqs.append(self.ledger.append(
-                "gen.probe", {"round_no": round_no, "capsule": best.capsule_name,
-                              "harness_id": best.harness_id,
-                              #: ⛔ 环境对是死路冷却的维度：缺了它，冷却只能
-                              #:    按候选全局生效 ⇒ 换环境后被误伤。
-                              "env_pair": env_pair,
-                              **pr.to_dict()}, actor="gate").seq)
-            if pr.blocks:
-                overfit_reason = pr.reason
-                best.reason = f"{pr.verdict}: {pr.reason}"
-                best.accepted = False
+                #: 全被拦 ⇒ 裁决取**排序第一**那个（与改动前语义一致），
+                #: 但每个候选的理由都留在自己身上（账本里看得见"试了几个"）。
                 best = None
+                fb = first_blocked
+                if fb is not None:
+                    cand0, pr0 = fb["cand"], fb["pr"]
+                    overfit_reason = pr0.reason
+                    cand0.accepted = False
+                    rep.generalization = pr0.to_dict()
+                    #: ⛔ 同轮试过但没过的，理由要能区分"我排第二，没轮到"
+                    #:    与"我也被拦了" ⇒ 否则观测侧会把它们读成"没探测"。
+                    for cand in queue:
+                        if cand is not cand0:
+                            cand.accepted = False
 
         rep.candidates = cands
 

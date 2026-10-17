@@ -169,7 +169,8 @@ class GeneralizationGate:
                  heldout_floor: float = 0.0,
                  dev_floor: float = 0.0,
                  min_tasks: int = 1,
-                 base_at_ceiling: Optional[float] = None):
+                 base_at_ceiling: Optional[float] = None,
+                 min_level_headroom: int = 3):
         # H2：结构性不重叠。重叠 ⇒ 这套闸自我取消 ⇒ 构造期就炸，不靠自觉。
         dev_ids = set(dev_task_ids or ())
         overlap = sorted(set(suite.task_ids) & dev_ids)
@@ -186,6 +187,22 @@ class GeneralizationGate:
         self.min_tasks = min_tasks
         #: held-out 的满分线（reward 上界）。None ⇒ 不做天花板判定。
         self.base_at_ceiling = base_at_ceiling
+        #: ⛔⛔ **分层裁决的最小样本量**（r52）。一条难度层里基线**还没修好**
+        #:    的题少于这个数 ⇒ 该层"没涨"**不可判别** ⇒ 归入 undecidable
+        #:    （`inconclusive`），**不许**判挑食（第 11 条：不可判别 ≠ 有罪）。
+        #:
+        #:    实测（r51 的 depth2+均衡口径）：轮 2 起 held-out 的 hard 层
+        #:    **只剩 1 条**未解题（7 条里 6 条已被上一代修好），而发展集
+        #:    同层还剩 9 条 ⇒ 候选在 dev 上修好 4/9、在 ho 上修好 0/1
+        #:    ⇒ `dev_by_difficulty` 是 +0.138 而 `by_difficulty` 是 +0.000
+        #:    ⇒ 判「挑食」，连续 4 轮。**0/1 与 4/9 在统计上无法区分** ——
+        #:    那不是挑食的证据，是分母太小。
+        #:    ⛔ 处置：样本不足的层**不进 lagging** ⇒ 它既不能作证也不能
+        #:    作反证（与 `out_of_reach` 同处置：不处罚，但**必须点名**）。
+        #:    这不是放宽判据 —— 判据"某层没涨 ⇒ 挑食"对**有样本**的层
+        #:    一字未改（G2 守着它）；对没样本的层，它本来就不适用。
+        #:    ⛔ 默认 3：不小于 3 条才有资格谈"这一层涨没涨"。
+        self.min_level_headroom = int(min_level_headroom)
 
     @property
     def env_pair(self) -> str:
@@ -371,8 +388,31 @@ class GeneralizationGate:
                         f"（{base_ho:.2f}→{cand_ho:.2f}）⇒ 讨好判据，不提交"))
         # ⛔ 分层裁决：总体涨了，但某一难度层没涨 ⇒ **不能直接判挑食**，
         #    必须与发展集的同层增益对照（理由见 docstring 的"自指死锁"）。
-        lagging = sorted(lv for lv in by_diff if by_diff[lv] <= self.heldout_floor)
-        if lagging:
+        #: 该层里基线**尚未修好**的题数 = 这一层真正能涨的空间（r52）。
+        base_by_id = {tid: v.reward
+                      for tid, v in zip(self.suite.task_ids, base_vs)}
+        headroom = {
+            lv: sum(1 for t in self.suite.ids_of(lv)
+                    if base_by_id.get(t, 0.0) < 1.0)
+            for lv in by_diff}
+        #: ⛔ 样本量不足的层：它能涨的题太少 ⇒ "没涨"**不可判别**
+        #:    ⇒ 既不进 lagging（不作反证），也要在裁决里**点名**（不作证）。
+        #:    ⛔ 只对**未涨**的层谈样本量：已经涨了的层不需要这层豁免
+        #:    （第一版对全部层判 ⇒ easy 涨了也被算进 out_of_reach ⇒
+        #:      E1b 的"放行必须点名 out_of_reach"直接被污染）。
+        #:    ⛔ 与 `undecidable`（发展集没这一层）分开：处置相同，但出路
+        #:       完全不同 —— 这条要去补 held-out 该层的**题数**，不是补层。
+        lagging_all = sorted(lv for lv in by_diff
+                             if by_diff[lv] <= self.heldout_floor)
+        thin = sorted(lv for lv in lagging_all
+                      if headroom.get(lv, 0) < self.min_level_headroom)
+        #: ⛔ 每一层的可提升空间都不足 ⇒ 这套 held-out 在这道题上**整体**
+        #:   无判别力 ⇒ fail-closed（与 `discriminative=False` 同形态，
+        #:   但那是"没有难度标签"，这是"有标签但每层样本都不够"）。
+        all_thin = bool(by_diff) and all(
+            headroom.get(lv, 0) < self.min_level_headroom for lv in by_diff)
+        lagging = [lv for lv in lagging_all if lv not in thin]
+        if lagging or thin:
             out_of_reach: List[str] = []
             cherry: List[str] = []
             undecidable: List[str] = []
@@ -413,8 +453,33 @@ class GeneralizationGate:
                     reason=(f"held-out 的 {undecidable} 层未涨，但发展集**没有"
                             f"该难度层** ⇒ 无从对照，无法区分「能力边界」与"
                             f"「挑食」⇒ 按拦截处理（补该难度的 dev 任务后再判）"))
+            if all_thin:
+                #: ⛔ 每一层都只剩零星空地 ⇒ 这套 held-out 对这道题**整体**
+                #:    无判别力 ⇒ fail-closed（与 `discriminative=False` 同形态，
+                #:    但那是"没有难度标签"，这是"有标签但每层的样本都不够"）。
+                shown = sorted(f"{lv}(可提升空间 {headroom.get(lv, 0)} 条)"
+                               for lv in thin)
+                return ProbeResult(
+                    verdict="inconclusive", dev_gain=dev_gain,
+                    heldout_gain=ho_gain, base_heldout=base_ho,
+                    cand_heldout=cand_ho, n_tasks=self.suite.n_tasks,
+                    by_difficulty=by_diff,
+                    dev_by_difficulty=dict(dev_by_difficulty or {}),
+                    reason=(f"held-out **每层**的可提升空间都不足 "
+                            f"{self.min_level_headroom} 条（{shown}）⇒ 这次"
+                            f"裁决没有任何一层的证据可用 ⇒ 按拦截处理。"
+                            f"出路：补 held-out 的题数，不是放宽判据"))
             # 未涨的层全是"发展集也修不动" ⇒ 能力边界，不是挑食 ⇒ 放行
             shown = sorted(f"{lv}{by_diff[lv]:+.4f}" for lv in out_of_reach)
+            thin_note = ""
+            if thin:
+                #: ⛔⛔ 样本不足的层**必须点名**：它没进 lagging（不作反证），
+                #:    但不点名就成了"悄悄放宽判据"（第 13 条：闸自己要在
+                #:    名单里）。出路也不同：这条要补题，不是补层。
+                thin_note = ("".join(
+                    f" {lv} 层未涨但该层只有 {headroom.get(lv, 0)} 条可提升"
+                    f"题 ⇒ 样本不足，未计入裁决（要补题，不是放宽判据）；"
+                    for lv in thin))
             return self._downgrade_if_flat(ProbeResult(
                                verdict="generalize", dev_gain=dev_gain,
                                heldout_gain=ho_gain, base_heldout=base_ho,
@@ -425,7 +490,7 @@ class GeneralizationGate:
                                reason=(f"发展集 +{dev_gain:.4f} 且 held-out {ho_gain:+.4f}"
                                        f"（分层 {by_diff}）⇒ 泛化，放行。"
                                        f" {shown} 未涨但发展集同层同样未涨"
-                                       f" ⇒ 判为能力边界而非挑食")))
+                                       f" ⇒ 判为能力边界而非挑食。" + thin_note)))
         return self._downgrade_if_flat(ProbeResult(
                            verdict="generalize", dev_gain=dev_gain,
                            heldout_gain=ho_gain, base_heldout=base_ho,

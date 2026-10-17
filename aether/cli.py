@@ -1006,6 +1006,12 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                          budget=budget,
                          config=EvolutionConfig(
                              group_size=int(args.group),
+                             #: ⛔ 默认 1 = 「best 被拦 ⇒ 整轮结束」（与历史
+                             #:    基线逐字同口径）。>1 ⇒ 同轮按发展集排序
+                             #:    依次试下一个 —— 闸一条没少，held-out 仍
+                             #:    不参与排序（H1 不动）。见 r52。
+                             gate_tries=int(
+                                 getattr(args, "gate_tries", "1") or 1),
                              #: ⛔ 默认 0 = 串行（与历史基线同口径）。并行只
                              #:    包住 runner 计算，记账仍串行（见 §23.5）。
                              parallel_workers=int(
@@ -1896,6 +1902,13 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--llm-model", default="", help="真模型名（默认 Qwen3.5-4B:latest）")
     e.add_argument("--heldout-floor", default="0.0",
                    help="held-out 增益地板（低于它判 overfit）")
+    e.add_argument("--gate-tries", default="1",
+                   help="⛔ 新实验口径（默认 1 = 现状）：一轮内最多让几个候选\n"
+                        "去闯泛化闸。1 ⇒ best 被拦就整轮作废，下一轮因为排序\n"
+                        "不变又会提同一个（实测 6 轮里 4 轮提同一个候选）。\n"
+                        ">1 ⇒ 按**发展集**排序依次试下一个 —— 闸一条没少，\n"
+                        "held-out 仍不参与排序（H1 不动），只是被拦不再等于\n"
+                        "这一轮结束。⛔ 默认 1 ⇒ 与历史基线逐字同口径。")
     e.add_argument("--parallel", default="0",
                    help="并发评估线程数。0/1=串行（**默认**，与历史基线同口径）。\n"
                         "⛔ 并行只包住 runner 计算，run_id 分配与账本写入仍串行\n"

@@ -102,7 +102,7 @@ NO_DIFF = {}
 
 def _gate(difficulty, floor=0.0):
     tasks = [FrozenTask(f"ho::{i}", spec={"env": "B", "i": i})
-             for i in range(4)]
+             for i in range(N_HO)]
     suite = make_heldout("B", tasks, difficulty=difficulty)
     from aether.generalization import GeneralizationGate
     return GeneralizationGate(suite, dev_task_ids=["dev::1"],
@@ -125,12 +125,19 @@ def _runner(scores):
 
 
 # 4 条 held-out：0/1 是 easy，2/3 是 hard
-DIFF = {"ho::0": "easy", "ho::1": "easy", "ho::2": "hard", "ho::3": "hard"}
+#: ⛔ hard 层**刻意放 3 条**（r52 前是 2 条）：`min_level_headroom=3`
+#:    生效后，层内可提升空间不足 3 条 ⇒ 该层不作反证 ⇒ D 组这种
+#:    "必须判挑食"的场景会被它抢先（实测 D1 当场转 inconclusive）。
+#:    ⇒ 改判据后对照组必须重审：把层扩到样本足够，让 D1 继续考挑食，
+#:      而"样本不足不判挑食"由 contract_generalization_test 的 G 组守。
+N_HO = 5
+DIFF = {"ho::0": "easy", "ho::1": "easy",
+        "ho::2": "hard", "ho::3": "hard", "ho::4": "hard"}
 
 class _PhasedAll:
     """base 全红 → cand 全绿（两层都涨）。"""
 
-    def __init__(self, n_tasks=4):
+    def __init__(self, n_tasks=N_HO):
         self.n = 0
         self.n_tasks = n_tasks
 
@@ -163,8 +170,8 @@ class _Phased:
     def __call__(self, h, spec):
         self.n += 1
         i = spec.get("i")
-        # probe 先跑 base（前 4 次），再跑 cand（后 4 次）
-        if self.n <= 4:
+        # probe 先跑 base（前 N_HO 次），再跑 cand（后 N_HO 次）
+        if self.n <= N_HO:
             return _bad(i)
         return _ok(i) if DIFF.get(f"ho::{i}") == "easy" else _bad(i)
 
@@ -199,10 +206,11 @@ ck("D6 于是：分层与否，裁决相反 ⇒ 分层不是装饰",
 print()
 print("== E 组：难度跨度本身要被看见 ==")
 suite_spread = make_heldout("B", [FrozenTask(f"ho::{i}", spec={})
-                                  for i in range(4)], difficulty=DIFF)
+                                  for i in range(N_HO)], difficulty=DIFF)
 ck("E1 有跨度 ⇒ spread=True", suite_spread.spread)
-suite_flat = make_heldout("B", [FrozenTask(f"ho::{i}", spec={}) for i in range(4)],
-                          difficulty={f"ho::{i}": "easy" for i in range(4)})
+suite_flat = make_heldout("B", [FrozenTask(f"ho::{i}", spec={})
+                                for i in range(N_HO)],
+                          difficulty={f"ho::{i}": "easy" for i in range(N_HO)})
 ck("E2 全是 easy ⇒ spread=False（这样的 held-out 判别力不足）",
    not suite_flat.spread)
 d_flat = difficulty_report(ENVS["textscore"],
@@ -212,7 +220,7 @@ ck("E3 difficulty_report 会**明说**单一难度的问题",
    (not d_flat["spread"]) and bool(d_flat["note"]), str(d_flat))
 ck("E4 levels / ids_of 是按难度分桶的",
    suite_spread.levels == ("easy", "hard")
-   and suite_spread.ids_of("hard") == ("ho::2", "ho::3"))
+   and suite_spread.ids_of("hard") == ("ho::2", "ho::3", "ho::4"))
 
 print()
 print("== F 组：反证（把分层拆掉，上面的断言必须翻转）==")
@@ -228,7 +236,7 @@ ck("F1 放宽每层地板 ⇒ 同一个候选被**放行**（证明 D1 拦的是
 #      旧：标错 ⇒ 放行挑食候选（错误结论）
 #      新：标错 ⇒ 只能判 inconclusive（结论仍安全，但**丢了「挑食」这个诊断**，
 #          且 reason 会指向"去补采样"而不是"这个候选在挑食" ⇒ 排查方向错了）
-g_mislabel = _gate({f"ho::{i}": "easy" for i in range(4)})
+g_mislabel = _gate({f"ho::{i}": "easy" for i in range(N_HO)})
 pr_mis = g_mislabel.probe(_H({}), _H({}), _Phased(), dev_gain=0.5,
                           dev_by_difficulty={"easy": 1.0, "hard": 1.0})
 ck("F2 难度标签标错（全标 easy）⇒ held-out 失去判别力 ⇒ 不再判 partial，"
@@ -327,7 +335,7 @@ print()
 print("== H 组：held-out 没判别力 ⇒ 不许放行（只降级放行，不盖掉拦截）==")
 
 #: 无跨度的 held-out：4 条全是 easy（模拟采样偏到 easy 一侧）
-FLAT = {f"ho::{i}": "easy" for i in range(4)}
+FLAT = {f"ho::{i}": "easy" for i in range(N_HO)}
 g_flat = _gate(FLAT)
 
 
