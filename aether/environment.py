@@ -172,7 +172,8 @@ out = []
 for t in tests:
     name = t.get("name", "?")
     if err:
-        out.append({"name": name, "passed": False, "evidence": "import-failed: " + err[:200]})
+        out.append({"name": name, "passed": False, "why": "import",
+                    "evidence": "import-failed: " + err[:200]})
         continue
     try:
         fn = ns.get(t["call"])
@@ -185,9 +186,13 @@ for t in tests:
         else:
             ok = bool(got)
             ev = f"got={got!r} (truthy check)"
-        out.append({"name": name, "passed": bool(ok), "evidence": ev})
+        #: ⛔ `why` 由**产出方**写死，下游不许靠解析 evidence 文案去猜
+        #:    （那是两套逻辑：文案一改，分类就静默错位 —— 与 BFS/DFS
+        #:    错位同一个病）。见 `classify_failure`。
+        out.append({"name": name, "passed": bool(ok), "evidence": ev,
+                    "why": ("behavior" if ok else "mismatch")})
     except Exception:
-        out.append({"name": name, "passed": False,
+        out.append({"name": name, "passed": False, "why": "raise",
                     "evidence": traceback.format_exc().splitlines()[-1][:200]})
 print(json.dumps({"results": out, "import_error": err, "sandbox": _SB}))
 '''
@@ -895,7 +900,17 @@ def verify_source(env: Environment, source: Optional[str] = None,
                        evidence={"rc": ex.rc,
                                  "stdout_tail": ex.stdout[-400:],
                                  "stderr_tail": ex.stderr[-400:],
-                                 "sandbox": sb},
+                                 "sandbox": sb,
+                                 #: ⛔ 整段崩掉时 runner 不会逐条给 `why`
+                                 #:    ⇒ 这里**显式**给出：导入失败 ⇒
+                                 #:    import；否则（超时 / 内存守卫 / rc!=0）
+                                 #:    是**装置自己**出问题，归 unknown，
+                                 #:    ⛔ 绝不能记成 behavior（那是把装置
+                                 #:    故障冒充成"找到了真 bug"）。
+                                 "why": {str(t.get("name", "?")):
+                                         ("import" if ex.import_error
+                                          else None)
+                                         for t in env.tests}},
                        env_fingerprint=env.fingerprint, cost_s=ex.cost_s)
 
     #: ⛔ `bool(r["passed"])` 会**架空** `all_of` 的类型校验（`bool("false")
@@ -906,7 +921,11 @@ def verify_source(env: Environment, source: Optional[str] = None,
     v = all_of(env.env_id, checks)
     return Verdict(passed=v.passed, checks=v.checks,
                    evidence={"n_passed": ex.n_passed, "n_total": len(ex.results),
-                             "env_id": env.env_id, "sandbox": sb},
+                             "env_id": env.env_id, "sandbox": sb,
+                             #: ⛔ `why` 逐条带出 —— 「测试为什么红」是判据
+                             #:    自身的诚实度问题，不能靠下游猜文案。
+                             "why": {str(r.get("name", "?")): r.get("why")
+                                     for r in ex.results}},
                    env_fingerprint=env.fingerprint, cost_s=ex.cost_s)
 
 
@@ -1120,7 +1139,21 @@ class _Mutator(ast.NodeTransformer):
         return node
 
     def visit_UnaryOp(self, node):
-        """`not x` 增删 —— 与 boolop 同族的第四类（默认关闭）。"""
+        """`not x` 增删 —— 与 boolop 同族的第四类（默认关闭）。
+
+        ⛔⛔ **这个算子曾经在 Python 3.13 上 100% 失效，而且失效得很安静**
+            （2026-10-17 r50 实测）：`ast.UnaryOp` 的操作数字段在 3.12 起
+            从 `.value` 改名为 `.operand`（`_fields = ('op', 'operand')`），
+            原代码 `return node.value` ⇒ **必抛** `AttributeError`。
+            它被 `synthesize_tasks` 的 `note_error` 记成"合成失败" ⇒
+            账面看到的是"这个环境造不出 unaryop 题" ⇒ r49 据此判定
+            **「10 个环境里 unaryop 变异点 0 个 ⇒ 这条维度是死路」**。
+
+            ⛔ 那是误判：**不是世界里没有，是工具坏了**。这类失效是最贵的
+            一种 —— 它不报错、不崩、只是让一个维度安静地消失，而所有
+            下游读数（"没有这类变异点"）看起来都像是事实。
+            ⇒ 教训：**一个维度产出恒为 0 时，先怀疑工具，再怀疑世界。**
+        """
         self.generic_visit(node)
         if self.done or "unaryop" not in self.kinds:
             return node
@@ -1128,9 +1161,16 @@ class _Mutator(ast.NodeTransformer):
             return node
         self.seen += 1
         if self.seen - 1 == self.which:
+            #: ⛔ 兼容两个字段名：`operand`（3.12+）优先，回落 `value`（旧版）。
+            #:    两边都取不到 ⇒ **不改**（返回原节点），绝不静默造出坏树。
+            operand = getattr(node, "operand", None)
+            if operand is None:
+                operand = getattr(node, "value", None)
+            if operand is None:
+                return node
             self.done = True
             self.desc = "取反 删除 not"
-            return node.value
+            return operand
         return node
 
     def visit_Constant(self, node: ast.Constant):
@@ -1187,10 +1227,14 @@ class TaskInstance:
     desc: str
     fingerprint: str
     fail_to_pass: Tuple[str, ...] = ()     # 变异后变红的测试名
+    #: ⛔ 「打红原因」：behavior（真行为变化）/ crash（崩了）/ unknown。
+    #:    它是这个任务**值不值钱**的读数 —— 崩溃题会把题源强度吹胖。
+    fail_reason: str = "unknown"
 
     def to_dict(self) -> Dict[str, Any]:
         return {"task_id": self.task_id, "env_id": self.env_id, "desc": self.desc,
-                "fingerprint": self.fingerprint, "fail_to_pass": list(self.fail_to_pass)}
+                "fingerprint": self.fingerprint, "fail_to_pass": list(self.fail_to_pass),
+                "fail_reason": self.fail_reason}
 
 
 @dataclass
@@ -1203,6 +1247,23 @@ class SynthesisReport:
     #: 🔵 修复十三（附）：失败样本（最多保留 5 条）—— 审计者需要看到
     #:    **为什么**合成失败。原版只计数不记因，"yield 低"时无从下手。
     error_samples: List[str] = field(default_factory=list)
+    #: ⛔ 打红原因分账（r50）：`valid` 会撒谎，必须伴生"其中多少是真行为变化"。
+    #:    ⛔ unknown 单独记账，**不许**并入 behavior（否则装置故障被读成
+    #:    "找到了真 bug"，与第 11 条"三态必须分开"同源）。
+    n_behavior: int = 0
+    n_crash: int = 0
+    n_unknown: int = 0
+    #: 开了 `require_behavior` 后被过滤掉的题数（默认恒 0）
+    rejected_not_behavior: int = 0
+
+    def note_reason(self, reason: str) -> None:
+        """记一次"有效任务"的打红原因（三态分开，不合并）。"""
+        if reason == "behavior":
+            self.n_behavior += 1
+        elif reason == "crash":
+            self.n_crash += 1
+        else:
+            self.n_unknown += 1
 
     def note_error(self, where: str, exc: BaseException) -> None:
         """记一次合成失败 —— 计数 + 保留样本（最多 5 条）。"""
@@ -1215,18 +1276,52 @@ class SynthesisReport:
     def yield_rate(self) -> float:
         return (self.valid / self.attempted) if self.attempted else 0.0
 
+    @property
+    def behavior_rate(self) -> float:
+        """有效任务里**真行为变化**的占比 —— 题源的"含金量"。"""
+        return (self.n_behavior / self.valid) if self.valid else 0.0
+
     def to_dict(self) -> Dict[str, Any]:
         return {"attempted": self.attempted, "valid": self.valid,
                 "rejected_no_failure": self.rejected_no_failure,
                 "rejected_error": self.rejected_error,
                 "yield_rate": round(self.yield_rate, 4),
+                #: ⛔ 打红原因三态分账（r50）
+                "n_behavior": self.n_behavior,
+                "n_crash": self.n_crash,
+                "n_unknown": self.n_unknown,
+                "behavior_rate": round(self.behavior_rate, 4),
+                "rejected_not_behavior": self.rejected_not_behavior,
                 #: ⛔ 失败样本进 dict —— 观测侧能直接看到
                 "error_samples": list(self.error_samples)}
 
 
+def classify_failure(why: Optional[str]) -> str:
+    """把 runner 写的 `why` 归一成三类：**测试为什么红**。
+
+    ⛔ 这三类不是修辞差别，是**判据的真假**：
+
+        behavior ⇒ 函数跑完了，但**返回值变了** —— 这是真 bug，
+                   也是唯一能用来检验"修法有没有真的修对"的题；
+        raise    ⇒ 调用时抛异常；import ⇒ 源码本身导入就炸 ——
+                   这两类是**崩溃**，不是行为变化。崩溃题任何"把源码
+                   改回接近基线"的修法都能顺手修好（甚至恒等变换都能
+                   在别的维度上蒙对）⇒ 它们会把题源强度读数**吹胖**：
+                   账面上多了一堆题，reward 里完全看不见。
+                   （r49 实测 `editor` 环境 39 个变异点、有效变异体 1/8，
+                   那 1 个就是崩溃类 —— 人工才发现的，量具当时看不见。）
+    """
+    if why == "mismatch":
+        return "behavior"
+    if why in ("raise", "import"):
+        return "crash"
+    return "unknown"
+
+
 def synthesize_tasks(env: Environment, max_n: int = 8,
                      timeout: float = 10.0, *, depth: int = 1,
-                     kinds: Iterable[str] = DEFAULT_MUTATION_KINDS
+                     kinds: Iterable[str] = DEFAULT_MUTATION_KINDS,
+                     require_behavior: bool = False
                      ) -> SynthesisReport:
     """从一个环境合成任务实例：**只保留真让测试变红的**（Fail-to-Pass）。
 
@@ -1259,13 +1354,31 @@ def synthesize_tasks(env: Environment, max_n: int = 8,
             #: 变异了但测试没变红 ⇒ 不是有效任务（不能拿它充数）
             rep.rejected_no_failure += 1
             return False
+        #: ⛔ 「打红」≠「有 bug」：区分**行为变了**和**崩了**。
+        #:    why 由 runner 逐条给出（`verify_source` 透传），这里只归一。
+        why_map = dict((after.evidence or {}).get("why") or {})
+        cats = [classify_failure(why_map.get(n)) for n in broken]
+        if "behavior" in cats:
+            reason = "behavior"
+        elif "crash" in cats:
+            reason = "crash"
+        else:
+            reason = "unknown"
+        #: ⛔ **只留真 bug** 的口径（默认关闭 ⇒ 历史可比）。开它的那次是
+        #:    新实验：用来回答"第 3 代是不是建立在崩溃题上"这类可信度问题
+        #:    —— 崩溃题任何"把源码改回接近基线"的修法都能顺手修好，靠它
+        #:    拿到的 reward 提升是**假的**。
+        if require_behavior and reason != "behavior":
+            rep.rejected_not_behavior += 1
+            return False
+        rep.note_reason(reason)
         rep.valid += 1
         rep.tasks.append(TaskInstance(
             task_id=task_id, env_id=env.env_id,
             broken_source=attempted_src, desc=desc,
             #: 🟠 修复三：`[:16]` → `[:32]`（寻址键）
             fingerprint=content_hash(attempted_src)[:_ID_PREFIX],
-            fail_to_pass=broken))
+            fail_to_pass=broken, fail_reason=reason))
         return True
 
     for i in range(max_n):

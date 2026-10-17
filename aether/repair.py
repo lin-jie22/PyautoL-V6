@@ -176,6 +176,74 @@ def revert_strings(broken_src: str, base_src: str) -> str:
     return ast.unparse(b)
 
 
+def revert_unaryops(broken_src: str, base_src: str) -> str:
+    """**第五个正交维度**：把 `not` 的增删按**树形位置**对齐回基线。
+
+    ⛔⛔ 为什么这里**不能**沿用前四个维度的"按遍历序对齐常量"写法：
+        `unaryop` 变异是**删除节点**（`not x` → `x`），不是改值 ⇒
+        broken 树里的 UnaryOp 节点**比 baseline 少一个** ⇒ 按序号对齐
+        会**整体错位**（前面每删一个 not，后面全部前移一位）⇒ 修法会把
+        本来正确的节点改坏。这与 `numeric_literals` 记过的那个自洽性
+        bug 同源，只是触发条件从"bool 是否算入""表达式是否嵌套"
+        变成了"**变异是否增删节点**"。
+
+        ⇒ 本修法改用**同位置递归**：沿两棵树同一条路径往下走，
+          baseline 在该位置是 UnaryOp 而 broken 不是 ⇒ **包回**一层。
+          删除 not 不改变父节点的字段索引（只是那个位置的节点类型变了）
+          ⇒ 路径仍然对齐。
+
+    ⛔ fail-closed：两棵树结构对不上（字段是 list 且长度不同 / 节点类型
+        不同且不是 unary 差异）⇒ **原样返回**，绝不猜着改。
+
+    ⛔ 与另外四个维度正交，五者各管一类节点：
+
+        revert_control_flow ⇒ 比较符 / 运算符
+        revert_literals     ⇒ 数值常量
+        revert_boolops      ⇒ and / or
+        revert_strings      ⇒ 字符串常量
+        revert_unaryops     ⇒ not 的增删
+
+    ⛔ 与 `revert_strings` 同理，**刻意不进** `GENERIC_REPAIRS`：
+        进那个集合 ⇒ unaryop 题从 hard 变 easy ⇒ 难度跨度消失
+        ⇒ 泛化闸退化。它只作为**技能**进 proposer 池。
+    """
+    b = ast.parse(broken_src)
+    g = ast.parse(base_src)
+
+    def align(bn: ast.AST, gn: ast.AST) -> ast.AST:
+        #: baseline 这里有 unary、broken 没有 ⇒ 包回一层（变异删掉了它）
+        if isinstance(gn, ast.UnaryOp):
+            if isinstance(bn, ast.UnaryOp):
+                bn.op = type(gn.op)()
+                bn.operand = align(bn.operand, gn.operand)
+                return bn
+            return ast.UnaryOp(op=type(gn.op)(),
+                               operand=align(bn, gn.operand))
+        if isinstance(bn, ast.UnaryOp) and not isinstance(gn, ast.UnaryOp):
+            #: broken 多了一层 unary ⇒ 拆掉它（对称面：变异也可能加）
+            return align(bn.operand, gn)
+        if type(bn) is not type(gn):
+            return bn                       #: 结构不同 ⇒ 不碰（fail-closed）
+        for field in gn._fields:
+            gv = getattr(gn, field, None)
+            bv = getattr(bn, field, None)
+            if isinstance(gv, ast.AST):
+                if isinstance(bv, ast.AST):
+                    setattr(bn, field, align(bv, gv))
+            elif isinstance(gv, list):
+                if not isinstance(bv, list) or len(bv) != len(gv):
+                    return bn               #: 长度不同 ⇒ 不碰
+                setattr(bn, field, [align(x, y) for x, y in zip(bv, gv)])
+        return bn
+
+    new_root = align(b, g)
+    ast.fix_missing_locations(b)
+    try:
+        return ast.unparse(new_root)
+    except Exception:                                          # noqa: BLE001
+        return broken_src
+
+
 def restore_baseline(broken_src: str, base_src: str) -> str:
     """**完整恢复**：整个文件换回基线。
 

@@ -46,7 +46,7 @@ from .runtime import Trajectory
 #: ⛔ 唯一事实源：`revert_control_flow` 难度分层也用它，改动会同时
 #:    改变"什么算 easy"的定义。
 from .repair import (revert_boolops, revert_control_flow, revert_literals,
-                     revert_strings)
+                     revert_strings, revert_unaryops)
 from .verifier import Verdict, error_verdict
 
 #: L0 元规则指令表。**指令是有后果的**，不是注释。
@@ -76,6 +76,7 @@ REQUIRED_TOOLS: Tuple[str, ...] = ("read_file", "python_exec")
 #:      它不破坏任何断言、也不改进任何东西，只是让系统悄悄少一条路。
 KNOWN_STRATEGIES: Tuple[str, ...] = (
     "fix_control_flow", "fix_literals", "fix_boolops", "fix_strings",
+    "fix_unaryops",
     "memory_hint",
 )
 
@@ -489,6 +490,15 @@ class HarnessAgent:
             #:    —— 没有它，`string` 造出来的题**没有任何技能修得回来**
             #:    ⇒ delta 恒 0 ⇒ 那是注水题源，不是任务世界（r48 实测）。
             return revert_strings(src, env.source), True
+        if strategy == "fix_unaryops":
+            #: 第五维：**`not` 的增删**。⛔ 它是 `unaryop` 算子的对称修法。
+            #:    ⛔⛔ 这个算子在 Python 3.13 上曾**安静失效**：`UnaryOp`
+            #:    的操作数字段已从 `.value` 改名 `.operand` ⇒ 原实现必抛
+            #:    AttributeError ⇒ 被记成"合成失败" ⇒ 账面看到的是
+            #:    "unaryop 变异点 0 个" ⇒ r49 据此判定这条维度是死路。
+            #:    **真因是工具坏了，不是世界里没有。** 修好后单维度就能
+            #:    造出 14 条题（其中 7 条真行为变化）。
+            return revert_unaryops(src, env.source), True
         if strategy.startswith("patch:"):
             # ⛔ 定点修法必须**校验环境是否匹配**。不校验的话它会在任何环境
             #    都"生效" ⇒ 定点退化成通用 ⇒ 泛化闸再也发现不了它。

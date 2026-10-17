@@ -625,6 +625,10 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         x.strip() for x in (getattr(args, "kinds", "") or "").split(",")
         if x.strip()) or DEFAULT_MUTATION_KINDS
     _depth = int(getattr(args, "depth", "1") or "1")
+    #: ⛔ `require_behavior` **默认关闭**：它改的是"考卷上有哪些题"，
+    #:    开了之后任务集就与历史不可比 ⇒ 只能显式开启，算作新实验。
+    #:    开着它跑，是为了回答「第 3 代是不是建立在崩溃题上」。
+    _require_behavior = bool(getattr(args, "require_behavior", False))
 
     # ⛔ 种子 harness **必须先建**：冻结基线要用它跑。
     #    用空 `Harness()` 跑基线 ⇒ 连工具都没有 ⇒ 基线全红 ⇒
@@ -689,7 +693,8 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     grow_ho_report: Dict[str, Any] = {}
     if args.heldout == "on":
         rep_ho = synthesize_tasks(envs[ho_name], max_n=int(args.max_tasks),
-                                  depth=_depth, kinds=_kinds)
+                                  depth=_depth, kinds=_kinds,
+                                  require_behavior=_require_behavior)
         if rep_ho.tasks:
             def _ho_tasks(src_tasks) -> list:
                 return [FrozenTask(task_id=t.task_id,
@@ -714,7 +719,8 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                     envs[ho_name],
                     lambda n: synthesize_tasks(envs[ho_name], max_n=n,
                                                depth=_depth,
-                                               kinds=_kinds).tasks,
+                                               kinds=_kinds,
+                                               require_behavior=_require_behavior).tasks,
                     ("easy", "hard"), max_n=int(args.max_tasks))
                 if g_ho["covered"]:
                     ho_src = g_ho["tasks"]
@@ -746,12 +752,14 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     #    补采样只加题不加判据（合成任务与候选无关），所以它不给任何优待。
     grow_report: Dict[str, Any] = {}
     rep_synth = synthesize_tasks(envs[dev_name], max_n=int(args.max_tasks),
-                                 depth=_depth, kinds=_kinds)
+                                 depth=_depth, kinds=_kinds,
+                                 require_behavior=_require_behavior)
     dev_src_tasks = rep_synth.tasks
     if ho_levels:
         g = grow_for_difficulty(
             envs[dev_name], lambda n: synthesize_tasks(
-                envs[dev_name], max_n=n, depth=_depth, kinds=_kinds).tasks,
+                envs[dev_name], max_n=n, depth=_depth, kinds=_kinds,
+                require_behavior=_require_behavior).tasks,
             ho_levels, max_n=int(args.max_tasks))
         dev_src_tasks = g["tasks"]
         grow_report = {k: v for k, v in g.items() if k != "tasks"}
@@ -787,6 +795,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "fix_literals": "通用字面量修法：只把数值常量对齐基线，不动结构/字符串",
         "fix_boolops": "通用布尔运算修法：只把 and/or 对齐基线，不动比较/运算/常量",
         "fix_strings": "通用字符串修法：只把字符串常量对齐基线，不动结构/数值/bool",
+        "fix_unaryops": "通用取反修法：只把 not 的增删按树形位置对齐基线，不动其它",
         f"patch:{dev_name}": f"定点修法：{dev_name} 整个文件换回基线（换环境即失效）",
     }
     #: ⛔ 三类并列，前两类都是**通用**的（不点名环境），第三类是定点的：
@@ -1806,6 +1815,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "unaryop,string。留空=默认三种（与既有基线同口径）"
                         "；string 是后加的算子：真实代码里字符串处理是常态，"
                         "而默认三种打不穿纯字符串处理函数")
+    e.add_argument("--require-behavior", action="store_true",
+                   help="⛔ 新实验口径（默认关）：**只留真行为变化的题**，"
+                        "过滤掉崩溃类（raise / import-failed）。崩溃题任何"
+                        "「把源码改回接近基线」的修法都能顺手修好 ⇒ 靠它拿到"
+                        "的 reward 提升是假的。开它用来检验既有结论的可信度")
     e.add_argument("--capsules", default="both",
                    choices=["both", "general", "narrow"],
                    help="提议池：both=两类都给（定点修法必赢）/ general / narrow")

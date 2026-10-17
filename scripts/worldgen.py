@@ -784,6 +784,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="有效变异体（真能打红判据的）少于此 ⇒ 弃。"
                          "⛔ 只要求 ≥1 太松：editor 实测 39 个变异点、0 个有杀伤力，"
                          "却靠一次「变异后跑不完」混过了门槛")
+    ap.add_argument("--min-behavior", default="0",
+                    help="有效题里**真行为变化**（非崩溃）的条数少于此 ⇒ 弃。"
+                         "⛔ 默认 0：不淘汰任何既有环境 ⇒ 历史读数可比。"
+                         "⛔ 显开启例：eventflow 实测 6 条有效题里只有 1 条是"
+                         "行为变化（5 条是崩溃）⇒ 含金量 17%；崩溃题任何"
+                         "「把源码改回接近基线」的修法都能顺手修好 ⇒ 注水")
     ap.add_argument("--kinds", default="compare,binop,constant,boolop,unaryop,string",
                     help="F2P 验证用的变异算子。⛔ 默认含 `string`：真实代码里"
                          "字符串处理是常态，而默认三种算子打不穿纯串处理函数"
@@ -936,6 +942,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"  · {mod}: {len(tests)} 条判据，{rep.attempted} 次变异只有"
                   f" {rep.valid} 次击穿 < {args.min_lethal} ⇒ 弃（题源太弱）")
             continue
+        #: ⛔ **含金量闸**：`valid` 会撒谎 —— 它只数"打红了几条"，不区分
+        #:    是**行为变了**还是**崩了**。实测 eventflow 6 条有效题里 5 条
+        #:    是崩溃类（含金量 17%）：崩溃题任何"把源码改回接近基线"的
+        #:    修法都能顺手修好 ⇒ 账面多了题，reward 里看不见 ⇒ 与 editor
+        #:    那个虚胖环境同一个病，只是这次量具自己看得见。
+        #:    ⛔ 默认 0（不淘汰任何既有环境，历史可比）；显式开启才是新口径。
+        if rep.n_behavior < int(args.min_behavior):
+            print(f"  · {mod}: {rep.valid} 次击穿里只有 {rep.n_behavior} 次是"
+                  f"**行为变化**（其余 {rep.n_crash} 崩溃 / {rep.n_unknown} 未知）"
+                  f" < {args.min_behavior} ⇒ 弃（含金量不足）")
+            continue
         #: ⛔ 只留**被证明可被击穿**的判据（出现过在 fail_to_pass 里的）
         broken: Set[str] = set()
         for t in rep.tasks:
@@ -955,6 +972,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                        "n_functions": len(keep),
                        "n_source_lines": len(source.splitlines()),
                        "n_synth_valid": rep.valid, "n_synth_attempted": rep.attempted,
+                       #: ⛔ 打红原因三态分账：题量必须伴生"含金量"，
+                       #:    否则世界又会被崩溃题撑胖（第 37 条的直接延伸）。
+                       "n_synth_behavior": rep.n_behavior,
+                       "n_synth_crash": rep.n_crash,
+                       "n_synth_unknown": rep.n_unknown,
+                       "behavior_rate": round(rep.behavior_rate, 4),
                        "n_weak_dropped": weak, "fail_to_pass": sorted(broken),
                        #: ⛔ 判据选择方式必须进报告：题量涨了要能归因到它，
                        #:    不能靠"这次素材好"糊过去。
