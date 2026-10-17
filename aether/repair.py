@@ -211,6 +211,18 @@ def revert_unaryops(broken_src: str, base_src: str) -> str:
     g = ast.parse(base_src)
 
     def align(bn: ast.AST, gn: ast.AST) -> ast.AST:
+        #: ⛔⛔ **None 守卫**（2026-10-17 回归实测）：AST 的**列表字段**里
+        #:    合法地含 `None` —— 实测 `ast.arguments.kw_defaults == [None]`
+        #:    （有 kw-only 参数但没给默认值）。原版直接 `gn._fields`
+        #:    ⇒ `AttributeError: 'NoneType' object has no attribute
+        #:    '_fields'` ⇒ 修法**抛异常** ⇒ 冻结任务从通过变不通过
+        #:    （监督器 `REGRESSION_DETECTED` 当场抓到：frozen::_writer 1→0）。
+        #:
+        #:    ⛔ 这是「递归对齐」这类写法的通病：它假定"列表里每个元素都是
+        #:    节点"，而 AST 的字段域是 **可选节点**（Optional[AST]）。
+        #:    ⇒ fail-closed：任一边缺节点 ⇒ **原样返回**，绝不猜着改。
+        if bn is None or gn is None:
+            return bn
         #: baseline 这里有 unary、broken 没有 ⇒ 包回一层（变异删掉了它）
         if isinstance(gn, ast.UnaryOp):
             if isinstance(bn, ast.UnaryOp):

@@ -298,8 +298,24 @@ def main():
     ck("E3 监督器给出严重度统计（读数存在，不是只打印几条文字）", bool(m),
        out_txt[-160:])
     if m:
-        ck("E4 统计里的 critical 数与逐条报出的 critical 条数一致（0）",
-           int(m.group(1)) == n_crit, f'{m.group(1)} vs {n_crit}')
+        #: ⛔⛔ E4 曾经是**用错闸**（2026-10-17 实测）：它拿 `n_crit`
+        #:    （只数 `GENERALIZATION_GATE_BYPASSED`）去比统计里的
+        #:    **全部** critical ⇒ 只要账本里出现**任何别类型**的 critical
+        #:    （实测 `REGRESSION_DETECTED`：修法在 `kw_defaults=[None]` 上
+        #:    抛异常 ⇒ 冻结任务 1→0）它就红 —— 而它红**不代表**绕过闸。
+        #:    ⛔ 用错闸和闸太严看起来一模一样（第 9 条）。
+        #:    ⇒ 改成逐条数**所有** critical 行（输出里 critical 以 ❌ 标记）。
+        _n_all = len(_re.findall(r"❌ \[", out_txt))
+        ck("E4 统计里的 critical 数与逐条报出的 critical 条数一致",
+           int(m.group(1)) == _n_all, f'{m.group(1)} vs {_n_all}')
+        #: ⛔ 但"账本里出现过真回归"**不许因此消失**：账本 append-only，
+        #:    历史事件删不掉 ⇒ 它恒在那里。这里只把它**打印出来**而不是
+        #:    写成断言 —— 写成断言要么是恒真（无牙），要么会让"已修的历史
+        #:    回归"永久顶着红灯，二者都是假仪表（第 8 条）。
+        _n_reg = out_txt.count("[REGRESSION_DETECTED]")
+        if _n_reg:
+            print(f"     ℹ️ 账本历史上有 {_n_reg} 条 REGRESSION_DETECTED"
+                  f"（已修复，但事件不可删 ⇒ 它是历史事实，不是当前状态）")
     ck("E5 历史遗留的不可判定**如实可见**（不静默吞掉）",
        ("GATE_BYPASS_UNVERIFIABLE" in out_txt) or n_crit == 0)
 

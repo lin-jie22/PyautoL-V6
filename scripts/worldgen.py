@@ -618,7 +618,7 @@ def mutation_kill_matrix(source: str, cases: List[Dict[str, Any]],
 def lethal_mutants(env: "Any", n_mut: int = 32,
                    kinds: Tuple[str, ...] = ("compare", "binop", "constant",
                                              "boolop", "unaryop", "string"),
-                   timeout: float = 10.0) -> int:
+                   timeout: float = 10.0, balanced: bool = False) -> int:
     """**题源强度**的唯一读数：有多少个变异体能真把判据打红。
 
     ⛔⛔ 为什么单独抽这个函数（2026-10-17 实测）：一个环境"在不在世界里"
@@ -634,7 +634,8 @@ def lethal_mutants(env: "Any", n_mut: int = 32,
         变异成功 ≠ 打红了判据。变异落在没人执行的分支上，attempted 照样 +1。
     """
     from aether.environment import synthesize_tasks
-    rep = synthesize_tasks(env, max_n=int(n_mut), timeout=timeout, kinds=kinds)
+    rep = synthesize_tasks(env, max_n=int(n_mut), timeout=timeout,
+                           kinds=kinds, balanced=balanced)
     return int(rep.valid)
 
 
@@ -794,6 +795,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="F2P 验证用的变异算子。⛔ 默认含 `string`：真实代码里"
                          "字符串处理是常态，而默认三种算子打不穿纯串处理函数"
                          "（实测 textwrap 12 条判据、0 次击穿）")
+    ap.add_argument("--balanced", action="store_true",
+                    help="F2P 验证时**按维度轮流**取变异点（默认按遍历序取前 N 个）。"
+                         "⛔ 默认关：它换的是一批题 ⇒ 与既有题源强度读数不可比。"
+                         "⛔ 开启后 `--min-lethal` 的门槛含义会变（同样的环境，"
+                         "实测有效变异体更多）⇒ 那是新口径的读数，别与旧表并排看")
     ap.add_argument("--timeout", default="10.0")
     ap.add_argument("--only", default="", help="只处理这些模块（逗号分隔）")
     ap.add_argument("--check", action="store_true",
@@ -927,7 +933,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             _kinds = tuple(x.strip() for x in args.kinds.split(",") if x.strip())
             rep = synthesize_tasks(env, max_n=int(args.mutations),
                                    timeout=float(args.timeout),
-                                   kinds=_kinds)
+                                   kinds=_kinds,
+                                   balanced=bool(args.balanced))
         except Exception as e:                               # noqa: BLE001
             print(f"  · {mod}: 验证异常 {type(e).__name__}: {e} ⇒ 弃")
             if args.verbose:

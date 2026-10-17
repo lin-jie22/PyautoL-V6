@@ -30,6 +30,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import (Any, Dict, Iterable, List, Optional, Tuple, Union)
@@ -1073,6 +1074,15 @@ class _Mutator(ast.NodeTransformer):
 
     def __init__(self, which: int = 0,
                  kinds: Iterable[str] = DEFAULT_MUTATION_KINDS):
+        #: ⛔ `which = -1` ⇒ **探针模式**：永不命中任何点位（`seen-1 >= 0`
+        #:    恒不等于 -1）⇒ `done` 恒 False ⇒ 遍历走完整棵树 ⇒
+        #:    `site_kinds` 拿到**全部**点位。这是"点位枚举"与"真实变异"
+        #:    **同源**的关键：两者是同一个类的同一次遍历（第 2 条纪律）。
+        #:    ⛔ 没有它会怎样：只能靠"逐个 `mutate_source(which=i)` 直到抛
+        #:    异常"来枚举 —— 而那个异常有**两种**含义（点位耗尽 / 点位存在
+        #:    但变不动，如空串无变体）⇒ 量具会把后者读成前者 ⇒ 点位被低估
+        #:    ⇒ 均衡采样的底数从一开始就是错的（2026-10-17 实测：unaryop
+        #:    点位被读成 2 个，真值 15 个）。
         #: 🔵 修复十四：字符串会被 `set()` 拆成单个字符 ⇒ 静默变成
         #:    "所有 kind 都没启用"（每个字母一个 kind，都不匹配）。
         if isinstance(kinds, str):
@@ -1084,6 +1094,9 @@ class _Mutator(ast.NodeTransformer):
         self.seen = 0
         self.done = False
         self.desc = ""
+        #: ⛔ **点位表**：`site_kinds[i]` = `which=i` 属于哪个变异维度。
+        #:    无论 `which` 取什么都记（含探针模式）⇒ 枚举与变异同源。
+        self.site_kinds: List[str] = []
 
     def visit_Compare(self, node: ast.Compare):
         self.generic_visit(node)
@@ -1092,6 +1105,7 @@ class _Mutator(ast.NodeTransformer):
         if self.done:
             return node
         self.seen += 1
+        self.site_kinds.append("compare")
         if self.seen - 1 == self.which and node.ops:
             old = type(node.ops[0])
             new = _FLIP_OPS.get(old)
@@ -1106,6 +1120,7 @@ class _Mutator(ast.NodeTransformer):
         if self.done or "binop" not in self.kinds:
             return node
         self.seen += 1
+        self.site_kinds.append("binop")
         if self.seen - 1 == self.which:
             old = type(node.op)
             new = _FLIP_OPS.get(old)
@@ -1131,6 +1146,7 @@ class _Mutator(ast.NodeTransformer):
         if self.done or "boolop" not in self.kinds:
             return node
         self.seen += 1
+        self.site_kinds.append("boolop")
         if self.seen - 1 == self.which:
             old = type(node.op)
             node.op = ast.Or() if old is ast.And else ast.And()
@@ -1160,6 +1176,7 @@ class _Mutator(ast.NodeTransformer):
         if not isinstance(node.op, ast.Not):
             return node
         self.seen += 1
+        self.site_kinds.append("unaryop")
         if self.seen - 1 == self.which:
             #: ⛔ 兼容两个字段名：`operand`（3.12+）优先，回落 `value`（旧版）。
             #:    两边都取不到 ⇒ **不改**（返回原节点），绝不静默造出坏树。
@@ -1182,6 +1199,7 @@ class _Mutator(ast.NodeTransformer):
             if self.done or "string" not in self.kinds:
                 return node
             self.seen += 1
+            self.site_kinds.append("string")
             if self.seen - 1 == self.which:
                 new = _string_variant(node.value)
                 if new is not None:
@@ -1194,11 +1212,81 @@ class _Mutator(ast.NodeTransformer):
                 or not isinstance(node.value, (int, float)):
             return node
         self.seen += 1
+        self.site_kinds.append("constant")
         if self.seen - 1 == self.which:
             node.value = node.value + 1
             self.done = True
             self.desc = f"常量 {node.value - 1}→{node.value}"
         return node
+
+
+def mutation_sites(source: str,
+                   kinds: Iterable[str] = DEFAULT_MUTATION_KINDS,
+                   limit: int = 4096) -> List[str]:
+    """枚举**全部**变异点位：`site_kinds[i]` = `which=i` 属于哪个维度。
+
+    ⛔ 与真实变异**同源**（第 2 条纪律）：走的是同一个 `_Mutator`，只把
+        `which` 设成 -1（探针模式：永不命中 ⇒ 遍历完整棵树）。
+        ⛔ 另写一份枚举（比如自己 `ast.walk` 数节点）会立刻踩两个坑：
+          · `ast.walk` 是 BFS 而 `_Mutator` 是 DFS ⇒ 序号整体错位
+            （这个病在本仓库出现过**三次**）；
+          · "哪些节点算变异点"的判定（`_FLIP_OPS` 里有没有、字符串有没有
+            变体、`not` 才算 unaryop）会漂移 ⇒ 枚举与实际不匹配。
+
+    ⛔ 它给出的是**点位**，不保证该点位**变得动**：空串没有字符串变体、
+        `is` / `in` 不在 `_FLIP_OPS` 里 ⇒ 采样到那些点位会白试一次。
+        这是诚实的（点位存在性是遍历事实，能否变异是另一件事），
+        ⛔ 但**不能**因此把"变不动"读成"没有点位" —— 那正是旧量具的错。
+    """
+    tree = ast.parse(source)
+    m = _Mutator(-1, kinds)
+    m.visit(tree)
+    return list(m.site_kinds[:limit])
+
+
+def balanced_which_order(sites: List[str], max_n: int) -> List[int]:
+    """按维度**轮流**取点位（round-robin），返回 `which` 序列。
+
+    ⛔ 为什么需要它 —— `which` 是**全局 DFS 序号**：遍历时遇到的第 i 个
+        可变异点（**不分种类**）就是 `which=i`。于是 AST 里数量最多的那种
+        算子会把前 N 个序号**全部占满**，后加的维度一条题都进不来。
+
+        2026-10-17 实测（14 环境 / 全算子 / max_n=12）：
+
+            顺序采样   59 条题  string=19 constant=17 compare=12
+                                binop=8 boolop=2 unaryop=1
+            均衡采样   81 条题  binop=20 compare=18 constant=16
+                                unaryop=11 boolop=9 string=7
+
+        ⇒ 总题量 +37%，而**最稀缺的两个维度翻了 5–11 倍**。dev 环境
+        （textscore）从「3 条全是 compare」变成「6 条 / 3 个维度」。
+
+    ⛔ **尝试次数不变**：返回序列长度 = `min(max_n, len(sites))`，与顺序
+        采样完全相同 ⇒ 是一次"只差一个变量"的对照（第 39 条纪律），
+        不是"多试几次当然多得题"。
+
+    ⛔ 顺序必须**确定**（按维度名排序轮流），否则同一份输入两次跑出
+        不同的采样 ⇒ 账本不可复现。
+    """
+    by_kind: Dict[str, List[int]] = {}
+    for i, k in enumerate(sites):
+        by_kind.setdefault(k, []).append(i)
+    target = min(max_n, len(sites))
+    out: List[int] = []
+    idx = {k: 0 for k in by_kind}
+    kinds_sorted = sorted(by_kind)
+    while len(out) < target:
+        added = False
+        for k in kinds_sorted:
+            if idx[k] < len(by_kind[k]):
+                out.append(by_kind[k][idx[k]])
+                idx[k] += 1
+                added = True
+                if len(out) >= target:
+                    break
+        if not added:
+            break
+    return out
 
 
 def mutate_source(source: str, which: int = 0,
@@ -1255,6 +1343,14 @@ class SynthesisReport:
     n_unknown: int = 0
     #: 开了 `require_behavior` 后被过滤掉的题数（默认恒 0）
     rejected_not_behavior: int = 0
+    #: ⛔ 采样口径必须**进报告**（r51）：题量/维度分布会撒谎 —— 同样的
+    #:    `max_n`，顺序采样与均衡采样能差 37% 的题量和 11 倍的维度覆盖。
+    #:    不记 ⇒ 看到"这次出了 81 条题"时无从知道是换口径还是换世界。
+    sampling: str = "sequential"
+    #: 这个环境**实际存在**的各维度点位数（None = 没枚举，即顺序口径）
+    sites_by_kind: Optional[Dict[str, int]] = None
+    #: 本次**采到**的各维度点位数（顺序口径下同样为 None）
+    chosen_by_kind: Optional[Dict[str, int]] = None
 
     def note_reason(self, reason: str) -> None:
         """记一次"有效任务"的打红原因（三态分开，不合并）。"""
@@ -1292,6 +1388,10 @@ class SynthesisReport:
                 "n_unknown": self.n_unknown,
                 "behavior_rate": round(self.behavior_rate, 4),
                 "rejected_not_behavior": self.rejected_not_behavior,
+                #: ⛔ 采样口径（r51）：题量读数必须带"用什么口径采的"
+                "sampling": self.sampling,
+                "sites_by_kind": self.sites_by_kind,
+                "chosen_by_kind": self.chosen_by_kind,
                 #: ⛔ 失败样本进 dict —— 观测侧能直接看到
                 "error_samples": list(self.error_samples)}
 
@@ -1321,7 +1421,8 @@ def classify_failure(why: Optional[str]) -> str:
 def synthesize_tasks(env: Environment, max_n: int = 8,
                      timeout: float = 10.0, *, depth: int = 1,
                      kinds: Iterable[str] = DEFAULT_MUTATION_KINDS,
-                     require_behavior: bool = False
+                     require_behavior: bool = False,
+                     balanced: bool = False
                      ) -> SynthesisReport:
     """从一个环境合成任务实例：**只保留真让测试变红的**（Fail-to-Pass）。
 
@@ -1334,8 +1435,22 @@ def synthesize_tasks(env: Environment, max_n: int = 8,
         "装第二个技能会顶掉第一个"才会变成可观测的失败
         （实测 `probe_growth_ceiling` B 段：flow=0 / lit=0 / chain=1.0）。
         默认 `depth=1` 保持既有任务集不变 ⇒ 基线可比。
+
+    ⛔⛔ `balanced`（按维度轮流取点位）**默认关闭**：`which` 是全局遍历序
+        号，换采样顺序就换了一批题 ⇒ 与既有账本不可比。开它的那次是
+        **新实验口径**，必须显式传参（第 33 条）。
+        ⛔ 它只改**取点顺序**，尝试次数与判据完全不变 ⇒ 是一次干净的
+        单变量对照（顺序 59 条 / 均衡 81 条，同 max_n=12）。
     """
     rep = SynthesisReport()
+    if balanced:
+        _sites = mutation_sites(env.source, kinds)
+        rep.sampling = "balanced"
+        rep.sites_by_kind = dict(Counter(_sites))
+        _order = balanced_which_order(_sites, max_n)
+        rep.chosen_by_kind = dict(Counter(_sites[i] for i in _order))
+    else:
+        _order = list(range(max_n))
     before = verify_source(env, timeout=timeout)
     before_names = {c.name for c in before.checks if c.passed}
 
@@ -1381,7 +1496,7 @@ def synthesize_tasks(env: Environment, max_n: int = 8,
             fail_to_pass=broken, fail_reason=reason))
         return True
 
-    for i in range(max_n):
+    for i in _order:
         try:
             src1, desc1 = mutate_source(env.source, which=i, kinds=kinds)
         except Exception as e:                                  # noqa: BLE001
@@ -1393,7 +1508,7 @@ def synthesize_tasks(env: Environment, max_n: int = 8,
             continue
         #: depth >= 2：在单点变异基础上**再变异一次**（不同变异点）
         got = False
-        for j in range(max_n):
+        for j in _order:
             if j == i:
                 continue
             try:

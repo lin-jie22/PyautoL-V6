@@ -36,6 +36,7 @@ r49 加了**题源强度闸**（有效变异体 < min-lethal ⇒ 弃），把世
 用法：
     python tests/contract_task_quality_test.py
 """
+import ast
 import sys
 from pathlib import Path
 
@@ -236,6 +237,36 @@ def main() -> int:
     ck("N6 `fix_unaryops` 已在技能词汇表里（否则 proposer 提不出来）",
        "fix_unaryops" in __import__("aether.agent", fromlist=["x"]
                                     ).KNOWN_STRATEGIES)
+
+    #: ── N7：递归对齐的 **None 守卫**（2026-10-17 实测回归）────────
+    #: `revert_unaryops` 用"沿两棵树同一条路径递归对齐"，而 AST 的**列表
+    #: 字段**里合法地含 `None`（`ast.arguments.kw_defaults == [None]`）
+    #: ⇒ 原版 `gn._fields` 直接抛 `AttributeError: 'NoneType' object has
+    #: no attribute '_fields'` ⇒ **修法抛异常** ⇒ 冻结任务从通过变不通过
+    #: （监督器 `REGRESSION_DETECTED` 当场抓到 frozen::_writer 1→0）。
+    #: ⛔ 这类写法的通病：假定"列表里每个元素都是节点"，而 AST 字段域是
+    #:    Optional[AST]。⇒ fail-closed：任一边缺节点 ⇒ 原样返回。
+    _w = Environment.from_dir(ROOT / "tasks" / "_writer", env_id="_writer")
+    _tree = ast.parse(_w.source)
+    _has_none_in_list = any(
+        any(x is None for x in getattr(n, f))
+        for n in ast.walk(_tree) if isinstance(n, ast.arguments)
+        for f in ("kw_defaults",) if isinstance(getattr(n, f, None), list))
+    ck("N7 ⛔ 触发条件**真实存在于源码里**（不是假想）："
+       "`ast.arguments.kw_defaults` 含 None",
+       _has_none_in_list)
+    _rep_w = synthesize_tasks(_w, max_n=8,
+                              kinds=("compare", "binop", "constant",
+                                     "boolop", "unaryop", "string"))
+    _errs = []
+    for t in _rep_w.tasks:
+        try:
+            revert_unaryops(t.broken_source, _w.source)
+        except Exception as ex:                              # noqa: BLE001
+            _errs.append(f"{t.task_id}: {type(ex).__name__}: {ex}")
+    ck("N8 ⛔ 该环境的**每条**破坏题上第五维修法都不抛异常"
+       f"（实测 {len(_rep_w.tasks)} 条；曾 2/2 全崩）",
+       not _errs and len(_rep_w.tasks) >= 1, str(_errs[:2]))
 
     print(f"\n{'=' * 60}")
     print(f"结果：{len(FAILS)} 条失败" if FAILS else "结果：全部通过")

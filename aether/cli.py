@@ -464,7 +464,8 @@ def cmd_synth(args: argparse.Namespace) -> int:
         if x.strip()) or DEFAULT_MUTATION_KINDS
     rep = synthesize_tasks(env, max_n=int(args.max),
                            depth=int(getattr(args, "depth", "1") or "1"),
-                           kinds=_kinds)
+                           kinds=_kinds,
+                           balanced=bool(getattr(args, "balanced", False)))
     print(json.dumps(rep.to_dict(), ensure_ascii=False, indent=2))
     for t in rep.tasks[:5]:
         print(f"  ✓ {t.task_id}  {t.desc}  F2P={list(t.fail_to_pass)}")
@@ -629,6 +630,12 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     #:    开了之后任务集就与历史不可比 ⇒ 只能显式开启，算作新实验。
     #:    开着它跑，是为了回答「第 3 代是不是建立在崩溃题上」。
     _require_behavior = bool(getattr(args, "require_behavior", False))
+    #: ⛔ `balanced`（按维度轮流取变异点）**默认关闭**，理由同上：它换的是
+    #:    "考卷上有哪些题"，开了就与历史不可比。
+    #:    ⛔ 它**刻意不作用于冻结套件**：冻结套件是**基线锚点**，非回归闸
+    #:    的判据集不能随采样实验漂移（V5 教训：判据不能被退化 run 重建）。
+    #:    ⇒ 本轮唯一的变量是 dev / held-out 的采样顺序。
+    _balanced = bool(getattr(args, "balanced", False))
 
     # ⛔ 种子 harness **必须先建**：冻结基线要用它跑。
     #    用空 `Harness()` 跑基线 ⇒ 连工具都没有 ⇒ 基线全红 ⇒
@@ -694,7 +701,8 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     if args.heldout == "on":
         rep_ho = synthesize_tasks(envs[ho_name], max_n=int(args.max_tasks),
                                   depth=_depth, kinds=_kinds,
-                                  require_behavior=_require_behavior)
+                                  require_behavior=_require_behavior,
+                                  balanced=_balanced)
         if rep_ho.tasks:
             def _ho_tasks(src_tasks) -> list:
                 return [FrozenTask(task_id=t.task_id,
@@ -720,7 +728,8 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                     lambda n: synthesize_tasks(envs[ho_name], max_n=n,
                                                depth=_depth,
                                                kinds=_kinds,
-                                               require_behavior=_require_behavior).tasks,
+                                               require_behavior=_require_behavior,
+                                               balanced=_balanced).tasks,
                     ("easy", "hard"), max_n=int(args.max_tasks))
                 if g_ho["covered"]:
                     ho_src = g_ho["tasks"]
@@ -753,19 +762,55 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     grow_report: Dict[str, Any] = {}
     rep_synth = synthesize_tasks(envs[dev_name], max_n=int(args.max_tasks),
                                  depth=_depth, kinds=_kinds,
-                                 require_behavior=_require_behavior)
+                                 require_behavior=_require_behavior,
+                                 balanced=_balanced)
     dev_src_tasks = rep_synth.tasks
     if ho_levels:
         g = grow_for_difficulty(
             envs[dev_name], lambda n: synthesize_tasks(
                 envs[dev_name], max_n=n, depth=_depth, kinds=_kinds,
-                require_behavior=_require_behavior).tasks,
+                require_behavior=_require_behavior,
+                balanced=_balanced).tasks,
             ho_levels, max_n=int(args.max_tasks))
         dev_src_tasks = g["tasks"]
         grow_report = {k: v for k, v in g.items() if k != "tasks"}
         if g["note"]:
             print(("✅ " if g["covered"] else "⚠️ ") + g["note"],
                   file=sys.stderr)
+        #: ⛔⛔ 缺层自愈的**第二个出口**：换**变异深度**补层（r51 实测）。
+        #:    `grow_for_difficulty` 只会"加大 max_n"，但加大 n 补不出来的是
+        #:    **这个口径根本造不出**的那种层 —— 实测 `--depth 2 --balanced`
+        #:    下 dev 集 **26 条全是 hard**（双点跨维度叠加 ⇒ 单技能修不好），
+        #:    而 held-out 有 easy 层 ⇒ 泛化闸判「dev 没有该层，无从对照」
+        #:    ⇒ **6 轮 0 提交**，尽管 dev_gain 高达 +0.69。
+        #:    ⛔ 那是 fail-closed 的正确行为，但系统因此**没有任何出口**：
+        #:    「明明有增益却永不提交」与「候选不好」长得一模一样。
+        #:    ⇒ 出口：降级用**单点**变异补 easy 层（单点题 = easy）。
+        #:    ⛔ 只在「缺层 且 depth≥2」时触发 ⇒ 默认口径（depth=1）零影响。
+        if not g["covered"] and _depth >= 2:
+            g2 = grow_for_difficulty(
+                envs[dev_name], lambda n: synthesize_tasks(
+                    envs[dev_name], max_n=n, depth=1, kinds=_kinds,
+                    require_behavior=_require_behavior,
+                    balanced=_balanced).tasks,
+                g["missing"], max_n=int(args.max_tasks))
+            if g2["tasks"]:
+                _seen = {t.task_id for t in dev_src_tasks}
+                _added = [t for t in g2["tasks"] if t.task_id not in _seen]
+                dev_src_tasks = list(dev_src_tasks) + _added
+                grow_report["depth_fallback"] = {
+                    "from_depth": _depth, "to_depth": 1,
+                    "missing": list(g["missing"]),
+                    "covered_after": bool(g2["covered"]),
+                    "n_added": len(_added),
+                    "n_tasks_after": len(dev_src_tasks),
+                    "note": "加大采样仍缺层（该口径造不出这层）⇒ 降级用"
+                            "单点变异补齐难度跨度",
+                }
+                print(f"{'✅' if g2['covered'] else '⚠️ '} 难度层降级自愈："
+                      f"depth {_depth}→1 补 {len(_added)} 条题（缺 "
+                      f"{'/'.join(g['missing'])}）⇒ dev 共 "
+                      f"{len(dev_src_tasks)} 条", file=sys.stderr)
     dev = [FrozenTask(task_id=t.task_id,
                       spec={"env_id": dev_name, "broken_source": t.broken_source,
                             "topic": dev_name, "task_class": TASK_CLASS})
@@ -1022,6 +1067,11 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "proposer": args.proposer, "dev_env": args.dev_env,
         "heldout_env": args.heldout_env, "heldout": args.heldout,
         "heldout_floor": args.heldout_floor,
+        #: ⛔ 采样口径必须进账本（r51）：同样的 `max_n` 下，顺序与均衡能差
+        #:    37% 的题量与 11 倍的维度覆盖 ⇒ 不记就读不出"换的是口径还是
+        #:    换的是世界"（与 `n_envs` 同族：世界规模也是实验变量）。
+        "balanced": bool(_balanced),
+        "require_behavior": bool(_require_behavior),
         "parallel": getattr(args, "parallel", "0"),
         "embedder": args.embedder,
         "budget": {k: (getattr(args, k, "") or "")
@@ -1710,6 +1760,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--kinds", default="",
                    help="变异种类，逗号分隔：compare,binop,constant,"
                         "boolop,unaryop")
+    s.add_argument("--balanced", action="store_true",
+                   help="按变异维度轮流取点位（默认：按遍历序取前 N 个）")
     m = _sub("memory", help="记忆库：读数 / 换嵌入后全量重算 / 补记账")
     ms = m.add_subparsers(dest="memory_cmd", required=True)
     ms.add_parser("show", help="打印记忆库完整性读数")
@@ -1815,6 +1867,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "unaryop,string。留空=默认三种（与既有基线同口径）"
                         "；string 是后加的算子：真实代码里字符串处理是常态，"
                         "而默认三种打不穿纯字符串处理函数")
+    e.add_argument("--balanced", action="store_true",
+                   help="⛔ 新实验口径（默认关）：**按变异维度轮流取点位**。"
+                        "`which` 是全局遍历序号 ⇒ 数量最多的算子会把前 N 个"
+                        "序号占满，后加的维度一条题都进不来（实测 dev 环境"
+                        "顺序采样 3 条全是 compare，均衡后 6 条 / 3 个维度）。"
+                        "只改取点顺序，尝试次数与判据不变 ⇒ 干净的单变量对照")
     e.add_argument("--require-behavior", action="store_true",
                    help="⛔ 新实验口径（默认关）：**只留真行为变化的题**，"
                         "过滤掉崩溃类（raise / import-failed）。崩溃题任何"
