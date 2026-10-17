@@ -26,7 +26,7 @@
 `world_fact.promote_failed` / `attribution.unavailable` /
 `cleanup.propose_failed` / `gate.blocked` 的真正记账点都在 `_run_round`
 内部（分别由 evolution.py:1608 / 1853 / 1517 / 1630 的 except 写），
-单元级注入进不去。B 组只能验到"异常会冒出这一层"，**验不到最终的写osseus**。
+单元级注入进不去。B 组只能验到"异常会冒出这一层"，**验不到最终的写入**。
 ⇒ 这三条在 `scripts/audit_zero_events.py` 里保持 `unverified`，等端到端补丁。
 
 用法：

@@ -2125,6 +2125,65 @@ add_skill:patch:textscore|textscore->eventflow streak= 3   ← 读取侧只查�
 
 ---
 
+## 103. 为什么「进化史上从未走过第 3 代」—— resume 的语义死锁
+
+把生产账本 87 次 `harness.commit` 按 `parent_id` 重建血缘，分布是：
+
+```
+距种子 1 代：73 次        距种子 2 代：14 次        ★ 第 3 代及以上：0 次
+```
+
+一台自称「自演化」的系统，历史上**从未累积到第三代**。拆开是两个**彼此独立**
+的原因，混在一起会看错方向：
+
+### ① 参数语义死锁（ bug，已修 ）
+
+旧代码 `cli.py` 里判断要不要续跑：
+
+```python
+rounds_left = cpx.rounds_total - cpx.round_no     # 两个数都来自 checkpoint
+if cpx.rounds_left <= 0: return 0                 # 「已全部跑完」
+```
+
+上一次运行**必定**写到 `round_no == rounds_total` 才收尾 ⇒ `rounds_left` 恒为 0
+⇒ **无论本次命令行传 `--rounds` 多少，都判「已跑完」**。
+实测 `--rounds 2` 之后 `--rounds 4 --resume`、`--rounds 6 --resume`，
+两次都直接 `return 0`，账本零新增。
+
+生产侧佐证：34 次 `run_config` 里 `checkpoint` 全为 `None`、`resumed_from` 全 0
+⇒ **34 次运行没有一次续跑过**，想续也续不动。
+
+修法：抽成纯函数 `resume_window(target, done)`，语义改为
+**「目标总轮数来自命令行（人的意图），checkpoint 只提供已完成到第几轮」**。
+修复后实测 `resumed_from 0 → 2 → 4`，账本轮号跨进程连续。
+
+### ② 能力饱和（**不是** bug，是设计取舍 ）
+
+修完 resume 后重跑，代数**仍然只有 2**。因为：
+
+```
+轮1  reward 0.0 → 0.6   commit  fix_control_flow
+轮2  reward 0.6 → 1.0   commit  fix_literals
+轮3  no_weakness_evidence（无失败证据 ⇒ 不提议）  idle
+轮4  idle_streak=2 ⇒ evolution.stopped「不是失败」
+```
+
+`tasks/` 下只有 4 个环境、每个一个 `task.py`（3–5 条 check），
+两个胶囊就把 dev 集打满 ⇒ **没有失败 ⇒ 没有弱点 ⇒ 没有提议**。
+
+⇒ **20793 行进化引擎的能力上限，被 4 个小函数锁死了。**
+这条只能靠扩大任务源解决（见 `docs/VERDICT_2026-10-17.md` 的 P1），不是缺陷。
+
+⛔ **① 和 ② 不许混为一谈**：修 ① 的价值不是让系统变强，而是让人第一次能
+诚实看到 —— 天花板在世界，不在机器。在此之前，「只能进化两代」会被错读成
+「机器只能消化两代」。
+
+**契约落点**：新增 `tests/contract_resume_window_test.py` A–E 组 19 条 ——
+语义 / 边界 / 脏输入 / **D 组反证**（换回事故版实现 ⇒ A 组必须转红）/
+**E 组端到端**（真跑两次 CLI，断言第二次从第 2 轮开始跑）。
+
+---
+
 ## 6. 与 V5 的关系
 
 V6 不是 V5 的替代品，是它的**结构化重写**：

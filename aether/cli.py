@@ -46,6 +46,37 @@ def _setup_logging(level: str, json_output: bool = False) -> None:
 #: 解法形状刻意不同：数值归一化 / 流式聚合 / 图搜索 / 扫描线+贪心。
 DEFAULT_ENVS = ("textscore", "eventflow", "stateflow", "scheduler")
 
+def resume_window(target_rounds: Any, ck_round_no: Any,
+                  ) -> Optional[Tuple[int, int]]:
+    """算出续跑窗口，返回 `(start_round, remaining)`；无需续跑则返回 None。
+
+    ⛔⛔ 这里承载过一次**一票否决级死锁**（2026-10-17），务必看清：
+
+    旧实现是 `remaining = ck.rounds_total - ck.round_no`，两个数**都来自
+    checkpoint**（上次运行的计划轮数与已完成轮数）。而上一次运行**必定**写到
+    `round_no == rounds_total` 才结束 ⇒ `remaining` 恒为 0 ⇒ 无论本次命令行
+    传 `--rounds` 多少，都判定"已全部跑完"⇒ **一个进化存过断点之后就再也
+    续不动了**。
+
+    实测：`--rounds 2` 后再 `--rounds 4 --resume`、`--rounds 6 --resume`，
+    两次都直接 return 0，账本零新增事件。这也是生产账本里
+    "87 次提交、最长血缘只有 2 代"的直接原因之一。
+
+    ⛔ 正确语义：**`target_rounds` 是本次命令行表达的意图**（目标总轮数），
+    checkpoint 只提供"已完成到第几轮"，余量 = 目标 − 已完成。二者谁是权威，
+    决定了这个系统能不能跨进程累积 —— 答案必须是人。
+    """
+    try:
+        target = int(target_rounds)
+        done = int(ck_round_no)
+    except (TypeError, ValueError):          # noqa: BLE001
+        return None
+    if done < 0 or target < 0:
+        return None
+    remaining = target - done
+    return None if remaining <= 0 else (done, remaining)
+
+
 #: 任务类别。**路由按它来**，不按环境名 —— 见 TemplateProposer.route_key。
 TASK_CLASS = "repair"
 
@@ -900,14 +931,29 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         except Exception as e:      # noqa: BLE001 —— 拒绝原因要原样给人看
             _log.error(f"❌ 无法续跑：{e}")
             return 2
-        if cpx.rounds_left <= 0:
-            print(f"✅ checkpoint 显示 {cpx.rounds_total} 轮已全部跑完"
-                  f"（第 {cpx.round_no} 轮）⇒ 无需续跑。")
+        #: ⛔⛔ **这里原先是一票否决级的死锁**（2026-10-17 实测修复）。
+        #:    旧代码用 `cpx.rounds_left`（= checkpoint 里存的**上次**
+        #:    `rounds_total` − `round_no`）判断要不要续跑。而上一次写完
+        #:    checkpoint 时二者必然相等 ⇒ `rounds_left == 0` ⇒ 无论这次
+        #:    命令行传 `--rounds` 多少，都打印"已全部跑完 ⇒ 无需续跑"。
+        #:    **后果：一个进化一旦存过断点，就再也续不动了。**
+        #:    实测 `--rounds 2` 后再 `--rounds 4 --resume` / `--rounds 6
+        #:    --resume` ⇒ 两次都直接 return 0，账本零新增事件。
+        #:    这正是生产账本里"87 次提交、最长血缘只有 2 代"的根因之一
+        #:    （配合单次运行最快在第 4 轮就 idle 停机）。
+        #:
+        #:    正确语义：`--rounds` 是**本次目标总轮数**（人的意图），
+        #:    checkpoint 只提供"已完成到第几轮"。余量 = 目标 − 已完成。
+        target = rounds                       # 命令行给的目标总轮数
+        win = resume_window(target, cpx.round_no)
+        if win is None:
+            print(f"✅ checkpoint 已完成第 {cpx.round_no} 轮，"
+                  f"本次目标 {target} 轮 ⇒ 无需续跑。")
             return 0
-        start_round, rounds = cpx.round_no, cpx.rounds_left
+        start_round, rounds = win
         resumed_from = cpx.round_no
-        print(f"♻️  续跑：从第 {start_round + 1} 轮开始，还剩 {rounds} 轮"
-              f"（计划 {cpx.rounds_total} 轮，已完成 {cpx.round_no} 轮）")
+        print(f"♻️  续跑：从第 {start_round + 1} 轮开始，再跑 {rounds} 轮"
+              f"（目标 {target} 轮，已完成 {cpx.round_no} 轮）")
     else:
         #: ⛔ 初始 harness 必须**先进账本**再落投影：只写库的话，从账本重建
         #:    会丢掉它（实测 7 个快照重建只剩 6 个）⇒ "唯一事实源"被违反。
