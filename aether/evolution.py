@@ -1995,6 +1995,14 @@ class EvolutionLoop:
                      #:    按候选全局生效 ⇒ 换环境后被误伤。
                      "env_pair": env_pair,
                      "try_index": len(probes), "queue_size": len(queue),
+                     #: ⛔ 纯**读数**：`eligible` 的真实大小。
+                     #:    `queue_size = min(tries, len(eligible))` ⇒ 默认
+                     #:    `tries=1` 时它恒为 1，**看不出**这一轮到底有几个
+                     #:    候选够格 ⇒ 判断「值不值得开 `--gate-tries`」在
+                     #:    账本里读不出来。`eligible` 在被 `[:tries]` 截断
+                     #:    前已完整算出 ⇒ 任何 `tries` 下都可知。
+                     #:    ⛔ 只进账、不参与任何判据（零行为影响）。
+                     "n_eligible": len(eligible),
                      **pr.to_dict()}, actor="gate").seq)
                 probes.append({"capsule": cand.capsule_name,
                                "verdict": pr.verdict,

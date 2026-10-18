@@ -660,6 +660,39 @@ def main() -> int:
        " ⇒ 修复方向被生产数据反向确认",
        True, "access_count 1814/1602 的那两条就是 topic 还没退化时留下的")
 
+    print("\n== AB 组：项 10 —— 准入闸 vs `eligible`（负结果 + 读数）==")
+    ck("AB1 `gen.probe` 补上了 `n_eligible`（`len(eligible)`，纯读数）",
+       '"n_eligible": len(eligible),' in src)
+    _ne_lines = [l.strip() for l in src.splitlines() if "n_eligible" in l]
+    _as_judge = [l for l in _ne_lines
+                 if "if " in l or "elif " in l
+                 or any(op in l for op in ("==", "!=", "<=", ">="))]
+    ck("AB2 ⛔ `n_eligible` **不参与任何判据**（读数是读数，判据是判据）；"
+       "⛔ 且它**确实在源码里**（否则这条会因空集而恒真，第 57 条）",
+       bool(_ne_lines) and not _as_judge,
+       f"lines={_ne_lines} as_judge={_as_judge}")
+    #: ⛔ 顺序关系才是这个读数的命门：`eligible` 必须**先**完整算出、再被
+    #:    `[:tries]` 截断 —— 否则 `n_eligible` 会退化成 `queue_size`。
+    _i_sorted = src.find("eligible = sorted(")
+    _i_slice = src.find("queue = eligible[:tries]")
+    _i_key = src.find('"n_eligible"')
+    ck("AB3 ⛔ `n_eligible` 取的是**截断前**的真实大小"
+       "（`eligible = sorted(` 在 `queue = eligible[:tries]` 之前）",
+       _i_sorted >= 0 and _i_slice > _i_sorted and _i_key > _i_sorted,
+       f"sorted@{_i_sorted} slice@{_i_slice} key@{_i_key}")
+    ck("AB4 ⛔ 负结果钉住：准入闸在这个世界**从没拦过任何候选** —— 实测 18 条"
+       " `gate.result` 全 `passed=True`（拦截率 0/18）⇒ 「被拦 ⇒ 拿不到"
+       "试下一个的机会」**前提不成立**，两套判据不需要收敛",
+       True, "见 §20；收敛 = 改判据（第 34 条）⇒ 不做")
+    ck("AB5 ⛔ 用武之地极小但**有牙**：`gate_tries=5` 时只有 round 1 的"
+       " `queue_size=2`，其余 5 轮仍是 1；且 `try_index` 恒为 0"
+       "（第 1 个就过闸，队列里第 2 个从没被探测）",
+       True, "与项 6 的 `--retry-every` 同形：留着不许删")
+    ck("AB6 ⛔ 局限要写明：`gen.probe` 只在 `heldout is not None` 时记"
+       " ⇒ `--heldout off` 的运行读不到 `n_eligible`",
+       "if best is not None and self.heldout is not None" in src,
+       "挂载点变了这条要跟着改")
+
     print()
     print("=" * 60)
     if FAILS:
