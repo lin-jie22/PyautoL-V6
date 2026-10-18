@@ -739,6 +739,45 @@ class GeneralizationGate:
                 #:    但那是"没有难度标签"，这是"有标签但每层的样本都不够"）。
                 shown = sorted(f"{lv}(可提升空间 {headroom.get(lv, 0)} 条)"
                                for lv in thin)
+                #: ⛔⛔ r56（第 35b 条）：闸写在 reason 里的「出路」，系统必须
+                #:    真的有那条路，否则那条 reason 是**装饰**。
+                #:    实测（r55 F 段 + r56 轮 5）：`easy` 层 headroom=0 是
+                #:    **结构性饱和**（基线已全部修好）⇒ 建卷外的题里该层的
+                #:    题基线**全做对** ⇒ 补题一条都补不进（n_added=0）。
+                #:    而旧文案对 saturated 与 thin 一视同仁地写「补 held-out
+                #:    的题数」⇒ 对一个永远补不进的层给出了无效出路 ⇒
+                #:    下游（人和 ho-grow）照它行动必然白跑。
+                #:    ⇒ 出路按层分叉：饱和层明确**无解**（要换更难的题/换
+                #:      环境，当前系统没有这条路），只有非饱和的 thin 层
+                #:      才说"补题"。⛔ 判据本身一个字不改。
+                _sat_set = set(saturated)
+                _growable = [lv for lv in thin if lv not in _sat_set]
+                _sat_note = "".join(
+                    f" {lv} 层已结构性饱和（基线全部修好，可提升空间 0）"
+                    f"⇒ 补题对它无效（实测补不进），需换更难的题或换环境"
+                    f"（当前系统无此出路）；"
+                    for lv in saturated)
+                if _growable:
+                    _out = (f"出路：补 {'/'.join(_growable)} 层的题数，"
+                            f"不是放宽判据"
+                            + ("（开了 --ho-grow 则由闸自己补，仍补不齐才会到这里）"
+                               if self.grow_fn is not None else
+                               "（可开 --ho-grow 让闸自己补采样）"))
+                else:
+                    #: ⛔ 未涨的层**全部**饱和 ⇒ 补题一条都补不进；而涨了的
+                    #:    层空间也够不上门槛 ⇒ 两边都不可判别。⛔ 文案不许
+                    #:    写成"所有层都结构性饱和" —— 涨了的层**不是**饱和
+                    #:    （它涨了），只是空间小。说错会让下游去找错的原因。
+                    _rose = sorted(lv for lv in by_diff
+                                   if by_diff[lv] > self.heldout_floor)
+                    _rose_note = "、".join(
+                        f"{lv}（可提升空间 {headroom.get(lv, 0)} 条）"
+                        for lv in _rose) or "（无）"
+                    _out = (f"出路：未涨的层全部结构性饱和 ⇒ 补题对它们"
+                            f"无效；涨了的层 {_rose_note} 可提升空间同样"
+                            f"不足 {self.min_level_headroom} 条 ⇒ 也不可"
+                            f"判别 ⇒ 必须换更难的题或换环境（当前系统无此"
+                            f"出路，这是能力天花板，不是判据问题）")
                 return ProbeResult(
                     verdict="inconclusive", dev_gain=dev_gain,
                     heldout_gain=ho_gain, base_heldout=base_ho,
@@ -750,10 +789,7 @@ class GeneralizationGate:
                     reason=(f"held-out **每层**的可提升空间都不足 "
                             f"{self.min_level_headroom} 条（{shown}）⇒ 这次"
                             f"裁决没有任何一层的证据可用 ⇒ 按拦截处理。"
-                            f"出路：补 held-out 的题数，不是放宽判据"
-                            + ("（开了 --ho-grow 则由闸自己补，仍补不齐才会到这一步）"
-                               if self.grow_fn is not None else
-                               "（可开 --ho-grow 让闸自己补采样）")))
+                            + _sat_note + _out))
             # 未涨的层全是"发展集也修不动" ⇒ 能力边界，不是挑食 ⇒ 放行
             shown = sorted(f"{lv}{by_diff[lv]:+.4f}" for lv in out_of_reach)
             thin_note = ""
