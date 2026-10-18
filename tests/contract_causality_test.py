@@ -44,7 +44,8 @@ def ck(name, cond, detail=""):
 def main():
     import random
 
-    from aether.attribution import (LAYERS, LayerCredit, attribute_layers,
+    from aether.attribution import (ABLATION_LAYERS, LayerCredit,
+                               attribute_layers,
                                     mean_reward)
     from aether.environment import Environment, mutate_source
     from aether.genome import Harness
@@ -74,7 +75,7 @@ def main():
     # ── A 组：归因的结构 ──────────────────────────────────────────
     print("A 组：反事实层归因的结构")
     lc = attribute_layers(runner, h_skill, SPECS)
-    ck("A1 归因覆盖 5 层且可用", set(lc.per_layer) == set(LAYERS)
+    ck("A1 归因覆盖 5 层且可用", set(lc.per_layer) == set(ABLATION_LAYERS)
        and lc.available, f"{lc.per_layer}")
     ck("A2 基线 reward 被记录（归因必须有参照点）",
        lc.baseline_reward == 1.0, f"{lc.baseline_reward}")

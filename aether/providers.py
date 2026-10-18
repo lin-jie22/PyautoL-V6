@@ -188,6 +188,11 @@ class MemoryAwareProposer:
     #:    过」在账本里**读不出来**：2026-10-17 全量账本扫描，`evolution:reject`
     #:    写入仅 5 条、`knowledge.ingested` 0 条，而"因学到而少提了几个候选"
     #:    根本没有数 ⇒ 闭环两侧都是盲的。以下三个事件补齐两侧读数。
+    #: ⛔ r58 更正：r57 审计曾判定「PROPOSE 一个事件都没有」—— **那是量具
+    #:    的盲区**（审计只扫字面量，扫不到 `self.EVENT_PROPOSE` 这种常量
+    #:    别名 + `_emit()` 中转），生产账本里其实有 21 条。真缺口小得多：
+    #:    记了 n_in/n_out，却**没记提名名单** ⇒ "这轮池子里有谁、什么顺序"
+    #:    仍然读不出来 ⇒ 提名名单已补齐（第 24 条第七次命中，先修量具）。
     EVENT_REMEMBERED = "experience.remembered"
     EVENT_PROPOSE = "experience.propose"
     #: 名单只做**取证**：有界窗口，不承担计数职责（计数在 `stats` 里）
@@ -328,7 +333,12 @@ class MemoryAwareProposer:
             self._emit(self.EVENT_PROPOSE, {
                 "asked": self.asked, "recall": "no_memory",
                 "n_in": len(caps), "n_out": len(caps), "n_skipped": 0,
-                "n_known_history": 0, "skipped_sample": []})
+                "n_known_history": 0, "skipped_sample": [],
+                #: ⛔ 提名名单**必须进账**（r58 实测缺口，见类注释 §r58）：
+                #:    没有它 ⇒ "这一轮池子里到底有哪些候选、以什么顺序"
+                #:    在账本里读不出来 ⇒ 候选挤压（r52）只能靠外部探针猜。
+                "proposed": [c.name for c in caps],
+                "accepted": [c.name for c in caps]})
             return caps
         out = []
         for c in caps:
@@ -387,7 +397,14 @@ class MemoryAwareProposer:
             "retry_every": self.retry_every,
             "probation_released": list(self.probation_released),
             "skipped_sample": [c.name for c in caps
-                               if c not in out][:self.EVIDENCE_WINDOW]})
+                               if c not in out][:self.EVIDENCE_WINDOW],
+            #: ⛔ 两个名单**都要**（r58）：
+            #:    `proposed` = 池子原样（含顺序）⇒ 能回答"这轮考虑了谁"；
+            #:    `accepted` = 过筛后的名单 ⇒ 能回答"谁真的进了闸"。
+            #:    只记后者 ⇒ "被永久跳过的候选"在账本里从来没出现过
+            #:    （r54 的故障正是这样被藏住的）。
+            "proposed": [c.name for c in caps],
+            "accepted": [c.name for c in out]})
         return out
 
     def _rejected_for(self, weakness: Dict[str, Any]) -> List[Tuple[str, str]]:

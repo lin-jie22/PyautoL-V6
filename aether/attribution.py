@@ -65,7 +65,13 @@ LAYER_ABLATIONS: Dict[str, Callable[[Harness], Harness]] = {
         **dict(h.memory_policy or {}), "recall_topk": 0}),
 }
 
-LAYERS: Tuple[str, ...] = ("L0", "L1", "L2", "L3", "L4")
+#: ⛔⛔ r58 改名：`LAYERS` → `ABLATION_LAYERS`。
+#:    原名与 `genome.LAYERS` **同名不同物**：那边是"可编辑层"的名字
+#:    （`meta_rules` / `routing` / `skills` …），这边是消融实验用的层**代号**
+#:    （`L0`–`L4`）。两个东西共用一个名字 ⇒ 改名时另一处不会跟着改，
+#:    而且读代码的人会以为它们是同一份名单（第 65 条同形病）。
+#:    ⇒ 这里改名，两边都**不**互相 import（它们是不同领域的概念）。
+ABLATION_LAYERS: Tuple[str, ...] = ("L0", "L1", "L2", "L3", "L4")
 
 #: ⛔ 互为备份的层组合。**单变量消融必然低估它们**：
 #: L3（技能）与 L4（记忆通路）在"技能不可达时走记忆"的设计下天然互为备份
@@ -117,7 +123,7 @@ def mean_reward(runner: Runner, h: Harness,
 
 def attribute_layers(runner: Runner, h: Harness,
                      specs: Sequence[Dict[str, Any]],
-                     layers: Sequence[str] = LAYERS,
+                     layers: Sequence[str] = ABLATION_LAYERS,
                      ablations: Optional[Dict[str, Callable[[Harness], Harness]]] = None
                      ) -> LayerCredit:
     """逐层消融，给出每层的反事实贡献。

@@ -291,8 +291,36 @@ def main() -> int:
     if cmpx["state"] == J.INCOMPARABLE:
         got_d = [c for c in D.run(ROOT)["checks"]
                  if c["name"] == "judge.boundary"][0]
-        ck("D7 ⛔ 多版本判据 ⇒ doctor 报 fail（改尺子必须看得见）",
-           got_d["status"] == D.FAIL, str(got_d)[:120])
+        #: ⛔ r58：生产账本已被 `aether caliber --seal` 处置（旧尺子段封存）
+        #:    ⇒ 它的正确状态是 **ok 且 detail 写明封存边界**。
+        #:    原断言写死 `FAIL` ⇒ 处置一做就红 —— 那是把"已处置"读成"没处置"。
+        sealed_ok = ("封存" in (got_d.get("detail") or "")
+                     and got_d["status"] == D.OK)
+        ck("D7 ⛔ 多版本判据 ⇒ doctor **必须点名**"
+           "（未封存 ⇒ fail；已封存 ⇒ ok 但写明封存边界）",
+           got_d["status"] == D.FAIL or sealed_ok, str(got_d)[:160])
+        #: ⛔⛔ D7b：上面的放宽**不能**靠生产账本的当前状态蒙混过关 ——
+        #:    用临时账本造一个「多版本 + **未封存**」的现场，必须 FAIL。
+        #:    这才是 D7 真正要守的东西：判据没有因为加了封存机制而变松。
+        import tempfile as _tf
+        from aether.ledger import Ledger as _Ledger
+        _d = Path(_tf.mkdtemp(prefix="v6_d7_"))
+        (_d / "data").mkdir()
+        #: ⛔ 必须走**生产 `Ledger.append`** 造账本：手写 JSON 行缺链字段
+        #:    ⇒ `iter_events` 判「非空但无可解析事件」⇒ 检查自身抛异常
+        #:    ⇒ 拿不到 `judge.boundary` 这一项（实测 IndexError）。
+        _led = _Ledger(_d / "data" / "ledger.jsonl")
+        for _v in ("a" * 32, "b" * 32):
+            for _ in range(2):
+                _led.append("eval.verdict", {"judge_version": _v},
+                            actor="contract")
+        _c = [c for c in D.run(_d)["checks"]
+              if c["name"] == "judge.boundary"][0]
+        ck("D7b ⛔ 反证：多版本**未封存** ⇒ 仍然 FAIL（判据没变松）",
+           _c["status"] == D.FAIL, f"{_c['status']} / {_c['detail'][:100]}")
+        ck("D7c ⛔ 承上：D7 与 D7b 形态不同 ⇒ 封存机制真在起作用",
+           sealed_ok and _c["status"] == D.FAIL,
+           "两者同形 ⇒ 封存没牙")
 
     # ── E 组：反证 —— 拆掉边界必须转红 ───────────────────────────
     print("E 组：反证（把边界拆掉 ⇒ 判据必须转红）")

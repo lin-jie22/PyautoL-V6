@@ -149,14 +149,22 @@ def cmd_status(args: argparse.Namespace) -> int:
     stat_agg = led.stats_agg()
     mem_agg = MemoryLedgerAgg()
     cons_agg = s.consistency_agg() if s is not None else None
+    #: ⛔ 尺子分区**搭同一次遍历**（`CaliberAgg` 与 `caliber.partition`
+    #:    同一份逻辑）。它进 status 不是装饰：`aether caliber --seal` 之后
+    #:    这里的 `dropped_sealed` 必然从 0 变正 ⇒ 封存**改变了一个真读数**
+    #:    （第 35b 条：处置动作必须有可观测后果）。
+    from . import caliber as _C
+    cal_agg = _C.CaliberAgg()
     try:
         for ev in led.iter_events():
             stat_agg.feed(ev)
             mem_agg.feed(ev)
+            cal_agg.feed(ev)
             if cons_agg is not None:
                 cons_agg.feed(ev)
         st = stat_agg.result()
         cons = cons_agg.result() if cons_agg is not None else None
+        _cal = cal_agg.result()
         print(json.dumps({"ledger": st}, ensure_ascii=False, indent=2))
         chain_ok = st["chain_ok"]
         cons_ok = True
@@ -181,6 +189,10 @@ def cmd_status(args: argparse.Namespace) -> int:
         #:    不一致"报成"账本链断裂" —— 那是另一种假仪表（文案与判据不对应）。
         print("账本链：" + ("✅ 完整" if chain_ok
                         else f"❌ 断裂 @seq={st['first_bad_seq']} {st['reason']}"))
+        #: ⛔ 尺子读数**无条件打印**（第 35 条）：不打印 ⇒ "混了几把尺子"
+        #:    这件事在 status（最常用的读数入口）上永远看不见。
+        print(json.dumps({"caliber": _cal}, ensure_ascii=False, indent=2))
+        print("尺子分区：" + _C.render(_cal).replace("\n", "\n  "))
         print("投影一致性：" + ("✅ 与账本一致" if cons_ok else "❌ 与账本不一致"))
         #: 记忆完整性也进 status（与 serve 用**同一个**读数函数，不抄第二份）
         mr = memory_report(p["memory"], ledger_agg=mem_agg)
@@ -1038,7 +1050,16 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         except Exception:                              # noqa: BLE001
             pass
 
-    cp_path = str(getattr(args, "checkpoint", "") or "")
+    #: ⛔⛔ 断点续跑**默认开**（r58）：第 60 条承诺"中间态可恢复"，而默认
+    #:    口径下 `checkpoint_path=None` ⇒ 一次都不写 ⇒ 那条承诺在默认口径下
+    #:    **不成立**（r57 实测 `evolution.checkpoint` 0 次、模块覆盖率 0%）。
+    #:    ⛔ 第 12 条：默认开的开关必须能**显式关** ⇒ 配 `--no-checkpoint`。
+    #:    ⛔ 第 46 条：位置只从 `paths()` 取，不在这里手拼。
+    if getattr(args, "no_checkpoint", False):
+        cp_path = ""
+    else:
+        cp_path = str(getattr(args, "checkpoint", "") or ""
+                      or _paths(Path(args.root))["checkpoint"])
 
     def _int_or_none(v):
         v = str(v or "").strip()
@@ -1765,6 +1786,43 @@ def cmd_doctor(args) -> int:
     return rep["exit_code"]
 
 
+def cmd_caliber(args) -> int:
+    """尺子分区：**哪条读数能跟哪条比**。
+
+    ⛔ 它存在的理由（r57 实测）：`doctor` 的 `judge.boundary` 因为账本里
+       混了 14 把尺子而 fail，给出的出路是"用同一把尺子重跑一组"，
+       而**系统里当时没有这个工具** ⇒ 那条出路是装饰（第 35b 条）。
+
+    ⛔ `--seal` 是**显式**动作，默认不开：封存 = 声明"这段历史退出一切
+       跨轮比较"，是不可撤销（只可前推）的语义动作，不该由只读命令顺手做。
+    """
+    from . import caliber as C
+    from .ledger import Ledger
+    p = _paths(Path(args.root))
+    led = Ledger(p["ledger"])
+    evs = list(led.iter_events())
+    if getattr(args, "seal", False):
+        rep = C.seal(led, reason=getattr(args, "note", "") or "")
+        if getattr(args, "json", False):
+            print(json.dumps(rep, ensure_ascii=False, indent=2, default=str))
+        if not rep["sealed"]:
+            print(f"❌ 未封存：{rep['reason']}")
+            return 1
+        print(f"✅ 已封存到 seq={rep['upto_seq']}"
+              f"（之前 {rep['prev_upto_seq']}）；"
+              f"封存段 {rep['dropped_sealed_after']} 条，"
+              f"可比 {rep['n_comparable_after']} 条")
+        return 0
+    view = C.comparable_view(evs)
+    if getattr(args, "json", False):
+        print(json.dumps(view, ensure_ascii=False, indent=2, default=str))
+    else:
+        print(C.render(view))
+    #: ⛔ 多把尺子 **且** 未封存 ⇒ 退出码非 0：这是"待处置"，不是"报错"。
+    #:    不设 ⇒ CI 里永远绿，等于没这个命令（第 9 条：闸恒绿先做反证）。
+    return 0 if (view["n_segments"] <= 1 or view["sealed_upto"] is not None) else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     """构造 CLI 的 parser（**单独抽出**是为了可测）。
 
@@ -1821,6 +1879,11 @@ def build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--from", dest="src", required=True, help="备份目录")
     rs.add_argument("--yes", action="store_true",
                     help="真的执行覆盖（恢复前会自动留一份当前状态）")
+    cl = _sub("caliber", help="尺子分区：哪段读数能跟哪段比（--seal 才动手）")
+    cl.add_argument("--json", action="store_true", help="输出结构化报告")
+    cl.add_argument("--seal", action="store_true",
+                    help="把当前账本末尾之前的历史封存（只追加事件，不删改）")
+    cl.add_argument("--note", default="", help="封存理由（进账本）")
     dc = _sub("doctor", help="一条命令体检（只读，不改任何东西）")
     #: ⛔ 默认**不接**外部清单（`NO_CAPS`）：命令行体检的默认口径是
     #:    "只查仓库自带的"，与 UI 默认挂示例清单（`DEFAULT_CAPS`）不同 ——
@@ -2028,6 +2091,9 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--checkpoint", default="",
                    help="断点续跑：每轮末把进度（第几轮 + 当前 harness）"
                         "原子写到这个文件。不指定 ⇒ 不写 ⇒ 不可续跑。")
+    e.add_argument("--no-checkpoint", action="store_true",
+                   help="不写续跑进度（默认写 <root>/data/checkpoint.json）"
+                        " ⇒ 本次运行不可续跑")
     e.add_argument("--resume", action="store_true",
                    help="从 --checkpoint 记录的位置接着跑，轮号**接续**"
                         "（否则账本里会出现两个「第 3 轮」）。"
@@ -2078,6 +2144,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "restore": cmd_restore,
         "check": cmd_check,
         "doctor": cmd_doctor,
+        "caliber": cmd_caliber,
     }[args.cmd](args)
 
 

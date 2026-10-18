@@ -1,294 +1,124 @@
-# 架构审计 · 2026-10-18
+# 架构审计 · 2026-10-18（r57 诊断 + r58 修完复检）
 
-> 目的：回答三个问题 —— **流程合不合理 / 架构整合得合不合理 / 到底哪几处真要改**。
-> 方法：**不靠人画架构图**，全部读数来自可复跑的 `scripts/arch_scan.py`
-> （AST 依赖图 + 入口可达性 BFS + 一次真实 evolve 的行级覆盖 + 账本零次事件差分）。
-> ⛔ 本轮**只做诊断，不动生产代码**（除新增审计脚本与本文件）。
+> r57 只做诊断，列出 P0/P1；**r58 把它们全修了，并从头复查了一遍**。
+> 方法不变：不靠人画架构图，读数来自可复跑的 `scripts/arch_scan.py`
+> （AST 依赖图 + 入口可达 BFS + 真实 evolve 行级覆盖 + 零次事件差分 + 巨石读数），
+> 审计自带反证组（`--self-test`，5 项，rc=0 才算有牙）。
 
 ---
 
-## 0. 怎么量的（以及四条必须一起看的边界）
+## 0. 先说最重要的：r57 的三条结论里，**两条是量具错了**
 
-| 段 | 量什么 | 数据源 |
+| r57 结论 | r58 实测 | 定性 |
 |---|---|---|
-| A | 依赖图：规模 / 咽喉 / 环 / 反向依赖 | AST 解析 150 个 `.py` 的 import |
-| B | 静态可达性：图里有、但没人走到的模块 | 从所有入口做 BFS |
-| C | 运行时覆盖：一次真实 `evolve` 跑到了哪些模块 | `sys.settrace` 行级 |
-| D | 零次事件：源码声明过、账本里一次都没有 | AST 扫事件名 − 生产账本实到 |
+| 「PROPOSE 一个事件都没有」 | 账本里 `experience.propose` **21 条** | ⛔ **量具盲区**：审计只扫字面量，扫不到 `self.EVENT_PROPOSE` + `_emit()` 中转（第 24 条第七次命中） |
+| 「死路冷却与提名策略**互斥** ⇒ 结构性不可达」 | 把实验从 4 轮加到 **6 轮**（门槛是 3）⇒ `deadend.cooldown=2`、`world_fact.promoted=2`、最长 streak=4 | ⛔ **实验设计不足**：4 轮攒不到 streak（第 24 条第八次命中） |
+| 「doctor 是红的：账本混 14 把尺子」 | 属实 | ✅ 真问题，本轮已修 |
 
-⛔ **四条边界**（不一起看就会读错）：
-
-1. `settrace` 只覆盖**本进程**。任务执行走 `subprocess`（python_exec）⇒ 子进程里的
-   aether 代码不计入。**覆盖率低 ≠ 死代码**，它只是「值得去查」的线索。
-2. 覆盖率采自**一次** `evolve`。`serve` / `doctor` / `check` / `backup` 那些入口
-   0% 是**正常**的（本来就不在 evolve 路径上）—— 脚本已把它们点名为「别的入口」，
-   与「可疑」分开列。
-3. tracer 晚于 `import aether.cli` 启动 ⇒ 导入期执行的代码不计入；
-   `__init__.py` / `_version.py` 偏低是量具偏差。
-4. 零次事件只统计 **aether/ 下声明的**生产事件（契约里的 `c.d` / `t.one`
-   这类假 kind 是 fixture，已排除 —— 第 19 条：归因前先排除 fixture）。
-
-审计脚本自带**反证组**（`python3 scripts/arch_scan.py --self-test`，rc=0 全绿）：
-造一个孤岛模块 + 一个永不发生的事件，抓不到就退出码非 0。
-⇒ 它若静默恒绿，下面所有读数都不可用。
+⇒ 修完的量具从 1 层扫描升级到 **3 层**（字面量 / 常量别名 / 包装函数中转），
+并补了两条反证（[3] [4]）—— 它若再看不见，`--self-test` 会红。
 
 ---
 
-## 1. 依赖全景（A 段）
+## 1. 修了什么（逐项，含决定性实验）
 
-```
-py 文件 150   总行数 52092
-  aether    40 个 / 22114 行   ← 生产
-  scripts   35 个 /  8880 行   ← 探针与实验
-  tests     61 个 / 20065 行   ← 契约
-  tasks     14 个 /  1033 行   ← 可验证环境
-```
+### P0-0 · 尺子分区（`aether/caliber.py` + `aether caliber` 命令）
 
-**结论先说：静态架构是干净的。**
+- **问题**：`judge.boundary` fail（14 种判据身份 / 905 条），出路「用同一把尺子重跑」
+  **系统里没这个工具** ⇒ 装饰（第 35b 条）。
+- **修法**：不是放松判据，而是给一条**真有的处置动作**。
+  1. `partition()`：按 `judge_version` 切段（n / seq 区间 / 是否当前尺子 / 是否封存）；
+  2. `seal()`：**只追加**一条 `judge.sealed` 事件（不删历史，删就断链），
+     边界 = **最后一个旧尺子段的末尾**（⛔ 第一版写成账本末尾 ⇒ 把当前尺子段
+     一起封了 ⇒ 可比视窗归零，那是把处置做成清空，实测后修）；
+  3. `comparable_view()`：封存后「哪段还能跟当前比」有唯一答案，空集合分三种成因
+     报 `why_empty`（第 57 条）。
+- **消费点（真消费，不是装饰）**：`status` 搭**同一次**账本遍历输出 `caliber` 段
+  ⇒ 封存后 `dropped_sealed` 必然从 0 变正。
+- **决定性实验**（副本，不动生产）：
 
-| 检查项 | 结果 |
+  | 组 | dropped_sealed | doctor |
+  |---|---|---|
+  | A 不封存 | 0 | **fail** |
+  | B 封存 | **893** | **ok** |
+  | C 反证（抹掉封存事件） | 0 | **fail**（与 A 逐字同形） |
+
+- **生产处置**：备份 → `aether caliber --seal`（封存到 seq=6020，保留当前尺子段 12 条）
+  ⇒ `doctor` 现为 `healthy: true / exit_code: 0`。
+- 契约 `tests/contract_caliber_test.py`（O 组 29 项）全绿，含 O7「判据没变松」
+  （未封存**必须** fail）与 O4 反证。
+
+### P0-1 · 提名名单进账（真缺口，比 r57 说的小得多）
+
+- r57 说「完全没有账」是错的；真缺口是**记了数量、没记名单**
+  ⇒ 「这轮池子里有谁、什么顺序」读不出来（r52 挤压只能靠外部探针猜）。
+- 修：`experience.propose` 增 `proposed`（池子原样含顺序）与 `accepted`（过筛后）。
+  ⇒ 被永久跳过的候选**第一次在账本里留下名字**。
+- 契约：experience 契约新增 P 组 8 项（含反证 P8：换池子 ⇒ 名单跟着变）。
+
+### P0-2 · 三条零次路径的定性（契约 `contract_zero_event_paths_test.py`，R 组 22 项）
+
+| 事件 | 定性 | 处置 |
+|---|---|---|
+| `gate.blocked` | **有牙**（`L0.meta_rules` 与裸 `meta_rules` 两种形态都被拦），0 次是**结构性**（没有构造器产出碰 L0 的胶囊） | 纵深防御第二道锁 ⇒ **加反证契约钉住，不许改判据**（R1） |
+| `evolution.checkpoint` | 默认关 ⇒ 第 60 条「中间态可恢复」默认不成立 | **默认开**（`<root>/data/checkpoint.json`，位置走 `paths()`），配 `--no-checkpoint`（第 12 条）。零影响取证：开/关对照 reward 轨迹**逐字相同**（R2） |
+| `memory.pruned` | 只在人显式 `memory prune --apply` 时写 ⇒ **0 次是好事**（从没删过记忆） | 默认路径是 dry-run，读数 `will_delete` 照样出得来（R3） |
+
+### P0-3 · 冷却/陈述性知识：撤回「互斥」结论
+
+- **有牙**（R4）：streak=2 不冷却 / streak=3 冷却；`world_facts` streak=3 晋升 / 2 不晋升；
+  probation 轮放行（不是永久封死）。
+- **端到端**（6 轮）：`deadend.cooldown=2` / `world_fact.promoted=2` / 最长 streak=4。
+- **生产账本 0 次的历史成因**：早期 `env_pair` 是 `unknown`，后来变成具体值 ⇒ 旧 key
+  永久失配（`patch:textscore|unknown` 连续被拦 15 次也没用），且**没有迁移机制**。
+  ⇒ 这是历史遗留，不是结构缺陷；**判据与 key 拼法都不许改**（R5 行为级证明两处同源）。
+
+### P1-2 · 收敛「第二份」定义（4 处，逐个处置）
+
+| 常量 | 处置 |
 |---|---|
-| 循环依赖（SCC） | **无** |
-| 生产包反向依赖 tests/scripts/tasks | **无** |
-| aether 模块静态不可达 | **0 / 40** |
+| `selfref.ROOT` | 默认值改从 `paths.ROOT` 取（**可注入性保留**，契约反证仍可改） |
+| `caps_candidate.CANDIDATES_NAME` | **删除**（从未被使用的死常量），注释指向 `paths` |
+| `attribution.LAYERS` | 改名 `ABLATION_LAYERS`（与 `genome.LAYERS` **同名不同物**：层名 vs L0–L4 代号） |
+| `check.FAIL` / `doctor.FAIL` | **不合并**（五态 vs 三态，合了会把契约超时读成体检没查），两处互相点名 |
 
-**咽喉（被依赖最多 ⇒ 改它的爆炸半径最大）**
+### P1-1 · 巨石：**不拆**，改成每次体检可见的读数（arch_scan F 段）
 
-```
-indeg=50  ledger        indeg=27  nongression   indeg=19  evolution
-indeg=47  genome        indeg=26  verifier      indeg=18  providers
-indeg=39  environment   indeg=25  aether        indeg=17  repair
-```
+取证先做：
+- `serve` **不** import `cmd_evolve` ⇒ r57 担心的「第二份编排 / 第二个入口」**不存在**；
+- 剩下的只是 `cmd_evolve` 807 行（占 cli 的 37.6%）、cli 扇出 21 个模块。
 
-分层是自洽的，**零依赖的地基真的只有常量层**：
-
-```
-地基（0 依赖）  paths / _version / logging_setup / embeddings
-事实源          ledger → provenance → _version
-能力/判据        genome / verifier / judge / nongression / environment
-编排            evolution（依赖 15 个 aether 模块）
-入口            cli（依赖 28 个）/ serve（7 个）/ ui（4 个）
-```
-
-## 2. aether 内部依赖清单（谁直接依赖谁）
-
-```
-模块            indeg  直接依赖
-ledger           16    provenance
-genome           11    ledger
-paths            10    —            ← 布局唯一事实源，零依赖（对）
-verifier          9    ledger
-memory            5    embeddings, ledger
-embeddings        4    —
-environment       4    ledger, verifier
-logging_setup     4    —
-store             4    —
-cleanup           3    agent, genome, judge, ledger, paths, selfref, srcmut
-discover          3    —
-entry             3    logging_setup, paths
-interop           3    environment, genome, ledger, verifier
-judge             3    genome, ledger
-nongression       3    genome, ledger, verifier
-runtime           3    ledger, verifier
-srcmut            3    ledger, paths
-agent             2    environment, genome, memory, repair, runtime, verifier
-backup            2    ledger, paths
-providers         2    cleanup, genome, runtime
-repair            2    environment
-serve             2    entry, interop, ledger, logging_setup, memory, paths, store
-attribution       1    genome, verifier
-caps_candidate    1    discover, ledger
-check             1    discover
-checkpoint        1    —            ⛔ 见 P0-2
-doctor            1    backup, embeddings, interop, judge, ledger, memory, paths, store
-evolution         1    aging, attribution, checkpoint, cleanup, genome, judge,
-                       ledger, nongression, paths, providers, runtime, srcmut,
-                       store, verifier, world_facts
-generalization    1    genome, nongression, verifier
-learner           1    memory
-provenance        1    _version
-retrieval         1    embeddings
-selfref           1    paths
-ui                1    entry, logging_setup, paths, serve
-world_facts       1    genome          ⛔ 见 P0-3
-cli               1    （28 个：几乎全部）⛔ 唯一总装点，见 P1-1
-```
-
-## 3. 运行时覆盖（C 段 · 一次真实 evolve：2 轮 / 114s / rc=0）
-
-```
- 82.76%  learner          51.03%  generalization  31.62%  genome
- 81.69%  attribution      50.43%  evolution       31.41%  providers
- 69.84%  agent            47.81%  selfref         31.25%  judge
- 64.78%  repair           43.42%  environment     30.77%  nongression
- 63.33%  cleanup          40.28%  world_facts     30.10%  memory
-                          39.31%  ledger          29.92%  aging
- 25.35%  srcmut           34.39%  runtime         28.57%  verifier
-                          32.44%  cli             18.85%  store
-                                                  7.25%   embeddings
-```
-
-0% 的 13 个模块里，**11 个是别的入口**（serve / ui / doctor / check / backup /
-discover / caps_candidate / retrieval / interop / `_version` / `__main__`），
-**2 个值得查**：`checkpoint`（P0-2）、`__init__`（量具偏差，见边界 3）。
-
-## 4. 零次事件（D 段 · 生产账本 6119 条 / 28 种）
-
-源码声明 35 种，实到 22 种，**零次 13 种**：
-
-```
-好事（条件未满足 = 没出事）：attribution.unavailable / attribution.step_unavailable
-                            baseline.supersede_failed / cleanup.propose_failed
-                            experience.ledger_failed
-默认关的新口径：            heldout.grow（--ho-grow）
-─────────────────────────────────────────────────────
-⛔ 真可疑（6 条，逐条见 §6）
-gate.blocked                 evolution.py:1695
-world_fact.promoted          evolution.py:1662
-world_fact.promote_failed    evolution.py:1674
-deadend.cooldown             evolution.py:1632
-deadend.inherited            evolution.py:1620
-evolution.checkpoint(_failed) evolution.py:2209 / 2085
-memory.pruned                memory.py:716
-```
-
-⛔ 零次有两种含义，**必须分开标定**：结构性不可达（要修）vs 条件未满足（好事，别误杀）。
-下面每一条都做了「它有没有牙」的取证。
+⇒ 拆它的回归面是最大的一片，而**没有判据能证明拆了会让系统变强**。
+处置：F 段每次体检报「最大模块 / ≥150 行函数 / 入口层直接依赖判据层」，
+并配反证 [5]（造 200 行函数必须被点名）。**恶化时一眼看得出**，这比一次性重构可控。
 
 ---
 
-## 5. 正反双方：整个流程合不合理
+## 2. 改完之后，从头复查：哪里还不合理
 
-### 5.1 正方（哪些真的站得住，有证据）
-
-1. **唯一事实源 + 哈希链是真的**：生产账本 6119 条，**逐行可解析、0 条损坏**；
-   `doctor` 报 `ledger.chain: 链完整`、`projection.consistency: 一致`。
-2. **静态架构无环、无反向依赖、0 孤岛** —— 40 个模块全都从入口可达。
-   这是同规模项目里少见的。
-3. **分层是真的分开了**：地基（paths / _version / logging_setup）零依赖；
-   `paths` 作为布局唯一事实源被 10 个模块引用。
-4. **进化五步里四步有账**：MINE `weakness.mined` 165 / VALIDATE `gate.result` 282 +
-   `eval.verdict` 2321 / SELECT `gen.probe` 114 / COMMIT `harness.commit` 103。
-5. **判据可回归这条宪法守住了**：`aether check` 60 份契约全绿。
-
-### 5.2 反方（哪些站不住）
-
-1. **系统当前自检是红的**（见 P0-0）：`aether doctor` 退出码 1，
-   `judge.boundary` fail。契约全绿 ≠ 系统健康 —— **契约测的是代码，体检测的是数据**。
-2. **五步里唯独 PROPOSE 没有账**。提议器提名了谁、谁被永久跳过了，
-   账本里**一个事件都没有** —— r52（候选挤压）与 r54（被拒候选永久不提）
-   连续两轮故障**都出在这最不可观测的一步**。
-3. **三条「承诺过的路径」从未走过**（P0-2 / P0-3 逐条取证，区分有牙还是没牙）。
-4. **天花板是硬的，不是机器问题**：2 代、4 个环境、单口径题源硬顶 26 条、
-   easy 层结构性饱和（`GENERIC_REPAIRS` 只有一个成员）。
-5. **自证机器比被证系统还大**：scripts 8880 + tests 20065 = **28945 行**
-   vs 生产 aether **22114 行** ⇒ **1.31×**。这台机器现在主要产出
-   「关于自己的证据」，而不是能力。
-6. **两块巨石**：`evolution.py` 2222 行 + `cli.py` 2086 行 = aether 的 **19.5%**；
-   cli 扇出 28 个模块，是**唯一**总装点。
-
----
-
-## 6. 真正要改的地方（按「改了会不会变强」排序，不按「看起来脏」）
-
-### P0-0 · 系统当前自检是红的：生产账本混了 14 把尺子
-
-- **证据（实测）**：`python -m aether.cli doctor` ⇒ `healthy: false`，`exit_code: 1`，
-  `judge.boundary` **fail**：账本里有 **14 种判据身份**（`judge_version`），
-  分布在 905 条 `eval.verdict` 上（最大一把 480 条，其余 12–132 条不等，按 seq 分段连续）。
-- **为什么是真问题**：这不是「历史遗留的脏」，它是**当前生效的读数约束** ——
-  任何跨轮/跨版本的 reward 对比（本项目 r48–r56 的结论大多属于此类）
-  在严格意义上**不可采信**。而 doctor 给的出路是「用同一把尺子重跑一组」，
-  ⛔ **系统里没有这个工具**（`rebuild` 只能重建投影，重跑判据要重跑评估）
-  ⇒ 按第 35b 条：这条出路目前是**装饰**。
-- **改法（三选一，都要先钉口径）**：
-  ① 给账本做**尺子分区**，所有对比工具只在同一 `judge_version` 内比较；
-  ② 提供 `rejudge` 命令，用当前尺子重跑历史评估并**留痕**（不删事件）；
-  ③ 明说「跨尺子不可比」并把历史段标为封存（不再进任何对比）。
-- **不改会怎样**：下次再有人拿今天的 reward 去比三个月前的 reward，结论仍然无效。
-
-### P0-1 · PROPOSE 必须记账 —— 让最不可观测的一步可审计
-
-- **证据**：账本 28 种事件里没有 propose/candidate 类事件；MINE/VALIDATE/
-  SELECT/COMMIT 四步都有。r52 + r54 两轮根因都在这步。
-- **为什么是真问题**：不是「少了一条日志」。是**当挤压/永久跳过发生时系统无法自证**，
-  只能靠外部探针 monkey patch 才看得到（r52/r54 都是这么发现的）。
-- **改法**：提名即 `candidate.proposed`（含：提名了谁 / 池子顺序 / 被谁以什么理由排除）。
-  ⛔ 必须与 `MemoryAwareProposer` 的 skip 同源，否则又是「有机制不走」的摆设。
-- **不改会怎样**：下一次候选挤压仍然只能靠人猜。
-
-### P0-2 · 三条零次路径：先定性，再决定接线还是标注
-
-| 事件 | 有没有牙（本轮取证） | 为什么 0 次 | 处置 |
+| # | 现象 | 读数 | 定性 |
 |---|---|---|---|
-| `gate.blocked`（L0 保护） | **有牙**：构造 `target=L0.meta_rules` 的胶囊 ⇒ `touches_protected=True`（`L0.meta_rules` 与 `meta_rules` 两种形态都识别，`_split_target` 的绕过洞已补） | **结构性**：两个提议器都被设计成永不碰 `meta_rules`，且**没有构造器**能产出碰 L0 的胶囊 | 纵深防御第二道锁，永不触发是设计意图 ⇒ **加负结果契约钉住**（第 58 条），不许改判据 |
-| `evolution.checkpoint` | 未触发（默认路径不可达，覆盖 0%） | **默认关**：`checkpoint_path=None` ⇒ 不落盘 | 第 60 条承诺「中间态可恢复」，但**默认口径下不成立**。要么默认开，要么在报告里明写「本次不可续跑」 |
-| `memory.pruned` | 未取证 | 未知（可能阈值未到） | ⛔ 本轮**不下结论**，列为下一轮取证项 |
+| 1 | `cmd_evolve` 807 行、`cmd_caps` 321 行、`build_parser` 289 行 | F 段 | 已知，用读数盯着（见上） |
+| 2 | 入口层直接依赖判据层 **5 条**（cli → verifier/nongression/generalization/genome/environment） | F 段 | 事实上的编排层在入口；不重构，但**新增一条就是警报** |
+| 3 | `evolution.py` 2222 行 | F 段 | 同上 |
+| 4 | 自证机器 28945 行 vs 生产 22114 行（**1.31×**） | A 段 | 这台机器主要产出「关于自己的证据」 |
+| 5 | 天花板：4 环境 / 26 题硬顶 / easy 层结构性饱和 / 2 代 | r47–r56 | **不是机器问题**，换世界才破 |
+| 6 | 封存后可比视窗只剩 **12 条** | `aether caliber` | 诚实代价：历史 893 条退出跨轮比较。想要更多可比数据 ⇒ 用同一把尺子重跑（P2，研究方向） |
 
-### P0-3 · 死路冷却与陈述性知识：触发条件与提名策略**互斥**
+**没有新出现的架构问题**：无环、无反向依赖、aether 模块静态不可达 **0/40**（复查后仍成立）。
 
-这是本轮最绕的一条，也是**唯一一条我一开始判错、被取证纠正**的。
+## 3. 不该改的（负结果，别下一轮又来一遍）
 
-- **第一版假设（已证伪）**：两处 key 拼法不同源 ⇒ streak 恒 0。
-  **实测**：`_deadend_accum` 用 `gen.probe` 的 `capsule|env_pair`，
-  `_in_cooldown` 用 `cap_name|heldout.env_pair` —— 两者**逐字同源**
-  （实测交集 = 全集，且 streak 正常累加：轮 3 时 `fix_literals` streak=1）。
-- **第二版假设（已证伪）**：`world_facts` 模块没牙。
-  **实测**：`streak=3` 时 `W.promote` 命中且 `harness_id` 改变；`streak=1/2` 不晋升 ⇒ 门槛正确。
-- **真因（实测）**：
-  ① **生产账本里确实有达标的历史** —— 用生产同一份累加逻辑重算 114 条 `gen.probe`：
-     `add_skill:patch:textscore|unknown` **连续被拦 15 次**、
-     `add_skill:patch:textscore|textscore->eventflow` **3 次**，都 ≥ 门槛 3。
-  ② 但这些读数**从未转化为冷却/晋升**，原因是两层：
-     - **层 1（取值域漂移）**：早期事件的 `env_pair` 是 `unknown`，后来变成
-       `textscore->eventflow` ⇒ 历史死路 key 永久失配，**且没有迁移或失效机制**
-       （与第 52 条「缓存的结论必须有失效机制」同形）。
-     - **层 2（触发条件与提名策略互斥）**：`_in_cooldown` 只对**本轮被提名的候选**
-       调用。候选一旦被拦，提议器就不再提名它 ⇒ streak 停在 1，永远到不了 3。
-- **决定性实验（负结果，如实记录）**：`evolve --rounds 4` 开/关 `--retry-every 2`
-  对照 —— `deadend.cooldown` / `world_fact.promoted` **两组都是 0**，
-  reward 轨迹逐字相同 `0→0.6→0.6→0.6` ⇒ **`--retry-every` 不是这条路的出口**
-  （它修的是「被闸拒后重审」，不是「被提名后重新进池」）。
-- **改法**：要么让 world_facts 的观察**不依赖"再次被提名"**（提名失败本身就能记一次观察），
-  要么把 world_facts 从「已交付」降级为「未接线」并写清出路（第 35b 条）。
+1. 依赖图本身（无环 / 无反向依赖 / 0 孤岛）。
+2. `gate.blocked` 的判据 —— 有牙，0 次是设计意图（R1）。
+3. 死路 key 的拼法 —— 两处**行为级同源**（R5.4/R5.5），去「统一」是把对的改坏。
+4. `world_facts` 门槛 3 / `deadend_streak` 3 —— 实测有牙（R4）。
+5. `check.FAIL` 与 `doctor.FAIL` —— 同名不同物，合并会更糟。
+6. `cmd_evolve` 的拆分 —— 没有判据收益，先盯读数。
 
-### P1-1 · 拆两块巨石（evolution 2222 / cli 2086）
+## 4. 诚实未做
 
-- cli 依赖 28 个模块 = 唯一总装点 ⇒ 加任何能力都要改它，它是事实上的编排层。
-- 建议方向（**未做**）：把 `cmd_evolve` 的编排移进 evolution 的 `run_from_args()`，
-  让 cli/serve 都只做参数解析 ⇒ 消除「第二个入口」的漂移风险。
-
-### P1-2 · 收敛「第二份」常量（4 处，逐个点名）
-
-| 常量 | 两处 | 判定 |
-|---|---|---|
-| `ROOT` | `paths.py:30` vs **`selfref.py:54`**（自己算 `parent.parent`） | ⛔ 真违反第 46 条：r36 收口就是禁止这件事，它又长出来一份 |
-| `CANDIDATES_NAME` | `paths.py:34` vs **`caps_candidate.py:71`** | ⛔ 第二份布局定义；且后者**从未被使用**（死常量） |
-| `LAYERS` | `genome.py:48`（层名）vs `attribution.py:68`（L0–L4 代号） | ⚠️ 同形不同源：两个东西共用一个名字，风险是改名不同步 |
-| `FAIL` | `check.py:49` vs `doctor.py:47` | ⚠️ 同形不同源（五态 vs 三态），同级 |
-
-### P2 · 天花板（唯一能让它真正「变强」的，但代价最大）
-
-4 个环境 / 单口径 26 题硬顶 / easy 层结构性饱和 / 代数 2 代。
-前三项已由 r47–r56 逐轮实测钉死，**不是机器问题**。
-⇒ 想突破只能换世界或重构难度层，这是**研究方向**不是「收拾代码」。本轮不动。
-
----
-
-## 7. 不该改的（负结果，别下一轮又来一遍）
-
-1. **依赖图本身**：无环、无反向依赖、0 孤岛 —— 现状是对的，别为了「更清晰」重构。
-2. **`gate.blocked` 的判据**：本轮取证证明它有牙，只是结构性不触发 ⇒ 不许改判据，
-   改的是「给它一条反证契约」（第 9 条：闸恒绿先做反证）。
-3. **死路 key 的拼法**：已证两处同源，别去「统一」（那是把对的改坏）。
-4. **`world_facts` 的门槛 3**：实测 `streak=3` 晋升、`1/2` 不晋升 ⇒ 门槛正确，别调。
-5. **静态可达性 0 不可达**：这是好结果，别读成「覆盖率太低所以要加 import」。
-
-## 8. 诚实未做
-
-- 覆盖率只采**一次** evolve 的**本进程**；serve / ui / doctor / check 等
-  **入口路径未做运行时覆盖**（它们的健康度未知）。
-- `memory.pruned`（0 次）未取证，未下结论。
-- 世界规模（4 环境）未扩；难度层未重构。
-- P0-0 的三选一改法**未实施**，本轮只把问题与影响面量化。
-- 未改任何生产代码。
+- 覆盖取证只采**一次** evolve 的**本进程**；serve / ui / doctor 的运行时覆盖未做。
+- 世界规模未扩、难度层未重构（P2 研究方向）。
+- `env_pair` 取值域漂移的**迁移机制**没做（历史 key 永久失配，但不影响现在）。
+- 封存是**不可逆**的（只可前推）；想撤销只能从 `backups/backup-20261018-141740` 恢复。

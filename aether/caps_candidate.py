@@ -63,12 +63,20 @@ __all__ = ["PENDING", "VALIDATED", "REJECTED", "APPROVED", "INSTALLED",
            "verify", "record", "load", "save", "ID_PREFIX"]
 
 
+#: ⛔⛔ r58 收口：这份 `CANDIDATES_NAME` **已删除** —— 它是布局的第二份
+#:    定义，而且**从未被任何代码使用**（全仓 grep 只有这一行）。留着它
+#:    的害处不是重复，是"下次有人改 `paths.CANDIDATES_NAME` 时会以为改
+#:    全了"。文件名与落点的唯一事实源是 `aether/paths.py`：
+#:      · 文件名  `paths.CANDIDATES_NAME`
+#:      · 落点    `paths(root)["candidates"]`
+#:    下面 `load/save` 只接收**已经算好的路径**，不自己拼（拼了就是第三份）。
+#:
+#: （原注释保留，因为它解释的是"为什么要落盘"这件仍然成立的事：）
 #: 候选档案的落盘位置（相对仓库根）。⛔ 它**不是事实源** —— 事实源是账本；
 #: 这份文件只是"当前待办状态"的便利用缓存，随时可由账本重建。
 #: 之所以要落盘：CLI 每次调用都是新进程，而"批准"是一个**跨调用**的动作。
 #: 实测踩过：不落盘时 `validate` 之后跑 `approve` 会重新生成候选
 #: ⇒ 批准状态丢失 ⇒ 后面的 `hint` 报 `validated` 而不是 `approved`。
-CANDIDATES_NAME = "candidates.json"
 
 
 def load(path: Any) -> Dict[str, Candidate]:

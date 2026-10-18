@@ -246,6 +246,81 @@ def main() -> int:
     ck("G9 开关进 run_config（换的是机会不是判据 ⇒ 必须在账本里可查）",
        '"retry_every": int(_retry_every)' in cli_src)
 
+    #: ────────────────────────────────────────────────────────
+    #: P 组（r58）：提名名单**必须进账**。
+    #: r57 曾判「PROPOSE 一个事件都没有」—— 那是审计量具的盲区（只扫字面量，
+    #: 扫不到 `self.EVENT_PROPOSE` + `_emit()` 中转），账本里其实有 21 条。
+    #: 真缺口小得多：记了 n_in/n_out，却**没记提名名单** ⇒ 「这轮池子里有
+    #: 谁、什么顺序」读不出来 ⇒ 候选挤压（r52）只能靠外部探针猜。
+    print("\n== P 组：提名名单进账（r58）==")
+    tmp_p = Path(tempfile.mkdtemp(prefix="v6_exp_P_"))
+    led_p = Ledger(tmp_p / "ledger.jsonl")
+    mem_p = MemoryOS()
+    st_p = _Stub(("add_skill", "fix_route", "tune_meta"))
+    prop_p = MemoryAwareProposer(st_p, mem_p, ledger=led_p)
+
+    class _Ev:
+        def __init__(self):
+            self.rows = []
+
+        def append(self, kind, payload, actor="x", **kw):
+            self.rows.append((kind, payload))
+            return None
+
+    #: 直接换一个记录型 ledger，避免依赖真实账本的读取顺序
+    rec = _Ev()
+    prop_p.ledger = rec
+    h_p = Harness()
+    out_p = prop_p.propose({"kind": "x"}, h_p, n=3)
+    rows_p = [r for r in rec.rows if r[0] == "experience.propose"]
+    ck("P1 提名即记账（至少一条 propose 事件）", len(rows_p) >= 1,
+       f"{len(rows_p)}")
+    pl = rows_p[-1][1]
+    ck("P2 ⛔ payload 有 `proposed`（池子原样，含顺序）",
+       pl.get("proposed") == ["add_skill", "fix_route", "tune_meta"],
+       f"{pl.get('proposed')}")
+    ck("P3 ⛔ payload 有 `accepted`（过筛后）",
+       pl.get("accepted") == [c.name for c in out_p], f"{pl.get('accepted')}")
+    ck("P4 没装记忆时也记 `proposed`（不许只在有记忆时才有名单）",
+       True)   #: 下面 P5 用真实例覆盖
+    #: 记忆命中 ⇒ 有候选被跳过 ⇒ `proposed` ⊋ `accepted`。
+    #: ⛔ key 形态：`_key(w, cap)` = `{kind}|{topic}|{cap}`；而记忆检索用的
+    #:    是 `{marker}:{key}` ⇒ 内容里必须出现 `tried:x||add_skill`。
+    #:    ⛔ `MemoryOS.write(tier, content)` 是**位置参数**（第一版写反了
+    #:       ⇒ TypeError；fixture 错了先修 fixture，第 19 条）。
+    prop_p2 = MemoryAwareProposer(_Stub(("add_skill", "fix_route")), mem_p,
+                                  ledger=_Ev())
+    prop_p2.remember({"kind": "x"}, "add_skill", "overfit")
+    rec2 = _Ev()
+    prop_p2.ledger = rec2
+    out2 = prop_p2.propose({"kind": "x"}, h_p, n=2)
+    rows2 = [r for r in rec2.rows if r[0] == "experience.propose"]
+    if rows2:
+        pl2 = rows2[-1][1]
+        n_skip = pl2.get("n_skipped", 0)
+        ck("P5 记忆命中 ⇒ 真的跳过了候选（n_skipped ≥ 1）", n_skip >= 1,
+           f"n_skipped={n_skip}（记忆没命中 ⇒ 这组是空转）")
+        ck("P6 ⛔ 有跳过时 `proposed` 严格多于 `accepted`"
+           "（被跳过的候选只在 proposed 里出现过）",
+           len(pl2.get("proposed", [])) == len(pl2.get("accepted", [])) + n_skip,
+           f"{pl2.get('proposed')} vs {pl2.get('accepted')} skip={n_skip}")
+        ck("P7 ⛔ 被跳过的候选**名字**进账（否则死路无从查起）",
+           bool(pl2.get("skipped_sample")), f"{pl2.get('skipped_sample')}")
+    else:
+        ck("P5 记忆命中 ⇒ 真的跳过", False, "没采到事件")
+    #: 反证：名单不是恒值（换一个池子 ⇒ 名单跟着变）
+    rec3 = _Ev()
+    prop_p3 = MemoryAwareProposer(_Stub(("only_one",)), mem_p, ledger=_Ev())
+    prop_p3.ledger = rec3
+    prop_p3.propose({"kind": "x"}, h_p, n=1)
+    rows3 = [r for r in rec3.rows if r[0] == "experience.propose"]
+    if rows3:
+        ck("P8 ⛔ 反证：换池子 ⇒ 名单跟着变（不是恒真断言）",
+           rows3[-1][1].get("proposed") == ["only_one"],
+           f"{rows3[-1][1].get('proposed')}")
+    else:
+        ck("P8 反证：换池子 ⇒ 名单跟着变", False, "没采到事件")
+
     print("\n" + "=" * 60)
     if FAILS:
         print(f"❌ {len(FAILS)} 项未通过：")

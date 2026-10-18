@@ -45,6 +45,13 @@ __all__ = ["PASS", "FAIL", "SKIP", "TIMEOUT", "ERROR",
            "Run", "discover", "supports_e2e", "is_exclusive", "declared_modes",
            "run_checks", "summarize", "find_node", "cross_language"]
 
+#: ⛔ r58 点名：**本模块的 `FAIL` 与 `doctor.FAIL` 同名不同物**，别合并。
+#:    · 这里：契约执行的**五态**（pass/fail/skip/timeout/error）；
+#:    · 那边：体检项的**三态**（ok/fail/skipped）。
+#:    两边的值都叫 `"fail"`，但 `skip` vs `skipped`、`timeout/error` 的有无
+#:    说明它们是两套不同的状态机。合并 ⇒ 契约的超时会被体检读成"没查"。
+#:    ⇒ 处置是**点名 + 不许互相 import**（见 `contract_zero_event_paths_test`
+#:       的同类处置），不是抽公共模块。
 PASS = "pass"
 FAIL = "fail"
 SKIP = "skip"

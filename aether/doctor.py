@@ -43,6 +43,11 @@ from .paths import data_dir, paths
 __all__ = ["OK", "FAIL", "SKIPPED", "Check", "run", "CHECKS"]
 
 
+#: ⛔ r58 点名：**本模块的 `FAIL` 与 `check.FAIL` 同名不同物**，别合并。
+#:    · 这里：体检项的**三态**（ok / fail / skipped）；
+#:    · 那边：契约执行的**五态**（pass / fail / skip / timeout / error）。
+#:    合并会把两套状态机合成一套 ⇒ 契约超时被读成"体检没查"。
+#:    ⇒ 两边各自保留，互不 import；想统一状态语义是另一件事，要有交叉表。
 OK = "ok"
 FAIL = "fail"
 SKIPPED = "skipped"
@@ -270,21 +275,39 @@ def _check_judge(root: Path, ctx: Dict[str, Any]) -> Check:
     except RuntimeError as e:
         return Check("judge.boundary", FAIL, str(e)[:200],
                      "判据集可被变异寻址 ⇒ 诚实性结构塌了，先修边界")
+    from . import caliber as C
     from .ledger import Ledger
     from .paths import paths as _p
     led = Ledger(_p(root)["ledger"])
     reps = []
+    events = []
     if led.path.exists():
         for ev in led.iter_events():
+            events.append(ev)
             if ev.kind != "eval.verdict":
                 continue
             reps.append({"judge_version": (ev.payload or {}).get("judge_version")})
     cmp_ = J.check_verdict_comparable(reps)
     if cmp_["state"] == J.INCOMPARABLE:
+        #: ⛔⛔ 第 35b 条：闸的 reason 里写的"出路"，系统里必须**真有**。
+        #:    修之前这里写「用同一把尺子重跑一组」，而系统里没有那个工具
+        #:    ⇒ 那条出路是装饰，这条检查会永远红且无人能处置（r57 实测）。
+        #:    现在出路是 `aether caliber --seal`：**真的存在**，且封存真的
+        #:    改变读数（`comparable_view` / `status` 的 `caliber` 段）。
+        view = C.comparable_view(events)
+        if view["sealed_upto"] is not None:
+            #: 已封存 ⇒ 历史段已退出跨轮比较，这条不再红（不是放松判据：
+            #: 判据照旧要求"不得跨尺子比较"，只是现在**有处置动作**了）。
+            return Check("judge.boundary", OK,
+                         f"判据边界完好；账本有 {len(cmp_['versions'])} 种"
+                         f"判据身份，已于 seq≤{view['sealed_upto']} 封存"
+                         f" ⇒ 可比视窗 {view['n_comparable']} 条"
+                         f"（封存段 {view['dropped_sealed']} 条）")
         return Check("judge.boundary", FAIL,
                      f"账本里有 {len(cmp_['versions'])} 种判据身份"
                      f" ⇒ 存在跨尺子比较：{cmp_['reason'][:120]}",
-                     "同一批结论必须用同一把尺子重跑；跨版本比较不可采信")
+                     "跑 `aether caliber` 看分区；确认后 `aether caliber --seal` "
+                     "把旧尺子段封存（只追加事件、不删历史，封存后它们退出一切跨轮比较）")
     detail = (f"判据身份 {J.identity()[:16]}；边界完好"
               f"（{bound['probes_rejected']} 个越界 target 全部被拒）")
     if cmp_["state"] == J.UNKNOWN:

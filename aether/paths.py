@@ -47,6 +47,10 @@ REA_SHIMS_DIRNAME = "rea_shims"
 LEDGER_NAME = "ledger.jsonl"
 DB_NAME = "aether.db"
 MEMORY_NAME = "memory.json"
+#: 断点续跑的进度文件（r58 起默认开；见 `EvolutionLoop.write_checkpoint`）。
+#: ⛔ 它是**派生量**（可从账本重放得到），不入 `BACKUP_TARGETS`；但它的
+#:    **位置**与其它数据文件一样只允许在这里定义一次（第 46 条）。
+CHECKPOINT_NAME = "checkpoint.json"
 
 #: 能力清单的示例文件（UI / 控制台的默认清单）。
 CAPS_EXAMPLE = "capabilities.example.json"
@@ -63,8 +67,8 @@ BACKUP_TARGETS: Tuple[Tuple[str, str], ...] = (
 __all__ = [
     "ROOT", "DATA_DIRNAME", "TASKS_DIRNAME", "BACKUPS_DIRNAME",
     "CONSOLE_DIRNAME", "REA_DIRNAME", "LEDGER_NAME", "DB_NAME",
-    "MEMORY_NAME", "CAPS_EXAMPLE", "BACKUP_TARGETS", "data_dir", "paths",
-    "flat_name", "BACKUP_FLAT",
+    "MEMORY_NAME", "CHECKPOINT_NAME", "CAPS_EXAMPLE", "BACKUP_TARGETS",
+    "data_dir", "paths", "flat_name", "BACKUP_FLAT",
 ]
 
 
@@ -104,6 +108,8 @@ def paths(root: Union[str, Path], *, default_env: str = "textscore"
         #: 清理提案档案（同 `candidates`：不是事实源，事实源是账本的
         #: `cleanup.proposal` 事件；但**位置**必须只有一处定义）。
         "cleanup": r / DATA_DIRNAME / CLEANUP_NAME,
+        #: 续跑进度（派生量，不是事实源）。默认开 ⇒ 位置必须有唯一定义。
+        "checkpoint": r / DATA_DIRNAME / CHECKPOINT_NAME,
     }
 
 

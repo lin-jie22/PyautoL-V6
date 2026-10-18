@@ -308,25 +308,189 @@ EVENT_NAME_RE = re.compile(r"^[a-z][a-z0-9]*(\.[a-z0-9_]+)+$")
 NOT_EVENTS = {"binop", "boolop", "compare", "constant", "string", "unaryop"}
 
 
-def declared_events(files) -> dict:
-    out = collections.defaultdict(list)
+def _event_aliases(files) -> dict:
+    """⛔⛔ 第 24 条第七次命中（r58 实测）：**事件名可以藏在常量里**。
+
+    `led.append(self.EVENT_PROPOSE, {...})` —— 字面量不在调用点上，
+    而在类体里的 `EVENT_PROPOSE = "experience.propose"`。
+    只扫字面量 ⇒ 这类事件**既不进"声明"也不进"实到"**，于是
+    「PROPOSE 没有账」这种结论会凭空成立（r57 就是这么判错的：
+    账本里其实有 21 条 `experience.propose`）。
+
+    这里按**属性名**建别名表（`EVENT_PROPOSE` → `experience.propose`）。
+    ⛔ 同名属性在不同类里映射到不同值时**全部保留** —— 宁可多报
+    （可人工核对），不可漏报（漏报 ⇒ 恒绿的假读数）。
+    """
+    alias = collections.defaultdict(set)
     for p in files:
         try:
             tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
         except SyntaxError:
             continue
         for n in ast.walk(tree):
-            if isinstance(n, ast.Call):
-                f = n.func
-                nm = getattr(f, "attr", None) or getattr(f, "id", None)
-                if nm in ("append", "append_many", "emit", "record",
-                          "write_event", "log_event"):
-                    for a in n.args[:1]:
-                        if isinstance(a, ast.Constant) and isinstance(a.value, str) \
-                                and EVENT_NAME_RE.match(a.value):
-                            out[a.value].append(f"{p.name}:{n.lineno}")
+            if not isinstance(n, ast.Assign) or len(n.targets) != 1:
+                continue
+            v = n.value
+            if not (isinstance(v, ast.Constant) and isinstance(v.value, str)
+                    and EVENT_NAME_RE.match(v.value)):
+                continue
+            t = n.targets[0]
+            if isinstance(t, ast.Name) and t.id.isupper() and len(t.id) > 3:
+                alias[t.id].add(v.value)
+            elif isinstance(t, ast.Attribute) and t.attr.isupper() \
+                    and len(t.attr) > 3:
+                alias[t.attr].add(v.value)
+    return {k: sorted(v) for k, v in alias.items()}
+
+
+def _event_sinks(files) -> dict:
+    """⛔ 第二层盲区：**事件名可以经包装函数中转**。
+
+    `self._emit(self.EVENT_PROPOSE, {...})` → `_emit` 内才 `led.append(kind, …)`。
+    只看 `append` 的调用点 ⇒ 实参是形参名 `kind`，什么都抓不到
+    （生产里 `experience.propose` 就是这么躲过去的：账本里 21 条，
+    老量具却说「PROPOSE 一个事件都没有」）。
+
+    这里反推：谁的函数体里把**自己的形参**当作事件名传给了 append/emit
+    ⇒ 该函数名就是「事件名接收器」，记下形参下标。
+    """
+    sinks: dict = {}
+    for p in files:
+        try:
+            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for n in ast.walk(tree):
+            if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            params = [a.arg for a in n.args.args]
+            for sub in ast.walk(n):
+                if not isinstance(sub, ast.Call) or not sub.args:
+                    continue
+                nm = getattr(sub.func, "attr", None) or getattr(sub.func, "id", None)
+                if nm not in ("append", "append_many", "emit", "record",
+                              "write_event", "log_event"):
+                    continue
+                a0 = sub.args[0]
+                if isinstance(a0, ast.Name) and a0.id in params:
+                    idx = params.index(a0.id)
+                    #: 裸名可能重名 ⇒ 两个键都记（宁可多报）
+                    sinks.setdefault(n.name, idx)
+                    sinks.setdefault(f"{p.name}:{n.name}", idx)
+    return sinks
+
+
+def declared_events(files) -> dict:
+    """事件名声明点：字面量 + **常量别名** + **包装函数中转**。
+
+    三层都要扫（r58 实测：r57 只扫了第一层，凭空得出「PROPOSE 无账」）。
+    """
+    out = collections.defaultdict(list)
+    alias = _event_aliases(files)
+    sinks = _event_sinks(files)
+
+    def resolve(a, loc, via=""):
+        if isinstance(a, ast.Constant) and isinstance(a.value, str) \
+                and EVENT_NAME_RE.match(a.value):
+            out[a.value].append(loc + via)
+        elif isinstance(a, ast.Attribute) and a.attr in alias:
+            for name in alias[a.attr]:
+                out[name].append(f"{loc}←常量{a.attr}{via}")
+        elif isinstance(a, ast.Name) and a.id in alias:
+            for name in alias[a.id]:
+                out[name].append(f"{loc}←常量{a.id}{via}")
+
+    for p in files:
+        try:
+            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for n in ast.walk(tree):
+            if not isinstance(n, ast.Call):
+                continue
+            f = n.func
+            nm = getattr(f, "attr", None) or getattr(f, "id", None)
+            key = f"{p.name}:{nm}"
+            if nm in ("append", "append_many", "emit", "record",
+                      "write_event", "log_event"):
+                for a in n.args[:1]:
+                    resolve(a, f"{p.name}:{n.lineno}")
+            elif key in sinks or nm in sinks:
+                idx = sinks.get(key, sinks.get(nm))
+                if idx is not None:
+                    #: ⛔ `self._emit(…)` 是**绑定调用**：接收器不吃实参位，
+                    #:    而形参表里 `self` 占了一位 ⇒ 下标必须减 1。
+                    #:    不减就会去解析 `payload` 那个 dict（实测：反证 [4] 红）。
+                    recv = getattr(f, "value", None)
+                    rname = getattr(recv, "id", None)
+                    if isinstance(f, ast.Attribute) and rname in ("self", "cls"):
+                        idx = max(0, idx - 1)
+                    if len(n.args) > idx:
+                        resolve(n.args[idx], f"{p.name}:{n.lineno}",
+                                f"←经{nm}()")
     return {k: v for k, v in out.items() if k.split(".")[0] not in NOT_EVENTS
             and k not in NOT_EVENTS}
+
+
+#: 判据层：入口**不该**直接依赖这些（依赖了 ⇒ 入口事实上在当编排层用）。
+#: ⛔ 这是**读数不是闸**：现状 cli 就依赖其中几个（809 行的 `cmd_evolve`
+#:    是历史产物），判红会恒红。先让它每次体检可见，恶化时一眼看得出。
+VERDICT_LAYERS = ("verifier", "judge", "nongression", "generalization",
+                  "genome", "environment")
+ENTRY_LAYERS = ("cli", "serve", "ui", "entry")
+
+
+def report_boulders(files, nodes, inner, pkg: str = "aether") -> dict:
+    """F · 巨石与分层越界（r58 新增）。
+
+    ⛔ 为什么是读数不是闸：P1-1 建议"拆两块巨石"，但 r58 取证发现
+       · `serve` **不** import `cmd_evolve` ⇒ 没有"第二份编排"这个风险；
+       · 剩下的只是 `cmd_evolve` 809 行 —— **没有判据能证明拆了会变强**，
+         而拆它的回归面是最大的那一片（它扇出 21 个模块）。
+       ⇒ 处置：不重构，改成**每次体检都看得见的读数**，并在 `--self-test`
+         里用反证保证这个读数不会静默失效。
+    """
+    big_mod, big_fn = [], []
+    for p in files:
+        #: ⛔ 被测包是**参数**：反证组用的是人造包 `pkg`，写死 "aether"
+        #:    ⇒ 反证现场一个函数都扫不到 ⇒ 读数恒 0（第 24 条同形病）。
+        if p.parent.name != pkg:
+            continue
+        try:
+            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        lines = p.read_text(encoding="utf-8", errors="replace").count("\n") + 1
+        big_mod.append((lines, p.name))
+        for n in tree.body:
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                span = (n.end_lineno or n.lineno) - n.lineno + 1
+                if span >= 150:
+                    big_fn.append((span, f"{p.name}:{n.name}"))
+    over = []
+    adj = collections.defaultdict(set)
+    for (s, d) in inner:
+        adj[s].add(d)
+    for e in ENTRY_LAYERS:
+        mod = f"{pkg}.{e}"
+        for v in VERDICT_LAYERS:
+            if f"{pkg}.{v}" in adj.get(mod, ()):
+                over.append(f"{e} → {v}")
+    print("\n" + "=" * 74)
+    print("F · 巨石与分层越界（读数，不是闸）")
+    print("=" * 74)
+    print("  -- aether 最大的 5 个模块 --")
+    for lines, name in sorted(big_mod, reverse=True)[:5]:
+        print(f"    {lines:5d} 行  {name}")
+    print(f"\n  -- 长度 ≥150 行的函数（{len(big_fn)} 个）--")
+    for span, name in sorted(big_fn, reverse=True)[:8]:
+        print(f"    {span:5d} 行  {name}")
+    print(f"\n  -- 入口层直接依赖判据层（{len(over)} 条）--")
+    for o in over:
+        print(f"    {o}")
+    print("\n  ⛔ 这些是**读数**：现状已越界，判红会恒红 ⇒ 只报数不裁决。")
+    print("     真正要防的是**恶化**：新增一条就说明有人又在入口里写编排。")
+    return {"big_fn": big_fn, "over": over, "big_mod": big_mod}
 
 
 def report_zero_events(files, ledger_path: Path, prod_only: bool = True) -> dict:
@@ -382,8 +546,29 @@ def self_test() -> int:
     (tmp / "pkg").mkdir()
     (tmp / "pkg" / "__init__.py").write_text("", encoding="utf-8")
     (tmp / "pkg" / "island.py").write_text("X = 1\n", encoding="utf-8")
+    #: 反证 [5]：F 段（巨石读数）也必须抓得到 —— 造一个 200 行函数
+    (tmp / "pkg" / "boulder.py").write_text(
+        "from . import verifier\n"
+        "def huge(a):\n" + "".join(f"    x{i} = {i}\n" for i in range(200))
+        + "    return verifier\n", encoding="utf-8")
+    files_b = collect_files(tmp)
+    nb, ib = build_graph(files_b, tmp)
+    fb = report_boulders(files_b, nb, ib, pkg="pkg")
+    hit_big = any(span >= 150 and "huge" in name for span, name in fb["big_fn"])
+    print(f"  [5] ≥150 行的函数必须被点名（巨石读数）… "
+          f"{'OK' if hit_big else '❌ 没抓到'}")
+    ok &= hit_big
+
     (tmp / "pkg" / "main.py").write_text(
-        "def f(led):\n    led.append('zzz.never_happens', {})\n", encoding="utf-8")
+        "class P:\n"
+        "    EVT_ALIAS = 'zzz.via_constant'\n"
+        "    EVT_SINK = 'zzz.via_wrapper'\n"
+        "    def _emit(self, kind, payload):\n"
+        "        self.led.append(kind, payload)\n"
+        "    def f(self, led):\n"
+        "        led.append('zzz.never_happens', {})\n"
+        "        led.append(self.EVT_ALIAS, {})\n"
+        "        self._emit(self.EVT_SINK, {})\n", encoding="utf-8")
     files = collect_files(tmp)
     nodes, inner = build_graph(files, tmp)
     unreach = report_reach(nodes, collections.defaultdict(
@@ -400,6 +585,19 @@ def self_test() -> int:
     hit_zero = "zzz.never_happens" in z["zero"]
     print(f"  [2] 未发生事件必须被报 ZERO … {'OK' if hit_zero else '❌ 没抓到'}")
     ok &= hit_zero
+
+    #: ⛔ 第 24 条第七次命中（r58）：只扫字面量的老版本**看不见**常量别名，
+    #:    于是「PROPOSE 没有账」这种结论凭空成立。这条反证专治它。
+    hit_alias = "zzz.via_constant" in z["zero"]
+    print(f"  [3] 藏在常量里的事件名也必须被报 ZERO … "
+          f"{'OK' if hit_alias else '❌ 没抓到（量具盲区：会凭空得出「没有账」）'}")
+    ok &= hit_alias
+
+    #: 第二层盲区：事件名经 `_emit()` 包装函数中转（生产 `_emit` 就是这么写的）
+    hit_sink = "zzz.via_wrapper" in z["zero"]
+    print(f"  [4] 经包装函数中转的事件名也必须被报 ZERO … "
+          f"{'OK' if hit_sink else '❌ 没抓到（会把「有账」读成「无账」）'}")
+    ok &= hit_sink
 
     print(f"\n  反证组 {'全绿 ⇒ 本审计有牙' if ok else '❌ 红了 ⇒ 本审计自己在静默恒绿'}"
           f"（退出码 {0 if ok else 1}）")
@@ -425,6 +623,7 @@ def main(argv=None) -> int:
     if not a.no_run:
         run_cover(int(a.rounds), a.max_tasks)
     report_zero_events(files, Path(a.ledger))
+    report_boulders(files, nodes, inner)
     return 0
 
 

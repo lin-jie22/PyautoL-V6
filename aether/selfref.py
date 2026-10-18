@@ -51,7 +51,20 @@ from typing import Any, Dict, List, Sequence, Set, Tuple
 #: 扫描根。⛔ 是模块级可变量（不是常量）：契约测试会把它指向**临时目录**
 #: 来注入人造死接口做反证（见 `contract_self_reference_probe_test`）。
 #: 写成 `Path(__file__).parents[1]` 更直白，但那样测试就无法改它了。
-ROOT = Path(__file__).resolve().parent.parent
+#:
+#: ⛔ r58 收口（第 46 条）：**默认值**只从 `paths.ROOT` 取，不在本文件里
+#:    再算一遍 `parent.parent`。此前这里是第二份布局定义 —— 它和
+#:    `paths.ROOT` 用的是同一个表达式，于是"看起来一致"，而一旦布局变动
+#:    就只有一处会跟着改。可注入性**保留**（变量名仍是模块级 `ROOT`）。
+try:
+    from .paths import ROOT as _PATHS_ROOT          # noqa: E402
+except ImportError:                                  # noqa: E402
+    #: ⛔ 契约用 `importlib` **单独加载**本文件（为了注入临时 ROOT 做反证）
+    #:    ⇒ 那时没有包上下文，相对导入必然 ImportError（实测：全量验收
+    #:    就这么红的）。绝对导入在 `sys.path` 里有仓库根时成立。
+    from aether.paths import ROOT as _PATHS_ROOT     # noqa: E402
+
+ROOT = _PATHS_ROOT
 
 __all__ = ["scan_dead_api", "scan_write_only", "scan_unreachable",
            "mechanism_vs_gain", "report"]
