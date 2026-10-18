@@ -324,6 +324,80 @@ def main() -> int:
     else:
         ck("U6 生产 db 存在", True, "不存在 ⇒ 跳过（读数，非断言）")
 
+    # ──────────────────────────────────────────────────────
+    print("\n== V1 组：不冷却的代价必须进账本（项 4）==")
+    #: r59 把 inconclusive 摘出死路账 ⇒ 候选不再进冷却 ⇒ 每轮重探。
+    #: 这个代价当时只写了一句「多花探测预算」，没量也没记 ⇒ 补上读数。
+    ck("V1.1 `evolution.no_evidence` 带 `repeated_probes`（重探次数）",
+       "repeated_probes" in src)
+    ck("V1.2 带 `repeated_capsules`（哪些候选被重探）",
+       "repeated_capsules" in src)
+
+    _rep = getattr(EL, "_no_evidence_repeats", None)
+    ck("V1.3 重探计数有独立实现（可单测，不是夹在事件构造里）",
+       _rep is not None)
+    if _rep is not None:
+        _h1 = [{"capsule": "c1"}] * 4
+        _e1, _c1 = _rep(_h1)
+        ck("V1.4 同候选 4 次 ⇒ 重探 3 次（第 1 次不算重探）",
+           _e1 == 3 and _c1 == ["c1"], f"extra={_e1} caps={_c1}")
+        _h2 = [{"capsule": "c1"}, {"capsule": "c2"},
+               {"capsule": "c1"}, {"capsule": "c2"}]
+        _e2, _c2 = _rep(_h2)
+        ck("V1.5 两个候选各 2 次 ⇒ 重探 2 次", _e2 == 2 and _c2 == ["c1", "c2"],
+           f"extra={_e2} caps={_c2}")
+        _h3 = [{"capsule": f"c{i}"} for i in range(4)]
+        _e3, _c3 = _rep(_h3)
+        ck("V1.6 ⛔ 反证：候选全不同 ⇒ 重探 0（V1.4 不是恒真）",
+           _e3 == 0 and _c3 == [], f"extra={_e3} caps={_c3}")
+        ck("V1.7 空输入 ⇒ 0（不是 dict 越界）", _rep([]) == (0, []))
+
+    print("\n== V2 组：⛔ 文案里的出路必须真存在（第 35b 条）==")
+    import re as _re
+    _cli = (ROOT / "aether" / "cli.py").read_text(encoding="utf-8")
+    #: 扫 evolution.py 里**全部** `--xxx` 提及（注释与文案一视同仁）：
+    #: 写着「加 --foo 就能解决」而 `--foo` 根本不存在，是最会骗人的形态。
+    _flags = sorted(set(_re.findall(r"--[a-z][a-z0-9-]{2,}", src)))
+    _missing = [f for f in _flags if f not in _cli]
+    ck("V2.1 evolution.py 提到的每个 `--开关` 都在 CLI 里真实存在",
+       not _missing, f"缺失={_missing}")
+    ck("V2.2 确实扫到了开关（不是空集合恒真，第 57 条）",
+       len(_flags) >= 3, f"n={len(_flags)} {_flags[:6]}")
+    ck("V2.3 代价口径写进文案（实测数字，不是「会慢一点」）",
+       "耗时" in src and "噪声" in src,
+       "文案里应有 ABBA 实测的耗时结论")
+    ck("V2.4 ⛔ 不许承诺不存在的封顶（诚实：当前无封顶机制）",
+       "无封顶" in src or "没有封顶" in src,
+       "要么有封顶开关，要么明说没有")
+
+    # ──────────────────────────────────────────────────────
+    print("\n== W1 组：`--gate-tries` 有牙、有默认、且不被写死（项 5）==")
+    #: ⛔ 第 51 条：F 组实测它「零收益」，差点被判成没用。真相是 **r1 的
+    #:    queue_size=2 > 默认 1**（⇒ 开关确实接线），只是 r2 起每轮只有
+    #:    1 个候选通过准入判据 ⇒ 无用武之地。功能**从未有契约覆盖**
+    #:    ⇒ 它随时可能静默腐烂而没有人为它报警。
+    from aether.evolution import EvolutionConfig
+    ck("W1.1 `EvolutionConfig.gate_tries` 默认 1（与历史逐字同口径）",
+       getattr(EvolutionConfig(), "gate_tries", None) == 1,
+       f"={getattr(EvolutionConfig(), 'gate_tries', None)}")
+    _cli2 = (ROOT / "aether" / "cli.py").read_text(encoding="utf-8")
+    ck("W1.2 CLI 有 `--gate-tries` 且默认 \"1\"（第 12 条：默认开的要能显式关）",
+       '"--gate-tries"' in _cli2 and 'default="1"' in _cli2)
+    ck("W1.3 ⛔ `tries` 从 cfg 读（不是被写成常数 ⇒ 开关不是装饰）",
+       'getattr(self.cfg, "gate_tries", 1)' in src and "max(1, int(" in src)
+    ck("W1.4 `queue = eligible[:tries]`（按发展集排序依次试，H1 不动）",
+       "eligible[:tries]" in src)
+
+    print("\n== W2 组：「它有没有用武之地」必须永远可从账本读出 ==")
+    #: queue_size=1 就是「这一轮没有第二个候选可试」⇒ 没有它，
+    #: 「gate-tries 无用」与「gate-tries 没接线」在外部无法区分。
+    ck("W2.1 `gen.probe` 带 `queue_size`", "queue_size" in src)
+    ck("W2.2 `gen.probe` 带 `try_index`", "try_index" in src)
+    ck("W2.3 ⛔ 准入闸与 eligible 是**两套**判据（读数，非断言）："
+       "F 组实测 gate.result 3 条 / 轮，但 queue_size=1~2 ⇒ "
+       "过了 gate ≠ 进了泛化闸队列。别拿 gate.result 数当队列长度",
+       True, "见 docs/CEILING_2026-10-18.md §项5")
+
     print()
     print("=" * 60)
     if FAILS:

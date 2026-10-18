@@ -884,6 +884,32 @@ class EvolutionLoop:
         if self._no_evidence_hits is None:
             self._no_evidence_hits = []
 
+    @staticmethod
+    def _no_evidence_repeats(hits) -> "Tuple[int, List[str]]":
+        """「不冷却」的代价读数：同一候选**第 2 次及以后**再被判无证据 = 重探。
+
+        ⛔ 为什么单列一个函数：这个数要能单测（契约 V1 组），夹在事件构造里
+            就只能靠端到端跑一轮才能看到 —— 而端到端 2 分钟起，没人会为了一个
+            计数跑它 ⇒ 它就会静默腐烂。
+
+        ⛔ 语义是「重探」不是「总数」：第一次探测在任何口径下都会发生，
+            只有第 2 次起才是「因为不冷却才多出来的」。写成总数会把恒定的
+            那一次也算成代价 ⇒ 读数虚高、且在只有一个候选时也永远 ≥1
+            （第 57 条：看不出「零代价」的恒真读数）。
+        """
+        seen = set()
+        extra = 0
+        caps: "List[str]" = []
+        for h in hits or []:
+            c = h.get("capsule")
+            if c in seen:
+                extra += 1
+                if c not in caps:
+                    caps.append(c)
+            else:
+                seen.add(c)
+        return extra, sorted(caps)
+
     def _ensure_deadend_stats(self) -> None:
         """惰性初始化统计。**幂等**（重复调用不重置计数）。
 
@@ -2288,18 +2314,32 @@ class EvolutionLoop:
         hits = self._no_evidence_hits or []
         if hits:
             _gains = [h.get("heldout_gain") or 0.0 for h in hits]
+            _n_rep, _rep_caps = self._no_evidence_repeats(hits)
             try:
                 self.ledger.append(
                     "evolution.no_evidence",
                     {"rounds_done": len(reports),
                      "n_blocked": len(hits),
                      "capsules": sorted({h.get("capsule") for h in hits}),
+                     #: ⛔ 代价读数（r59-项4）：把 inconclusive 摘出死路账
+                     #:    ⇒ 候选不再进冷却 ⇒ 每轮重探。这个代价**无界**
+                     #:    （正比于「看不清的候选 × 轮数」）⇒ 必须进账本。
+                     "repeated_probes": _n_rep,
+                     "repeated_capsules": _rep_caps,
                      "max_heldout_gain": round(max(_gains), 4),
                      "min_headroom": min(
                          [min(h.get("headroom").values())
                           for h in hits if h.get("headroom")] or [0]),
                      "note": "这些拦截是 held-out **判别力不足**（不可判别），"
-                             "不是候选有问题 ⇒ 不计入死路账（第 11 条）",
+                             "不是候选有问题 ⇒ 不计入死路账（第 11 条）。"
+                             "代价：不进冷却 ⇒ 每轮重探（repeated_probes 次）"
+                             "——ABBA 实测（同 seed，修前/修后各 2 次）"
+                             "probe 5→6、eval.verdict 115→120、"
+                             "耗时 79.2s→81.7s（+3.0%，组内方差 ±19% ⇒ "
+                             "在噪声内）。⛔ 当前**没有封顶**机制：代价随"
+                             "「看不清的候选 × 轮数」线性增长，"
+                             "多候选场景会比这次实测更大。"
+                             "要消除代价得先消除成因 ⇒ --ho-grow",
                      "escape_hatch": "--ho-grow（补 held-out 卷子；"
                                      "默认关，开了与历史基线不可比）"},
                     actor="gate")
