@@ -398,6 +398,203 @@ def main() -> int:
        "过了 gate ≠ 进了泛化闸队列。别拿 gate.result 数当队列长度",
        True, "见 docs/CEILING_2026-10-18.md §项5")
 
+    # ──────────────────────────────────────────────────────
+    #: ── 项 6：`--ho-grow` × `--retry-every` 是否叠加 ──────────────
+    print("\n== X1 组：「用武之地」三读数必须永远可从账本读出（项 6）==")
+    #: ⛔⛔ 第 51 / 72 条：`gain=0` 与「从没被测过」在外部**无法区分**。
+    #:    r59 项 6 实测 J（`--ho-grow --retry-every 2`）与 K（只 `--ho-grow`）
+    #:    **逐字同形**（commit 2/2、revert 0/0、probe 2/2、耗时 94/75s），
+    #:    差点被判成「开关无效」。真相靠三个读数才排出来，**少任何一个都会
+    #:    误判**：
+    #:      ① `retry_every` = 2      ⇒ 开关**接线**了（不是没传进去）；
+    #:      ② `recall` = "ok"        ⇒ 记忆**装了**（不是 no_memory / degraded）；
+    #:      ③ `n_known_history` = 0  ⇒ 失败史为空 ⇒ **零原料**。
+    #:    ⇒ 结论是「**无原料**」，不是「机制失效」。不许据此删除开关。
+    #:    （G 组已覆盖放行逻辑本身，本组补的是**用武之地**这一半。）
+    from aether.embeddings import HashingEmbedder
+    from aether.genome import Harness
+    from aether.ledger import Ledger
+    from aether.memory import MemoryOS
+    from aether.providers import MemoryAwareProposer
+
+    _psrc = (ROOT / "aether" / "providers.py").read_text(encoding="utf-8")
+    ck("X1.1 ① `experience.propose` 带 `retry_every`（证明开关真传到 proposer）",
+       '"retry_every": self.retry_every' in _psrc)
+    ck("X1.2 ② 带 `recall` 三态（ok / degraded / no_memory）",
+       '"recall": recall' in _psrc and "no_memory" in _psrc
+       and "degraded" in _psrc)
+    ck("X1.3 ③ 带 `n_known_history`（失败史条数 = 出口的原料）",
+       '"n_known_history"' in _psrc)
+    ck("X1.4 出口走了几次可读（与 G5 同一条，钉住不回退）",
+       '"probation_released": list(self.probation_released)' in _psrc)
+
+    print("\n== X2 组：反证 —— 这三个读数都不是恒 0 的摆设 ==")
+
+    class _Cap:
+        def __init__(self, name):
+            self.name = name
+
+    class _Stub:
+        """同协议内层提议器：每次只提一个变异（模拟"记不住"的提议器）。"""
+
+        def __init__(self, names=("add_skill",)):
+            self.names = tuple(names)
+
+        def propose(self, weakness, harness, n=3, rejected=None):
+            return [_Cap(x) for x in self.names[:n]]
+
+        def diagnostics(self):
+            return {"name": "stub"}
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        led = Ledger(tdp / "led.jsonl")
+        mem, _ = MemoryOS.load(tdp / "mem.json", HashingEmbedder(dim=256),
+                               min_content_len=0)
+        w = {"kind": "missing_skill", "topic": "t"}
+        p = MemoryAwareProposer(_Stub(), mem, ledger=led, retry_every=2)
+        p.propose(w, Harness())          #: 此时还没有失败史
+        e0 = [e for e in led.events() if e.kind == "experience.propose"][-1]
+        ck("X2.1 ⛔ 无失败史 ⇒ n_known_history == 0（与生产实测同形）",
+           e0.payload.get("n_known_history") == 0,
+           str(e0.payload.get("n_known_history")))
+        ck("X2.2 此时 recall == 'ok'（记忆装了，只是没料 ⇒ 不是没接线）",
+           e0.payload.get("recall") == "ok", str(e0.payload.get("recall")))
+        #: 注入一条失败史 ⇒ 原料 > 0 ⇒ 读数必须跟着动（否则它是死的）
+        p.remember(w, "add_skill", reason="overfit")
+        p.propose(w, Harness())
+        e1 = [e for e in led.events() if e.kind == "experience.propose"][-1]
+        ck("X2.3 ⛔ 反证：有失败史 ⇒ n_known_history > 0（读数不是恒 0）",
+           (e1.payload.get("n_known_history") or 0) > 0,
+           str(e1.payload.get("n_known_history")))
+        ck("X2.4 反证：同一批里 n_skipped 也从 0 变 > 0（出口有对象了）",
+           (e1.payload.get("n_skipped") or 0) > 0,
+           str(e1.payload.get("n_skipped")))
+        #: 三态里的第二态：没装记忆 ⇒ 必须是 no_memory，不许冒充 ok
+        led2 = Ledger(tdp / "led2.jsonl")
+        p2 = MemoryAwareProposer(_Stub(), None, ledger=led2)
+        p2.propose(w, Harness())
+        e2 = [e for e in led2.events() if e.kind == "experience.propose"][-1]
+        ck("X2.5 ⛔ 反证：memory=None ⇒ recall == 'no_memory'"
+           "（与『装了但没料』可分辨，第 10 条）",
+           e2.payload.get("recall") == "no_memory",
+           str(e2.payload.get("recall")))
+
+    print("\n== X3 组：`--ho-grow` 与 `--retry-every` 正交（机器验证）==")
+    _gsrc = (ROOT / "aether" / "generalization.py").read_text(encoding="utf-8")
+    ck("X3.1 `retry_every` 不在泛化闸里（它管 proposer 过滤，不管考卷）",
+       "retry_every" not in _gsrc)
+    ck("X3.2 `ho_grow` 不在提议器里（它管 held-out 卷子，不管候选）",
+       "ho_grow" not in _psrc)
+    ck("X3.3 ⛔ 反证：确实扫到这两个名字（不是空集恒真，第 57 条）",
+       "ho_grow" in src and "retry_every" in _psrc)
+    ck("X3.4 负结果钉住：项 6 实测 J 与 K 逐字同形（commit 2/2、revert 0/0）"
+       " ⇒ 成因是**零原料**（remembered=0），不是机制失效"
+       " ⇒ 不许据此删开关（第 51 条）",
+       True, "见 docs/CEILING_2026-10-18.md §12")
+
+    # ──────────────────────────────────────────────────────
+    #: ── 项 7：知识层产出空壳 —— 失败原因两处不同源 ────────────────
+    print("\n== Y1 组：失败原因必须**同源**（r59 项 7）==")
+    #: ⛔⛔ 实测因果链（每一步都有数）：
+    #:   `run_round` 的 MINE **只**走 `_runs_from_verdicts`，而它写的是
+    #:   `v.error or ""`（**没有 fallback**）；`evaluate_dev` 写的却是
+    #:   `v.error or "checks_failed:" + 失败检查名`。
+    #:   ⇒ 挖掘侧拿到的 `error` **恒为空** ⇒ `w.evidence` 永不 append
+    #:   ⇒ 知识条目 = `missing_skill / t0：`（**19 字**）⇒ 空壳。
+    #:   生产实测：**111/173（64%）**弱点无证据、28 次摄入里 **23 次空壳**；
+    #:   库里那条空壳 `access_count=1`，而两条有内容的 **1814 / 1602**
+    #:   ⇒ 空知识在事实上从没被用过（写入端"成功"≠ 可用，第 48 条）。
+    ck("Y1.1 存在单一实现 `_verdict_error`（第 13 条）",
+       "def _verdict_error" in src)
+    ck("Y1.2 MINE 侧（`_runs_from_verdicts`）用它，不再写 `v.error or \"\"`",
+       "EvolutionLoop._verdict_error(v)" in src
+       and 'payload={"error": v.error or ""' not in src)
+    ck("Y1.3 落库侧（`evaluate_dev`）也用它（两处同源）",
+       '"error": self._verdict_error(v)' in src)
+    ck("Y1.4 ⛔ 反证：确实扫到两处调用（不是空集恒真，第 57 条）",
+       src.count("_verdict_error(") >= 3,
+       f"出现 {src.count('_verdict_error(')} 次")
+
+    print("\n== Y2 组：`_verdict_error` 的三态行为 ==")
+
+    class _Chk:
+        def __init__(self, name, passed):
+            self.name = name
+            self.passed = passed
+
+    class _V:
+        def __init__(self, error="", checks=()):
+            self.error = error
+            self.checks = tuple(checks)
+
+    _ve = EvolutionLoop._verdict_error
+    ck("Y2.1 有 error ⇒ 原样返回（不覆盖判据层的崩溃信号）",
+       _ve(_V("boom", [_Chk("a", False)])) == "boom")
+    _v2 = _V("", [_Chk("clamp_low", False), _Chk("ok1", True),
+                  _Chk("clamp_mid", False)])
+    ck("Y2.2 error 空 + 有失败检查 ⇒ `checks_failed:` + 失败名（有序）",
+       _ve(_v2) == "checks_failed:clamp_low,clamp_mid", _ve(_v2))
+    ck("Y2.3 error 空 + 全通过 ⇒ \"\"（成功 run 不伪造原因）",
+       _ve(_V("", [_Chk("a", True)])) == "")
+    ck("Y2.4 ⛔ 反证：Y2.2 对「全通过」为假（不是恒真断言）",
+       _ve(_V("", [_Chk("a", True)])) != "checks_failed:a")
+    ck("Y2.5 空 checks ⇒ \"\"（不是 None，下游 join 不炸）",
+       _ve(_V("", [])) == "")
+
+    print("\n== Y3 组：零回归 —— 落库侧与旧口径**逐字相同** ==")
+    #: ⛔ 第 22 条：修复算子是行为改动。落库侧（`evaluate_dev`）的旧写法是
+    #:    `v.error or ("checks_failed:" + ",".join(失败名))`，语义必须与
+    #:    `_verdict_error` 逐字相同 ⇒ 这次改动的**回归面为零**。
+    def _old_way(v):
+        return v.error or ("checks_failed:"
+                           + ",".join(c.name for c in v.checks
+                                      if not c.passed))
+
+    _cases = [_V("boom", [_Chk("a", False)]),
+              _V("", [_Chk("a", False), _Chk("b", True)]),
+              _V("", [_Chk("a", True)]),
+              _V("", []),
+              _V("err", [])]
+    #: ⛔ 语义等价点 = **有失败检查时**（这才是落库侧真正的用途）。
+    #:   「无失败检查」那两个用例新旧**不同** —— 见 Y3.1b，那是本次改动
+    #:    唯一的行为差异，且是有意修掉的噪声，不是回归。
+    _rel = [c for c in _cases if any(not x.passed for x in c.checks)]
+    _same = all(_ve(c) == _old_way(c) for c in _rel)
+    ck("Y3.1 ⛔ 有失败检查时与旧写法**逐字相同**（落库侧语义零变化）",
+       _same,
+       str([(_ve(c), _old_way(c)) for c in _rel if _ve(c) != _old_way(c)]))
+    #: ⛔⛔ 第 22 条：修复算子是行为改动 ⇒ 差异不许藏。旧写法在
+    #:    「error 空 **且** 无失败检查」时会拼出 `"checks_failed:"`
+    #:    （说了失败、却一个检查名都没列 = 纯噪声）；新写法返回 `""`。
+    ck("Y3.1b ⛔ 如实记录唯一行为差异：旧写法产噪声串 `checks_failed:`，"
+       "新写法返回空串（更干净）。该分支下游无人消费"
+       "（MINE 已改走 `_runs_from_verdicts`，store 的 error 不再进挖掘）",
+       _old_way(_V("", [])) == "checks_failed:" and _ve(_V("", [])) == "",
+       f"旧={_old_way(_V('', []))!r} 新={_ve(_V('', []))!r}")
+    ck("Y3.2 ⛔ 反证：差异确实存在过 —— 旧 MINE 口径 `v.error or \"\"` "
+       "对「error 空但有失败检查」会丢掉全部信息",
+       (_V("", [_Chk("a", False)]).error or "") == ""
+       and _ve(_V("", [_Chk("a", False)])) == "checks_failed:a")
+
+    print("\n== Y4 组：修后的实测对照（同 seed，唯一变量 = 本修复）==")
+    #: 同 seed=7 / rounds=6 / max-tasks=12 / dev=textscore / ho=eventflow：
+    #:   弱点无证据   6/6 (100%)  →  0/6 (0%)
+    #:   知识 preview  19 字       →  60 / 44 字
+    #:   commit/revert 1/5         →  1/5（**不变**）
+    #:   裁决序列     generalize + 5×inconclusive → **逐字相同**
+    #:   总事件       231          →  231（不变）
+    ck("Y4.1 修对了：弱点证据从 100% 空 → 0% 空（实测，见 §13）",
+       True, "6/6 → 0/6")
+    ck("Y4.2 ⛔ 没翻车：commit/revert/裁决序列/事件总数全部不变",
+       True, "1/5 → 1/5，裁决逐字相同，231 → 231")
+    ck("Y4.3 ⛔ 诚实残留（不许改闸掩盖）：修后两条真实长度 **63 / 44** 字"
+       "（账本 `preview` 截断显示 60，别拿它当全长），生产 "
+       "`min_content_len=60` ⇒ **1/2 跨过、1/2 仍 `below_min`**（修前 0/2）"
+       " ⇒ 修的是「有没有证据」，不是「够不够长」（降闸 = 改判据，第 34 条）",
+       True, "残留如实记录，出路见 §13")
+
     print()
     print("=" * 60)
     if FAILS:

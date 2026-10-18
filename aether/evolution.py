@@ -739,9 +739,9 @@ class EvolutionLoop:
                     "topic": t.spec.get("topic", ""),
                     # ⛔ 失败**原因**必须进 payload：弱点挖掘靠它归类，
                     # 只有 reward=0 而没有原因 ⇒ 只能落到"保守默认"类别。
-                    "error": v.error or ("checks_failed:"
-                                         + ",".join(c.name for c in v.checks
-                                                    if not c.passed)),
+                    # ⛔ 与 `_runs_from_verdicts` **同源**（r59）：以前两处
+                    #    各写一份，后者漏了 fallback ⇒ 弱点恒无证据。
+                    "error": self._verdict_error(v),
                 })
             self._runs.append(row)
             if self.store is not None:
@@ -795,6 +795,38 @@ class EvolutionLoop:
                 for lv in set(base) | set(cand)}
 
     @staticmethod
+    def _verdict_error(v: "Verdict") -> str:
+        """失败原因的**唯一**构造口径（第 13 条：单一实现）。
+
+        ⛔⛔ r59 实测：两处曾经**不同源**，后果是知识层整条链产出空壳 ——
+
+          · `evaluate_dev`：`v.error or "checks_failed:" + 失败检查名`
+          · `_runs_from_verdicts`：`v.error or ""`（**没有 fallback**）
+
+        而 `run_round` 的 MINE 步骤**只**走后者（1630 行）⇒ 弱点挖掘拿到
+        的 `error` **恒为空** ⇒ `w.evidence` 永不 append ⇒ 知识条目退化成
+        `missing_skill / t0：`（**19 字**，`< min_content_len 60`）⇒ 加载
+        侧拒载、检索侧无人用。生产实测：**111/173（64%）**的弱点无证据、
+        28 次 `knowledge.ingested` 里 **23 次是空壳**；库里 3 条 learner
+        条目中，唯一那条空壳的 `access_count=1`，而两条有内容的却是
+        **1814 / 1602** —— 空知识在事实上从没被用过。
+
+        ⛔ 取证（r59，同 seed）：30 条 run payload 的 `error` **100% 为空**，
+        但 15 条失败裁决的 `checks` 里**全都有**失败项（如
+        `["clamp_low","clamp_high","clamp_mid"]`）⇒ fallback 能补 **15/15**。
+        另外 15 条 `all_pass` 是 `passed=true` 的 run，不进弱点挖掘。
+
+        ⛔ 为什么不用 `v.error` 就算了：判据层**只在崩溃/异常时**填
+        `error`，普通「检查没过」不填 ⇒ 只读 `v.error` 等于只收崩溃信号，
+        而进化中最常见的失败恰恰是「跑了、但检查没过」。
+        """
+        if getattr(v, "error", ""):
+            return v.error
+        failed = ",".join(c.name for c in (getattr(v, "checks", ()) or ())
+                          if not getattr(c, "passed", True))
+        return ("checks_failed:" + failed) if failed else ""
+
+    @staticmethod
     def _runs_from_verdicts(vs: List[Verdict], h: Harness) -> List[RunRow]:
         """把本轮发展集判定包装成 RunRow，供 `mine_weaknesses` 使用。
 
@@ -812,8 +844,12 @@ class EvolutionLoop:
                 task_id=str(v.evidence.get("task_id") or topic or f"t{i}"),
                 reward=(1.0 if v.passed else 0.0), passed=bool(v.passed),
                 gate_ok=True,
-                payload={"error": v.error or "", "topic": topic,
-                         "evidence": v.evidence}))
+                #: ⛔ `error` 走**同源**的 `_verdict_error`（r59）：这里原来
+                #:    写 `v.error or ""` ⇒ 100% 为空 ⇒ 挖出来的弱点没有证据
+                #:    ⇒ 知识条目是 19 字空壳（`min_content_len=60`）⇒
+                #:    加载侧拒载、检索侧零引用。与 `evaluate_dev` 同一函数。
+                payload={"error": EvolutionLoop._verdict_error(v),
+                         "topic": topic, "evidence": v.evidence}))
         return out
 
     # ── 死路账：同一候选在同一环境对上被拦了多少次 ──────────────────
