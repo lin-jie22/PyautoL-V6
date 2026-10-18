@@ -836,8 +836,22 @@ class EvolutionLoop:
         from .store import RunRow
         out: List[RunRow] = []
         for i, v in enumerate(vs):
+            #: ⛔ `topic` 原来只找 `topic` / `env`，而判据层填的是
+            #:    **`env_id`**（r59 取证：30 条 evidence 里 `topic`/`env`/
+            #:    `task_id` **100% 缺失**，`env_id` 30/30 存在且全为
+            #:    `textscore`）⇒ topic 恒为空 ⇒ 退化成 task_id ⇒ 再退化成
+            #:    序号 `t0`/`t3` ⇒ 弱点按**任务序号**分桶（每条 n_failed=1），
+            #:    而不是按**环境**分桶。生产实测 173 个弱点里 111 个的 topic
+            #:    就是 `t0`(77)/`t3`(33)/`t7`(1) 这种序号。
+            #:    ⇒ 补 `env_id` 后 topic 恢复成真实环境名（实测 `textscore`），
+            #:      与生产那两条**有内容**的化石知识
+            #:      （`missing_skill / textscore：checks_failed:...`）吻合 ——
+            #:      那两条正是 topic 还没退化时留下的。
+            #:    ⛔ 按环境分桶会让 `n_failed` 变大（多条失败聚到一起）⇒
+            #:      知识条目的 `evidence[:2]` 才有得拼（顺带缓解过短问题）。
             topic = str(v.evidence.get("topic") or
-                        v.evidence.get("env") or "")
+                        v.evidence.get("env") or
+                        v.evidence.get("env_id") or "")
             out.append(RunRow(
                 run_id=f"probe:{h.harness_id}:{i}",
                 harness_id=h.harness_id,

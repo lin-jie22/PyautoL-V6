@@ -595,6 +595,71 @@ def main() -> int:
        " ⇒ 修的是「有没有证据」，不是「够不够长」（降闸 = 改判据，第 34 条）",
        True, "残留如实记录，出路见 §13")
 
+    # ──────────────────────────────────────────────────────
+    #: ── 项 8：topic 读漏 `env_id` ⇒ 弱点按任务序号分桶 ─────────────
+    print("\n== Z1 组：`topic` 必须能取到真实环境名（r59 项 8）==")
+    #: ⛔⛔ 第 24 条**第十二次**命中：代码找 `evidence["topic"]` /
+    #:    `evidence["env"]`，而判据层填的是 **`env_id`** —— 取证 30 条
+    #:    evidence：`topic`/`env`/`task_id` **100% 缺失**，`env_id` 30/30
+    #:    存在且全为 `textscore`。
+    #:    ⇒ topic 恒空 ⇒ 退化 `task_id` ⇒ 再退化序号 `t0`/`t3` ⇒ 弱点按
+    #:    **任务序号**分桶（每桶 n_failed=1）而不是按**环境**分桶。
+    #:    生产 173 个弱点里 111 个的 topic 就是 `t0`(77)/`t3`(33)/`t7`(1)。
+    ck("Z1.1 `topic` 的取值链里补上了 `env_id`",
+       'v.evidence.get("env_id")' in src)
+    ck("Z1.2 ⛔ 原来那两个键（`topic` / `env`）的优先级**没变**"
+       "（只是往后追加，不是替换 ⇒ 已有数据不失配）",
+       'v.evidence.get("topic")' in src and 'v.evidence.get("env")' in src)
+    _hit = {k: src.count(f'v.evidence.get("{k}")')
+            for k in ("topic", "env", "env_id")}
+    ck("Z1.3 ⛔ 反证：三个键各扫到至少一次（不是空集恒真，第 57 条）",
+       all(v >= 1 for v in _hit.values()), str(_hit))
+
+    print("\n== Z2 组：`_runs_from_verdicts` 的 topic 三态 ==")
+
+    class _Vv:
+        def __init__(self, evidence=None, passed=False):
+            self.evidence = dict(evidence or {})
+            self.passed = passed
+            self.checks = ()
+            self.error = ""
+
+    class _H:
+        harness_id = "h-test"
+
+    _rfv = EvolutionLoop._runs_from_verdicts
+    _r1 = _rfv([_Vv({"env_id": "textscore"})], _H())
+    ck("Z2.1 evidence 有 `env_id` ⇒ topic == 该值（真实环境名）",
+       _r1[0].payload["topic"] == "textscore",
+       str(_r1[0].payload["topic"]))
+    _r2 = _rfv([_Vv({"topic": "显式", "env_id": "textscore"})], _H())
+    ck("Z2.2 ⛔ 优先级不变：有 `topic` 时仍以 `topic` 为准",
+       _r2[0].payload["topic"] == "显式", str(_r2[0].payload["topic"]))
+    ck("Z2.3 ⛔ 反证：Z2.1 不是恒真 —— 没有 env_id 时退化成序号 `t0`",
+       _rfv([_Vv({})], _H())[0].payload["topic"] == ""
+       and _rfv([_Vv({})], _H())[0].task_id == "t0",
+       str(_rfv([_Vv({})], _H())[0].task_id))
+    ck("Z2.4 `task_id` 也跟着受益（topic 非空 ⇒ 不再是序号）",
+       _r1[0].task_id == "textscore", str(_r1[0].task_id))
+
+    print("\n== Z3 组：修后实测对照（同 seed，唯一变量 = 本修复）==")
+    #: topic      {'t0':1,'t3':5}  →  {'textscore':6}
+    #: n_failed   {1:6}            →  {2:5, 5:1}（失败按环境聚桶）
+    #: 知识真实长度 63 / 44         →  **106 / 79** ⇒ **2/2 全部 ≥60**
+    #: commit/revert 1/5           →  1/5（**不变**）
+    #: 裁决序列 / 总事件 231        →  逐字相同
+    ck("Z3.1 修对了：topic 从序号 `t0/t3` → 真实环境名 `textscore`",
+       True, "{'t0':1,'t3':5} → {'textscore':6}")
+    ck("Z3.2 ⛔ 强度伴生读数（第 27 条）：不是读数搬家 —— 分桶变粗的"
+       "同时，**知识真实长度 63/44 → 106/79，跨过 60 字闸的从 1/2 变 2/2**",
+       True, "项 7 的残留被本项顺带解决")
+    ck("Z3.3 ⛔ 没翻车：commit/revert 1/5、裁决序列、总事件 231 全部不变",
+       True, "见 §14")
+    ck("Z3.4 ⛔ 形态自证：修后知识条目与生产里那两条**被用了 1600+ 次**的"
+       "化石同形（`missing_skill / textscore：checks_failed:…; …`）"
+       " ⇒ 修复方向被生产数据反向确认",
+       True, "access_count 1814/1602 的那两条就是 topic 还没退化时留下的")
+
     print()
     print("=" * 60)
     if FAILS:
