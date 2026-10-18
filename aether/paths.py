@@ -55,6 +55,13 @@ CHECKPOINT_NAME = "checkpoint.json"
 #: 能力清单的示例文件（UI / 控制台的默认清单）。
 CAPS_EXAMPLE = "capabilities.example.json"
 
+#: 架构基线（r59）。⛔ 刻意**不在 data/ 下**：`data/*.json` 被 `.gitignore`
+#:    排除（运行产物不该提交），而基线是**代码的属性** —— 放进 data/ ⇒
+#:    `git clone` 得到的是「没有基线」的仓库，基线闸从第一天起就不可判别。
+#:    位置仍然只在这里定义一次（第 46 条），实现见 `aether/arch_baseline.py`。
+ARCH_BASELINE_DIRNAME = "scripts"
+ARCH_BASELINE_NAME = "arch_baseline.json"
+
 #: 备份清单：**唯一**被带走的文件（相对 root 的路径，kind）。
 #: ⛔ 与 `backup.BACKUP_TARGETS` 是同一个值（那里直接引用本常量），
 #:    不在两处各写一份 —— 否则"备份了什么"就有了两个答案。
@@ -67,7 +74,9 @@ BACKUP_TARGETS: Tuple[Tuple[str, str], ...] = (
 __all__ = [
     "ROOT", "DATA_DIRNAME", "TASKS_DIRNAME", "BACKUPS_DIRNAME",
     "CONSOLE_DIRNAME", "REA_DIRNAME", "LEDGER_NAME", "DB_NAME",
-    "MEMORY_NAME", "CHECKPOINT_NAME", "CAPS_EXAMPLE", "BACKUP_TARGETS",
+    "MEMORY_NAME", "CHECKPOINT_NAME", "CAPS_EXAMPLE",
+    "ARCH_BASELINE_DIRNAME", "ARCH_BASELINE_NAME",
+    "BACKUP_TARGETS",
     "data_dir", "paths", "flat_name", "BACKUP_FLAT",
 ]
 
@@ -80,6 +89,10 @@ def data_dir(root: Union[str, Path]) -> Path:
 def paths(root: Union[str, Path], *, default_env: str = "textscore"
           ) -> Dict[str, Path]:
     """一次算全所有**已知数据文件**的位置。
+
+    ⛔ `arch_baseline` 是唯一的例外（它不在 data/ 下）：它是**代码的
+       属性**、必须随代码进版本库，见 `ARCH_BASELINE_DIRNAME` 的注释。
+       位置照样在这里定义一次 —— 不放这儿就会有人在别处再拼一遍。
 
     ⛔ 键名是**接口**：`ledger` / `db` / `memory` / `task` / `tasks_root`。
        调用方按键取值，不要自己再拼一遍（拼了就回到收口前的状态）。
@@ -110,6 +123,8 @@ def paths(root: Union[str, Path], *, default_env: str = "textscore"
         "cleanup": r / DATA_DIRNAME / CLEANUP_NAME,
         #: 续跑进度（派生量，不是事实源）。默认开 ⇒ 位置必须有唯一定义。
         "checkpoint": r / DATA_DIRNAME / CHECKPOINT_NAME,
+        #: 架构基线（代码属性，随代码进版本库 —— 唯一的非 data/ 键）。
+        "arch_baseline": r / ARCH_BASELINE_DIRNAME / ARCH_BASELINE_NAME,
     }
 
 

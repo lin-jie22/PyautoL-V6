@@ -315,10 +315,55 @@ def _check_judge(root: Path, ctx: Dict[str, Any]) -> Check:
     return Check("judge.boundary", OK, detail)
 
 
+def _check_boulders(root: Path, ctx: Dict[str, Any]) -> Check:
+    """架构是否在**恶化**（r59）。
+
+    ⛔ 为什么这项必须进 doctor：r58 把「拆巨石」降级成「用读数盯着」，
+       而「盯」这件事**没有消费点就没人做**（第 7 条）。基线文件躺在
+       `scripts/` 里，只有医生每次体检念一遍，它才会真的被走到。
+
+    ⛔ 三态，且 `skipped` 的语义很讲究：
+       · `worse`   ⇒ fail，action 指名道姓列出恶化项；
+       · `ok`      ⇒ 与基线相比确实没恶化；
+       · `skipped` ⇒ **没有可用基线**。⛔ 这里绝不能报 ok：「没量过」和
+                     「量过没问题」长得一样 ⇒ 这项从装上起就是恒绿的装饰
+                     （第 57 条：空集合当分母最会撒谎）。
+
+    ⛔ 判的是**恶化**，不是「有没有巨石」。现状有 6 个巨函数、5 条越界，
+       判「有巨石」会恒红 ⇒ 恒红的闸三天内就会被人无视（第 9 条）。
+    """
+    from . import arch_baseline as ab
+    try:
+        d, cur = ab.compare(root)
+    except Exception as e:      # noqa: BLE001 —— 体检不得因一项崩掉
+        return Check("arch.boulders", FAIL,
+                     f"基线闸自身抛异常：{type(e).__name__}: {e}",
+                     "这是 doctor 或 arch_baseline 的 bug，请报告")
+    n_big, n_over = len(cur["big_fn"]), len(cur["over"])
+    fact = (f"实测 {len(cur['modules'])} 模块 / {n_big} 个"
+            f"≥{ab.BIG_FN_LINES} 行函数 / {n_over} 条越界")
+    if d["state"] == ab.STATE_WORSE:
+        return Check("arch.boulders", FAIL,
+                     f"{fact}；相比基线恶化 {d['n_worse']} 项：{ab.render(d)}",
+                     "要么拆掉它（尤其是新增项），要么确认这是有意的 ⇒ "
+                     "`python3 scripts/arch_scan.py --write-baseline "
+                     "--baseline-note \"原因\"`（吃掉恶化会留痕进 acknowledged）")
+    if d["state"] == ab.STATE_UNKNOWN:
+        return Check("arch.boulders", SKIPPED,
+                     f"{fact}；{d.get('reason', '基线不可判别')}",
+                     "跑 `python3 scripts/arch_scan.py --write-baseline` "
+                     "建基线（之后每次体检都比一次）",
+                     "no_baseline")
+    ack = d.get("n_acknowledged", 0)
+    return Check("arch.boulders", OK,
+                 f"{fact}；{ab.render(d)}"
+                 + (f"（历史上被人工接受过的恶化：{ack} 次）" if ack else ""))
+
+
 CHECKS: List[Callable[[Path, Dict[str, Any]], Check]] = [
     _check_ledger, _check_provenance, _check_judge, _check_projection,
     _check_memory,
-    _check_backup, _check_caps, _check_writable,
+    _check_backup, _check_caps, _check_writable, _check_boulders,
 ]
 
 

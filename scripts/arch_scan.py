@@ -64,6 +64,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 SKIP_DIRS = {".git", "__pycache__", ".venv", "node_modules", "backups", "console"}
 
+from aether import arch_baseline as _ab      # noqa: E402  （F 段与基线闸同源）
+
 #: evolve 之外的**独立入口**：它们的模块在 evolve 里 0% 是正常的，
 #: 不该被报成"可疑死代码"（把它们点名，是为了不让"0%"被读成"有问题"）。
 OTHER_ENTRIES = {
@@ -86,11 +88,7 @@ OTHER_ENTRIES = {
 # A · 依赖图
 # ─────────────────────────────────────────────────────────────
 def modname_of(p: Path, base: Path = ROOT) -> str:
-    rel = p.relative_to(base).with_suffix("")
-    parts = list(rel.parts)
-    if parts[-1] == "__init__":
-        parts = parts[:-1]
-    return ".".join(parts)
+    return _ab.modname_of(p, base)      # 唯一实现见 aether/arch_baseline.py
 
 
 def collect_files(extra_dir: Path | None = None) -> list:
@@ -105,42 +103,13 @@ def collect_files(extra_dir: Path | None = None) -> list:
 
 
 def build_graph(files: list, base: Path = ROOT):
-    """解析 import，产出 nodes / 内部边。相对导入按**所在包**展开（不是留成 '.'）。"""
-    nodes, edges = {}, collections.Counter()
-    for p in files:
-        m = modname_of(p, base)
-        src = p.read_text(encoding="utf-8", errors="replace")
-        try:
-            rel = str(p.relative_to(base))
-        except ValueError:
-            rel = str(p)
-        nodes[m] = dict(path=rel, lines=src.count("\n") + 1)
-        try:
-            tree = ast.parse(src)
-        except SyntaxError:
-            continue
-        for n in ast.walk(tree):
-            if isinstance(n, ast.ImportFrom):
-                #: ⛔ 别叫 `base`：它会被当成函数参数 `base` 的重新绑定，
-                #:    第二个文件起 `p.relative_to(base)` 就用了上一次的相对
-                #:    包名 ⇒ 报 "not in the subpath of '.'"（实测踩到）。
-                pkg = ".".join(m.split(".")[:-1]) if n.level else ""
-                if n.level:
-                    tgt = ".".join(x for x in (pkg, n.module or "") if x)
-                    if n.module:
-                        edges[(m, tgt)] += 1
-                    else:
-                        for a in n.names:          # `from . import a, b`
-                            edges[(m, f"{tgt}.{a.name}" if tgt else a.name)] += 1
-                elif n.module:
-                    edges[(m, n.module)] += 1
-            elif isinstance(n, ast.Import):
-                for a in n.names:
-                    edges[(m, a.name)] += 1
-    real = set(nodes)
-    inner = collections.Counter({(s, d): c for (s, d), c in edges.items()
-                                 if s in real and d in real and s != d})
-    return nodes, inner
+    """⛔ 唯一实现已搬到 `aether/arch_baseline.py`（r59）。
+
+    搬的原因：F 段读数与基线闸必须是**同一个量具**。留两份 ⇒ 迟早出现
+    「脚本说 6 个巨函数、体检说 5 个」，而没人知道该信谁（第 13 条）。
+    这里只做转发，保持脚本侧调用点不变。
+    """
+    return _ab.build_graph(files, base)
 
 
 def report_graph(nodes, inner) -> dict:
@@ -432,65 +401,65 @@ def declared_events(files) -> dict:
             and k not in NOT_EVENTS}
 
 
-#: 判据层：入口**不该**直接依赖这些（依赖了 ⇒ 入口事实上在当编排层用）。
-#: ⛔ 这是**读数不是闸**：现状 cli 就依赖其中几个（809 行的 `cmd_evolve`
-#:    是历史产物），判红会恒红。先让它每次体检可见，恶化时一眼看得出。
-VERDICT_LAYERS = ("verifier", "judge", "nongression", "generalization",
-                  "genome", "environment")
-ENTRY_LAYERS = ("cli", "serve", "ui", "entry")
+#: ⛔ 判据层 / 入口层的名单**只有一份**，在 `aether/arch_baseline.py`
+#:    （F 段读数与基线闸共用一个量具，见那里的注释）。
+VERDICT_LAYERS = _ab.VERDICT_LAYERS
+ENTRY_LAYERS = _ab.ENTRY_LAYERS
+BIG_FN_LINES = _ab.BIG_FN_LINES
 
 
-def report_boulders(files, nodes, inner, pkg: str = "aether") -> dict:
-    """F · 巨石与分层越界（r58 新增）。
+def report_boulders(files, nodes, inner, pkg: str = "aether",
+                    root: Path | None = None) -> dict:
+    """F · 巨石与分层越界（r58 读数 + r59 基线闸）。
 
-    ⛔ 为什么是读数不是闸：P1-1 建议"拆两块巨石"，但 r58 取证发现
+    ⛔ 为什么不拆：P1-1 建议"拆两块巨石"，但 r58 取证发现
        · `serve` **不** import `cmd_evolve` ⇒ 没有"第二份编排"这个风险；
-       · 剩下的只是 `cmd_evolve` 809 行 —— **没有判据能证明拆了会变强**，
+       · 剩下的只是 `cmd_evolve` 807 行 —— **没有判据能证明拆了会变强**，
          而拆它的回归面是最大的那一片（它扇出 21 个模块）。
-       ⇒ 处置：不重构，改成**每次体检都看得见的读数**，并在 `--self-test`
-         里用反证保证这个读数不会静默失效。
+
+    ⛔ r59 补上的那一块：**读数自己不会记住上一次是多少**。
+       r58 说"新增一条就是警报"，可机器不落基线 ⇒ 只有人眼 diff 才看得
+       出来 ⇒ 那句话是空话。现在每次体检都会跟 `scripts/arch_baseline.json`
+       比一次，恶化就报警（并且 `--check-baseline` 会退出非 0）。
     """
-    big_mod, big_fn = [], []
-    for p in files:
-        #: ⛔ 被测包是**参数**：反证组用的是人造包 `pkg`，写死 "aether"
-        #:    ⇒ 反证现场一个函数都扫不到 ⇒ 读数恒 0（第 24 条同形病）。
-        if p.parent.name != pkg:
-            continue
-        try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
-        except SyntaxError:
-            continue
-        lines = p.read_text(encoding="utf-8", errors="replace").count("\n") + 1
-        big_mod.append((lines, p.name))
-        for n in tree.body:
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                span = (n.end_lineno or n.lineno) - n.lineno + 1
-                if span >= 150:
-                    big_fn.append((span, f"{p.name}:{n.name}"))
-    over = []
-    adj = collections.defaultdict(set)
-    for (s, d) in inner:
-        adj[s].add(d)
-    for e in ENTRY_LAYERS:
-        mod = f"{pkg}.{e}"
-        for v in VERDICT_LAYERS:
-            if f"{pkg}.{v}" in adj.get(mod, ()):
-                over.append(f"{e} → {v}")
+    m = _ab.measure(files, inner, pkg=pkg)
+    big_mod = sorted(((v, k) for k, v in m["modules"].items()), reverse=True)
+    big_fn = sorted(((v, k) for k, v in m["big_fn"].items()), reverse=True)
+    over = m["over"]
     print("\n" + "=" * 74)
-    print("F · 巨石与分层越界（读数，不是闸）")
+    print("F · 巨石与分层越界（读数 + 基线闸）")
     print("=" * 74)
-    print("  -- aether 最大的 5 个模块 --")
-    for lines, name in sorted(big_mod, reverse=True)[:5]:
+    print(f"  -- {pkg} 最大的 5 个模块 --")
+    for lines, name in big_mod[:5]:
         print(f"    {lines:5d} 行  {name}")
-    print(f"\n  -- 长度 ≥150 行的函数（{len(big_fn)} 个）--")
-    for span, name in sorted(big_fn, reverse=True)[:8]:
+    print(f"\n  -- 长度 ≥{BIG_FN_LINES} 行的函数（{len(big_fn)} 个）--")
+    for span, name in big_fn[:8]:
         print(f"    {span:5d} 行  {name}")
     print(f"\n  -- 入口层直接依赖判据层（{len(over)} 条）--")
     for o in over:
         print(f"    {o}")
-    print("\n  ⛔ 这些是**读数**：现状已越界，判红会恒红 ⇒ 只报数不裁决。")
-    print("     真正要防的是**恶化**：新增一条就说明有人又在入口里写编排。")
-    return {"big_fn": big_fn, "over": over, "big_mod": big_mod}
+
+    d = None
+    if pkg == "aether" and root is not None:
+        bp = _ab.baseline_path(root)
+        try:
+            base = _ab.read(bp)
+        except _ab.BaselineError as e:
+            base = None
+            print(f"\n  -- 基线 --\n    ⛔ {e}")
+        d = _ab.diff(base, m)
+        print(f"\n  -- 与基线比（{bp.name}）--")
+        print(f"    {_ab.render(d)}")
+        if d["shrunk"]:
+            for s in d["shrunk"][:4]:
+                print(f"      变小：{s}")
+        if d.get("n_acknowledged"):
+            print(f"    （历史上被人工接受过的恶化：{d['n_acknowledged']} 次）")
+        if d["state"] == _ab.STATE_UNKNOWN:
+            print("    ⛔ 不可判别 ≠ 没恶化。要开闸："
+                  "`python3 scripts/arch_scan.py --write-baseline`")
+    return {"big_fn": big_fn, "over": over, "big_mod": big_mod, "diff": d,
+            "measure": m}
 
 
 def report_zero_events(files, ledger_path: Path, prod_only: bool = True) -> dict:
@@ -554,10 +523,47 @@ def self_test() -> int:
     files_b = collect_files(tmp)
     nb, ib = build_graph(files_b, tmp)
     fb = report_boulders(files_b, nb, ib, pkg="pkg")
-    hit_big = any(span >= 150 and "huge" in name for span, name in fb["big_fn"])
+    hit_big = any(span >= BIG_FN_LINES and "huge" in name
+                  for span, name in fb["big_fn"])
     print(f"  [5] ≥150 行的函数必须被点名（巨石读数）… "
           f"{'OK' if hit_big else '❌ 没抓到'}")
     ok &= hit_big
+
+    #: ── 反证 [6]~[9]：r59 新增的**基线闸**自己必须有牙 ──────────
+    #: ⛔ 只测「能不能抓到恶化」是不够的 —— 一个恒红的闸也抓得到。
+    #:    必须同时证明：① 没变化时它不红（[6]）；② 没基线时它不装绿（[8]）。
+    bp = _ab.baseline_path(tmp)
+    cur1 = fb["measure"]
+    _ab.write(bp, cur1, note="反证基线")
+    d_same = _ab.diff(_ab.read(bp), cur1)
+    ok6 = d_same["state"] == _ab.STATE_OK
+    print(f"  [6] 现状=基线 ⇒ 必须 ok（防恒红）… "
+          f"{'OK' if ok6 else '❌ 恒红了（闸会立刻被无视）'}")
+    ok &= ok6
+
+    (tmp / "pkg" / "boulder2.py").write_text(
+        "def huge2(a):\n" + "".join(f"    y{i} = {i}\n" for i in range(220))
+        + "    return y0\n", encoding="utf-8")
+    fc = collect_files(tmp)
+    _nc, ic = build_graph(fc, tmp)
+    cur2 = _ab.measure(fc, ic, pkg="pkg")
+    d2 = _ab.diff(_ab.read(bp), cur2)
+    ok7 = (d2["state"] == _ab.STATE_WORSE
+           and any("huge2" in s for s in d2["new_big_fn"]))
+    print(f"  [7] 新增一个 220 行函数 ⇒ 必须 worse … "
+          f"{'OK' if ok7 else '❌ 没抓到（闸是装饰）'}")
+    ok &= ok7
+
+    ok8 = _ab.diff(None, cur2)["state"] == _ab.STATE_UNKNOWN
+    print(f"  [8] 没有基线 ⇒ 必须 unknown（不是 ok）… "
+          f"{'OK' if ok8 else '❌ 没量过却装绿（第 57 条）'}")
+    ok &= ok8
+
+    obj9 = _ab.write(bp, cur2, note="反证：接受这次恶化", prev=_ab.read(bp))
+    ok9 = obj9["n_acknowledged"] == 1
+    print(f"  [9] 更新基线吃掉恶化 ⇒ 必须留痕 … "
+          f"{'OK' if ok9 else '❌ 洗白没痕迹'}")
+    ok &= ok9
 
     (tmp / "pkg" / "main.py").write_text(
         "class P:\n"
@@ -608,6 +614,12 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="V6 架构体检（依赖 / 可达 / 零次事件）")
     ap.add_argument("--no-run", action="store_true", help="只做静态 A/B/D，不跑 evolve")
     ap.add_argument("--self-test", action="store_true", help="只跑反证组")
+    ap.add_argument("--write-baseline", action="store_true",
+                    help="把当前 F 段读数落为基线（吃掉恶化会留痕）")
+    ap.add_argument("--check-baseline", action="store_true",
+                    help="只比基线：恶化 ⇒ 退出码 1（给 CI 用）")
+    ap.add_argument("--baseline-note", default="",
+                    help="写基线时的原因（进 acknowledged 留痕）")
     ap.add_argument("--ledger", default=str(ROOT / "data" / "ledger.jsonl"))
     ap.add_argument("--rounds", default="2")
     ap.add_argument("--max-tasks", default="12")
@@ -617,14 +629,61 @@ def main(argv=None) -> int:
         return self_test()
 
     files = collect_files()
-    nodes, inner = build_graph(files)
+    nodes, inner = build_graph(files, ROOT)
+
+    if a.check_baseline:
+        return _baseline_gate(ROOT, a.baseline_note)
+
+    if a.write_baseline:
+        return _baseline_write(files, inner, ROOT, a.baseline_note)
+
     g = report_graph(nodes, inner)
     report_reach(nodes, g["adj"])
     if not a.no_run:
         run_cover(int(a.rounds), a.max_tasks)
     report_zero_events(files, Path(a.ledger))
-    report_boulders(files, nodes, inner)
+    report_boulders(files, nodes, inner, root=ROOT)
     return 0
+
+
+def _baseline_write(files, inner, root: Path, note: str) -> int:
+    """落基线。⛔ 吃掉恶化会被写进 `acknowledged`（只增不删）。"""
+    cur = _ab.measure(files, inner, pkg="aether")
+    bp = _ab.baseline_path(root)
+    try:
+        prev = _ab.read(bp)
+        acked = json.loads(bp.read_text(encoding="utf-8")).get("acknowledged")
+    except (_ab.BaselineError, OSError, ValueError):
+        prev, acked = None, None
+    d = _ab.diff(prev, cur)
+    obj = _ab.write(bp, cur, note=note, prev=prev, acked=acked)
+    print(f"  基线已写入 {bp}")
+    print(f"    {len(cur['modules'])} 个模块 / {len(cur['big_fn'])} 个巨函数"
+          f" / {len(cur['over'])} 条越界")
+    if d["state"] == _ab.STATE_WORSE:
+        #: ⛔ 不许静默洗白：吃掉了什么必须当场念一遍，且已进留痕。
+        print(f"  ⛔ 本次更新吃掉了 {d['n_worse']} 项恶化（已进 acknowledged）：")
+        for k in ("new_big_fn", "new_over", "grown_fn", "grown_mod"):
+            for s in d[k]:
+                print(f"      {k}: {s}")
+    elif d["state"] == _ab.STATE_UNKNOWN:
+        print(f"  （此前没有可用基线：{d['reason']}）")
+    print(f"  acknowledged 累计 {obj['n_acknowledged']} 次")
+    return 0
+
+
+def _baseline_gate(root: Path, note: str) -> int:
+    """CI 用：只比基线。三态 ⇒ 退出码分开（不可判别 ≠ 通过）。"""
+    d, cur = _ab.compare(root)
+    print("=" * 74)
+    print("基线闸：架构是否比上次记录的更差")
+    print("=" * 74)
+    print(f"  基线：{d.get('baseline_path', '?')}")
+    print(f"  结果：{_ab.render(d)}")
+    if d["state"] == _ab.STATE_UNKNOWN:
+        print(f"  ⛔ 不可判别 ⇒ 退出码 2（不是 0：没量过 ≠ 没问题）")
+        return 2
+    return 1 if d["state"] == _ab.STATE_WORSE else 0
 
 
 if __name__ == "__main__":
