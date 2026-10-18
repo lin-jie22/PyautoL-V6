@@ -493,6 +493,9 @@ class EvolutionLoop:
     """
     _deadend_cache: Optional[Dict[str, Any]] = None
     _deadend_stats: Optional[Dict[str, Any]] = None
+    #: ⛔ 类级兜底（同上）：本次运行里「因判据无从判别而拦下」的探测。
+    #:    它是**运行级**读数，与跨运行的死路账刻意分开（第 16 条）。
+    _no_evidence_hits: Optional[list] = None
     #: ⛔ 类级兜底（与 `_deadend_cache` 同形态）：对象可能经 `__new__` /
     #:    pickle 构造，拿不到 `__init__` 的赋值 ⇒ 访问 `self.budget` 会
     #:    AttributeError。默认 None = **不限**（保持旧行为与旧基线可比）。
@@ -814,6 +817,27 @@ class EvolutionLoop:
         return out
 
     # ── 死路账：同一候选在同一环境对上被拦了多少次 ──────────────────
+    #: ⛔⛔ **不可判别的裁决**（第 11 条：不可判别 ≠ 有罪）。
+    #:
+    #:    `inconclusive` 的语义是「这套 held-out 对这道题**无从判别**」——
+    #:    它是**机器的**判别力问题，不是**候选的**品行问题。把它计进死路
+    #:    streak ⇒ 「因为看不清，所以判它有罪」。
+    #:
+    #:    ⛔ r59 实测（seed=7 / 4 环境 / depth=1 / rounds=6，同一次运行对照）：
+    #:      · 默认口径：`fix_literals` 连得 4 次 `inconclusive`
+    #:        （`headroom={'easy':0,'hard':2}` ⇒ `all_thin` ⇒ 每次都拦），
+    #:        streak=4 ⇒ 判成死路 ⇒ 冷却 ⇒ **晋升成陈述性知识**；
+    #:      · 同一 seed 只开 `--ho-grow`（补 4 条 held-out ⇒ hard 层 2→6）
+    #:        ⇒ 它第 2 轮就 `generalize` 并 commit（advantage **1.7321**）。
+    #:      ⇒ 那 4 次「被拦」**全是误判**：候选从来不是死路，是尺子太短。
+    #:        误判还写进了基因组（`world_facts`）⇒ 跨代继承，换运行也不掉。
+    #:
+    #:    ⛔ 处置：**不计入也不归零**（它不是成功的证据，不该清零别人的
+    #:      账；也不是失败的证据，不该给自己累加）。单独计数 ⇒ 出口可见。
+    #:    ⛔ 判据**没放松**：`overfit` / `partial`（有证据的讨好与挑食）
+    #:      一个字没改，照旧 +1。
+    NO_EVIDENCE_VERDICTS = frozenset({"inconclusive"})
+
     def _deadend_accum(self, ev: Any, streak: Dict[str, int]) -> None:
         """把**一条**事件累加进死路账（增量与全量共用同一份累加逻辑）。
 
@@ -823,7 +847,9 @@ class EvolutionLoop:
 
         ⛔ 累加的是**连续**计数（streak），不是累计总数：
             · `generalize` ⇒ 归零（成功一次就重新给机会）；
-            · 其它 verdict ⇒ +1。
+            · **有证据**的负面裁决（`overfit` / `partial`）⇒ +1；
+            · **不可判别**（`inconclusive`）⇒ **不动**（见 `NO_EVIDENCE_
+              VERDICTS` 的实测）。
           `streak` 是"连续"语义的**充分统计量**：正序流式扫一遍就能维护，
           不需要重放历史，也不需要额外记"曾否成功过"的集合 —— 所以增量
           路径与全量路径在数学上严格等价（不存在"增量算出来的值和全量
@@ -833,13 +859,30 @@ class EvolutionLoop:
             return
         p = ev.payload or {}
         key = f"{p.get('capsule', '')}|{p.get('env_pair', 'unknown')}"
+        v = str(p.get("verdict"))
+        if v in self.NO_EVIDENCE_VERDICTS:
+            #: ⛔ 单独计数（第 16 条）：「因看不清而没判」与「判了没过」
+            #:    是两件事，合并成一个数 ⇒ 出口到底被用了几次永远读不出来。
+            self._ensure_deadend_stats()
+            self._deadend_stats["no_evidence"] = (
+                self._deadend_stats.get("no_evidence", 0) + 1)
+            return
         #: ⛔ 严格匹配 `"generalize"`（不大小写折叠、不把 `partial` 算成功）：
         #:    这是改造前就有的口径，改判据属于**另一件事**，要有自己的交叉
         #:    表。当前口径下 `partial`/`GENERALIZE` 都计入"被拦"（+1）。
-        if str(p.get("verdict")) == "generalize":
+        if v == "generalize":
             streak[key] = 0
         else:
             streak[key] = streak.get(key, 0) + 1
+
+    def _ensure_no_evidence(self) -> None:
+        """惰性初始化「不可判别」名单（与 `_ensure_deadend_stats` 同形态）。
+
+        ⛔ 必须惰性：`__new__` / pickle 构造的对象拿不到 `__init__` 的赋值
+            ⇒ 类级兜底是 `None` ⇒ 直接 `append` 会 AttributeError。
+        """
+        if self._no_evidence_hits is None:
+            self._no_evidence_hits = []
 
     def _ensure_deadend_stats(self) -> None:
         """惰性初始化统计。**幂等**（重复调用不重置计数）。
@@ -904,6 +947,32 @@ class EvolutionLoop:
         return W.summarize(h) if h is not None else {"n": 0, "by_scope": {},
                                                      "keys": {}}
 
+    @staticmethod
+    def _deadend_pair(env_pair: str) -> str:
+        """知识侧的「环境对」表示 —— 必须与**账本侧**同源（r59 项 3）。
+
+        ⛔⛔ 旧写法在这里做了 `env_pair_key(*s.split("|", 1))`（当值里含
+            `|` 时）—— 那是把「**有向**的发展集→held-out 对」当成
+            「**无序**的环境集合」来规范化，语义是错的，而且**会改写 key**：
+
+                env_pair = 'zeta|alpha->ho'      （两个 dev 环境）
+                知识侧 → 'alpha->ho|zeta'        ← 被改写了
+                账本侧 → 'c1|zeta|alpha->ho'     （`_deadend_accum` 用原值）
+
+            ⇒ 同一个 (候选, 环境对) 在两处是**两个 key** ⇒ 「继承的知识
+              优先于本轮派生量」（`_facts_deadend_streak`）会查不到自己刚
+              写进去的东西。r58 把这类现象记成「`env_pair` 取值域漂移」，
+              真机制是**这个规范化**，不是历史值变了。
+
+        ⛔ 为什么敢直接返回原值：`env_pair` 的唯一生产源是
+           `GeneralizationGate.env_pair`（`f"{'|'.join(devs)}->{ho}"`），
+           它**已经是规范形式**（dev 侧 sorted、`->` 定方向）⇒ 再规范化
+           一次只会引入第二种表示。
+        ⛔ 零影响：单 dev 环境（现状，也是生产的全部 15 次运行）时新旧
+           两法**逐字相同** ⇒ 已存的 key 一个都不会失配。
+        """
+        return str(env_pair)
+
     def _facts_deadend_streak(self, h: Harness, capsule: str,
                               env_pair: str) -> int:
         """基因组里是否已记着"这个候选在这套环境对上是死路" ⇒ 返回观测数。
@@ -915,9 +984,7 @@ class EvolutionLoop:
         if h is None:
             return 0
         from . import world_facts as W
-        key = W.fact_key(W.SCOPE_DEADEND, capsule,
-                         W.env_pair_key(*str(env_pair).split("|", 1))
-                         if "|" in str(env_pair) else str(env_pair))
+        key = W.fact_key(W.SCOPE_DEADEND, capsule, self._deadend_pair(env_pair))
         v = W.get(h, key)
         try:
             return int((v or {}).get("observations") or 0)
@@ -936,9 +1003,7 @@ class EvolutionLoop:
            这正是本模块存在的理由：洞察不再是过程性的。
         """
         from . import world_facts as W
-        pair = (W.env_pair_key(*str(env_pair).split("|", 1))
-                if "|" in str(env_pair) else str(env_pair))
-        key = W.fact_key(W.SCOPE_DEADEND, capsule, pair)
+        key = W.fact_key(W.SCOPE_DEADEND, capsule, self._deadend_pair(env_pair))
         obs = [{"key": key, "kind": "deadend", "round_no": round_no}
                for _ in range(max(0, int(streak)))]
         cands = W.promote(obs)
@@ -1860,6 +1925,15 @@ class EvolutionLoop:
                                "blocks": bool(pr.blocks),
                                "dev_gain": round(cand.reward - base_reward, 4),
                                "heldout_gain": round(pr.heldout_gain, 4)})
+                #: ⛔ 本次运行的「因看不清而拦」累计（r59）。
+                #:    它是**运行级**的，不是死路账级的：死路账要跨运行可比，
+                #:    而这条只回答"这一次跑，判别力拖了多少后腿"。
+                if str(pr.verdict) in self.NO_EVIDENCE_VERDICTS:
+                    self._ensure_no_evidence()
+                    self._no_evidence_hits.append({
+                        "round_no": round_no, "capsule": cand.capsule_name,
+                        "headroom": dict(pr.headroom or {}),
+                        "heldout_gain": round(pr.heldout_gain, 4)})
                 if not pr.blocks:
                     passed = cand
                     cand.accepted = True
@@ -2200,6 +2274,37 @@ class EvolutionLoop:
         #:      发现"的机制形态。
         #:    ⇒ 现在它自己产出提案、自己过闸、自己记账：人只剩"执行"这一步。
         self._source_cleanup_pass(reports)
+
+        #: ── r59：判别力不足的**运行级**出口 ──────────────────────────
+        #:    `all_thin`（每层可提升空间都 < 门槛）⇒ `inconclusive` ⇒ 拦。
+        #:    系统早在 r52 就知道这件事、r53 也修好了出路（`--ho-grow`
+        #:    补 held-out 卷子），但出路**默认关** ⇒ 操作者看到的是
+        #:    "连续几轮被拦、最后 saturated"，而**看不到**"是尺子太短"。
+        #:    ⛔ 这里不自动开它（换考卷 ⇒ 与历史不可比，第 33/34 条），
+        #:      只把「有多少增益是被判别力吃掉的」和那条真出路写进账本。
+        #:    ⛔ 第 35b 条：reason 里写的出路，系统必须真有 ⇒ `--ho-grow`
+        #:      是 CLI 上真实存在的开关（r59 实测：开了 commit 1→2、
+        #:      revert 5→0，同一个候选 advantage 1.7321 从"死路"变提交）。
+        hits = self._no_evidence_hits or []
+        if hits:
+            _gains = [h.get("heldout_gain") or 0.0 for h in hits]
+            try:
+                self.ledger.append(
+                    "evolution.no_evidence",
+                    {"rounds_done": len(reports),
+                     "n_blocked": len(hits),
+                     "capsules": sorted({h.get("capsule") for h in hits}),
+                     "max_heldout_gain": round(max(_gains), 4),
+                     "min_headroom": min(
+                         [min(h.get("headroom").values())
+                          for h in hits if h.get("headroom")] or [0]),
+                     "note": "这些拦截是 held-out **判别力不足**（不可判别），"
+                             "不是候选有问题 ⇒ 不计入死路账（第 11 条）",
+                     "escape_hatch": "--ho-grow（补 held-out 卷子；"
+                                     "默认关，开了与历史基线不可比）"},
+                    actor="gate")
+            except Exception:   # noqa: BLE001
+                pass
 
         #: ⛔ 落点要兑现：写了 checkpoint 却没有任何读数 ⇒ "我开了续跑"
         #:    与"续跑真的可用"在外部无法区分（假仪表）。这里记一条事件，

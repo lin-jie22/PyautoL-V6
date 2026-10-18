@@ -488,6 +488,11 @@ def _legacy_binary_deadend(ledger: Any) -> Dict[str, int]:
     return out
 
 
+#: ⛔ oracle 侧**独立表达**的「不可判别」集合（见 `_naive_streak` 的注释：
+#:    照抄生产常量会让对拍失去独立性）。漂移由 `J1b` 断言兜住。
+_ORACLE_NO_EVIDENCE = frozenset({"inconclusive"})
+
+
 def _naive_streak(ledger: Any) -> Dict[str, int]:
     """**朴素"连续"实现** —— 当 oracle 用，不参与生产。
 
@@ -512,7 +517,17 @@ def _naive_streak(ledger: Any) -> Dict[str, int]:
         key = f"{p.get('capsule', '')}|{p.get('env_pair', 'unknown')}"
         if key in stopped:
             continue
-        if str(p.get("verdict")) == "generalize":
+        v = str(p.get("verdict"))
+        #: ⛔ r59：**不可判别**的裁决**不参与**这条账（第 11 条：不可判别
+        #:    ≠ 有罪）。倒序回看时它相当于**这条事件不存在** ⇒ 跳过继续
+        #:   往前数（生产实现是"不动 streak"，两者等价）。
+        #:   ⛔ 这里**刻意硬编码**而不是 import `NO_EVIDENCE_VERDICTS`：
+        #:      oracle 只能照抄**定义**，照抄被测对象的常量就失去了独立性
+        #:      ⇒ 改生产常量时两边一起错、对拍恒绿。独立性由下面的
+        #:      J1b 断言（两边集合必须相等）来兜住漂移。
+        if v in _ORACLE_NO_EVIDENCE:
+            continue
+        if v == "generalize":
             #: ⛔⛔ **停止，但不要清零**！倒序已经数到的那 k 条"末尾连续
             #:    被拦"是真实存在的：序列 `[G, 拦, 拦]` 的连续数是 **2**，
             #:    不是 0。写成 `out[key] = 0`（照抄旧二元实现的写法）就把
@@ -662,6 +677,32 @@ def group_i() -> None:
     ck("J1 随机对拍 40 组：与**独立算法**（倒序回看）逐 key 相等"
        "（连续语义的正序累加实现）",
        bad == 0, f"{bad} 组不一致")
+
+    #: ⛔ J1b：oracle 硬编码了「不可判别」集合以保持独立性，那就必须有一条
+    #:    断言防止它和生产常量**各自漂移**（否则 J1 会在两边一起改错时恒绿）。
+    from aether.evolution import EvolutionLoop as _EL
+    ck("J1b oracle 的「不可判别」集合与生产常量**逐字相同**（防各自漂移）",
+       set(_ORACLE_NO_EVIDENCE) == set(_EL.NO_EVIDENCE_VERDICTS),
+       f"oracle={sorted(_ORACLE_NO_EVIDENCE)} "
+       f"生产={sorted(_EL.NO_EVIDENCE_VERDICTS)}")
+    #: ⛔ 对拍组里**必须**真的出现 inconclusive，否则 J1 是在对拍一个
+    #:   永远不触发的分支（第 100 条：判据集与变异空间要相交）。
+    ck("J1c 对拍用的 verdict 池里含 inconclusive（否则 J1 恒真）",
+       "inconclusive" in verdicts, f"{verdicts}")
+    #: ⛔ 补一条**定向**的：不可判别不许打断连续（它是"没判"，不是成功）。
+    def _streak_with(seq):
+        with tempfile.TemporaryDirectory() as td:
+            led = Ledger(Path(td) / "l.jsonl")
+            for v in seq:
+                led.append("gen.probe", {"capsule": "c", "env_pair": "p",
+                                         "verdict": v})
+            return new_deadend(led).get("c|p", "MISSING")
+    ck("J1d [拦,不可判别,拦] ⇒ 2（不可判别不是成功，不许清零别人的账）",
+       _streak_with(("blocked", "inconclusive", "blocked")) == 2,
+       f"实得 {_streak_with(('blocked','inconclusive','blocked'))}")
+    ck("J1e [拦,拦,不可判别] ⇒ 2（末尾的不可判别不加不算）",
+       _streak_with(("blocked", "blocked", "inconclusive")) == 2,
+       f"实得 {_streak_with(('blocked','blocked','inconclusive'))}")
 
     #: ⛔⛔ J2/J2b/J2c 三条一起把"连续"语义钉死 —— 三个方向都得挡住：
     #:     二元（曾成功⇒0）/ 累计（不归零）/ 方向搞反。
