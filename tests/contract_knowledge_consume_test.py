@@ -48,6 +48,8 @@ SHORT = "missing_skill / t0："
 LONG = ("missing_skill / textscore：checks_failed:top_n_basic; "
         "checks_failed:hollow_empty")
 Q = "missing_skill textscore checks_failed"
+#: 生产库里真实存在的 L4/system 条目（44 字，也 < min_content_len 60）
+SYS44 = "第 1 轮进化：基线 reward=0.00，候选 1 个，结果=提交 4efcad1e"
 
 
 def main() -> int:
@@ -55,6 +57,13 @@ def main() -> int:
 
     def mk(min_len: int = 0) -> MemoryOS:
         return MemoryOS(min_content_len=min_len)
+
+    def n_short_id(m: MemoryOS, content: str) -> str:
+        """按内容反查 note_id（不靠写入返回值，避免组间串味）。"""
+        for _n in m.notes.values():
+            if _n.content == content:
+                return _n.note_id
+        return ""
 
     print("=" * 68)
     print("A 组 · 检索侧长度闸（`memory.py:430`）—— 短条目永远进不了召回")
@@ -136,6 +145,93 @@ def main() -> int:
        and len(SHORT) < 60 and n_s.note_id not in got60,
        f"len={len(SHORT)} 前缀匹配={bool(pre.match(SHORT))} "
        f"完整匹配={bool(pat.match(SHORT))}")
+
+    print("F 组 · ⛔ 长度闸的**旁路**：默认 `expand_links=True` 会把它绕过去")
+
+    #: 复现口径：同一个库，唯一变量 = `expand_links`。
+    def _mk3(min_len: int):
+        _m = mk(min_len)
+        _m.write("L3", LONG, channel="learner", source="a")
+        _m.write("L3", SHORT, channel="learner", source="a")
+        _m.write("L4", SYS44, channel="system", source="a")
+        return _m
+
+    m60 = _mk3(60)
+    out_on = m60.search(Q, top_k=10)                    #: 默认 expand_links=True
+    out_off = m60.search(Q, top_k=10, expand_links=False)
+    ids_on = [x.note_id for x in out_on]
+    ids_off = [x.note_id for x in out_off]
+    ck("F1 ⛔ 默认 `expand_links=True` ⇒ 被闸拦掉的 19 字条目**仍在结果里**",
+       n_short_id(m60, SHORT) in ids_on, f"on={ids_on}")
+    ck("F2 ⛔ 反证（F1 有牙）：同一库 `expand_links=False` ⇒ 它**不在**",
+       n_short_id(m60, SHORT) not in ids_off, f"off={ids_off}")
+    #: ⛔ 这是**设计**不是 bug，判据是「有没有违背设计意图」——
+    #:    `memory.py:186` 的意图是防「极短条目余弦虚高**霸占 top-k**」。
+    #:    旁路带进来的短条目只落链接段、不占主循环名额 ⇒ 意图未被违背。
+    #: ⛔ 「不霸占 top-k」的**精确**表达：它只出现在链接段，
+    #:    即位置 ≥ 主循环命中数（`expand_links=False` 的结果长度）。
+    #:    ⛔ 不写「排第 1」这种断言 —— 排序位置取决于具体文本与查询，
+    #:    换个 LONG 就翻车（我自己先写错了一次）。
+    sid60 = n_short_id(m60, SHORT)
+    pos_on = ids_on.index(sid60) if sid60 in ids_on else -1
+    ck("F3 ⛔ 旁路**不违背**设计意图：短条目只落在链接段"
+       "（位置 ≥ 主循环命中数，不占主循环名额）",
+       pos_on >= len(ids_off) >= 1,
+       f"pos={pos_on} 主循环命中={len(ids_off)} ids={ids_on}")
+    m0 = _mk3(0)
+    out0 = m0.search(Q, top_k=10)
+    out0_off = m0.search(Q, top_k=10, expand_links=False)
+    ids0 = [x.note_id for x in out0]
+    sid0 = n_short_id(m0, SHORT)
+    pos0 = ids0.index(sid0) if sid0 in ids0 else -1
+    ck("F4 ⛔ 反证（F3 有牙）：下限设 0 ⇒ 它落进**主循环段**"
+       "（位置 < 主循环命中数，能靠余弦抢位）⇒ 「不霸占」不是恒真",
+       pos0 >= 0 and pos0 < len(out0_off),
+       f"pos={pos0} 主循环命中={len(out0_off)} ids={ids0}")
+
+    print("G 组 · `hit_channels` 读数（账本只能看 top_note ⇒ 补聚合口径）")
+
+    class _Led:
+        def __init__(self):
+            self.rows = []
+
+        def append(self, kind, payload, actor=None):
+            self.rows.append({"kind": kind, "payload": payload,
+                              "actor": actor})
+
+    gl = _Led()
+    gm = mk(60)
+    gm.ledger = gl
+    gm.write("L3", LONG, channel="learner", source="a")
+    gm.write("L4", SYS44, channel="system", source="a")
+    gm.search(Q, top_k=10, ledger_actor="agent:L4")
+    rec = [r for r in gl.rows if r["kind"] == "memory.recall"]
+    ck("G1 `ledger_actor` 非空 ⇒ 记一条 `memory.recall` 且含 `hit_channels`",
+       len(rec) == 1 and "hit_channels" in rec[0]["payload"],
+       str(rec[:1])[:200])
+    if rec:
+        hc = rec[0]["payload"]["hit_channels"]
+        ck("G2 ⛔ 反证（不是恒真）：各 channel 计数之和 == `n_hits`",
+           sum(hc.values()) == rec[0]["payload"]["n_hits"] and len(hc) >= 1,
+           f"hit_channels={hc} n_hits={rec[0]['payload']['n_hits']}")
+    gl2 = _Led()
+    gm2 = mk(60)
+    gm2.ledger = gl2
+    gm2.search("完全没有相关内容的查询词", top_k=10, ledger_actor="agent:L4")
+    rec2 = [r for r in gl2.rows if r["kind"] == "memory.recall"]
+    ck("G3 ⛔ 空结果也要记账（没召回 ≠ 没检索），且 `hit_channels == {}`",
+       len(rec2) == 1 and rec2[0]["payload"]["hit_channels"] == {}
+       and rec2[0]["payload"]["n_hits"] == 0, str(rec2[:1])[:200])
+    #: ⛔ 源码级钉住「读数是读数」：只出现 1 次，且那一行不是 `if` 分支。
+    #:    （别用「切片里有没有 if」—— 前一行是三元表达式，会误判。）
+    _msrc = (ROOT / "aether" / "memory.py").read_text(encoding="utf-8")
+    _lines = [ln for ln in _msrc.splitlines() if "hit_channels" in ln]
+    ck("G4 ⛔ `hit_channels` 只出现 1 次且**只进账本**（读数是读数，不参与判据）",
+       len(_lines) == 1 and _msrc.count("hit_channels") == 1
+       and not _lines[0].strip().startswith("if")
+       and "hit_channels" not in _msrc.split("ledger.append")[0],
+       f"行数={len(_lines)} count={_msrc.count('hit_channels')} "
+       f"行内容={_lines[:1]}")
 
     print("=" * 68)
     if FAILS:

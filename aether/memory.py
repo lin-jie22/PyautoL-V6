@@ -513,12 +513,23 @@ class MemoryOS:
            否则"consume 无账"会以"看起来有账但其实是空的"形式复现。
         """
         try:
+            #: ⛔ `top_note` 只留了第 1 个 —— 实测 `n_hits` 可达 24，
+            #:    于是「新知识有没有被消费」只能靠 `access_count` 间接推
+            #:    （还得扣掉写入侧 dedup 的假消费，见第 77 条）。
+            #:    ⇒ 补一个**聚合**读数：召回列表按 channel 计数。
+            #:    ⛔ 它是**读数不是判据**，且不记原文（与 `query_hash`
+            #:    同样的账本膨胀纪律）：channel 是条目自身属性，
+            #:    不经任何二次判断 ⇒ 不会像"手工定义知识类"那样把口径做坏。
+            _ch: "dict[str, int]" = {}
+            for _n in out:
+                _ch[_n.channel] = _ch.get(_n.channel, 0) + 1
             self.ledger.append("memory.recall", {
                 "query_hash": content_hash(query or "")[:16],
                 "n_hits": len(out),
                 "degraded": bool(degraded),
                 "tiers": sorted({n.tier for n in out}),
                 "top_note": (out[0].note_id if out else ""),
+                "hit_channels": _ch,
             }, actor=actor)
         except Exception as e:  # noqa: BLE001
             self._ledger_error = f"{type(e).__name__}: {e}"
