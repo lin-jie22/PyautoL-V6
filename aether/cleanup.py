@@ -62,8 +62,9 @@ from .genome import (Gene, Harness, gene_remove_skill, gene_route_remove,
 from .ledger import content_hash
 from .paths import ROOT as _ROOT
 
-__all__ = ["PENDING", "PROPOSED", "REJECTED", "APPLIED", "CleanupProposal",
-           "load", "save", "build", "validate", "apply_patch", "record",
+__all__ = ["PENDING", "PROPOSED", "REJECTED", "APPLIED", "EXECUTED",
+           "CleanupProposal", "load", "save", "build", "validate",
+           "apply_patch", "verify_executed", "record",
            "PROPOSALS_NAME", "genome_dead_entries", "genome_load",
            "cleanup_genes", "source_load"]
 
@@ -71,9 +72,18 @@ __all__ = ["PENDING", "PROPOSED", "REJECTED", "APPLIED", "CleanupProposal",
 GENOME_LOAD_KEY = "genome_dead"
 
 PENDING = "pending"
-PROPOSED = "proposed"       # 过了闸，等人执行
+PROPOSED = "proposed"       # 过了闸，等人批准
 REJECTED = "rejected"
+#: ⛔⛔ `APPLIED` 这个名字会骗人：它**不表示源码被改过**，只表示
+#:    「人已批准，可以去改了」。本模块从不写源码（`apply_patch` 文档里
+#:    写死了）。拿它当「已删除」读 ⇒ 账本会说删了而代码一字未动
+#:    （2026-10-19 实测：`sandbox_detail` 早就是 applied，
+#:     `aether/interop.py:473` 的赋值到今天还在）。
+#:    ⇒ 「真的删了」由 `EXECUTED` 表示，且必须过 `verify_executed`。
 APPLIED = "applied"
+#: ⛔ 终态：人执行了补丁，**且**复验证明目标真的不在原位了。
+#:    它是唯一能表示「这件事结案了」的状态 ⇒ `build()` 依此去重。
+EXECUTED = "executed"
 
 #: 提案档案文件名（走 `paths()` 的键，不手拼布局）。
 PROPOSALS_NAME = "cleanup_proposals.json"
@@ -109,7 +119,12 @@ class CleanupProposal:
     evidence: Dict[str, Any] = field(default_factory=dict)
 
     def identity(self) -> Dict[str, Any]:
-        """只由"删什么"决定（不含状态/时间）⇒ 同一提案同 id。"""
+        """只由"删什么"决定（不含状态/时间）⇒ 同一提案同 id。
+
+        ⛔ 它**含行号** ⇒ 代码一动行号就漂 ⇒ id 跟着变。所以光靠它去重
+           不够（实测：同一批提案因为行号从 501 漂到 518，被当成新提案
+           又提了一遍）。稳定的那一份是 `_dedup_key()`。
+        """
         return {"kind": self.kind, "target": self.target, "where": self.where}
 
     def to_dict(self) -> Dict[str, Any]:
@@ -122,6 +137,43 @@ class CleanupProposal:
                 "load_after_expected": self.load_after_expected,
                 "patch": self.patch, "edits": list(self.edits),
                 "evidence": self.evidence}
+
+
+def _dedup_key(p: "CleanupProposal") -> Tuple[str, str, str]:
+    """**跨行号漂移**的去重键：**删哪个文件里的哪个东西**。
+
+    ⛔ 为什么不直接用 `prop_id`：`identity()` 里含行号，而**行号会漂移**
+       —— 上面加三行，同一个 `uci_skill_id` 就从 501 变成 518，
+       `prop_id` 随之改变 ⇒ 精确匹配判不出"这是同一条"，于是又被提一遍
+       （实测 30 个提案被提 509 次，其中不少就是这么来的）。
+       这里把行号**整个拿掉**，只留 (kind, 符号, 文件)。
+
+    ⛔ 不反过来改 `identity()`：那样会让历史账本里的 `prop_id` 全部失效
+       （旧记录对不上新 id），代价远大于收益。去重键与寻址 id 分开，
+       各管一件事。
+    """
+    w = str(p.where or "")
+    f = w.rsplit(":", 1)[0] if ":" in w else w
+    t = str(p.target or "")
+    #: `unreachable` 的 target 自带 `file:起-止` ⇒ 行号也在里面，一并去掉。
+    if p.kind == "unreachable":
+        t = t.split(":")[0]
+    return (str(p.kind), t, f)
+
+
+def _is_duplicate(p: "CleanupProposal",
+                  existing: Optional[Mapping[str, "CleanupProposal"]]) -> bool:
+    """这条提案是不是**已经提过**（`build()` 与契约**同源**的判定）。
+
+    ⛔ 为什么单独抽出来：去重判定如果只存在于 `build()` 的循环体里，
+       契约就只能去测 `_dedup_key` 这个函数本身 —— 那测的是零件，
+       不是装配。装配错了（比如忘了用语义键）契约照样全绿。
+    """
+    if not existing:
+        return False
+    if p.prop_id in existing:
+        return True
+    return _dedup_key(p) in {_dedup_key(q) for q in existing.values()}
 
 
 def _judge_modules_short() -> Tuple[str, ...]:
@@ -265,12 +317,22 @@ def source_load() -> Dict[str, int]:
                 _sr.scan_unreachable().get("n_unreachable") or 0)}
 
 
-def build(*, limit: int = 20) -> List[CleanupProposal]:
+def build(*, limit: int = 20,
+          existing: Optional[Mapping[str, "CleanupProposal"]] = None
+          ) -> List[CleanupProposal]:
     """从自指负载扫描生成清理提案（**只读**：不改任何文件）。
 
     ⛔ 判据集模块**在构造上**被排除：清理不是"能删任何代码"的通道，
        否则 `judge` 锁死的那件事就白做了。
+
+    ⛔⛔ `existing`：已有提案档案。**同 id 的一律不重提**（id 只由
+       "删什么"决定，见 `identity`）。不传 ⇒ 每次把同一批再提一遍
+       （实测：30 个独立提案被提了 509 次），而且更糟的是——
+       新提案的 `state=PENDING` 会**覆盖**掉已有的 `APPLIED`
+       （CLI 的 `propose` 是整表替换）⇒ 人刚批准完，下一轮就退回待办，
+       **批准被静默抹掉**。这是"提议 509 次 / 结案 0 次"的根因之一。
     """
+    known = existing or {}
     dead = _sr.scan_dead_api()
     wo = _sr.scan_write_only()
     un = _sr.scan_unreachable()
@@ -315,7 +377,8 @@ def build(*, limit: int = 20) -> List[CleanupProposal]:
                       "editable": False,
                       "protected_excluded": sorted(protected)})
         p.prop_id = content_hash(p.identity())[:_ID_PREFIX]
-        out.append(p)
+        if not _is_duplicate(p, known):
+            out.append(p)
     for w in wo["write_only"][:limit]:
         if not _is_prod(w["first_site"]):
             continue
@@ -333,7 +396,8 @@ def build(*, limit: int = 20) -> List[CleanupProposal]:
                       "editable": False,
                       "protected_excluded": sorted(protected)})
         p.prop_id = content_hash(p.identity())[:_ID_PREFIX]
-        out.append(p)
+        if not _is_duplicate(p, known):
+            out.append(p)
 
     # ── ③ 不可达块：**唯一可证明**的一类 ⇒ 带可执行编辑 ──────────
     for u in un["unreachable"][:limit]:
@@ -372,7 +436,8 @@ def build(*, limit: int = 20) -> List[CleanupProposal]:
                                 "同级语句不可达 ⇒ 删掉不改变任何执行结果"),
                       "protected_excluded": sorted(protected)})
         p.prop_id = content_hash(p.identity())[:_ID_PREFIX]
-        out.append(p)
+        if not _is_duplicate(p, known):
+            out.append(p)
     return out
 
 
@@ -456,6 +521,126 @@ def apply_patch(p: CleanupProposal, *, approved_by: str,
         return p
     p.state = APPLIED
     p.evidence["approved_by"] = str(approved_by).strip()
+    return p
+
+
+def _base_count(p: "CleanupProposal", default: int) -> int:
+    """提案时记录的目标**出现次数**，作为复查的基线。
+
+    ⛔ 取不到就退回 `default`，绝不退回 0：基线为 0 会让"还在"被判成
+       "已删"（因为 1 >= 0 恒真）⇒ 那道闸反过来变成恒绿 —— 空基线
+       是最会撒谎的那一种（第 57 条：`bool(X) and all(...)` 先看 X 为空）。
+    """
+    se = (p.evidence or {}).get("scan_entry") or {}
+    for k in ("n_assign", "n_sites", "n_occurrences"):
+        v = se.get(k)
+        if isinstance(v, int) and v > 0:
+            return v
+    return default
+
+
+def _target_still_there(p: "CleanupProposal", src_root: Any) -> Optional[bool]:
+    """目标**还在不在原位**（位置级证据）。
+
+    ⛔ 返回 `None` 表示「读不到」—— 那是**不可判别**，不是"不在了"。
+       文件读不动就判"已删除" ⇒ 删没删全看磁盘心情，这是最会撒谎的
+       一种量具（第 24 条）。不可判别必须由调用方按 fail-closed 处理。
+
+    各类各判，不用同一个口径：
+      · `dead_api`    `def 名字(` 还有几处
+      · `write_only`  `self.名字 =` 还有几处（类属性声明 `名字: str` 不算，
+                      它不长这样 ⇒ 删了实例赋值也判得出来）
+      · `unreachable` 走 `srcmut` 的**指纹**（原文还对得上 ⇒ 还没删）
+
+    ⛔⛔ 前两类按**次数**判，不按"全文里还有没有出现过"：
+        同一个属性常常有**多处**赋值（`sandbox_detail` 在
+        `interop.py` 的 470 与 473 各有一处），而补丁只让人删其中一处
+        ⇒ 按"还在出现过"判，这类提案**永远结不了案**（实测到过）。
+        按次数：删掉一处 ⇒ 计数从 2 降到 1 ⇒ 判得出来。
+    """
+    where = str(p.where or "")
+    if ":" not in where:
+        return None
+    target = str(p.target or "")
+    if not target:
+        return None
+    if p.kind == "unreachable":
+        #: ⛔ 这一类有可执行编辑 ⇒ 用指纹，比字符串匹配硬得多。
+        if not p.edits:
+            return None
+        try:
+            from . import srcmut as SM
+        except Exception:                                   # noqa: BLE001
+            return None
+        try:
+            eds = [SM.Edit.from_dict(x) for x in p.edits]
+            #: `verify` 返回 (ok, why)：ok=True ⇒ 原文还在（指纹对得上）
+            present = [e for e in eds if SM.verify(src_root, e)[0]]
+        except Exception:                                   # noqa: BLE001
+            return None
+        return bool(present)
+    f = Path(src_root) / where.split(":")[0]
+    try:
+        text = f.read_text(encoding="utf-8", errors="replace")
+    except Exception:                                       # noqa: BLE001
+        return None
+    if p.kind == "dead_api":
+        return text.count(f"def {target}(") >= _base_count(p, 1)
+    if p.kind == "write_only":
+        return (text.count(f"self.{target} =")
+                + text.count(f"self.{target}=")) >= _base_count(p, 1)
+    return None
+
+
+def verify_executed(p: "CleanupProposal", *, src_root: Any = None,
+                    at: Any = None) -> "CleanupProposal":
+    """**人执行之后**的复验：只有目标真的不在原位了，才允许结案。
+
+    ═══ 这条链到此才闭合 ═══
+
+    此前状态机停在 `APPLIED`（人已批准）就没有下一步了 ⇒ 三件事同时发生：
+
+      ① **账本会说谎**：`APPLIED` 读起来像"已应用"，实际代码一字未动
+         （实测：`sandbox_detail` 2026-10-15 就是 applied，10-19 还在原位）；
+      ② **提案永远结不了案** ⇒ `build()` 每轮把同一批再提一遍
+         （实测：30 个独立提案被提了 509 次）；
+      ③ **没人复核减负**：`load_after_expected` 算过"应该少 1"，
+         但从没有一次拿执行后的真相去对拍它。
+
+    ⛔ 本函数**不改源码**，也不执行补丁 —— 那一步由人做（与 `apply_patch`
+       同族）。它只回答"那人到底做了没有"。
+
+    ⛔⛔ 三态，不许把「读不到」并入「已删除」：
+        通过 / 没通过 / 不可判别，各自留痕（第 14 条）。不可判别的处理是
+        **保持 `APPLIED`**（不结案），不是放行。
+    """
+    root = src_root if src_root is not None else _ROOT
+    if p.state != APPLIED:
+        p.evidence["execution"] = {
+            "ok": False, "unverified": True, "level": "skipped",
+            "reason": f"状态是 {p.state!r}（只有 {APPLIED!r} 才谈得上执行复验）"}
+        return p
+    still = _target_still_there(p, root)
+    if still is None:
+        p.evidence["execution"] = {
+            "ok": False, "unverified": True, "level": "unreadable",
+            "reason": ("读不到目标位置 ⇒ 不可判别。不可判别 ≠ 已删除，"
+                       "本条保持 APPLIED 不结案")}
+        return p
+    if still:
+        p.evidence["execution"] = {
+            "ok": False, "unverified": False, "level": "still_there",
+            "reason": (f"目标仍在 {p.where} ⇒ 补丁没被执行。"
+                       "（保守口径：名字只要在文件里出现过就算还在，"
+                       "宁可漏判也不冒充已删）")}
+        return p
+    p.state = EXECUTED
+    p.evidence["execution"] = {
+        "ok": True, "unverified": False,
+        "level": ("fingerprint" if p.kind == "unreachable" else "source_text"),
+        "reason": (f"目标已不在 {p.where} ⇒ 与 load_after_expected "
+                   f"{p.load_after_expected} 的减负方向一致"),
+        "verified_at": at if at is not None else ""}
     return p
 
 

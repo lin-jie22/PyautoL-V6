@@ -24,7 +24,13 @@
        · 删错了 ⇒ `removal_regress`（held-out 掉了 ⇒ 拦）
      ⛔ 走旧的 `probe()` 会 100% 得 `no_gain` ⇒ 清理永远提交不了。
        那不是闸严，是**用错了闸**：overfit 问的是"涨的是不是真的"，
-       而清理根本不涨 ⇒ 对清理该问的是"删完之后 held-out 变差没有"。
+       而清理根本不涨 ⇒ 对清理该问的是"删完之后 held-out 变差没有"；
+
+  ④ **`APPLIED` 不许被当成「已删除」**（G 组，r60）：
+       `APPLIED` 的真实语义是「人已批准，可以去改了」，源码一字未动。
+       名字骗人 + 没有办法分辨 ⇒ 链路停在那里，提案永远结不了案
+       （实测：30 个独立提案被提了 509 次）。
+       ⇒ 终态是 `EXECUTED`，且必须过 `verify_executed` 的**位置级复验**。
 
 跑法：
     python tests/contract_cleanup_test.py
@@ -306,6 +312,113 @@ def main():
                      proposer=TemplateProposer(skills={}), caliber=CAL,
                      config=EvolutionConfig(cleanup_enabled=False)
                      ).cleanup is None)
+
+    # ── G 组：⛔⛔ 「批准 ≠ 已删除」—— 执行闭环（r60）──────────────
+    print("G 组：人执行之后的复验（APPLIED 不许被当成『已删除』）")
+    #: ⛔ 本组针对的形态（2026-10-19 实测）：
+    #:    账本里 `sandbox_detail` 早在 10-15 就是 `applied`，而
+    #:    `aether/interop.py:473` 的赋值到 10-19 还在原位 —— 批准了，
+    #:    但补丁没被执行，账本上却看不出来。
+    #:    ⇒ 链路上没有"执行后复验"这一环，`APPLIED` 就成了终点。
+    import shutil
+    from aether.cleanup import (APPLIED, EXECUTED, CleanupProposal,
+                                _base_count, _dedup_key, _is_duplicate,
+                                verify_executed)
+    from aether.ledger import content_hash
+    gdir = Path(tempfile.mkdtemp(prefix="cl_g_"))
+    try:
+        (gdir / "aether_probe").mkdir()
+        gf = gdir / "aether_probe" / "mod.py"
+        gf.write_text("class A:\n"
+                      "    def __init__(self):\n"
+                      "        self.zz = 1\n"
+                      "        self.zz = 2\n", encoding="utf-8")
+
+        def mkp():
+            p = CleanupProposal(
+                kind="write_only", target="zz",
+                where="aether_probe/mod.py:3", state=APPLIED,
+                gate_passed=True,
+                evidence={"scan_entry": {"n_assign": 2}})
+            p.prop_id = "g_dummy"
+            return p
+
+        ck("G1 ⛔ APPLIED 与 EXECUTED 是两个不同的状态"
+           "（不是一个值的两个名字）",
+           APPLIED != EXECUTED and bool(EXECUTED), f"{APPLIED}/{EXECUTED}")
+
+        r2 = verify_executed(mkp(), src_root=gdir, at=1)
+        ck("G2 ⛔ 目标还在原位 ⇒ 不许结案（保持 APPLIED，不冒充已删）",
+           r2.state == APPLIED
+           and r2.evidence["execution"]["ok"] is False
+           and r2.evidence["execution"]["unverified"] is False,
+           f"state={r2.state} {r2.evidence.get('execution')}")
+
+        #: 人真的删掉了那一处（2 处 → 1 处）
+        gf.write_text("class A:\n"
+                      "    def __init__(self):\n"
+                      "        self.zz = 1\n", encoding="utf-8")
+        r3 = verify_executed(mkp(), src_root=gdir, at=1)
+        ck("G3 目标少了一处 ⇒ 放行结案（state=EXECUTED）",
+           r3.state == EXECUTED and r3.evidence["execution"]["ok"] is True,
+           f"state={r3.state} {r3.evidence.get('execution')}")
+
+        ck("G4 ⛔ 反证：G2 与 G3 裁决相反 ⇒ 这两条不是恒真/恒假",
+           r2.state != r3.state
+           and r2.evidence["execution"]["ok"]
+           != r3.evidence["execution"]["ok"])
+
+        p5 = CleanupProposal(kind="write_only", target="zz",
+                             where="aether_probe/nonexistent.py:1",
+                             state=APPLIED, gate_passed=True,
+                             evidence={"scan_entry": {"n_assign": 2}})
+        r5 = verify_executed(p5, src_root=gdir, at=1)
+        ck("G5 ⛔ 读不到目标 ⇒ unverified 且**不结案**（不可判别 ≠ 已删除）",
+           r5.state == APPLIED
+           and r5.evidence["execution"]["unverified"] is True
+           and r5.evidence["execution"]["ok"] is False,
+           f"{r5.evidence.get('execution')}")
+
+        #: ⛔ 去重键：行号漂移时 prop_id 会变，语义键不变
+        a = CleanupProposal(kind="write_only", target="zz",
+                            where="aether_probe/mod.py:3")
+        b = CleanupProposal(kind="write_only", target="zz",
+                            where="aether_probe/mod.py:25")
+        a.prop_id = content_hash(a.identity())[:32]
+        b.prop_id = content_hash(b.identity())[:32]
+        ck("G6 ⛔ 行号漂到 25 ⇒ prop_id 变了（所以光靠 id 去重不够）",
+           a.prop_id != b.prop_id, f"{a.prop_id[:8]} vs {b.prop_id[:8]}")
+        ck("G7 同一条（删什么没变）⇒ 语义去重键**不变**（跨行号仍去重）",
+           _dedup_key(a) == _dedup_key(b),
+           f"{_dedup_key(a)} vs {_dedup_key(b)}")
+
+        ck("G8 ⛔ 基线取不到时退回 1，绝不退回 0"
+           "（基线 0 ⇒「还在」被判成「已删」，闸反转为恒绿）",
+           _base_count(CleanupProposal(), 1) == 1)
+
+        #: ⛔ G9–G11 测的是**装配**：`build()` 用的就是这个函数
+        #:    （只测 `_dedup_key` 的话，忘了用语义键也全绿）
+        def mkid(where, target="zz"):
+            q = CleanupProposal(kind="write_only", target=target,
+                                where=where)
+            q.prop_id = content_hash(q.identity())[:32]
+            return q
+
+        old = mkid("aether_probe/mod.py:3")
+        drift = mkid("aether_probe/mod.py:25")
+        other = mkid("aether_probe/mod.py:40", target="yy")
+        ex = {old.prop_id: old}
+        ck("G9 ⛔ 同一条已提过（id 相同）⇒ 判重复",
+           _is_duplicate(old, ex))
+        ck("G10 ⛔ 同一条但**行号漂到 25** ⇒ 仍判重复（跨行号去重）",
+           _is_duplicate(drift, ex))
+        ck("G11 ⛔ 反证：换了个目标（zz→yy）⇒ 不判重复"
+           "（证明 G9/G10 不是「有档案就全拦」）",
+           not _is_duplicate(other, ex))
+        ck("G12 反证（续）：空档案 ⇒ 不判重复（第一次扫要能提得出东西）",
+           not _is_duplicate(old, {}))
+    finally:
+        shutil.rmtree(gdir, ignore_errors=True)
 
     print()
     if FAILS:

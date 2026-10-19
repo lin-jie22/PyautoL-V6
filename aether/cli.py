@@ -1480,18 +1480,31 @@ def cmd_caps(args) -> int:
             CL.save(cpath, props)
 
         if sub == "propose":
-            props = CL.build(limit=int(getattr(args, "limit", 20) or 20))
+            #: ⛔ 传 `existing` ⇒ 同 id 的**不再重提**。不传的后果是每轮
+            #:    把同一批再记一遍账（实测 30 个提案被提了 509 次），
+            #:    而且新提案的 pending 会把人刚批准的 applied **冲掉**。
+            props = CL.build(limit=int(getattr(args, "limit", 20) or 20),
+                             existing=saved)
             for p in props:
                 CL.record(led, p)
-            _save({p.prop_id: p for p in props})
+            #: ⛔ 合并而非整表替换：旧提案带着它的状态（proposed/applied/
+            #:    executed）必须留下，否则"批准"这一动作会被下一次 propose
+            #:    静默抹掉 —— 看上去是重新扫了一遍，实际是撤销了人的决定。
+            merged = dict(saved)
+            for p in props:
+                merged[p.prop_id] = p
+            _save(merged)
             if getattr(args, "json", False):
                 print(json.dumps([p.to_dict() for p in props],
                                  ensure_ascii=False, indent=2))
                 return 0
             if not props:
-                print("✅ 没有清理提案：自指负载扫描没发现零消费方接口/只写不读属性")
+                print(f"✅ 没有**新**清理提案（档案里已有 {len(saved)} 条，"
+                      "不再重复记账）")
+                print(f"   想看它们：直接读 {cpath}")
                 return 0
-            print(f"清理提案 {len(props)} 条（已进账本，state=pending）→ {cpath}")
+            print(f"新清理提案 {len(props)} 条（已进账本，state=pending）；"
+                  f"档案共 {len(merged)} 条 → {cpath}")
             for p in props[:12]:
                 print(f"  [{p.kind}] {p.target} @ {p.where}")
             if len(props) > 12:
@@ -1601,6 +1614,30 @@ def cmd_caps(args) -> int:
             for ln in p.patch.splitlines():
                 print("     " + ln)
             return 0
+
+        if sub == "done":
+            #: ⛔ 人执行完补丁之后**回来结账** —— 这是这条链此前缺的最后一环。
+            #:    没有它，`APPLIED`（已批准）就是终点，于是账本会说"删了"
+            #:    而源码一字未动，提案也永远结不了案。
+            pid = getattr(args, "pid", "") or ""
+            p = saved.get(pid)
+            if p is None:
+                print(f"⛔ 没有提案 {pid!r}（先跑 propose → validate → approve）")
+                return 2
+            p = CL.verify_executed(p, src_root=src_root,
+                                   at=int(time.time()))
+            saved[pid] = p
+            _save(saved)
+            CL.record(led, p)
+            ex = (p.evidence or {}).get("execution") or {}
+            if p.state == CL.EXECUTED:
+                print(f"✅ 已结案：{p.target} @ {p.where}"
+                      f"（证据级：{ex.get('level')}）")
+                print("   `build()` 将不再重提这一条。")
+                return 0
+            print(f"⛔ 不能结案：{ex.get('reason')}")
+            print(f"   （当前状态仍是 {p.state}：补丁还没被真正执行）")
+            return 1
 
         # patch
         p = saved.get(getattr(args, "pid", ""))
@@ -1991,6 +2028,12 @@ def build_parser() -> argparse.ArgumentParser:
                      help="显式批准：本系统不代你决定删什么")
     cap_ = cls_.add_parser("patch", help="打印给人执行的补丁（本命令不执行）")
     cap_.add_argument("--id", dest="pid", required=True)
+    cd = cls_.add_parser(
+        "done",
+        help="人执行完补丁后**回来结账**：复验目标真的没了才准结案")
+    cd.add_argument("--id", dest="pid", required=True)
+    cd.add_argument("--note", default="",
+                    help="执行备注（可选，进账本）")
     cs.add_parser("list", help="列出已注册能力")
     sh = cs.add_parser("show", help="查看一个能力的声明")
     sh.add_argument("id")
