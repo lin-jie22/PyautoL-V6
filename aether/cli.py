@@ -1394,20 +1394,41 @@ def cmd_caps(args) -> int:
 
         if sub == "propose":
             probes = D.discover()
+            found = {t.name: pr for t, pr in zip(D.KNOWN_TOOLS, probes)}
             cands = []
+            fresh = []
             for t, pr in zip(D.KNOWN_TOOLS, probes):
                 c = CC.from_probe(pr, install_argv=list(t.install_argv))
                 if not c:
                     continue
-                c = CC.merge(c, saved.get(t.name))
+                c = CC.merge(c, saved.get(t.name), probe=pr)
                 cands.append(c)
+                #: ⛔ 只记**状态变了**的（r60 B）。原来每轮 propose 都把
+                #:    同一条候选重记一遍 —— 实测 radare2 一条在账本里
+                #:    占了 170 条，害得"事件数"被读成"候选数"。
+                if saved.get(t.name) is None or saved[t.name].state != c.state:
+                    fresh.append(c)
+            #: ⛔ 装好的工具从上面漏掉了（`from_probe` 对"已探到且已包装"
+            #:    返回 None，那是"不值得提"的正确判定）⇒ 由 `seal` 结案，
+            #:    否则 `installed` 永远不可达（r60 B 实测）。
+            sealed = CC.seal(saved, found)
+            #: ⛔ 合并保存：原写法是整表替换，会把刚批准的（甚至刚结案的）
+            #:    冲回 pending —— 与 `cleanup` 链当初同一个 bug。
+            merged = dict(saved)
+            for c in cands:
+                merged[c.tool] = c
+            for c in sealed:
+                merged[c.tool] = c
+            CC.save(cpath, merged)
+            for c in fresh:
                 CC.record(led, c)
-            CC.save(cpath, {c.tool: c for c in cands})
+            for c in sealed:
+                CC.record(led, c)
             if getattr(args, "json", False):
-                print(json.dumps([c.to_dict() for c in cands],
+                print(json.dumps([c.to_dict() for c in cands + sealed],
                                  ensure_ascii=False, indent=2))
                 return 0
-            if not cands:
+            if not cands and not sealed:
                 print("✅ 没有待办候选：本机没有缺的工具，已有的也都包装了")
                 return 0
             for c in cands:
@@ -1416,10 +1437,64 @@ def cmd_caps(args) -> int:
                 print(f"{mark} {c.tool} [{c.kind}] {c.reason}")
                 if c.verify_hint:
                     print(f"    ⇒ {c.verify_hint}")
-            print(f"\n候选 {len(cands)} 条 → {cpath}")
-            print("⛔ 下一步：`aether caps candidates validate --tool X`，"
-                  "然后 `approve --tool X --by 你 --yes`")
+            for c in sealed:
+                print(f"✅ 已装（复验过） {c.tool} —— 结案"
+                      f"（原本这条会直接消失）")
+            print(f"\n候选 {len(cands)} 条"
+                  + (f"｜结案 {len(sealed)} 条" if sealed else "")
+                  + f" → {cpath}")
+            if cands:
+                print("⛔ 下一步：`aether caps candidates validate --tool X`，"
+                      "然后 `approve --tool X --by 你 --yes`")
+            print("   装完：`aether caps candidates verify --tool X` 结案"
+                  "（propose 也会自动结案）")
             return 0
+
+        if sub == "verify":
+            c, pr = _mk(args.tool)
+            if pr is None:
+                _log.warning(f"[caps] 不认识工具 {args.tool!r}；"
+                             f"已知：{[t.name for t in D.KNOWN_TOOLS]}")
+                return 2
+            if c is None:
+                #: ⛔ 工具装好且已包装 ⇒ `from_probe` 返回 None（**这是对的**，
+                #:    没有待办就不提候选）。但档案里那条已批准的候选必须
+                #:    还能被结案 —— 这正是 r60 B 实测的"装好了就蒸发"：
+                #:    不这么接一下，这条工具就再也不会出现在任何读数里。
+                c = saved.get(args.tool)
+                if c is None:
+                    _log.warning(f"[caps] 档案里没有 {args.tool!r} 的候选；"
+                                 f"先跑 `caps candidates propose`")
+                    return 2
+            c = CC.verify(c, pr)
+            if c.state == CC.INSTALLED:
+                #: 只有结案才落盘。
+                saved[c.tool] = c
+                CC.save(cpath, saved)
+                CC.record(led, c)
+                print(json.dumps({"tool": c.tool, "state": c.state,
+                                  "approved_by": c.approved_by,
+                                  "probe": pr.to_dict()},
+                                 ensure_ascii=False, indent=2))
+                print(f"✅ 已装（复验过）：{c.tool} @ {pr.path}")
+                if not c.approved_by:
+                    print("   （⚠️ 这条**未经人批准**：这里记下的是探针事实，"
+                          "不等于本系统采纳过它）")
+                return 0
+            #: ⛔ 没通过就**只留痕、不落盘**：把 approved 打回 rejected
+            #:    等于撤销人的批准，而"还没装"和"装了没用"是两件事
+            #:    （r60 B）—— 后者才该被看见，前者只是时机不对。
+            CC.record(led, c)
+            #: ⛔ 别再套一遍"复验未通过"前缀：`verify()` 写的那条原因
+            #:    本身就是这句话开头，叠起来变成"复验未通过：复验未通过：…"。
+            _log.warning("[caps] "
+                         + (c.gate_reasons[-1] if c.gate_reasons else "?"))
+            print(f"   探针读数：{pr.status}（{pr.detail}）")
+            _o = saved.get(c.tool)
+            print(f"   档案里 {c.tool} 仍是 "
+                  f"**{_o.state if _o else '（无记录）'}**，"
+                  f"你的批准没有被撤销。")
+            return 1
 
         if sub in ("validate", "approve", "hint"):
             c, pr = _mk(args.tool)
@@ -1453,7 +1528,10 @@ def cmd_caps(args) -> int:
                 else:
                     print("   本系统没给出 install_argv：**不猜包管理器**，"
                           "请按该工具的官方文档人工装。")
-                print("   装完跑 `aether caps discover` 复验。")
+                #: ⛔ 出路必须真能结案（r60 B）：`caps discover` 只重扫清单，
+                #:    **不结案**（不会把 approved 变成 installed，也不记账本）。
+                print(f"   装完跑 `aether caps candidates verify "
+                      f"--tool {c.tool}` 结案。")
                 return 0
             argv = CC.install_hint(c)
             if not argv:
@@ -1995,6 +2073,10 @@ def build_parser() -> argparse.ArgumentParser:
                      help="显式批准：本系统不代你决定装什么")
     cgh = cgs.add_parser("hint", help="打印给人执行的安装命令（本命令不执行它）")
     cgh.add_argument("--tool", required=True)
+    #: ⛔ 人装完之后**回来结账**的入口（r60 B）。没有它，`installed` 是
+    #:    不可达的终态：工具一装好候选就蒸发，账本上永远 0 次。
+    cgvf = cgs.add_parser("verify", help="装完后复验并结案（approved ⇒ installed）")
+    cgvf.add_argument("--tool", required=True)
     #: ⛔ 清理提案器：让"自己的产出该收拾"变成可被提议、可被裁决的一件事。
     #:    判据不是"通过测试"（删代码不会让 reward 变高 ⇒ 按增益判永远提不出来），
     #:    而是"**减少自指负载**且**不动判据集**"。详见 `aether/cleanup.py`。

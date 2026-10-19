@@ -28,6 +28,7 @@
     python tests/contract_caps_candidate_test.py
 """
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -182,8 +183,13 @@ def main() -> int:
 
     # ── F 组：CLI 流水线（三个独立进程）──────────────────────────
     print("F 组：CLI 三次独立调用能串成一条流水线")
-    r1 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "caps",
-                         "candidates", "propose", "--json"],
+    #: ⛔ 全程改用**临时数据根**（r60 B）：原写法直接在真仓库上跑，
+    #:    每跑一次契约就往生产账本里塞好几条 `cap.candidate`
+    #:    （实测：账本 170 条里署名 tester 的那 53 条就是这么来的），
+    #:    收尾还会把生产 `data/candidates.json` 删掉。
+    #:    ⇒ 测试不该是生产账本的并发写入者。
+    r1 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
+                         str(tmp), "caps", "candidates", "propose", "--json"],
                         cwd=str(ROOT), stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE, timeout=300)
     try:
@@ -193,30 +199,142 @@ def main() -> int:
     ck("F1 `candidates propose --json` 输出结构化候选",
        isinstance(cands, list), r1.stderr.decode()[-160:])
     #: ⛔ 未加 --yes 时退出码必须非 0（否则脚本会把"没批准"当成功）
-    r2 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "caps",
-                         "candidates", "approve", "--tool", "radare2",
-                         "--by", "tester"],
+    r2 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
+                         str(tmp), "caps", "candidates", "approve",
+                         "--tool", "radare2", "--by", "tester"],
                         cwd=str(ROOT), stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE, timeout=300)
     ck("F2 ⛔ 无 --yes 的 approve 退出码非 0（脚本能判出没批准）",
        r2.returncode != 0, f"rc={r2.returncode}")
-    r3 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "caps",
-                         "candidates", "approve", "--tool", "radare2",
-                         "--by", "tester", "--yes"],
+    r3 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
+                         str(tmp), "caps", "candidates", "approve",
+                         "--tool", "radare2", "--by", "tester", "--yes"],
                         cwd=str(ROOT), stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE, timeout=300)
     ck("F3 带 --yes 的 approve 成功且**说清仍未安装**",
        r3.returncode == 0 and "仍未安装" in r3.stdout.decode("utf-8", "replace"),
        r3.stdout.decode()[-200:])
-    r4 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "caps",
-                         "candidates", "hint", "--tool", "radare2"],
+    r4 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
+                         str(tmp), "caps", "candidates", "hint",
+                         "--tool", "radare2"],
                         cwd=str(ROOT), stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE, timeout=300)
     out4 = r4.stdout.decode("utf-8", "replace").strip()
     ck("F4 ⛔ 状态跨进程存活：hint 能读出批准后的命令（实测踩过不落盘的坑）",
        r4.returncode == 0 and out4.startswith("brew install"), out4[:80])
-    #: 清理：别把测试造出来的候选留在真仓库里
-    (ROOT / "data" / "candidates.json").unlink(missing_ok=True)
+
+    # ── G 组：装好之后要能结案（r60 B）──────────────────────────
+    print("G 组：installed 必须可达（装好 ⇒ 结案，不是消失）")
+    #: 造一个「工具装好了、且已经包装好」的探针
+    fin = D.Probe(tool="ghost", status="found", path="/bin/ghost",
+                  version="1.0",
+                  capability={"id": "tool.ghost", "kind": "tool",
+                              "impl": {"transport": "cli",
+                                       "argv": ["/bin/ghost"]}})
+    #: ⛔ 前提：装好且已包装 ⇒ `from_probe` 返回 None（A3 已经钉过这是**对的**）
+    ck("G1 前提：装好且已包装 ⇒ 候选不产生（这正是它会消失的原因）",
+       CC.from_probe(fin) is None)
+    c_appr = CC.approve(CC.validate(CC.from_probe(
+        D.probe(ghost), install_argv=["brew", "install", "ghost"])),
+        by="linshaojie", yes=True)
+    sealed = CC.seal({c_appr.tool: c_appr}, {c_appr.tool: fin})
+    ck("G2 ⛔ 装好 ⇒ seal 结案为 installed（没它账本上永远 0 次）",
+       len(sealed) == 1 and sealed[0].state == CC.INSTALLED,
+       str([s.state for s in sealed]))
+    ck("G3 结案后 approved_by 仍留着（谁批的不许丢）",
+       bool(sealed) and sealed[0].approved_by == "linshaojie")
+    ck("G4 结案证据是探针的客观读数（不是「我觉得装好了」）",
+       bool(sealed) and "verify_probe" in sealed[0].evidence)
+    #: ⛔ 反证：没批准的不许被认领 —— 装了也不等于本系统采纳
+    c_pend = CC.from_probe(D.probe(ghost),
+                           install_argv=["brew", "install", "ghost"])
+    ck("G5 ⛔ 未批准的候选**不许**被结案（装上也不算本系统采纳）",
+       CC.seal({c_pend.tool: c_pend}, {c_pend.tool: fin}) == [])
+    #: ⛔ 反证：没探到就不许结案 —— 不许把"没装"判成"装了"
+    c_appr2 = CC.approve(CC.validate(CC.from_probe(
+        D.probe(ghost), install_argv=["brew", "install", "ghost"])),
+        by="linshaojie", yes=True)
+    miss = D.Probe(tool="ghost", status="missing", path="", detail="找不到")
+    ck("G6 ⛔ 没探到 ⇒ 不许结案（approved 保持原样）",
+       CC.seal({c_appr2.tool: c_appr2}, {c_appr2.tool: miss}) == []
+       and c_appr2.state == CC.APPROVED)
+    #: merge 那条：已批准 + 探到 ⇒ installed（按探针读数判）
+    c_appr3 = CC.approve(CC.validate(CC.from_probe(
+        D.probe(ghost), install_argv=["brew", "install", "ghost"])),
+        by="linshaojie", yes=True)
+    c_new = CC.from_probe(D.Probe(tool="ghost", status="found",
+                                  path="/bin/ghost", version="1.0"),
+                          install_argv=["brew", "install", "ghost"])
+    ck("G7 merge：已批准 + 探针探到 ⇒ installed（按读数判）",
+       CC.merge(c_new, c_appr3,
+                probe=D.Probe(tool="ghost", status="found",
+                              path="/bin/ghost", version="1.0")).state
+       == CC.INSTALLED)
+    #: ⛔ 反证：不传探针 ⇒ 不许判 installed
+    ck("G8 ⛔ 反证：不传探针 ⇒ 保持 approved"
+       "（旧判据 `kind==\"\"` 永远不成立，是条死规则）",
+       CC.merge(c_new, c_appr3).state == CC.APPROVED)
+
+    #: ── CLI 层：人装完之后回来结账 ──
+    #: 造一个假 r2，让 radare2 在探针里"装好了"
+    fbin = tmp / "fakebin"
+    fbin.mkdir(exist_ok=True)
+    fk = fbin / "r2"
+    fk.write_text("#!/bin/sh\necho 'radare2 5.9.8 fake'\n", encoding="utf-8")
+    fk.chmod(0o755)
+    env_fake = dict(os.environ)
+    env_fake["PATH"] = str(fbin) + os.pathsep + env_fake.get("PATH", "")
+    #: ⛔ 先测**没装**就 verify：必须拒绝，且**不许**撤销人的批准
+    r5 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
+                         str(tmp), "caps", "candidates", "verify",
+                         "--tool", "radare2"],
+                        cwd=str(ROOT), stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, timeout=300)
+    o5 = r5.stdout.decode("utf-8", "replace")
+    ck("G9 ⛔ 没装就 verify ⇒ 退出码非 0（脚本能判出没装）",
+       r5.returncode != 0, f"rc={r5.returncode}")
+    ck("G10 ⛔ 复验失败**不许**撤销批准（「没装」≠「装了没用」）",
+       "你的批准没有被撤销" in o5, o5[-160:])
+    #: 后测**装好**了：必须结案
+    r6 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
+                         str(tmp), "caps", "candidates", "verify",
+                         "--tool", "radare2"],
+                        cwd=str(ROOT), stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, timeout=300, env=env_fake)
+    o6 = r6.stdout.decode("utf-8", "replace")
+    ck("G11 装完 verify ⇒ 结案为 installed（这是「人批准」的后半段）",
+       r6.returncode == 0 and "已装（复验过）" in o6, o6[-200:])
+    #: ⛔ 结案必须落到档案里（跨进程能读回来），而且账本里要有 installed
+    r7 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
+                         str(tmp), "caps", "candidates", "propose"],
+                        cwd=str(ROOT), stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, timeout=300, env=env_fake)
+    o7 = r7.stdout.decode("utf-8", "replace")
+    ck("G12 ⛔ 结案跨进程存活：重跑 propose 仍看得到 installed"
+       "（改前这条会直接消失）",
+       "已装（复验过）" in o7, o7[-200:])
+    #: ⛔ 光看打印不够 —— 打印读的是**内存里**的 sealed，档案才是跨进程的
+    #:    真相。少这一条，"propose 改成整表替换"就测不出来（实测：事故版 D
+    #:    只让 G12 看的话是绿的，因为输出不受落盘影响）。
+    try:
+        _sd = json.loads((tmp / "data" / "candidates.json").read_text(
+            encoding="utf-8"))
+    except Exception:                                        # noqa: BLE001
+        _sd = {"candidates": []}
+    _st = {c["tool"]: c["state"] for c in (_sd.get("candidates") or [])}
+    ck("G12b ⛔ 结案真的落进档案（跨进程读回，不是只打印一下）"
+       "（整表替换会把刚结案的又冲掉）",
+       _st.get("radare2") == "installed", str(_st))
+    #: ⛔ 账本路径按 `paths()` 取，不许手拼（`--root` 下它在 data/ 子目录，
+    #:    手拼 `tmp/ledger.jsonl` 会读到空账本 ⇒ 断言假红，第 24 条）。
+    n_inst = 0
+    _lf = tmp / "data" / "ledger.jsonl"
+    if _lf.is_file():
+        n_inst = sum(1 for e in Ledger(_lf).events()
+                     if e.kind == "cap.candidate"
+                     and e.payload.get("state") == "installed")
+    ck("G13 账本里真的出现了 installed（事实源上不再是 0 次）",
+       n_inst >= 1, f"installed={n_inst}")
 
     print("\n" + "=" * 60)
     if FAILS:

@@ -60,7 +60,7 @@ from .ledger import content_hash
 
 __all__ = ["PENDING", "VALIDATED", "REJECTED", "APPROVED", "INSTALLED",
            "Candidate", "from_probe", "validate", "approve", "install_hint",
-           "verify", "record", "load", "save", "ID_PREFIX"]
+           "verify", "seal", "record", "load", "save", "ID_PREFIX"]
 
 
 #: ⛔⛔ r58 收口：这份 `CANDIDATES_NAME` **已删除** —— 它是布局的第二份
@@ -128,7 +128,8 @@ def save(path: Any, cands: Dict[str, Candidate]) -> None:
     os.replace(tmp, f)
 
 
-def merge(new: Candidate, old: Optional[Candidate]) -> Candidate:
+def merge(new: Candidate, old: Optional[Candidate],
+          probe: Optional[D.Probe] = None) -> Candidate:
     """把新探到的候选与**已存档的状态**合并。
 
     ⛔ 合并规则很关键：新探针更新**事实**（reason/evidence/install_argv），
@@ -136,6 +137,14 @@ def merge(new: Candidate, old: Optional[Candidate]) -> Candidate:
        在每一次重跑探针后失效（流水线永远是断的）。
     ⛔ 反过来也要守住：已批准但**现在探到工具已经在**了 ⇒ 直接判 installed
        （人装了、复验通过），而不是继续显示"待安装"。
+
+    ⛔⛔ 那条判据原本写的是 `new.kind == ""` —— **永远不成立**，是条死
+       规则（r60 B 实测）：`kind` 由 `from_probe` 产出，只可能是
+       `missing_tool` / `unwrapped_capability`，没有空值这条路径。
+       ⇒ 改成按探针的**客观读数**判，跟 `seal()` / `verify()` 同口径。
+    ⛔ 它管的是"候选仍在流水线上"的那条路（工具装了但还没包装，
+       于是仍产出 `unwrapped_capability` 候选）；候选彻底消失的那条路
+       由 `seal()` 管 —— 两条路互补，出口都收在 `verify()`。
     """
     if old is None:
         return new
@@ -146,7 +155,7 @@ def merge(new: Candidate, old: Optional[Candidate]) -> Candidate:
         new.install_argv = list(old.install_argv)
     if old.state in (APPROVED, INSTALLED):
         new.state = old.state
-    if old.state == APPROVED and new.kind == "":
+    if old.state == APPROVED and probe is not None and probe.status == "found":
         new.state = INSTALLED
     return new
 
@@ -237,8 +246,12 @@ def from_probe(pr: D.Probe, *, install_argv: Optional[Sequence[str]] = None
         c = Candidate(tool=pr.tool, kind="missing_tool",
                       reason=f"探针：{pr.detail}",
                       install_argv=list(install_argv or []),
-                      verify_hint=f"装完跑 `aether caps discover`（应看到 "
-                                  f"{pr.tool} 变成 found）",
+                      #: ⛔ 出路必须是真的（r60 B）：`caps discover` 只重扫
+                      #:    清单，**不结案**（它不会把 approved 变成
+                      #:    installed，也不会往账本里写）。真正结案的是
+                      #:    `verify --tool`（propose 也会自动结案）。
+                      verify_hint=f"装完跑 `aether caps candidates verify "
+                                  f"--tool {pr.tool}` ⇒ 结案为 installed",
                       evidence={"probe": pr.to_dict()})
     elif pr.status == "found" and not pr.capability:
         c = Candidate(tool=pr.tool, kind="unwrapped_capability",
@@ -354,6 +367,43 @@ def verify(c: Candidate, probe: D.Probe) -> Candidate:
         c.gate_reasons.append(
             f"复验未通过：装完仍探到 {probe.status}（{probe.detail}）")
     return c
+
+
+def seal(saved: Dict[str, Candidate],
+         found: Dict[str, D.Probe]) -> List[Candidate]:
+    """把**已经装好、但档案里还没结案**的候选结掉。
+
+    ⛔⛔ 为什么非有它不可（r60 B 实测出来的，不是设计时想到的）：
+
+       `from_probe` 对"探到了且已包装"返回 `None` —— 那是**对的**
+       （没有待办就不该提候选）。但副作用是：**工具一装好，那条候选
+       就从流水线上直接消失了**。
+
+         批准 radare2        ⇒ 档案 `approved`
+         装好后再 propose    ⇒ 档案 **0 条**、账本 `installed` **0 次**
+
+       ⇒ `installed` 成了**结构性不可达**的终态。而且它比"卡在 approved"
+         更难发现：propose 会打印「✅ 没有待办候选」，看着像问题已经
+         解决了，实际是连"装好了"这件唯一的好事都没被记下来。
+
+    ⛔ 与 `cleanup` 的 `APPLIED` 是同族病：状态机有终态，但**没有到达
+       终态的路径**。差别只是 cleanup 停在 approved 不动，这条链是
+       连记录一起擦掉。
+
+    ⛔ 只认探针的**客观读数**（`status == "found"`），不认"我觉得装好了"。
+    ⛔ 只结"人已批准"的（approved）—— 没批准就装上的工具，不该由
+       这条链去认领成"系统采纳了它"。
+    """
+    out: List[Candidate] = []
+    for tool in sorted(saved):
+        c = saved[tool]
+        if c.state not in (APPROVED, INSTALLED):
+            continue
+        pr = found.get(tool)
+        if pr is None or pr.status != "found":
+            continue
+        out.append(verify(c, pr))
+    return out
 
 
 def record(ledger: Any, c: Candidate, *, actor: str = "caps") -> Optional[int]:
