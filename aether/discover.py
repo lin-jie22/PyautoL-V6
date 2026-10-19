@@ -181,6 +181,14 @@ class Tool:
     #: ⛔ 空元组表示"我们不知道该怎么装" ⇒ 宁可空着也不猜：
     #:    猜错会让人装错东西，比不给提示更糟（同族：`version` 抽不到就留空）。
     install_argv: Tuple[str, ...] = ()
+    #: 上游仓库（GitHub 的 `owner/name`），供外部**只读**事实探针查证。
+    #: ⛔ 空字符串表示"这个工具的上游不在 GitHub / 我们不确定是哪一个"
+    #:    ⇒ 留空，**不猜**（与 `install_argv` 同一条纪律）。
+    #:    ⛔ 为什么必须**显式声明**而不是让探针去搜：搜索接口
+    #:       **只有 10 次/分钟**（core 是 60 次/小时），而且搜索结果的第一条
+    #:       **不保证是官方仓库**（实测搜 `radare2` 返回 665 个）。
+    #:    ⛔ 这个字段**不参与**任何判据（见 `ghprobe` 模块文档）。
+    gh_repo: str = ""
 
 
 @dataclass
@@ -209,15 +217,20 @@ KNOWN_TOOLS: Tuple[Tool, ...] = (
          about="反编译/二进制分析（headless 模式）",
          capability={"id": "tool.ghidra", "kind": "tool"},
          aliases=("ghidra", "ghidraRun"),
-         install_argv=("brew", "install", "--cask", "ghidra")),
+         install_argv=("brew", "install", "--cask", "ghidra"),
+         gh_repo="NationalSecurityAgency/ghidra"),
     Tool(name="radare2", exe="r2",
          probe_args=(("-v",), ("-V",)),
          about="逆向工程框架（radare2）",
          capability={"id": "tool.radare2", "kind": "tool"},
          aliases=("radare2", "rabin2"),
-         install_argv=("brew", "install", "radare2")),
+         install_argv=("brew", "install", "radare2"),
+         gh_repo="radareorg/radare2"),
+    #: ⛔ `gh_repo` 空着是**事实**不是遗漏：binutils 的上游在 sourceware，
+    #:    otool 的上游是 Apple 的 cctools —— 它们**不在 GitHub 上**。
+    #:    留空 ⇒ 外部探针跳过（与其去搜一个不存在的官方仓库，不如不查）。
     Tool(name="objdump", exe="objdump", probe_args=(("--version",),),
-         about="binutils 反汇编/目标文件检查",
+         about="binutils 反汇编/目标文件检查（上游在 sourceware，不在 GitHub）",
          capability={"id": "tool.objdump", "kind": "tool"}),
     #: ⛔ `otool` **没有** `--version`（Apple 的版本在 Xcode 里）。这里用
     #:    `-h`：它能证明"这个可执行文件在"，但拿不到版本号 —— 那是
@@ -228,15 +241,18 @@ KNOWN_TOOLS: Tuple[Tool, ...] = (
          capability={"id": "tool.otool", "kind": "tool"}),
     Tool(name="git", exe="git", probe_args=(("--version",),),
          about="版本控制（取证/回放常用）",
-         capability={"id": "tool.git", "kind": "tool"}),
+         capability={"id": "tool.git", "kind": "tool"},
+         gh_repo="git/git"),
     Tool(name="node", exe="node", probe_args=(("--version",),),
          about="Node 运行时（跨语言监督器要用 ≥22）",
          capability={"id": "tool.node", "kind": "tool"},
-         aliases=("nodejs",)),
+         aliases=("nodejs",),
+         gh_repo="nodejs/node"),
     Tool(name="python3", exe="python3", probe_args=(("--version",),),
          about="Python 解释器",
          capability={"id": "tool.python3", "kind": "tool"},
-         aliases=("python",)),
+         aliases=("python",),
+         gh_repo="python/cpython"),
 )
 
 

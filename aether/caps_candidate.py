@@ -43,10 +43,24 @@
       ↓
     复验                        verify()       —— 装完重跑，读数进账本
 
-⛔ 本模块**永不自执行安装**：没有 `subprocess.run(["pip", "install", ...])`，
-   没有网络请求。`install_hint()` 产出的是**给人看的命令**，
+⛔ 本模块**永不自执行安装**：没有 `subprocess.run(["pip", "install", ...])`。
+   `install_hint()` 产出的是**给人看的命令**，
    而且落进账本 —— 所以"谁在什么时候批准了什么、让系统去装什么"
    是可回溯的，而不是一次悄悄的 `pip install`。
+
+═══ ⛔ 唯一的网络动作：`annotate()`，且**默认不发请求** ═══
+
+`annotate()` 会去问上游仓库"还活着吗"（GET 仓库元数据），这是本模块
+唯一会碰网络的地方。它守住三件事，否则上面那段承诺就不成立：
+
+  · **默认关**：只有显式 `net=True`（CLI `--net`）才真的发请求；
+  · **只 GET 元数据**：不下载、不 clone、不执行任何东西；
+  · **不进判据**：产出只写进 `evidence["external"]`，绝不被
+    `validate()` 的四道闸读 ⇒ 宪法"判据必须离线可回归"仍然成立
+    （外部 API 的可用性与配额不归我们管）。
+
+它提供的是**本机探针给不了**的那一半信息：`radare2 没装`是本机的
+事实，而 `它的上游昨天还有提交`是本模块怎么探都探不出来的。
 """
 from __future__ import annotations
 
@@ -56,11 +70,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import discover as D
+#: ⛔ `ghprobe` 只 import 标准库 ⇒ 不会与这条链形成循环导入。
+from . import ghprobe as GH
 from .ledger import content_hash
 
 __all__ = ["PENDING", "VALIDATED", "REJECTED", "APPROVED", "INSTALLED",
-           "Candidate", "from_probe", "validate", "approve", "install_hint",
-           "verify", "seal", "record", "load", "save", "ID_PREFIX"]
+           "Candidate", "from_probe", "annotate", "validate", "approve",
+           "install_hint", "verify", "seal", "record", "load", "save",
+           "ID_PREFIX"]
 
 
 #: ⛔⛔ r58 收口：这份 `CANDIDATES_NAME` **已删除** —— 它是布局的第二份
@@ -404,6 +421,42 @@ def seal(saved: Dict[str, Candidate],
             continue
         out.append(verify(c, pr))
     return out
+
+
+def annotate(c: Candidate, gh_repo: str, *, net: bool = False,
+             api_base: str = "", timeout: float = 0.0) -> Candidate:
+    """把上游仓库的外部事实挂到候选上。**只进 evidence，绝不进判据**。
+
+    ⛔⛔ 三件事它**都不做**，做了这条链就不再可信：
+
+      ① **不改 `identity()`** —— `cap_id` 由 `tool/kind/install_argv`
+         决定，不含 evidence ⇒ 外部信息来了走了，`cap_id` 都不变
+         （否则历史账本的候选 id 会集体失效，同 r60 A 的行号漂移）。
+      ② **不改 `state` / `gate_passed`** —— 外部事实不许影响任何闸。
+         否则"仓库今天被点了几颗星"就变成了"能不能装这个工具"的判据，
+         而且会随网络波动 ⇒ 直接违反宪法第一条（判据必须离线可回归）。
+      ③ **不发请求时不留痕** —— `evidence` 里没有 `external` 就是没查过。
+         ⛔ 写一条 `status=not_queried` 会让"从没测过"与"测了没结果"
+         变成同形（第 51 条），而这两件事的处置完全相反。
+
+    ⛔ 为什么必须显式 `net=True` 才发请求：外部 API 有配额
+       （实测 core 60 次/小时），而它的可用性不归我们管。默认让这条
+       路径**不存在**，需要时再打开 —— 想要的时候有，不想要时零成本
+       （同 r42 的对拍预算：破法存在但默认关，而不是删掉它）。
+
+    ⛔ 清单没声明上游（`gh_repo` 空）就**不猜**：与 `install_argv`
+       空着同一条纪律（猜错会让人去看一个错的仓库，比不给更糟）。
+    """
+    if not net:
+        return c
+    if not (gh_repo or "").strip():
+        return c
+    fact = GH.fetch(gh_repo, api_base=api_base or GH.API_BASE,
+                    timeout=timeout or GH.TIMEOUT_S)
+    #: ⛔ 三种状态**都留痕**："查了但取不到"也是事实，而且人需要知道
+    #:   （比如被限流了，那与"仓库不存在"的处置完全不同）。
+    c.evidence["external"] = fact.to_dict()
+    return c
 
 
 def record(ledger: Any, c: Candidate, *, actor: str = "caps") -> Optional[int]:

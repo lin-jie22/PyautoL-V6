@@ -1377,6 +1377,8 @@ def cmd_caps(args) -> int:
         #:    会重新生成候选 ⇒ 批准状态丢失 ⇒ `hint` 报 validated。
         from . import caps_candidate as CC
         from . import discover as D
+        #: ⛔ `ghprobe` 只 import 标准库 ⇒ 延迟导入这里不会有循环。
+        from . import ghprobe as GH
         #: ⛔ 位置**按键取**，不许手拼 `root / "data" / ...`：
         #:    布局的唯一事实源是 `paths()`（静态闸会抓手拼）。
         cpath = _paths(Path(args.root))["candidates"]
@@ -1392,6 +1394,36 @@ def cmd_caps(args) -> int:
             #: 与已存档状态合并：新探针更新事实，但不把已批准的打回 pending
             return CC.merge(c, saved.get(tool_name)) if c else None, pr
 
+        def _gh_line(c) -> str:
+            """外部上游事实的显示。⛔ **没查过就返回空串**（不显示 == 没查过）。
+
+            ⛔ 三态分开显示，合成一句最糟：
+              · ok          上游现状（星数 / 许可 / 最近提交）
+              · not_found   清单里的 `gh_repo` 可能写错了 ⇒ 该改的是清单
+              · unavailable 现在取不到（限流/断网）⇒ 与这个工具本身无关
+            ⛔ 把"取不到"显示成空白尤其危险：读者会读成"这工具没有上游"，
+               而真相只是我们这一刻问不到（第 51 条：没测过 ≠ 测了没结果）。
+            """
+            e = (c.evidence or {}).get("external")
+            if not e:
+                return ""
+            st = e.get("status") or ""
+            if st == GH.OK:
+                age = GH.stale_days(e.get("pushed_at") or "")
+                when = "未知" if age is None else f"{age} 天前"
+                lic = GH.license_label(e.get("license_spdx") or "")
+                out = (f"    🌐 上游 {e.get('full_name')} ★{e.get('stars')}"
+                       f"｜{lic}｜最近提交 {when}（本机探不到）")
+                if e.get("archived"):
+                    #: ⛔ 归档是**作者主动封存**，与"只是不活跃"是两件事，
+                    #:    所以它单独占一行，不混进上面那句里。
+                    out += "\n    ⛔ 上游已归档 —— 装之前先想清楚"
+                return out
+            if st == GH.NOT_FOUND:
+                return "    🌐 上游查不到 ⇒ 清单里的 gh_repo 可能写错了"
+            return (f"    🌐 上游现状取不到（{e.get('detail') or '?'}）"
+                    f"⇒ 与本机探针无关，不是这个工具的问题")
+
         if sub == "propose":
             probes = D.discover()
             found = {t.name: pr for t, pr in zip(D.KNOWN_TOOLS, probes)}
@@ -1402,6 +1434,13 @@ def cmd_caps(args) -> int:
                 if not c:
                     continue
                 c = CC.merge(c, saved.get(t.name), probe=pr)
+                #: ⛔ 外部上游事实**只在显式 `--net` 时才取**。默认不联网：
+                #:    外部 API 有配额且可用性不归我们管，而宪法第一条要求
+                #:    判据必须离线可回归 ⇒ 这条路径默认不存在。
+                c = CC.annotate(c, t.gh_repo,
+                                net=bool(getattr(args, "net", False)),
+                                api_base=str(getattr(args, "gh_api_base", "")
+                                             or ""))
                 cands.append(c)
                 #: ⛔ 只记**状态变了**的（r60 B）。原来每轮 propose 都把
                 #:    同一条候选重记一遍 —— 实测 radare2 一条在账本里
@@ -1437,6 +1476,10 @@ def cmd_caps(args) -> int:
                 print(f"{mark} {c.tool} [{c.kind}] {c.reason}")
                 if c.verify_hint:
                     print(f"    ⇒ {c.verify_hint}")
+                #: ⛔ 没查过就什么都不打印（不显示 == 没查过，不假装查过）。
+                ext = _gh_line(c)
+                if ext:
+                    print(ext)
             for c in sealed:
                 print(f"✅ 已装（复验过） {c.tool} —— 结案"
                       f"（原本这条会直接消失）")
@@ -2064,6 +2107,14 @@ def build_parser() -> argparse.ArgumentParser:
     cgs = cg.add_subparsers(dest="cand_cmd", required=True)
     cgp = cgs.add_parser("propose", help="从本机探针生成候选（缺的工具 / 未包装的）")
     cgp.add_argument("--json", action="store_true", help="结构化输出")
+    #: ⛔ 外部上游事实**默认不取**：外部 API 有配额（实测 core 60 次/小时）
+    #:    且可用性不归我们管。想要必须显式开 —— 破法存在但默认关，
+    #:    而不是删掉它（同 r42 的对拍预算）。
+    cgp.add_argument("--net", action="store_true",
+                     help="顺便查上游仓库现状（默认不联网）")
+    #: ⛔ 只给契约的**回环服务器**用，让契约完全离线（宪法：判据必须离线
+    #:    可回归）。不进帮助文档：它不是给人日常用的开关。
+    cgp.add_argument("--gh-api-base", default="", help=argparse.SUPPRESS)
     cgv = cgs.add_parser("validate", help="对候选过闸（探针复核 + 白名单 + 非回归 + 可复验）")
     cgv.add_argument("--tool", required=True, help="工具名（如 ghidra）")
     cga = cgs.add_parser("approve", help="**人批准**（没有 --yes 一律不推进）")
