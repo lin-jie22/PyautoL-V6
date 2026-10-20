@@ -32,7 +32,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path("/Users/linshaojie/V6")
+#: ⛔ 不许写死绝对路径（r60 F）：`srcmut.probe` 会在**副本根**上跑契约，
+#:    写死 ⇒ 契约永远 import 生产那份 ⇒ 删前删后跑的是同一份代码 ⇒
+#:    对拍恒绿 ⇒ 那道闸是空的（实测：删掉 `_SLUG_RE` 定义后契约仍 rc=0）。
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 #: ⛔ 声明支持的模式（`aether check` 静态读这一行）。

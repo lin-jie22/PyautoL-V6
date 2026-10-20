@@ -51,6 +51,10 @@ MEMORY_NAME = "memory.json"
 #: ⛔ 它是**派生量**（可从账本重放得到），不入 `BACKUP_TARGETS`；但它的
 #:    **位置**与其它数据文件一样只允许在这里定义一次（第 46 条）。
 CHECKPOINT_NAME = "checkpoint.json"
+#: 机器自审（r60 F）的快照落点：每次自动落盘前把**原文件整份**备份到这里，
+#: 子目录名是 unix 时间戳。⛔ 不入 `BACKUP_TARGETS`（它是回滚用的临时副本，
+#: 不是事实源），但**位置**必须在这里定义一次（第 46 条）。
+AUTONOMY_DIRNAME = "autonomy"
 
 #: 能力清单的示例文件（UI / 控制台的默认清单）。
 CAPS_EXAMPLE = "capabilities.example.json"
@@ -74,7 +78,7 @@ BACKUP_TARGETS: Tuple[Tuple[str, str], ...] = (
 __all__ = [
     "ROOT", "DATA_DIRNAME", "TASKS_DIRNAME", "BACKUPS_DIRNAME",
     "CONSOLE_DIRNAME", "REA_DIRNAME", "LEDGER_NAME", "DB_NAME",
-    "MEMORY_NAME", "CHECKPOINT_NAME", "CAPS_EXAMPLE",
+    "MEMORY_NAME", "CHECKPOINT_NAME", "CAPS_EXAMPLE", "AUTONOMY_DIRNAME",
     "ARCH_BASELINE_DIRNAME", "ARCH_BASELINE_NAME",
     "BACKUP_TARGETS",
     "data_dir", "paths", "flat_name", "BACKUP_FLAT",
@@ -123,6 +127,9 @@ def paths(root: Union[str, Path], *, default_env: str = "textscore"
         "cleanup": r / DATA_DIRNAME / CLEANUP_NAME,
         #: 续跑进度（派生量，不是事实源）。默认开 ⇒ 位置必须有唯一定义。
         "checkpoint": r / DATA_DIRNAME / CHECKPOINT_NAME,
+        #: 机器自审的落盘前快照（r60 F）。⛔ 派生量：只用于回滚，
+        #: 不是事实源；删了不丢证据（账本里记了备份路径与内容指纹）。
+        "autonomy": r / DATA_DIRNAME / AUTONOMY_DIRNAME,
         #: 架构基线（代码属性，随代码进版本库 —— 唯一的非 data/ 键）。
         "arch_baseline": r / ARCH_BASELINE_DIRNAME / ARCH_BASELINE_NAME,
     }

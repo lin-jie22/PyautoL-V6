@@ -1112,6 +1112,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     h_start = h0
     rounds = int(args.rounds)
     resumed_from = None
+    did_resume = False
     if getattr(args, "resume", False):
         if not cp_path:
             _log.error("❌ --resume 需要配合 --checkpoint <路径>")
@@ -1142,11 +1143,45 @@ def cmd_evolve(args: argparse.Namespace) -> int:
             return 0
         start_round, rounds = win
         resumed_from = cpx.round_no
+        did_resume = True
         print(f"♻️  续跑：从第 {start_round + 1} 轮开始，再跑 {rounds} 轮"
               f"（目标 {target} 轮，已完成 {cpx.round_no} 轮）")
-    else:
+    elif (not getattr(args, "no_continue", False)
+          and not getattr(args, "fresh", False)
+          and cp_path and os.path.exists(cp_path)):
+        #: ── 自动接续（默认行为，r60 F）────────────────────────────
+        #: ⛔ 与 `--resume` 的**语义差别**必须钉住，否则两个开关会打架：
+        #:    `--resume`：`--rounds` 是**目标总轮数**（人的意图，老语义）；
+        #:    自动接续：`--rounds` 是**本次追加**轮数（调度者每 30–80 分钟
+        #:    跑一次 `--rounds 1`，它说的当然是"再跑一轮"，不是"总数 1"）。
+        #:    ⛔ 混用会把"追加 1 轮"读成"目标 1 轮"⇒ 余量 0 ⇒ 永远不跑。
+        try:
+            cpx, h_start = loop.load_checkpoint(cp_path)
+        except Exception as e:      # noqa: BLE001 —— 拒绝原因要原样给人看
+            #: ⛔ 连续性断了（换尺子 / 换配置 / 账本回退）⇒ **从头跑，但必须
+            #:    说出来**。静默从头 = 把"断了"伪装成"正常"，而两者在账本
+            #:    里长得一样（都是新一轮从 round 1 起）⇒ 第 24/25 条。
+            print(f"⚠️  不接续：{e}")
+            print("   ⇒ 本次从初始 harness 起跑（本轮结束会覆盖 checkpoint）。"
+                  "要留住上次进度，先自行备份该文件。")
+            try:
+                led.append("evolution.continuity_broken",
+                           {"reason": str(e)[:300], "checkpoint": cp_path},
+                           actor="evolution")
+            except Exception:       # noqa: BLE001 —— 记账失败不拖垮这次运行
+                pass
+        else:
+            start_round = int(cpx.round_no)
+            resumed_from = start_round
+            did_resume = True
+            print(f"♻️  接续：第 {start_round} 轮已完成，本次追加 {rounds} 轮"
+                  f"（目标 {start_round + rounds} 轮，"
+                  f"harness={cpx.harness_id[:8] or '?'}）")
+    if not did_resume:
+        #: ⛔ 只在**从头跑**时注册 root：接续时 root 已经在上一次写进账本，
+        #:    再写一条会让账本出现两个 root ⇒ 「唯一事实源」自相矛盾。
         #: ⛔ 初始 harness 必须**先进账本**再落投影：只写库的话，从账本重建
-        #:    会丢掉它（实测 7 个快照重建只剩 6 个）⇒ "唯一事实源"被违反。
+        #:    会丢掉它（实测 7 个快照重建只剩 6 个）⇒ 「唯一事实源」被违反。
         loop.register_root(h0)
 
     #: ⛔ **实验可复现性**（r35）：跑之前先把"这次用的什么参数"写进账本。
@@ -1191,6 +1226,12 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         #:    （与 checkpoint 的 `n_below_min_content` 同源纪律：读数要么
         #:    是确认过的值，要么带原因，不许用空值冒充"已确认没有"。）
         "resumed_from": resumed_from if resumed_from is not None else 0,
+        #: ⛔ **走的是哪条连续性路径**必须进账本（r60 F）：`resume` 是显式
+        #:    老语义（--rounds 为目标总轮数）、`auto` 是默认接续（追加）、
+        #:    `fresh` 是从头。三者跑出来的 `round_no` 序列完全不同，不记
+        #:    就分不清「这轮从 seed 起」是配置如此还是接续失败。
+        "continuity": ("resume" if getattr(args, "resume", False)
+                       else ("auto" if did_resume else "fresh")),
     }
     led.append("evolution.run_config", run_config, actor="cli")
 
@@ -1851,6 +1892,53 @@ def cmd_caps(args) -> int:
                 print("     " + ln)
             return 0
 
+        if sub == "auto":
+            #: ⛔⛔ 机器自审（r60 F）：把「人点头」换成「冻结契约对拍」。
+            #:    这条路径**新增了写生产根的权限**，所以必须有等强度的约束
+            #:    顶上：按 import 选契约 → 副本对拍 → 快照 → 落盘 → 复验 →
+            #:    失败原子回滚。少任何一环，它就从"自审"退化成"自动乱改"。
+            from . import autonomy as AU
+            pid = getattr(args, "pid", "") or ""
+            p = saved.get(pid)
+            if p is None:
+                _log.warning(f"[cleanup] 没有提案 {pid!r}（先跑 propose/validate）")
+                return 2
+            if CL.STATE_RANK.of(p.state) >= CL.STATE_RANK.of(CL.EXECUTED):
+                print(f"✅ {pid} 已是 {p.state}：无需再执行")
+                return 0
+            dry = bool(getattr(args, "dry_run", False))
+            v = AU.auto_apply(
+                p, src_root,
+                max_contracts=int(getattr(args, "max_contracts", 12) or 12),
+                timeout_s=float(getattr(args, "timeout", 900.0) or 900.0),
+                verify_after=not dry,
+                apply_to_disk=not dry)
+            p.evidence["autonomy"] = v.to_dict()
+            #: ⛔ 记 `auto` 而**不是**任何人名：审计时要能一眼分开
+            #:    「人批的」与「机器对拍过的」，否则两种责任同形。
+            p.evidence["approved_by"] = AU.AUTO_BY
+            if v.applied and not dry:
+                p.state = CL.STATE_RANK.move(p.state, CL.EXECUTED)
+            saved[pid] = p
+            _save(saved)
+            CL.record(led, p)
+            if v.state == AU.OK:
+                print(f"{'🧪 演练（源码未改动）' if dry else '✅ 机器自审通过'}"
+                      f"：{p.target} @ {p.where}")
+                for r in v.reasons:
+                    print(f"   {r}")
+                if not dry:
+                    print(f"   删了 {v.evidence.get('applied_lines')} 行"
+                          f"｜快照 {v.snapshot_dir}")
+                return 0
+            if v.state == AU.UNVERIFIED:
+                print("⛔ 没有裁决（**不等于**『安全』）：")
+            else:
+                print("⛔ 对拍发现差异 ⇒ 拒绝落盘：")
+            for r in v.reasons:
+                print(f"   ⇒ {r}")
+            return 1
+
         if sub == "done":
             #: ⛔ 人执行完补丁之后**回来结账** —— 这是这条链此前缺的最后一环。
             #:    没有它，`APPLIED`（已批准）就是终点，于是账本会说"删了"
@@ -2282,6 +2370,18 @@ def build_parser() -> argparse.ArgumentParser:
     cd.add_argument("--id", dest="pid", required=True)
     cd.add_argument("--note", default="",
                     help="执行备注（可选，进账本）")
+    caa = cls_.add_parser(
+        "auto",
+        help="**机器自审**：冻结契约对拍通过就自己落盘"
+             "（先快照、落盘后复验、失败原子回滚）")
+    caa.add_argument("--id", dest="pid", required=True)
+    caa.add_argument("--max-contracts", type=int, default=12,
+                     help="单次对拍最多跑几份冻结契约（默认 12；"
+                          "超了记 unverified，不静默截断）")
+    caa.add_argument("--timeout", type=float, default=900.0,
+                     help="跑冻结契约的超时秒数")
+    caa.add_argument("--dry-run", action="store_true",
+                     help="只对拍不落盘：看「这段删除是否等价」的裁决")
     cs.add_parser("list", help="列出已注册能力")
     sh = cs.add_parser("show", help="查看一个能力的声明")
     sh.add_argument("id")
@@ -2388,7 +2488,25 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--resume", action="store_true",
                    help="从 --checkpoint 记录的位置接着跑，轮号**接续**"
                         "（否则账本里会出现两个「第 3 轮」）。"
-                        "⛔ 换尺子 / 换配置 / 账本回退 ⇒ 拒绝并说明是哪一种。")
+                        "⛔ 换尺子 / 换配置 / 账本回退 ⇒ 拒绝并说明是哪一种。"
+                        "⛔ 这个开关的语义是「--rounds 为目标**总**轮数」。"
+                        "默认已经会自动接续（见 --no-continue），本开关只在"
+                        "需要旧语义（给总目标）时用。")
+    #: ⛔⛔ r60 F：**默认接着上次的 checkpoint 跑**（追加 --rounds 轮）。
+    #:    理由不是"方便"，是实测出来的：生产账本里 119 次 `harness.commit`
+    #:    只有 6 个不同技能，`fix_control_flow` 一个占 93 次；38 次
+    #:    `baseline.superseded` 全是同一个 4→6。根因是调度者每轮都传
+    #:    `--rounds 1` 且**从不传 --resume** ⇒ 每轮从 seed 起 ⇒ 同一件事
+    #:    重学 N 遍。机制（`run(start_round=...)` + `rounds_total =
+    #:    start_round + rounds`）早就在，缺的只是"默认走它"。
+    e.add_argument("--no-continue", action="store_true",
+                   help="⛔ 不接续：每次从初始 harness 起（旧行为）。"
+                        "默认**接续**：checkpoint 校验通过就接着跑，"
+                        "追加 --rounds 轮，轮号连续。")
+    e.add_argument("--fresh", action="store_true",
+                   help="从初始 harness 起，并重置轮号（checkpoint 会被覆盖）。"
+                        "与 --no-continue 的区别：那个只影响本轮，这个明确"
+                        "表示「上一次的进度我不要了」。")
 
     u = _sub("ui", help="起 API + 控制台，并打开桌面窗口")
     #: ⛔ 与 `aether.ui` **同一份**参数声明（`entry.add_serve_args`）。

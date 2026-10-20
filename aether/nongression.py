@@ -163,6 +163,23 @@ class GateResult:
     #: ⛔ 本次裁决**真正参与回归判定**的题数（= 基线通过集大小）。
     #:    它 <= n_tasks：其余题仍会执行（崩溃要可见），但判定用不上。
     n_judged: int = 0
+    #: ⛔⛔ **只读观测，不是判据**（r60 F）：基线里**没通过**、而候选通过了
+    #:    的题数。它回答的是"冻结集上有没有真的变强"，而不是"有没有变坏"。
+    #:
+    #:    为什么必须单列：`deltas` 的定义域是「基线通过的题」（见 evaluate
+    #:    里 `if base.reward <= 0: continue`）⇒ 每条 delta 的取值只可能是
+    #:    0 或负数 ⇒ **在数学上永远不可能为正**。实测 314 次 `gate.result`
+    #:    里 313 次 frozen deltas 全 0、唯一非零是 -1 —— 那不是"没有泛化"，
+    #:    是"增益不在读数定义域里"（第 24 条：恒为 0 先怀疑量具）。
+    #:
+    #:    ⛔⛔ 一旦把它接进 `passed`，就等于让系统去优化冻结套件 ⇒ 尺子被
+    #:        污染，宪法第一条（判据必须离线可回归）当场失效。它只许流向
+    #:        「给人看的读数」，永远不许流向裁决。
+    frozen_gain: int = 0
+    frozen_gain_detail: List[str] = field(default_factory=list)
+    #: 分母：基线里没通过的题数。`frozen_gain=0` 与「分母为 0」必须能分辨
+    #: （第 51 条：`gain=0` 与「从没被测过」同形）。
+    frozen_open: int = 0
 
     @property
     def passed(self) -> bool:
@@ -183,6 +200,11 @@ class GateResult:
             "errors": list(self.errors),
             "warnings": list(self.warnings),
             "n_judged": self.n_judged,
+            #: ⛔ 第 35d 条：判据/读数用到的量必须进 `to_dict`，否则账本里
+            #:    看不见 ⇒ 事后只能靠重跑复现（而重跑不是同一个世界）。
+            "frozen_gain": self.frozen_gain,
+            "frozen_gain_detail": list(self.frozen_gain_detail),
+            "frozen_open": self.frozen_open,
             #: ⛔ `verdicts` 有意不导出 —— 逐条 Verdict 已在 evaluate 的
             #:    返回值里，`to_dict` 是给账本/日志的**摘要**，不是数据备份。
             #:    需要完整判定的消费者直接读 `result.verdicts`。
@@ -354,6 +376,24 @@ class NonRegressionGate:
         #:    "套件 12 条"看起来就有 12 条判别力，实际可能只有 4 条。
         n_judged = sum(1 for v in self.baseline.verdicts.values()
                        if v.reward > 0)
+        #: ── 只读增益读数（r60 F）：**不进闸** ───────────────────────
+        #: 基线没通过、而候选通过了 ⇒ 这一条就是"冻结集上真的变强了"。
+        #: 它与 `regressions` 是同一份 `verdicts` 的两个方向：
+        #:   · 基线过 → 候选挂 = 回归（进闸，会拦）
+        #:   · 基线挂 → 候选过 = 增益（只记，不拦，也不许被优化）
+        #: ⛔ 别把这两件事合成一个 `score = pass_after - pass_before`：
+        #:    那个数会被"用回归换增益"讨好，而本闸明确不接受 trade-off。
+        frozen_gain = 0
+        frozen_gain_detail: List[str] = []
+        frozen_open = 0
+        for tid, base in self.baseline.verdicts.items():
+            if base.reward > 0:
+                continue
+            frozen_open += 1
+            cur = verdicts.get(tid)
+            if cur is not None and cur.reward > 0:
+                frozen_gain += 1
+                frozen_gain_detail.append(f"{tid}: 0→{cur.reward:.0f}")
         warns: List[str] = []
         if no_passing:
             warns.append("baseline_all_red: 基线里没有一条原本通过的任务 ⇒"
@@ -371,6 +411,9 @@ class NonRegressionGate:
             errors=errors,
             warnings=warns,
             n_judged=n_judged,
+            frozen_gain=frozen_gain,
+            frozen_gain_detail=frozen_gain_detail,
+            frozen_open=frozen_open,
         )
 
 

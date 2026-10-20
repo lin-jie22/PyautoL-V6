@@ -220,23 +220,13 @@ def _is_production_root(root: Any) -> bool:
         return True
 
 
-def apply_edits(root: Any, edits: Sequence[Edit] = ()) -> Tuple[bool, str, int]:
-    """在 `root` 这套源码上应用编辑。⛔ **生产根一律拒绝**。
+def _apply_now(root: Any, edits: Sequence[Edit] = ()) -> Tuple[bool, str, int]:
+    """校验 + 应用（**不判根**）。只许 `apply_edits` / `apply_edits_privileged` 调。
 
-    ⛔⛔ 为什么拒绝生产根而不是"加个 --yes 就能写"：
-       "让系统能提议改自己的源码"里的**提议**二字是边界 ——
-       提议 = 产出证据与补丁；执行 = 改字节。后者不可逆，
-       而判据层就住在这批字节里。把它做成"需要显式确认"只挡得住误操作，
-       挡不住"某天有人把它接进自动循环"。⇒ 在**构造上**够不到。
-
-    ⛔ **全有或全无**：任一条校验不过 ⇒ 一个字节都不改（否则留下半截
-       编辑的源码树，比不改更糟 —— 它编译不过，而没人知道原稿是什么）。
-
-    返回 `(ok, reason, n_applied)`。
+    ⛔ 抽出这一层的理由：生产根的拒绝是**策略**，校验与应用是**机制**。
+       两件事写在一个函数里，就会出现「为了让自动落盘能跑，先把拒绝那行注释掉」
+       —— 而那正是构造性防护失效的形态（第 95 条：同构代码要抽一份）。
     """
-    if _is_production_root(root):
-        return False, (f"⛔ 拒绝在生产根上应用源码编辑（{root}）⇒ "
-                       f"本模块只产出提议与证据；执行由人完成"), 0
     edits = tuple(edits)
     if not edits:
         return True, "（没有编辑）", 0
@@ -260,6 +250,99 @@ def apply_edits(root: Any, edits: Sequence[Edit] = ()) -> Tuple[bool, str, int]:
         p.write_text("".join(kept), encoding="utf-8")
         n += len(drop)
     return True, "", n
+
+
+def snapshot(root: Any, edits: Sequence[Edit], dest: Any) -> List[str]:
+    """把编辑涉及的**原文件**整份备份到 `dest`，返回相对路径清单。
+
+    ⛔ 整份拷而不是只存被删的那几行：回滚要的是"文件原样"，而只存片段
+       在「同一文件有多处编辑 / 后续又被别人改过」时拼不回去。
+    """
+    dest = Path(dest)
+    seen: List[str] = []
+    for e in tuple(edits or ()):
+        rel = str(e.file)
+        if rel in seen:
+            continue
+        src = Path(root) / rel
+        if not src.exists():
+            continue
+        dst = dest / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        seen.append(rel)
+    return seen
+
+
+def apply_edits(root: Any, edits: Sequence[Edit] = ()) -> Tuple[bool, str, int]:
+    """在 `root` 这套源码上应用编辑。⛔ **生产根一律拒绝**。
+
+    ⛔⛔ 为什么拒绝生产根而不是"加个 --yes 就能写"：
+       "让系统能提议改自己的源码"里的**提议**二字是边界 ——
+       提议 = 产出证据与补丁；执行 = 改字节。后者不可逆，
+       而判据层就住在这批字节里。把它做成"需要显式确认"只挡得住误操作，
+       挡不住"某天有人把它接进自动循环"。⇒ 在**构造上**够不到。
+
+    ⛔ 生产根的唯一入口是 `apply_edits_privileged`：它**强制要求快照目录**，
+       且必须由 `autonomy` 在冻结契约对拍通过之后调用（r60 F）。
+
+    ⛔ **全有或全无**：任一条校验不过 ⇒ 一个字节都不改（否则留下半截
+       编辑的源码树，比不改更糟 —— 它编译不过，而没人知道原稿是什么）。
+
+    返回 `(ok, reason, n_applied)`。
+    """
+    if _is_production_root(root):
+        return False, (f"⛔ 拒绝在生产根上应用源码编辑（{root}）⇒ "
+                       f"本模块只产出提议与证据；执行由人完成。"
+                       f"自动落盘走 `apply_edits_privileged`（要快照 + 对拍）"), 0
+    return _apply_now(root, edits)
+
+
+def apply_edits_privileged(root: Any, edits: Sequence[Edit] = (),
+                           *, snapshot_dir: Any
+                           ) -> Tuple[bool, str, int, List[str]]:
+    """**唯一允许写生产根**的入口：先快照，再应用。
+
+    ⛔ 为什么需要这条：r60 F 把「人点头」换成「机器对拍」之后，删代码仍然
+       需要一条能真正写字节的路。原设计的做法是「构造上够不到」（
+       `apply_edits` 拒生产根）。现在够得到了，就必须用**同强度的另一个
+       约束**顶上：**没有快照就不许写**。
+       ⛔ 这两件事不能只做一件：只给权限不给快照 = 不可逆；只留快照不给
+          权限 = 那条路永远是死的（第 60 条：图里可达 ≠ 跑到了）。
+
+    ⛔ 调用方**必须**已经拿到 `probe()` 的 `ok=True`（不是 `unverified`）。
+       本函数不复验契约 —— 它只保证「要么全写、要么全不写、写坏了能还原」。
+
+    返回 `(ok, reason, n_lines, backups)`。
+    """
+    edits = tuple(edits or ())
+    if not edits:
+        return True, "（没有编辑）", 0, []
+    if not str(snapshot_dir or "").strip():
+        return False, ("⛔ 缺 snapshot_dir ⇒ 拒绝写生产根"
+                       "（没有快照的删除不可逆，账本只能留痕不能还原）"), 0, []
+    d = Path(snapshot_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    backups = snapshot(root, edits, d)
+    ok, why, n = _apply_now(root, edits)
+    if not ok:
+        #: 应用失败（指纹漂移等）⇒ 文件还没动，但仍按"无副作用"返回备份清单，
+        #: 让调用方能区分「没写」与「写了要回滚」。
+        return False, why, 0, backups
+    return True, "", n, backups
+
+
+def rollback(root: Any, backups: Sequence[str], snapshot_dir: Any) -> Tuple[bool, str]:
+    """从快照还原。⛔ 只还原**快照里确实有**的文件，缺一个就整体报错。"""
+    d = Path(snapshot_dir)
+    missing = [r for r in backups if not (d / r).exists()]
+    if missing:
+        return False, f"快照缺文件 {missing[:3]} ⇒ 拒绝回滚（会造出半新半旧的树）"
+    for rel in backups:
+        dst = Path(root) / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(d / rel, dst)
+    return True, ""
 
 
 def probe(src_root: Any, edits: Sequence[Edit] = (),
