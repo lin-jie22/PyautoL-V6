@@ -309,6 +309,21 @@ class EvolutionConfig:
     #: 每轮最多提几个清理候选。⛔ 默认 1：清理同样走**最小编辑原则**，
     #:    一次只清一条 ⇒ 归因清楚、回滚便宜（一次清 5 条 ⇒ 出事不知道是谁）。
     cleanup_group_size: int = 1
+    # ── 分层非支配存档（r62，第三根轴）────────────────────────────
+    #: ⛔ **默认 0 = 不重采样**，与历史逐字同口径。开了才是新实验口径。
+    #:
+    #: 存在理由：`_run_round` 每轮只留一个 best，其余**通过准入闸**的
+    #: 候选随 `cands` 一起被回收 —— 它们的 reward 与 blast 都已算过（评估
+    #: 成本已付），却因为"这一轮不是第一名"被永久丢弃。下一轮基线变了，
+    #: 同一个胶囊在新基线上值不值得提交**必须重测才知道**，而旧代码连
+    #: 重测的机会都不给 ⇒ 单线爬坡。
+    #:
+    #: ⛔ 它换的是**候选来源**，不是判据：入档的候选照样过全部闸，重采样
+    #: 的候选也要在**当前**基线上重算 reward（存档里的读数是旧基线的）。
+    #: 与 `--ho-grow` / `--retry-every` 同族 ⇒ 必须进 run_config。
+    archive_resample: int = 0
+    #: 每层前沿上限。⛔ 有上限才叫存档：无上限 ⇒ 退化成"按旧 reward 全排"。
+    archive_cap: int = 8
     # ── 源码侧清理 pass（第二根轴的**另一半**）────────────────────
     #: ⛔ 与上面的 `cleanup_*` 是**两根不同的轴**，别混为一谈：
     #:    · `cleanup_*`（基因组侧）—— 每轮跑，产出 `Capsule`，改 **harness**
@@ -545,7 +560,8 @@ class EvolutionLoop:
                  aging_probes: Optional[List[FrozenTask]] = None,
                  budget: Optional[RunBudget] = None,
                  checkpoint_path: Optional[str] = None,
-                 cleanup: Optional[Any] = None):
+                 cleanup: Optional[Any] = None,
+                 archive: Optional[Any] = None):
         self.ledger = ledger
         self.gate = gate
         self.dev_suite = dev_suite
@@ -593,6 +609,11 @@ class EvolutionLoop:
         #: 最近一次成功落盘的 checkpoint 路径（读数，供 CLI/观测侧显示）。
         #: ⛔ 类级兜底见上方 `checkpoint_path` 的声明处。
         self.last_checkpoint: Optional[str] = None
+        #: ⛔ 分层非支配存档（r62）。**默认 None = 不入档、不重采样** ⇒
+        #:    与历史逐字同口径（账本里一条 `archive.*` 事件都不会有）。
+        #:    ⛔ 刻意**不**在这里自动构造（与 `cleanup` 相反）：存档会
+        #:    改变候选来源，默认开就等于悄悄换了实验口径。
+        self.archive = archive
         #: 跨轮纵向读数（老化检测的事实源，可投影到账本）。
         self.aging_traces: List[RoundTrace] = []
         #: 内存态 run 账（**不依赖 store**）：机制正确性不该依赖外部存储存在。
@@ -1220,6 +1241,72 @@ class EvolutionLoop:
             return False, streak
         return True, streak
 
+    def _archive_offers(self, h: Harness, capsules: List[Capsule],
+                        scored: List[Candidate], round_no: int,
+                        base_reward: float, env_pair: str) -> None:
+        """把本轮**通过准入闸**的解写进分层存档（r62）。
+
+        ⛔ 只入 `scored`（`gate_passed and n_verdicts > 0`）：没被真评估过
+           的候选没有 reward，入档就是"零信息条目" —— 它们会在帕累托
+           比较里以 0 分挤掉真解（存档的地板被拉平，前沿变噪音）。
+        ⛔ 每条都记账（含被支配/重复的）：不记 ⇒ "存档里为什么只有 2 条"
+           无从分辨是"只有 2 条够格"还是"40 条都被支配了"。
+        """
+        from .archive import Entry, capsule_to_dict
+        by_name = {c.name: c for c in capsules}
+        offered = added = 0
+        skips: List[Dict[str, str]] = []
+        for c in scored:
+            cap = by_name.get(c.capsule_name)
+            if cap is None:
+                #: ⛔ 找不到 capsule ⇒ 不入档（存空壳等于存噪音），但必须
+                #:    留痕：这说明 cands 与 capsules 脱节了，是真缺陷。
+                self.ledger.append(
+                    "archive.capsule_missing",
+                    {"round_no": round_no, "capsule": c.capsule_name},
+                    actor="evolution")
+                continue
+            try:
+                after = apply_capsule(h, cap)
+            except Exception as e:                    # noqa: BLE001
+                self.ledger.append(
+                    "archive.apply_failed",
+                    {"round_no": round_no, "capsule": c.capsule_name,
+                     "error": f"{type(e).__name__}: {e}"}, actor="evolution")
+                continue
+            layers = tuple(c.blast.get("layers_touched") or ()) \
+                or cap.blast_layers()
+            entry = Entry(
+                capsule=capsule_to_dict(cap), harness_id=c.harness_id,
+                harness=after.to_dict(), layers=layers,
+                reward=float(c.reward), load_gain=float(c.load_gain),
+                size_delta=int(c.blast.get("size_delta") or 0),
+                round_no=round_no, baseline_reward=float(base_reward),
+                #: ⛔ 记**基线身份**而不只是数值：0.0 这个数值在"还没提交"的
+                #:    那些轮里每轮都一样 ⇒ 靠数值判断新旧会把所有条目混成
+                #:    同一个基线（r62 实测 n_picked 恒 0 的一半原因）。
+                baseline_harness_id=h.harness_id,
+                env_pair=env_pair, accepted=bool(c.accepted))
+            offered += 1
+            try:
+                res = self.archive.add(entry)
+            except Exception as e:                    # noqa: BLE001
+                self.ledger.append(
+                    "archive.add_failed",
+                    {"round_no": round_no, "capsule": c.capsule_name,
+                     "error": f"{type(e).__name__}: {e}"}, actor="evolution")
+                continue
+            if res.get("added"):
+                added += 1
+            else:
+                skips.append({"capsule": c.capsule_name,
+                              "reason": str(res.get("reason") or "")})
+        self.ledger.append(
+            "archive.offer",
+            {"round_no": round_no, "harness_id": h.harness_id,
+             "offered": offered, "added": added, "skipped": skips[:8],
+             "report": self.archive.to_report()}, actor="evolution")
+
     def _saturation(self, base_vs: List[Verdict], scored: List[Candidate],
                     overfit_reason: str, h: Harness,
                     base_reward_of: Optional[float] = None
@@ -1727,6 +1814,59 @@ class EvolutionLoop:
             capsules += list(got)
             rep.cleanup_proposed = len(got)
 
+        # 3c) **存档重采样**（r62，默认关）：把历轮"够格但没被选中"的解
+        #     重新投进这一轮。⛔ 它们**不豁免任何闸**，且必须在**当前**
+        #     基线上重算 reward —— 存档里记的 `reward_at_store` 是旧读数，
+        #     只用于"挑哪几条回来"，绝不参与判据（见 archive.py 纪律③）。
+        n_res = int(getattr(self.cfg, "archive_resample", 0) or 0)
+        if self.archive is not None and n_res > 0:
+            have = {c.name for c in capsules}
+            try:
+                picked = self.archive.resample(
+                    n_res, exclude_harness=(h.harness_id,),
+                    exclude_capsules=tuple(have),
+                    #: ⛔ 与 `exclude_harness` 不是一回事：这个排除的是
+                    #:    "读数就是在**当前**基线上量的"（无重测价值）。
+                    exclude_baseline=(h.harness_id,))
+            except Exception as e:                    # noqa: BLE001
+                picked = []
+                self.ledger.append(
+                    "archive.resample_failed",
+                    {"round_no": round_no, "error": f"{type(e).__name__}: {e}"},
+                    actor="evolution")
+            from .archive import capsule_from_dict as _cap_from_dict
+            restored: List[Any] = []
+            for g in picked:
+                try:
+                    cap = _cap_from_dict(g["capsule"])
+                except Exception as e:                # noqa: BLE001
+                    self.ledger.append(
+                        "archive.restore_failed",
+                        {"round_no": round_no, "error": f"{type(e).__name__}: {e}"},
+                        actor="evolution")
+                    continue
+                if cap.name in have or not cap.genes:
+                    continue
+                restored.append(cap)
+                have.add(cap.name)
+            if restored:
+                capsules += restored
+            rep.ledger_seqs.append(self.ledger.append(
+                "archive.resample",
+                {"round_no": round_no, "harness_id": h.harness_id,
+                 "n_wanted": n_res, "n_picked": len(picked),
+                 "n_restored": len(restored),
+                 "capsules": [c.name for c in restored],
+                 #: ⛔ 打上 stale：这批评分**来自旧基线**，账本读者要先
+                 #:    看到这个标记，才不会把"存档里当初很好"当成"现在很好"。
+                 "stale": [{"capsule": g["capsule"].get("name"),
+                            "reward_at_store": g.get("reward_at_store"),
+                            "baseline_reward": g.get("baseline_reward"),
+                            "stored_at_round": g.get("stored_at_round")}
+                           for g in picked],
+                 "archive": self.archive.to_report()},
+                actor="evolution").seq)
+
         if not capsules:
             #: 两边都没得提 ⇒ 才是真的"这一轮无事可做"（与"到顶"同族）。
             #: ⛔ 措辞沿用原分支：契约依赖它，且它必须与"提了但被闸拦下"
@@ -2050,6 +2190,17 @@ class EvolutionLoop:
                             cand.accepted = False
 
         rep.candidates = cands
+
+        # 7.7) **入档**（r62，默认关）：把这一轮"通过准入闸"的解留在存档里。
+        #      ⛔ 放在这里而不是选 best 之后：`accepted` 要等泛化闸跑完才
+        #      最终确定（gate_tries > 1 时会改），早入档 ⇒ 存进去的
+        #      accepted 与最终裁决不一致（第 85 条：状态名必须等于事实）。
+        #      ⛔ 只入 `scored`（gate_passed 且真跑过 verdict 的）：没被
+        #      评估过的候选没有 reward，存进去就是"零信息条目"，会把
+        #      前沿的地板拉平（= 用 0 分挤掉真解）。
+        if self.archive is not None:
+            self._archive_offers(h, capsules, scored, round_no, base_reward,
+                                 env_pair)
 
         # 7.8) 跨轮经验记忆：把**这一轮被拒的变异**交给提议器记住。
         #      ⛔ 必须在**循环内部**调用，不能等 loop.run() 结束再补：

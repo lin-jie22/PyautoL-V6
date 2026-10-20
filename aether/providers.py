@@ -134,10 +134,15 @@ class OllamaProvider:
     ⛔ 访问 localhost 必须绕过代理（本机有 HTTP_PROXY，否则 502 假故障）。
     """
 
-    def __init__(self, model: str = "", base_url: str = "http://127.0.0.1:11434",
-                 timeout: float = 0.0, think: bool = False):
+    def __init__(self, model: str = "", base_url: str = "", timeout: float = 0.0,
+                 think: bool = False):
         self.model = model or os.environ.get("V6_OLLAMA_MODEL", "")
-        self.base_url = base_url
+        #: ⛔ 端点必须可覆盖（r62）：写死 11434 时，契约**无法注入**可控的
+        #:    假端点 ⇒ 「真模型链路跑通了吗」只能靠"本机恰好装了 ollama"来
+        #:    证明 ⇒ 在没装 ollama 的机器上永远红、在装了的机器上永远绿，
+        #:    两种都不是断言。默认值不变 ⇒ 生产行为逐字不变。
+        self.base_url = (base_url or os.environ.get("V6_OLLAMA_BASE_URL", "")
+                         or "http://127.0.0.1:11434")
         #: 本机小模型在长 prompt 下首 token 很慢（实测 >180s 超时过），
         #: 所以超时可配（V6_OLLAMA_TIMEOUT），默认 180s。
         self.timeout = float(timeout or os.environ.get("V6_OLLAMA_TIMEOUT", 180))

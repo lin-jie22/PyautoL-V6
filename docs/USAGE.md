@@ -107,8 +107,26 @@ aether evolve --rounds 1            # 跑一轮进化（默认 4 个环境，几
 aether evolve --rounds 4 --max-tasks 16            # 常规
 aether evolve --depth 2 --require-behavior         # 抬高天花板 / 只要真行为变化
 aether evolve --heldout on --ho-grow               # 泛化题不够时，让闸自己补采样
+aether evolve --proposer llm --llm-model qwen2.5:7b  # 用真模型提候选（默认模板）
+aether evolve --archive-resample 2                 # 把历轮「够格但没被选中」的解取回来重测
 aether evolve --resume                             # 断点续跑（r58 起默认写 checkpoint）
 ```
+
+三个「换口径」的开关，**默认全关**（关了与历史逐字同口径，可同表比）：
+
+| 开关 | 换的是什么 | 默认 | 开了之后 |
+|---|---|---|---|
+| `--ho-grow` | **考卷**（held-out 题量） | 关 | 判别力不足时自己补采样 |
+| `--archive-resample N` | **候选来源** | `0` 关 | 从分层存档取回 ≥N 个旧解重测 |
+| `--proposer llm` | **提议器** | `template` | 真模型生成候选（闸一个不少） |
+
+⛔ `--archive-resample` 取回来的候选带 `stale=true`：存档里的 reward 是
+**旧基线**读数，只用来挑"取哪几条"，必须在当前基线上重算才能进判据。
+
+⛔ 用 `--proposer llm` 时，账本里会有**两条**事件：`evolution.run_config`
+（跑之前的**意图**：`kind` / `model` / `provider`）和 `evolution.llm_result`
+（跑完之后的**实际**：`error` / `raw_len` / `propose_calls`）。端点连不上时
+前者照样写 `kind="llm"`，只有后者的 `error` 非空 —— 两者缺一不可。
 
 一轮 `evolve` 内部是五步，每步都落账本：
 

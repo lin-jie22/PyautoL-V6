@@ -1024,6 +1024,16 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     #    换环境就失效。泛化与否在路由层就已经是结构选择了。
     template = TemplateProposer(skills=pool, route_key=TASK_CLASS)
     proposer: Any = template
+    #: ⛔⛔ **供给端必须进账本**（r62）。此前 run_config 只有 `proposer` 一个
+    #:    字符串 ⇒ 71 次跑完之后，账本里**读不出用的是哪个模型**（连字段都
+    #:    没有，`.get("provider")` 恒 None ⇒ 曾被误读成"provider=None×71"，
+    #:    实际是量具的盲区：把"没有这个键"当成了"值是 None"，第 24 条）。
+    #:    ⇒ 这里记全三项：提议器种类、provider 实现、**实际生效的模型名**
+    #:    （`--llm-model` 留空时取默认值 ⇒ 空串会掩盖"其实跑了 Qwen3.5-4B"）。
+    #:    ⛔ 默认 template 也要记（`kind="template"`）：不写 ⇒ 又一次"读不出"，
+    #:    而"没接到真模型"与"接上了但没产出"必须能区分。
+    _llm_desc: Dict[str, Any] = {"kind": "template", "provider": "",
+                                 "model": "", "fallback": ""}
     if getattr(args, "proposer", "template") == "llm":
         # 真模型提议器。**同协议**替换模板提议器 —— 闸一个不少：
         # 语法闸（L0 禁改/白名单）→ 解析闸 → 非回归闸 → 泛化闸 → 能力地板。
@@ -1052,8 +1062,15 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                 skill_vocab=tuple(sorted(pool)),
                 env_ids=tuple(sorted(envs)),
                 heldout_note=ho_note)
+            _llm_desc = {"kind": "llm", "provider": "ollama",
+                         "model": model, "fallback": "",
+                         "think": False, "max_tokens": LLMProposer.max_tokens}
             _log.warning(f"🧠 proposer=llm（{model}）")
         except Exception as e:  # noqa: BLE001
+            #: ⛔ 回退必须留痕：`kind` 仍是 llm（用户要求的），但 `fallback`
+            #:    写明为什么没成 ⇒ 否则事后看账本会以为真跑了模型。
+            _llm_desc = {"kind": "llm", "provider": "ollama",
+                         "model": model, "fallback": f"{type(e).__name__}: {e}"}
             print(f"⚠️ 真模型不可用（{type(e).__name__}: {e}）⇒ 回退模板提议器",
                   file=sys.stderr)
             proposer = template
@@ -1177,12 +1194,31 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     if not budget.limited:
         budget = None
 
+    #: ⛔ 分层非支配存档（r62，默认关）：`--archive-resample 0` ⇒ 不注入
+    #:    Archive ⇒ 一条 `archive.*` 事件都不会有 ⇒ 与历史逐字同口径。
+    #:    ⛔ 落盘路径随数据根走（不是仓库根）：存档是**这次实验的产物**，
+    #:    不是代码资产。
+    _arch_n = int(getattr(args, "archive_resample", "0") or 0)
+    _archive = None
+    if _arch_n > 0:
+        from .archive import Archive
+        _arch_cap = int(getattr(args, "archive_cap", "8") or 8)
+        #: ⛔ 从 `_paths()` 取 `ledger` 的**父目录**，不手拼 "data" ——
+        #:    手拼目录名会被 `contract_entrypoints` 的 E 组抓住（r61 console
+        #:    同族：路径只许从 paths 派生）。
+        _archive = Archive(
+            path=os.path.join(
+                os.path.dirname(str(_paths(Path(args.root))["ledger"])),
+                "archive.jsonl"),
+            cap=_arch_cap).load()
+
     loop = EvolutionLoop(led, gate, dev, runner, proposer, store=store,
                          caliber=caliber, heldout=heldout,
                          dev_difficulty=dev_difficulty,
                          on_round_end=_remember_round,
                          checkpoint_path=cp_path or None,
                          budget=budget,
+                         archive=_archive,
                          config=EvolutionConfig(
                              group_size=int(args.group),
                              #: ⛔ 默认 1 = 「best 被拦 ⇒ 整轮结束」（与历史
@@ -1195,6 +1231,10 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                              ho_grow=bool(_ho_grow),
                              ho_grow_max_n=int(_ho_grow_max_n),
                              ho_grow_max_tasks=int(_ho_grow_max_tasks),
+                             #: ⛔ 默认 0 = 不重采样（与历史基线同口径，r62）。
+                             archive_resample=_arch_n,
+                             archive_cap=int(
+                                 getattr(args, "archive_cap", "8") or 8),
                              #: ⛔ 默认 0 = 串行（与历史基线同口径）。并行只
                              #:    包住 runner 计算，记账仍串行（见 §23.5）。
                              parallel_workers=int(
@@ -1289,6 +1329,9 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "max_tasks": args.max_tasks, "depth": args.depth,
         "kinds": args.kinds, "capsules": args.capsules,
         "proposer": args.proposer, "dev_env": args.dev_env,
+        #: ⛔ 供给端的**实际**配置（不是命令行字符串）：见 `_llm_desc` 的说明。
+        #:    `fallback` 非空 ⇒ 用户要了 llm 但回退成 template，必须能读出来。
+        "llm": dict(_llm_desc),
         "heldout_env": args.heldout_env, "heldout": args.heldout,
         "heldout_floor": args.heldout_floor,
         #: ⛔ 采样口径必须进账本（r51）：同样的 `max_n` 下，顺序与均衡能差
@@ -1305,6 +1348,11 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         #: ⛔ 换的是"要不要再给一次机会"，不是判据 ⇒ 同样必须进 run_config
         #:    （第 40 条：实验变量必须进账本，否则口径差异不可复现）。
         "retry_every": int(_retry_every),
+        #: ⛔ 存档换的是**候选来源**（第三根轴）⇒ 必须进账本：不开就是
+        #:    单线爬坡，开了才可能有旁支回来 ⇒ 两者跑出来的轨迹不可比。
+        "archive_resample": _arch_n,
+        "archive_cap": int(getattr(args, "archive_cap", "8") or 8),
+        "archive_path": (_archive.path if _archive is not None else ""),
         "parallel": getattr(args, "parallel", "0"),
         "embedder": args.embedder,
         "budget": {k: (getattr(args, k, "") or "")
@@ -1409,6 +1457,29 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     #    缺了它，进化循环"正确地什么都不做"和"供给根本没通"长得一模一样。
     diag = proposer.diagnostics() if hasattr(proposer, "diagnostics") else \
         {"name": "template", "error": "", "rejects": []}
+    #: ⛔⛔ **意图**与**实际**必须分两条事件记（r62）。`run_config` 写在跑之前，
+    #:    它只能记"打算用什么"：端点连不上时它照样写 `kind="llm"` 且
+    #:    `fallback=""`（构造 `OllamaProvider` 不校验可达性，第一次真正
+    #:    发请求才失败）⇒ 只靠 run_config，「接了模型、跑了、失败了」与
+    #:    「接了模型、跑了、成功了但没产出」**逐字相同**。
+    #:    ⇒ 这里补一条**运行后**的读数，数据直接取自 `diagnostics()`（同源，
+    #:    不另算一遍）：`error` 非空就是"这条链路走到了但失败了"。
+    try:
+        led.append("evolution.llm_result", {
+            "kind": _llm_desc.get("kind", ""),
+            "provider": _llm_desc.get("provider", ""),
+            "model": _llm_desc.get("model", ""),
+            "fallback": _llm_desc.get("fallback", ""),
+            "propose_calls": diag.get("propose_calls", 0),
+            "error": diag.get("error", ""),
+            "retries_used": diag.get("retries_used", 0),
+            "raw_len": diag.get("raw_len", 0),
+            "rejects": list(diag.get("rejects") or [])[:5],
+            "memory_skipped_n": diag.get("memory_skipped_n", 0),
+        }, actor="cli")
+    except Exception as _e:  # noqa: BLE001
+        #: ⛔ 记账失败不许让整轮白跑，但也不许静默。
+        _log.warning(f"⚠️ evolution.llm_result 写入失败：{_e}")
     if diag.get("error"):
         _log.info(f"ℹ️ proposer 诊断：{diag}")
     out = {
@@ -2645,6 +2716,16 @@ def build_parser() -> argparse.ArgumentParser:
                         ">1 ⇒ 按**发展集**排序依次试下一个 —— 闸一条没少，\n"
                         "held-out 仍不参与排序（H1 不动），只是被拦不再等于\n"
                         "这一轮结束。⛔ 默认 1 ⇒ 与历史基线逐字同口径。")
+    e.add_argument("--archive-resample", default="0",
+                   help="⛔ 新实验口径（默认 0 = 关，与历史逐字同口径）：\n"
+                        "每轮从**分层非支配存档**里取回至多 N 个历轮"
+                        "「通过准入闸但没被选中」的解，在当前基线上重测。\n"
+                        "0 ⇒ 不入档、不重采样 ⇒ 账本里一条 archive.* 都没有。\n"
+                        "⛔ 存档里的 reward 是**旧基线**读数，只用来挑候选；\n"
+                        "取回来的条目必须重算 reward 才许进任何判据。")
+    e.add_argument("--archive-cap", default="8",
+                   help="每层前沿保留上限（默认 8）。⛔ 无上限 = 全存 ⇒ "
+                        "重采样会退化成「按旧 reward 全局排序」。")
     e.add_argument("--parallel", default="0",
                    help="并发评估线程数。0/1=串行（**默认**，与历史基线同口径）。\n"
                         "⛔ 并行只包住 runner 计算，run_id 分配与账本写入仍串行\n"
