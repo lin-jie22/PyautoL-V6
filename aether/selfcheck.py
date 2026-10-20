@@ -192,7 +192,23 @@ def _c_root_priority(c: Ctx) -> Tuple[str, str]:
                                           env={})
     if src2 != ROOT_FROM_REPO:
         return BROKEN, f"③④ 顺序错了：在仓库子目录里拿到 {src2} {got2}"
-    return OK, "①flag>②env>③repo>④workspace>⑤home，且兜底不落包目录"
+
+    # ⛔ 唯一的例外（r61 第二块）：`pip install -e .` 装的是仓库本身，
+    #    站在**仓库外**的工作区里时必须由那个工作区说了算 ——
+    #    否则两个项目混用仓库账本，而两边都"看着正常"。
+    got3, src3 = resolve_root_with_source(None, pkg_root=repo, cwd=deep, env={})
+    if src3 != ROOT_FROM_WORKSPACE or not same(got3, ws):
+        return BROKEN, f"-e 装下工作区被仓库支遮蔽：拿到 {src3} {got3}"
+
+    # ⛔ 而这个例外**只认找得到的 `.aether`**：找不到时仍落 ③ ——
+    #    否则在临时目录里 spawn 子进程的契约会集体掉到 ⑤（测试写生产库）。
+    bare = c.tmp / "p1" / "bare"
+    bare.mkdir(parents=True, exist_ok=True)
+    got4, src4 = resolve_root_with_source(None, pkg_root=repo, cwd=bare, env={})
+    if src4 != ROOT_FROM_REPO:
+        return BROKEN, f"例外放宽成「cwd 在外面就换根」：拿到 {src4} {got4}"
+    return OK, ("①flag>②env>③repo>④workspace>⑤home；兜底不落包目录；"
+                "cwd 在仓库外的工作区里时工作区优先")
 
 
 def _c_root_no_pkg_write(c: Ctx) -> Tuple[str, str]:

@@ -26,7 +26,8 @@
   C 安装态**绝不**把数据根解析到包位置
   D 工作区靠 `.aether` 显式声明（不是"看到 data/ 就当工作区"）
   E `aether init` 幂等 / 不覆盖 / 演练不落盘
-  F **负结果契约**：开发态下 `.aether` 被 repo 支遮蔽（已知取舍，钉住它）
+  F 开发态下 cwd 在**别的工作区**里时由工作区说了算（`-e` 装不混库）；
+    负结果契约：例外只认找得到的 `.aether`，仓库内部的 `.aether` 不生效
 
 ⛔ 反证组（不在本文件内，见提交说明）：删掉 ③ repo 支 ⇒ B 全红；
    删掉 ④ 工作区支 ⇒ A4/D1 红；删掉 ⑤ 兜底 ⇒ C2 红。
@@ -211,26 +212,55 @@ def main() -> int:
     ck("E5b ⛔ noop 时**没有**造出 `.aether`（不许两种认路依据并存）",
        (P.ROOT / ".aether").exists() == had)
 
-    print("\n== F 组：负结果契约（已知取舍，钉住它而不是假装没有）==")
+    print("\n== F 组：开发态（包位置=仓库）下 cwd 在别的工作区里 ==")
 
-    #: ⛔ 开发态（包位置=仓库）下，**`.aether` 会被 repo 支遮蔽**：
-    #:    因为 ③ 排在 ④ 前面，而 ③ 判的是"代码来自哪"、不是"你站在哪"。
-    #:    这是**刻意的取舍**：仓库内任何命令都必须落到仓库自己的库上，
-    #:    否则契约（在仓库根跑的 68 份）会随机指向别处。
-    #:    代价：开发态想用别的工作区必须显式 `--root`。
-    #:    第 58 条：看着像 bug 的正确设计，用负结果契约钉住。
+    #: ⛔ r61 修掉的那个洞：`pip install -e .` 装的是**仓库本身**，于是
+    #:    `cd ~/proj && aether evolve` 也落回仓库账本 —— 两个项目混库，
+    #:    而两边都"看着正常"（与修前 `site-packages/data/` 是同一个病）。
+    #:    规则：③ 只在 cwd **不在**别的工作区里时命中。
     d = _tmp()
     repo2 = _mk_pkg(d / "repo2", repo=True)
     outside = d / "outside"
     outside.mkdir()
     (outside / ".aether").write_text("{}", encoding="utf-8")
     r, why = P.resolve_root_with_source(None, pkg_root=repo2, cwd=outside, env={})
-    ck("F1 已知取舍：开发态下 .aether 被 repo 支遮蔽（要它请用 --root）",
-       why == P.ROOT_FROM_REPO and r == repo2, f"{why} {r}")
+    ck("F1 ⛔ cwd 在**仓库外**的工作区里 ⇒ 工作区说了算（-e 装不再混库）",
+       why == P.ROOT_FROM_WORKSPACE and r.resolve() == outside.resolve(),
+       f"{why} {r}")
     r, why = P.resolve_root_with_source(
         str(outside), pkg_root=repo2, cwd=outside, env={})
-    ck("F1b 同一个场景传 `--root` 就能用工作区（取舍是可绕过的）",
+    ck("F1b 显式 `--root` 仍然优先（① 永远最大）",
        why == P.ROOT_FROM_FLAG and r == outside, f"{why} {r}")
+
+    #: ⛔⛔ 负结果契约：这个例外**只认找得到的 ④**。临时目录里没有 `.aether`
+    #:     时必须仍然落 ③ —— 否则 68 份在临时目录里 spawn 子进程的契约
+    #:     会集体掉到 ⑤（`~/.local/share/aether`）⇒ **测试写生产库**（第 88 条）。
+    bare = d / "bare"
+    bare.mkdir()
+    r, why = P.resolve_root_with_source(None, pkg_root=repo2, cwd=bare, env={})
+    ck("F1c ⛔⛔ 例外只认找得到的 `.aether`：临时目录里没有它 ⇒ 仍然落仓库",
+       why == P.ROOT_FROM_REPO and r == repo2, f"{why} {r}")
+
+    #: ⛔ 仓库自己的子目录里就算有 `.aether`，也不许把根拽出仓库
+    #:    （否则 `cd <repo>/data && aether status` 会指向另一个库）。
+    inner = repo2 / "data" / "sub"
+    inner.mkdir(parents=True, exist_ok=True)
+    (inner / ".aether").write_text("{}", encoding="utf-8")
+    r, why = P.resolve_root_with_source(None, pkg_root=repo2, cwd=inner, env={})
+    ck("F1d ⛔ 仓库内部的 `.aether` 不生效（根不许被拽出仓库）",
+       why == P.ROOT_FROM_REPO and r == repo2, f"{why} {r}")
+
+    #: ⛔ 反证：把 `_within` 恒判 True（== 修前"什么都算在仓库内"的行为）
+    #:    ⇒ F1 必须翻回仓库。否则 F1 是恒真的（本机恰好没装 -e 也会绿）。
+    _orig_within = P._within
+    P._within = lambda a, b: True
+    try:
+        r5, why5 = P.resolve_root_with_source(None, pkg_root=repo2,
+                                              cwd=outside, env={})
+    finally:
+        P._within = _orig_within
+    ck("F1e ⛔ 反证：`_within` 恒 True ⇒ F1 翻回仓库（证明 F1 不是恒真）",
+       why5 == P.ROOT_FROM_REPO and r5 == repo2, f"{why5} {r5}")
 
     print("\n" + "=" * 60)
     if FAILS:

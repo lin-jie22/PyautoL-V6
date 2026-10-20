@@ -256,6 +256,19 @@ def user_data_dir(env: Optional[Dict[str, str]] = None) -> Path:
     return Path.home() / ".local" / "share" / "aether"
 
 
+def _within(p: Union[str, Path], root: Union[str, Path]) -> bool:
+    """`p` 是否就是 `root` 或在其下面（都先 `resolve()`）。
+
+    ⛔ 必须 resolve：macOS 的 `/tmp` 是 `/private/tmp` 的符号链接，
+       直接比字符串会把"在仓库里"判成"在仓库外"。
+    """
+    try:
+        a, b = Path(p).resolve(), Path(root).resolve()
+    except OSError:  # pragma: no cover - 路径都来自盘上真实目录
+        return False
+    return a == b or b in a.parents
+
+
 def resolve_root_with_source(
         explicit: Optional[Union[str, Path]] = None, *,
         pkg_root: Optional[Union[str, Path]] = None,
@@ -272,10 +285,19 @@ def resolve_root_with_source(
     | ④ | 向上找到 `.aether` | `workspace` | `aether init` 过的工作区 |
     | ⑤ | 用户数据目录 | `home` | 安装态兜底 |
 
-    ⛔⛔ ③ 必须排在 ④ 前面，且判据只看"仓库资产在不在"：仓库根**没有**
-       `.aether` 标记，若让 ④ 先跑，`cd <仓库>/tasks && aether status`
-       会走到 ⑤，于是**同一台机器上两个库**，而两边都可能"看着正常"。
-       —— 这是本函数唯一不可调换的一对顺序。
+    ⛔⛔ ③ 的判据是"仓库资产在不在"，**不是"cwd 在不在仓库里"** ——
+       68 份契约都在仓库根跑，而它们大半把子进程的 `cwd` 设成临时目录；
+       若按 cwd 判，那些子进程会掉到 ⑤（`~/.local/share/aether`），
+       于是**测试写生产库**（第 88 条）。
+
+    ⛔⛔ 但 ③ 也因此有个反直觉的副作用：`pip install -e .` 装的是**仓库
+       本身**，于是 `cd ~/my-project && aether evolve` 也会落回仓库账本
+       —— 两个项目混库，而两边都"看着正常"（与 r61 修的
+       `site-packages/data/` 是同一个病，换了件衣服）。
+       所以给 ③ 加一个**唯一的例外**：cwd 在仓库**外**、且那里确实是一个
+       `aether init` 过的工作区 ⇒ 由那个工作区说了算。
+       ⛔ 条件是"找得到 ④"而不是"cwd 不在仓库内"：找不到 ④ 时仍然落 ③，
+       上面那条契约保护不受影响（负结果契约 `F1c` 钉住它）。
 
     ⛔ 四个入参都可注入（`pkg_root` / `cwd` / `env` 都是测试用的旋钮）：
        否则"安装态"这件事只能靠真的 `pip install` 一遍才能验，
@@ -288,10 +310,14 @@ def resolve_root_with_source(
     if v:
         return Path(v).expanduser(), ROOT_FROM_ENV
     base = Path(pkg_root) if pkg_root is not None else ROOT
-    if looks_like_repo(base):
-        return base, ROOT_FROM_REPO
     start = Path(cwd) if cwd is not None else _safe_cwd()
     ws = find_workspace(start) if start is not None else None
+    if looks_like_repo(base):
+        #: ⛔ 例外只认"cwd 在外面的工作区里"：ws 落在仓库内部时（理论上仓库
+        #:    子目录可以有 `.aether`）仍然落仓库，否则 `cd <repo>/data` 会漂。
+        if ws is not None and not _within(ws, base) and not _within(start, base):
+            return ws, ROOT_FROM_WORKSPACE
+        return base, ROOT_FROM_REPO
     if ws is not None:
         return ws, ROOT_FROM_WORKSPACE
     return user_data_dir(e), ROOT_FROM_HOME
