@@ -34,7 +34,8 @@
   T3 反证：`overfit` / `partial`（有证据）**仍**照旧 +1 ⇒ 闸没被关掉；
   T4 `generalize` 归零仍成立；
   T5 「没判」单独计数（第 16 条）；
-  T6 生产账本交叉表：0 条 `inconclusive` ⇒ 改动**零决策翻转**（零回归面）；
+  T6 生产账本交叉表：**改动落地前** 0 条 `inconclusive` ⇒ 零决策翻转
+     （边界钉在 cbbb148 的落地时刻；反证：同批数据在"现在"的边界下数出 ≥2 条）
   T7 `all_thin` 判据本身**一个字没改**（门槛还在）；
   T8 出路 `--ho-grow` 是 CLI 上**真有**的开关（第 35b 条）；
   T9 反证组：把 `inconclusive` 放回死路口径 ⇒ T2 必须转红（否则 T2 恒真）；
@@ -160,7 +161,22 @@ def main() -> int:
     led = ROOT / "data" / "ledger.jsonl"
     if led.exists():
         import collections
+        import datetime as _dt
+        #: ⛔⛔ 边界必须钉在**口径改动落地的那一刻**，不是"现在"。
+        #:    r60 G 全量验收实测（2026-10-20 14:29）：生产在那个来源未定位的
+        #:    周期短跑里连出 2 条 `inconclusive`（都走 `all_thin` 分支：
+        #:    easy 层 headroom=0、hard 只剩 1 条 ⇒ 没有一层的证据可用），
+        #:    于是原来那句 `n_inc == 0` 变红。
+        #:    ⛔ 红的不是代码、也不是判据，是**时间**：断言把"建卷那一刻的一次
+        #:    性事实"写成了永恒性质，而生产账本还在长（第 133 条：随被测对象
+        #:    变化的量不许当固定读数）。
+        #:    ⇒ 只数 `ts < CUTOFF` 的部分。「改动之后产生的判决」不是旧账，
+        #:      本来就应该按新口径算 —— 把它算进来才是真的翻旧账。
+        #:    CUTOFF = cbbb148（2026-10-18 20:39）引入 `NO_EVIDENCE_VERDICTS`。
+        CUTOFF = _dt.datetime(2026, 10, 18, 20, 39).timestamp()
         c = collections.Counter()
+        n_pre = 0
+        n_post = 0
         for line in led.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line:
@@ -170,13 +186,23 @@ def main() -> int:
             except ValueError:
                 continue
             if e.get("kind") == "gen.probe":
-                c[str((e.get("payload") or {}).get("verdict"))] += 1
-        n_inc = c.get("inconclusive", 0)
-        ck("T6.1 生产账本实测 inconclusive 条数（读数，不是断言）", True,
-           f"分布={dict(c)}")
-        ck("T6.2 ⛔ 改这条口径在生产上**零决策翻转** ⇒ 才允许改",
-           n_inc == 0,
-           f"生产有 {n_inc} 条 inconclusive ⇒ 改了会翻旧账，先做交叉表")
+                v = str((e.get("payload") or {}).get("verdict"))
+                c[v] += 1
+                if v == "inconclusive":
+                    if float(e.get("ts") or 0) < CUTOFF:
+                        n_pre += 1
+                    else:
+                        n_post += 1
+        ck("T6.1 生产账本实测各裁决条数（读数，不是断言）", True,
+           f"分布={dict(c)}｜改动前 inconclusive={n_pre}｜改动后={n_post}")
+        ck("T6.2 ⛔ 改这条口径在**落地前**的生产上零决策翻转 ⇒ 才允许改",
+           n_pre == 0,
+           f"改动前有 {n_pre} 条 inconclusive ⇒ 改了会翻旧账，先做交叉表")
+        #: ⛔ 反证：证明 T6.2 的 0 是**切分**出来的，不是数据里根本没有
+        #:    （第 57 条：空集合当分母最会撒谎）。同一批数据把边界挪到
+        #:    "现在"就能数出那两条 ⇒ 这条判据有牙。
+        ck("T6.2b ⛔ 反证：同一批数据在「现在」的边界下数出 ≥2 条 ⇒ T6.2 不是恒真",
+           n_post >= 2, f"改动后 inconclusive={n_post}")
     else:
         ck("T6 生产账本存在", False, f"{led} 不存在")
 

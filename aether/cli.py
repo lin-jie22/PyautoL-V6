@@ -1629,7 +1629,7 @@ def cmd_caps(args) -> int:
                   f"你的批准没有被撤销。")
             return 1
 
-        if sub in ("validate", "approve", "hint"):
+        if sub in ("validate", "approve", "hint", "auto"):
             c, pr = _mk(args.tool)
             #: ⛔ 「不认识」只认 `pr is None`（工具名真的不在 `KNOWN_TOOLS`）：
             #:    用 `c is None` 判会让"工具装好了"冒充"工具名写错了"（r60 E）。
@@ -1712,6 +1712,62 @@ def cmd_caps(args) -> int:
                 print(f"   装完跑 `aether caps candidates verify "
                       f"--tool {c.tool}` 结案。")
                 return 0
+            if sub == "auto":
+                #: ⛔⛔ **机器自审安装**（r60 G）：人审被拿掉，但替它顶上去的
+                #:    是五道判据（清单逐字比对 / 执行白名单 / 可回滚 /
+                #:    四道闸当场重跑 / 装后复验），见 `aether/install_auto.py`。
+                #: ⛔ 这里**不传** `probe_fn` / `run`：那两个参数只给契约用，
+                #:    从 CLI 传进来等于给外部一个"伪造装成功"的入口。
+                from . import install_auto as IA
+                #: ⛔ `_mk` 里的 Tool 是局部变量，这里按名字重取一次 ——
+                #:    不做闭包穿透，也不把 `_mk` 的返回值改成三元组
+                #:    （改了就要动四个已稳定的出口）。
+                tool = next(t for t in D.KNOWN_TOOLS if t.name == args.tool)
+                v = IA.machine_install(c, tool, dry_run=bool(args.dry_run),
+                                       timeout_s=float(args.timeout))
+                IA.record_verdict(led, v)
+                #: 落盘口径（三条，缺一条就会出现「演练与真装同形」）：
+                #:   · **演练**：一个字节都不落 —— 演练的语义是"环境零改动"，
+                #:     而档案是环境的一部分（E1b 实测抓到过：演练把状态推到
+                #:     validated 并写了 approved_by，与真装长得一样）；
+                #:   · **本来就在**（noop）：也不落 —— 什么都没做；
+                #:   · **装成**：installed + approved_by=auto（机器批准留痕）。
+                #:   · **被拒**：落 rejected 状态**只用于"没裁决"以外**的
+                #:     真结论；批准本身不退（见 `install_auto` 里那段说明）。
+                if not v.dry_run and v.state == IA.OK:
+                    if not v.noop:
+                        c.state = v.cand_state or c.state
+                        c.approved_by = IA.AUTO_BY
+                        c.approved_at = time.time()
+                        saved[c.tool] = c
+                        CC.save(cpath, saved)
+                elif not v.dry_run and v.state == IA.REJECTED:
+                    c.state = v.cand_state or c.state
+                    saved[c.tool] = c
+                    CC.save(cpath, saved)
+                if not v.dry_run:
+                    CC.record(led, c)
+                icon = {IA.OK: "✅", IA.REJECTED: "⛔"}.get(v.state, "⚠️")
+                head = {IA.OK: ("✅ 无事可做（本来就在）" if v.noop
+                                else "✅ 机器自审通过"),
+                        IA.REJECTED: "⛔ 机器自审拒绝",
+                        IA.UNVERIFIED: "⚠️ 无法裁决（没有执行任何命令）"}[v.state]
+                print(f"{icon} {head} —— {args.tool}"
+                      + ("（演练：命令未执行）" if v.dry_run else ""))
+                for r in v.reasons:
+                    print(f"   ⇒ {r}")
+                e = v.evidence.get("exec") or {}
+                if e:
+                    print(f"   执行：{' '.join(e.get('argv') or [])}")
+                    print(f"        rc={e.get('rc')} 耗时 {e.get('seconds')}s"
+                          + ("（超时）" if e.get("timed_out") else ""))
+                    if e.get("stderr_tail"):
+                        print("        stderr 尾部："
+                              + str(e["stderr_tail"]).strip().splitlines()[-1][:160])
+                if v.state == IA.OK and not v.noop and not v.dry_run:
+                    print(f"   状态：{c.tool} ⇒ {c.state}"
+                          f"（approved_by={c.approved_by}）")
+                return 0 if v.state == IA.OK else 1
             argv = CC.install_hint(c)
             if not argv:
                 #: ⛔ 已结案的不给命令，也**不许**再念一遍"先 validate +
@@ -2327,6 +2383,19 @@ def build_parser() -> argparse.ArgumentParser:
                      help="显式批准：本系统不代你决定装什么")
     cgh = cgs.add_parser("hint", help="打印给人执行的安装命令（本命令不执行它）")
     cgh.add_argument("--tool", required=True)
+    #: ⛔ **机器自审**（r60 G）：把「人点 --yes + 人执行」换成
+    #:    「五道判据 + 自动回滚」。人审被拿掉，替它顶上去的是
+    #:    清单逐字比对 / 执行白名单 / 可回滚 / 四道闸当场重跑 / 装后复验。
+    #:    理由与边界见 `aether/install_auto.py` 的模块文档。
+    cgi = cgs.add_parser(
+        "auto",
+        help="**机器自审**安装：五道判据全过才执行，装不上自动卸载")
+    cgi.add_argument("--tool", required=True)
+    #: ⛔ 演练是**默认安全**的那一档：裁决照跑，命令一条不执行。
+    cgi.add_argument("--dry-run", action="store_true",
+                     help="只裁决不执行（环境零改动）")
+    cgi.add_argument("--timeout", type=float, default=1800.0,
+                     help="单条命令超时秒数（默认 1800）")
     #: ⛔ 人装完之后**回来结账**的入口（r60 B）。没有它，`installed` 是
     #:    不可达的终态：工具一装好候选就蒸发，账本上永远 0 次。
     cgvf = cgs.add_parser("verify", help="装完后复验并结案（approved ⇒ installed）")
