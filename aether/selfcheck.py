@@ -468,6 +468,36 @@ def _c_deps_zero(c: Ctx) -> Tuple[str, str]:
     return OK, f"除 aether 自己外，{purelib.name} 下无第三方模块被加载"
 
 
+def _c_console_page(c: Ctx) -> Tuple[str, str]:
+    """控制台页面在**当前形态**下可达（仓库态 = `console/`，装态 = 包内快照）。
+
+    ⛔ 为什么要单独一条：`console/` 与 `tasks/` 一样是**仓库资产**，
+       不会自动进 wheel。r61 实测过后果 —— 装完之后 `aether ui` 直接
+       起不来（报 `site-packages/console/index.html` 不存在，而 API 是好的）。
+       `tasks/` 那条有 `seed.tasks` 兜着，控制台此前**一条断言都没有**，
+       所以缺了也只能等用户撞上。
+    ⛔ 只看"目录在不在"不够：真出过"目录在、页面是空的"（打包点错了 glob
+       ⇒ 只带进一个空目录条目）⇒ 必须验到 **index.html 还是非空的**。
+    """
+    from .paths import console_dir
+
+    try:
+        d = console_dir(c.pkg_root)
+    except OSError as exc:                       # pragma: no cover - 防御
+        return BROKEN, f"控制台目录解析失败：{exc}"
+    page = d / "index.html"
+    if not page.is_file():
+        return BROKEN, (f"找不到 {page}（仓库那份与控制台快照都没有）"
+                        "⇒ `aether ui` 会起不来，API 虽然还能用")
+    try:
+        size = page.stat().st_size
+    except OSError as exc:                       # pragma: no cover - 防御
+        return BROKEN, f"读不到 {page}：{exc}"
+    if size < 1024:
+        return BROKEN, f"{page} 只有 {size} 字节（空页面 ⟹ 控制台打开是白屏）"
+    return OK, f"{page}（{size // 1024} KB）"
+
+
 #: 检查项。⛔ 顺序固定（报告可逐次对比）；新增项加在末尾。
 CHECKS: Tuple[Check, ...] = (
     Check("root.priority", "工作区根的五支优先级按序生效", _c_root_priority),
@@ -481,6 +511,7 @@ CHECKS: Tuple[Check, ...] = (
     Check("backup.roundtrip", "备份→改坏→还原逐字节相同（可撤销）",
           _c_backup_roundtrip),
     Check("seed.tasks", "工作区任务集能真跑一遍", _c_seed_tasks),
+    Check("console.page", "控制台页面在装出来的包里也可达", _c_console_page),
     Check("deps.zero", "没有第三方依赖被拉进来", _c_deps_zero),
 )
 

@@ -33,11 +33,15 @@ _log = get_logger("aether.ui")         # ⛔ 显式名，理由见 cli.py 同位
 
 from .entry import (DEFAULT_CAPS, add_log_args, add_root_arg, add_serve_args,
                     add_ui_args, build_forward, normalize_log_args)
-from .paths import ROOT, paths
+from .paths import ROOT, console_dir
 #: ⛔ 控制台目录**由本入口决定**（不接受命令行覆盖）：它是"一键起控制台"
 #:    的一部分，让人改了就会冒出"页面 404 而 API 正常"的幽灵故障。
 #:    ⛔ 位置仍来自 `paths`：手拼 `ROOT / "console"` 就是布局又多一份。
-CONSOLE = paths(ROOT)["console"]
+#:    ⛔⛔ r61 补：装成 wheel 之后仓库根的 `console/` 不存在（它不是包资源），
+#:      原来这里直接 `paths(ROOT)["console"]` ⇒ `aether ui` 装完起不来
+#:      （实测报 `site-packages/console/index.html` 不存在，而 API 是好的）。
+#:      `console_dir()` 在仓库那份缺席时落回包内快照，仓库态行为逐字不变。
+CONSOLE = console_dir(ROOT)
 
 #: ⛔ 只认这两个浏览器的 app 模式；没有就退化，不硬依赖。
 APP_BROWSERS = (

@@ -55,20 +55,27 @@ include-package-data = false
 version = { attr = "aether._version.CODE_VERSION" }
 
 [tool.setuptools.package-data]
-#: ⛔ 只带**包内**的文件。`console/` / `tasks/` / `supervisor/` 在仓库根，
-#:    它们是"这个仓库的资产"而不是"这个包的资源" —— 打进 wheel 会让
-#:    `--console` / `--caps` 的默认相对路径在安装后指向包内的副本，
-#:    于是"改了仓库的 console 却没生效"（两个事实源）。
+#: ⛔ 只带**包内**的文件。`tasks/` / `console/` / `supervisor/` 在仓库根，
+#:    它们是"这个仓库的资产"而不是"这个包的资源" —— 直接打进 wheel 会让
+#:    仓库里出现**两份**（改了仓库那份却没生效 = 两个事实源）。
 #:
-#: ⛔ r61 增补：`aether/seeds/tasks` 是一个**符号链接**，指向仓库根的
-#:    `tasks/`。这么做是为了**同时**满足两件互相拉扯的事：
-#:      · 仓库里只能有**一份**任务集（复制一份 = 两个事实源，改一处漏一处）；
-#:      · 装成 wheel 之后必须**有**一份可跑的任务集（否则 `synth` / `evolve`
-#:        装完即废 —— 实测算过：wheel 里 46 个 .py、tasks/ 一个都没进去）。
+#: ⛔ r61 增补：`aether/seeds/tasks`、`aether/seeds/console` 都是**符号链接**，
+#:    分别指向仓库根的 `tasks/` 与 `console/`。这么做是为了**同时**满足
+#:    两件互相拉扯的事：
+#:      · 仓库里只能有**一份**（复制一份 = 两个事实源，改一处漏一处）；
+#:      · 装成 wheel 之后必须**有**（否则 `synth`/`evolve`/`ui` 装完即废 ——
+#:        实测算过：wheel 里 46 个 .py、tasks/ 一个都没进去；控制台则是
+#:        `aether ui` 起来直接死在「找不到控制台页面」，而 API 是好的）。
 #:    实测：setuptools 构建时会**跟随**符号链接、把真实文件写进 wheel
-#:    （29 个条目）⇒ 仓库零重复，安装物是真快照。
+#:    ⇒ 仓库零重复，安装物是真快照。读取侧由 `paths.console_dir()` /
+#:    `paths.seeds_dir()` 决定"用哪份"（仓库有多少就用仓库那份）。
 #:    ⛔ 只收 `task.py` 与 `tests.json`：`tasks/` 下还有 `_worldgen_report.json`
 #:       这类**运行产物**，用 `seeds/**/*` 会把它们一起发货（实测已中招）。
 aether = ["py.typed",
           "seeds/tasks/*/task.py",
-          "seeds/tasks/*/tests.json"]
+          "seeds/tasks/*/tests.json",
+          #: ⛔ r61 补：控制台页面是**单文件**（index.html，零构建）。它同样是
+          #:    仓库资产 ⇒ 不点名叫它，装完之后 `aether ui` 起来就死在
+          #:    「找不到控制台页面」（实测装态 rc=1，API 却是好的）。
+          #:    ⛔ 不写 `seeds/console/*`：那个目录里有 `.DS_Store`。
+          "seeds/console/index.html"]

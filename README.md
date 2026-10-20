@@ -2,6 +2,9 @@
 
 **可验证的自进化智能体骨架**（Autonomous Evolving Task-Harness with Empirical Reward）
 
+> 📖 **想直接用它**（怎么敲、用在哪、任务怎么写）→ **`docs/USAGE.md`**
+> 本文件是设计理由与纪律条目（110+ 条），当参考手册查，不要当入门读。
+
 ---
 
 ## 1. 一句话命题
@@ -4227,6 +4230,43 @@ $ aether status
 ⛔ 四条里后三条都是**负结果契约**（`F1c` / `F1d` / `F1e`）：只写"例外生效"
 那条，等于给了一个能被滥用的开口 —— 而这种开口的代价是"测试写生产库"，
 在读数上同样看不出来。
+
+
+## 119. ⛔⛔ 「内容断层」不是修了一次就没了 —— 同族资产要**逐个点名**
+
+第 112 条修了 `tasks/`（装完有活干），当时以为这一族收口了。**没有。**
+同一类资产 `console/` 只会更晚暴露，因为它不在"开始工作"这条路上，在"看结果"那条路上：
+
+```
+$ pip install . && cd ws && aether init && aether ui
+   ❌ 找不到控制台页面：site-packages/console/index.html     rc=1
+```
+
+而 `aether status` / `synth` / `evolve` 全都正常 —— API 也是好的，只是页面 404。
+⛔ **它比 `tasks/` 那次更险**：`tasks/` 缺了立刻"无事可做"（一眼看出来），
+`console/` 缺了只是"这个命令起不来"，用户会以为 UI 就是这样。
+
+修法和 `seeds/tasks` 完全同构，这正说明它该被模式化：
+
+| 资产 | 包内快照 | 读取侧收口 | 自检项 |
+|---|---|---|---|
+| `tasks/` | `aether/seeds/tasks`（symlink） | `paths.seeds_dir()` | `seed.tasks` |
+| `console/` | `aether/seeds/console`（symlink） | `paths.console_dir()` | `console.page` |
+
+⛔ `console_dir()` 的**顺序不许反**：仓库那份在就用仓库那份（改了就生效、
+一个事实源），不在才落回快照。判据是"仓库那份在不在"，不是"包在不在"——
+后者两边都成立，等于没判。反证在 `contract_seeds_test` **H4**：一棵假包里
+**同时**放两份且内容不同 ⇒ 必须拿到仓库那份（顺序反了就红）。
+
+⛔ 自检项只看"目录在不在"**不够**：真出过"目录在、页面是空的"（glob 点错 ⇒
+只带进一个空目录条目）。所以 `console.page` 还要验文件非空（H7 用 1 字节页面
+做反证：必须判 `broken`，否则白屏而自检全绿）。
+
+⛔ 教训落到操作层：**凡是"仓库根下的目录、运行时要读"的东西，都进不了 wheel。**
+新增一个就要同时加三样 —— 包内 symlink、`package-data` 点名（不许通配，
+那会把 `.DS_Store` 一起发货）、`selfcheck` 一项。少一样，装完就是"看着装好了"。
+
+用法与"用在哪"见 `docs/USAGE.md`。
 
 
 ---

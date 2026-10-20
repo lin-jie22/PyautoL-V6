@@ -86,6 +86,12 @@ ARCH_BASELINE_NAME = "arch_baseline.json"
 #:    ⛔ 也不参与 `paths()` 的任何键（数据根里没有它）。
 SEEDS_DIRNAME = "seeds"
 SEED_TASKS_DIRNAME = "tasks"
+#: 包内控制台页面的落点（相对**包目录**）。与 `SEED_TASKS_DIRNAME` 同族：
+#: 控制台是"仓库资产"，装成 wheel 之后根目录下的 `console/` 不存在 ⇒
+#: `aether ui` 起来就死在「找不到控制台页面」（实测：装态 rc=1，
+#: 报 `site-packages/console/index.html` 不存在，而 API 本身是好的）。
+#: ⇒ 包内带一份快照，`console_dir()` 在仓库那份缺席时落回它。
+SEED_CONSOLE_DIRNAME = "console"
 
 #: 工作区标记文件名（`aether init` 写的那个，r61）。#: ⛔ 为什么要有**显式标记**而不是"看到 data/ 就当工作区"：后者是"目录里
 #:    有什么就认什么"，你在任何目录里 `mkdir data` 都会把数据根拽过去 ——
@@ -125,12 +131,12 @@ __all__ = [
     "CONSOLE_DIRNAME", "REA_DIRNAME", "LEDGER_NAME", "DB_NAME",
     "MEMORY_NAME", "CHECKPOINT_NAME", "CAPS_EXAMPLE", "AUTONOMY_DIRNAME",
     "ARCH_BASELINE_DIRNAME", "ARCH_BASELINE_NAME",
-    "SEEDS_DIRNAME", "SEED_TASKS_DIRNAME",
+    "SEEDS_DIRNAME", "SEED_TASKS_DIRNAME", "SEED_CONSOLE_DIRNAME",
     "WORKSPACE_MARKER", "ENV_ROOT",
     "ROOT_FROM_FLAG", "ROOT_FROM_ENV", "ROOT_FROM_REPO",
     "ROOT_FROM_WORKSPACE", "ROOT_FROM_HOME",
     "BACKUP_TARGETS",
-    "data_dir", "paths", "flat_name", "BACKUP_FLAT", "seeds_dir",
+    "data_dir", "paths", "flat_name", "BACKUP_FLAT", "seeds_dir", "console_dir",
     "looks_like_repo", "find_workspace", "user_data_dir",
     "resolve_root", "resolve_root_with_source",
 ]
@@ -209,6 +215,27 @@ def seeds_dir(pkg_root: Optional[Union[str, Path]] = None) -> Path:
     """
     base = Path(pkg_root) if pkg_root is not None else ROOT
     return base / "aether" / SEEDS_DIRNAME / SEED_TASKS_DIRNAME
+
+
+def console_dir(pkg_root: Optional[Union[str, Path]] = None) -> Path:
+    """控制台页面目录。**先仓库、后包内快照**，顺序不可反。
+
+    | 形态 | 命中 | 为什么 |
+    |---|---|---|
+    | 仓库（开发态） | `<pkg>/console` | 改了就生效，只有一个事实源 |
+    | 装成 wheel | `<pkg>/aether/seeds/console` | 根目录 `console/` 不在包里 |
+
+    ⛔ 判据是"**仓库那份在不在**"，不是"包在不在" —— 后者两边都成立，
+       等于没判。反证见 `contract_seeds_test` H 组：同一棵假包里**同时**
+       放两份且内容不同 ⇒ 必须拿到仓库那份（顺序反了就红）。
+    ⛔ 读不到不抛异常：这是"有没有"的查询，由调用方决定怎么说
+       （`ui` 要说"控制台页面缺失，请用仓库里的那份或以源码目录运行"）。
+    """
+    base = Path(pkg_root) if pkg_root is not None else ROOT
+    repo = base / CONSOLE_DIRNAME
+    if repo.is_dir():
+        return repo
+    return base / "aether" / SEEDS_DIRNAME / SEED_CONSOLE_DIRNAME
 
 
 def looks_like_repo(pkg_root: Union[str, Path]) -> bool:

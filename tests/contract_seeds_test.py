@@ -29,6 +29,9 @@
     `init` 仍能物化 —— 这是真实用户会走的唯一那条路。
   G 反证：包里没有示例 ⇒ 如实说"没有"，不许静默成功；
     且 `package-data` 与 `SEED_FILES` 必须同源（少一个就发半份）。
+  H ⛔ **控制台页面**（同一类缺口）：仓库态用 `console/`，装态落回包内快照；
+    顺序不许反（两份同时存在时仓库那份说了算）+ `package-data` 必须点名
+    页面 + 自检项对空页面必须判 broken。
 
 跑法（离线，秒级）：
     python tests/contract_seeds_test.py
@@ -216,6 +219,60 @@ def main() -> int:
        suffixes == want, f"pyproject={suffixes} SEED_FILES={want}")
     ck("G4 package-data 里没有 `seeds/**/*` 这种通配（会把运行产物一起发货）",
        not any(g.endswith("**/*") for g in globs), str(globs))
+
+    # ── H 组：控制台页面（同族缺口：仓库资产不进 wheel）───────────
+    print("\nH 组：控制台页面在安装形态下也可达（r61 补）")
+    #: ⛔ 为什么这条必须存在：`console/` 与 `tasks/` 是**同一类东西** ——
+    #:    仓库资产，不会自动进 wheel。`tasks/` 有 `seed.tasks` 兜着，
+    #:    `console/` 此前**一条断言都没有** ⇒ 装完 `aether ui` 起来就死在
+    #:    「找不到控制台页面」，而 API 明明是好的（实测装态 rc=1）。
+    ck("H1 仓库态仍用仓库那份 console/（改了就生效，只有一个事实源）",
+       P.console_dir(ROOT) == ROOT / "console", str(P.console_dir(ROOT)))
+    ck("H2 仓库那份的页面真在（否则 H1 只是比了个路径）",
+       (ROOT / "console" / "index.html").is_file())
+
+    #: H3 装态：假 site-packages 里**没有** console/，只有 aether/seeds/console
+    sp2 = tmp / "sp_console"
+    (sp2 / "aether" / "seeds" / "console").mkdir(parents=True)
+    (sp2 / "aether" / "seeds" / "console" / "index.html").write_text(
+        "<!DOCTYPE html><title>seed</title>", encoding="utf-8")
+    ck("H3 ⛔ 装态（无 console/）落回包内快照",
+       P.console_dir(sp2) == sp2 / "aether" / "seeds" / "console",
+       str(P.console_dir(sp2)))
+
+    #: ⛔ H4 反证：两份**同时**存在且内容不同 ⇒ 必须拿到仓库那份。
+    #:    这条唯一能红的理由是"顺序写反了" ⇒ 它钉的是**顺序**，不是路径。
+    sp3 = tmp / "sp_both"
+    (sp3 / "console").mkdir(parents=True)
+    (sp3 / "console" / "index.html").write_text("<title>repo</title>",
+                                                encoding="utf-8")
+    (sp3 / "aether" / "seeds" / "console").mkdir(parents=True)
+    (sp3 / "aether" / "seeds" / "console" / "index.html").write_text(
+        "<title>seed</title>", encoding="utf-8")
+    got_page = (P.console_dir(sp3) / "index.html").read_text(encoding="utf-8")
+    ck("H4 ⛔ 两份都在时仓库那份说了算（顺序反了这条就红）",
+       "repo" in got_page, got_page)
+
+    #: ⛔ H5 只做回退不给发货，等于装完还是缺 —— 这两条必须成对看。
+    globs2 = re.findall(r'"(seeds/console/[^"]+)"', py)
+    ck("H5 ⛔⛔ package-data 点名了 seeds/console/index.html",
+       "seeds/console/index.html" in globs2, str(globs2))
+    ck("H6 package-data 没有用 seeds/console/* 这种通配（会带进 .DS_Store）",
+       not any(g.endswith("*") for g in globs2), str(globs2))
+
+    #: ⛔ H7 自检项必须**能红**：页面只有 1 字节 ⇒ 必须判 broken。
+    #:    否则"目录在就算好"会让空页面一路过闸（白屏而自检全绿）。
+    from aether import selfcheck as SC
+
+    bad = tmp / "sp_empty"
+    (bad / "console").mkdir(parents=True)
+    (bad / "console" / "index.html").write_text("x", encoding="utf-8")
+    st, _ = SC._c_console_page(SC.Ctx(root=tmp, tmp=tmp, pkg_root=bad))
+    ck("H7 ⛔ 空页面必须判 broken（不是『文件在就算好』）",
+       st == SC.BROKEN, st)
+    st2, detail2 = SC._c_console_page(SC.Ctx(root=tmp, tmp=tmp, pkg_root=ROOT))
+    ck("H8 真仓库上该项为 ok（正例，避免只测坏的那一侧）",
+       st2 == SC.OK, f"{st2} {detail2}")
 
     print("\n" + "=" * 60)
     if FAILS:

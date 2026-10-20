@@ -255,6 +255,18 @@ def main() -> int:
     ck("C10 没有任务集 ⇒ seed.tasks 是 skip（skip ≠ 通过）",
        _status(r, "seed.tasks") == SC.SKIP, str(_status(r, "seed.tasks")))
 
+    #: C11 ⛔⛔ 装出来的包里**漏了控制台页面** ⇒ console.page 必须红。
+    #:     这正是 r61 的真实事故：`console/` 是仓库资产、不进 wheel，
+    #:     而 `aether ui` 起来就死在「找不到控制台页面」（API 却是好的）。
+    #:     ⛔ 用假 pkg_root 而不是删真文件：契约不许改被测仓库（第 51 条）。
+    bare_pkg = Path(tempfile.mkdtemp(prefix="v6_sc_noconsole_")) / "sp"
+    (bare_pkg / "aether" / "seeds" / "tasks").mkdir(parents=True)
+    r = SC.run(ws, pkg_root=bare_pkg)
+    ck("C11 ⛔⛔ 包里漏了控制台页面 ⇒ console.page 红"
+       "（否则装完 `aether ui` 起不来而自检全绿）",
+       _status(r, "console.page") == SC.BROKEN,
+       str(_status(r, "console.page")))
+
     # ── D 组：预算 ────────────────────────────────────────────────
     print("\nD 组：预算是一道判据")
     ck("D1 全跑远低于 60s（实测读数，不是估计）",
