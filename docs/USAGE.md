@@ -262,6 +262,92 @@ aether verify-chain      # 账本被动过没有
 
 ---
 
+## 9. 用在别的项目上（以 V5 为例，实测）
+
+结论先给：**能，但只覆盖一类东西 —— 纯函数。**下面每个数字都是跑出来的，不是推的。
+
+### 9.1 三种意图，只有第一种成立
+
+| 你想要 | 能不能 | 原因 |
+|---|---|---|
+| 拿**对方的代码**当题源（切片成任务集） | **能** | `scripts/worldgen.py` 把源码切片成 `task.py + tests.json` |
+| 拿**对方的系统**当被测对象（服务/DB/多进程） | **不能** | 沙箱里没有网络、没有 DB、没有常驻进程 |
+| 让 AETHER **直接改对方的仓库** | **不是这么用的** | 它接受的是"胶囊"（技能层），落在自己的库里；不开 PR、不改源文件 |
+
+第三条要展开一句：`evolve` 的产出是 `harness_id` 的变化 + 账本事件，**不会去动
+你仓库里的 `.py`**。想让机器改源码，那是另一回事（V5 自己的 `evolution_loop`
+在做）—— 两条闭环同时写同一个仓库会互相打架。
+
+### 9.2 实测读数（V5 `/Users/linshaojie/V5`）
+
+用 `worldgen` 三个目录各扫一遍，看**过闸率**：
+
+| 目录 | 扫描模块 | 产出环境 | 淘汰主因 |
+|---|---|---|---|
+| `evolution/` | 1142（含 `.snapshots/` 重复） | **3** | 判据数 < 6 / 变异打不穿 |
+| `core/` | 10 | **2**（`knowledge_tier`、`patterns`） | 多数是"42 条判据、32 次变异 **0 次击穿**" |
+| `self_improving/` | 24 | **1**（`self_retriever`，变异产出率 **11/14**，好题源） | `learning_topics` 12 条判据 0 击穿 |
+
+把 `evolution/` 那 3 个环境放进临时工作区，真跑一轮：
+
+```
+aether evolve --rounds 1 --max-tasks 12
+  --envs bench_gain,consumption_ledger
+  --dev-env bench_gain --heldout-env consumption_ledger
+
+→ 13.79s / 账本 44 条 / chain_ok
+   synthesis  dev     attempted=12 valid=1  yield=0.083
+   synthesis  heldout attempted=12 valid=2  yield=0.167
+   gate.result ×3     passed=true（frozen_gain 1 / 1 / 0）
+   三个候选全被拒：
+     fix_control_flow  no_advantage(-0.577)
+     fix_literals      inconclusive（adv=1.73，但 held-out 每层可提升空间 < 3）
+     fix_boolops       no_advantage(-0.577)
+```
+
+对照（同口径 `--max-tasks 8`）：V5 切片 dev **1/8**、held-out 2/8；V6 自己的环境
+是 **3/7 ≈ 0.43**。**不是"水土不服"，而是判据覆盖率** —— `bench_gain` 的
+12 条判据只覆盖了 32 个变异点位里的 3 个（worldgen 已算出"变异产出率 3/32"），
+其余点位改了也打不穿任何判据 ⇒ 全部落进 `rejected_no_failure`。
+
+### 9.3 正确姿势（四步，都别越界）
+
+```bash
+# 1. 装到**独立** venv（零运行期依赖，不会碰 V5 的 .venv）
+python3 -m venv /tmp/aether-venv && /tmp/aether-venv/bin/pip install /Users/linshaojie/V6
+
+# 2. 工作区放**别处** —— ⛔ 绝不在 V5 根目录跑 init
+/tmp/aether-venv/bin/aether init --dir ~/v5lab
+
+# 3. 生成题源（指向 V5 的具体目录，别指仓库根）
+/Users/linshaojie/V6/scripts/worldgen.py \
+    --src ~/V5/evolution --out ~/v5lab/tasks --max-envs 6
+
+# 4. 跑
+cd ~/v5lab && /tmp/aether-venv/bin/aether evolve --envs auto --rounds 3
+```
+
+⛔ 三条不许：
+
+1. **不在对方仓库里建 `.aether` / `data/` / `backups/`** —— `init` 会写这四样，
+   等于往人家仓库里扔运行产物。一律 `--dir` 指到实验目录。
+2. **不和对方的常驻进程同时写盘**。V5 有 `v5_watchdog.py`，两边同时往
+   同一个目录写账本 = 哈希链打架。
+3. **不把 `characterization` 判据当"对方是对的"的证据**。它保证的是
+   "改完别变"，不是"本来就对"。对方代码里如果有 bug，判据会把 bug 固化成
+   正确答案（worldgen 的文档里明写了这条取舍）。
+
+### 9.4 什么时候值得这么干
+
+- 对方的**判据层薄**（只有集成测试、没有单元判据）⇒ 用它的纯函数补出一层行为回归
+- 你要评估"某次重构有没有改变行为"（不要求它变得更好，只要求**别变**）
+- 对方的代码是**算法/文本/评分**类，天然是纯函数
+
+不值得干的情况：对方的价值在多进程编排、DB 一致性、网络重试 —— 这些在沙箱里
+**根本跑不起来**，硬切片只会得到一堆"变异 0 击穿"的假题。
+
+---
+
 ## 附：一分钟自检清单
 
 ```bash
