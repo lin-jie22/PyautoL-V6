@@ -1748,10 +1748,12 @@ def cmd_caps(args) -> int:
                 if not v.dry_run:
                     CC.record(led, c)
                 icon = {IA.OK: "✅", IA.REJECTED: "⛔"}.get(v.state, "⚠️")
-                head = {IA.OK: ("✅ 无事可做（本来就在）" if v.noop
-                                else "✅ 机器自审通过"),
-                        IA.REJECTED: "⛔ 机器自审拒绝",
-                        IA.UNVERIFIED: "⚠️ 无法裁决（没有执行任何命令）"}[v.state]
+                #: ⛔ 图标只在 `icon` 里出现一次：两个 dict 都带 ✅ 会打出
+                #:    「✅ ✅ 机器自审通过」—— 文案瑕疵，但读者会以为是两层结论。
+                head = {IA.OK: ("无事可做（本来就在）" if v.noop
+                                else "机器自审通过"),
+                        IA.REJECTED: "机器自审拒绝",
+                        IA.UNVERIFIED: "无法裁决（没有执行任何命令）"}[v.state]
                 print(f"{icon} {head} —— {args.tool}"
                       + ("（演练：命令未执行）" if v.dry_run else ""))
                 for r in v.reasons:

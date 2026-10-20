@@ -321,15 +321,31 @@ def machine_install(cand: Any, tool: Any, *,
                       "stdout_tail": _tail(uout), "stderr_tail": _tail(uerr),
                       "probe_after_rollback": _probe_dict(pr3)}
     rolled_back = str(getattr(pr3, "status", "")) != "found"
-    why = [f"装完仍探不到：探针={getattr(pr2, 'status', '')}"
-           f"（rc={rc}{'，超时' if timed else ''}）"]
+    #: ⛔⛔ 原因必须**按 rc 分叉**（第 45 条：两个证人不一致先找差异源）。
+    #:    r60 G 生产实测（2026-10-20 15:17）：`brew install` 在本机的
+    #:    执行宿主里被 `sandbox-exec: sandbox_apply: Operation not permitted`
+    #:    挡掉，rc=1 且一秒都没装 —— 而当时那句文案写的是「装完仍探不到 ⇒
+    #:    这个工具装完本系统的探针找不到它」，把**执行失败**说成了**落点问题**。
+    #:    两条路的下一件事完全不同：一条去查执行环境/网络，一条去补
+    #:    `discover` 的落点规则。混成一句话，等于让人去修错的地方。
+    if rc != 0:
+        why = [f"执行失败：rc={rc}{'（超时）' if timed else ''} → 命令没跑成",
+               f"stderr 末行：{_last_line(err) or '（空）'}",
+               "⛔ 这不是探针落点问题 —— 装都没装上，谈不上探不探得到；"
+               "先解决执行环境（权限 / 网络 / 沙箱），或由人在普通终端里跑"]
+    else:
+        why = [f"装完仍探不到：探针={getattr(pr2, 'status', '')}（但 rc=0）",
+               "这个工具装完本系统的探针找不到它 ⇒ 它的自动装不该开放"
+               "（要开先让 `discover` 认识它的落点）"]
     if rolled_back:
-        why.append(f"已自动卸载（`{' '.join(un)}`，rc={urc}）⇒ 环境已还原")
+        #: ⛔ 判据是**探针**，卸载命令的 rc 只作参照：`brew uninstall` 对
+        #:    没装上的包返回非 0（"No such keg"），把那个 rc 念成"回滚失败"
+        #:    会让一次干净的回滚看起来像事故。
+        why.append(f"探针确认环境已还原（卸载命令 `{' '.join(un)}` rc={urc}；"
+                   f"rc≠0 通常表示本来就没装上，判据是探针不是 rc）")
     else:
         why.append(f"⛔ 回滚后仍探得到 ⇒ 环境**可能已被改动**，"
                    f"请人工确认：{' '.join(un)}")
-    why.append("下一件事：这个工具装完本系统的探针找不到它 ⇒ "
-               "它的自动装不该开放（要开先让 `discover` 认识它的落点）")
     #: ⛔⛔ 「这次没装成」**不是**「这个提案被否决」（第 45 条：两个证人不
     #:    一致先找差异源）。批准说的是"可以装"，不是"装得上"。
     #:    ⇒ 状态**退回 approved**（机器批准仍在，下次可再试），
@@ -359,6 +375,17 @@ def _tail(text: str, n: int = 800) -> str:
     """取尾部（安装输出前几千行都是下载进度，有用的错误在最后）。"""
     s = str(text or "")
     return s[-n:] if len(s) > n else s
+
+
+def _last_line(text: str) -> str:
+    """取最后一行非空输出。
+
+    ⛔ 只取一行而不是整段：`brew` 的 stderr 可能有几十行（下载进度 +
+    警告 + 错误），而"为什么失败"几乎总在最后一行。把整段塞进 reason
+    会让闸的理由变成日志，读者反而找不到那句关键的话。
+    """
+    lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
+    return lines[-1][:200] if lines else ""
 
 
 def record_verdict(ledger: Any, verdict: InstallVerdict,

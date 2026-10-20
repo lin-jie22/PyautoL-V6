@@ -202,6 +202,9 @@ def main():
     ck("C2b 装失败 ⇒ 状态退回 approved（批准仍在），不是 rejected",
        cand.state == CC.APPROVED and cand.approved_by == IA.AUTO_BY,
        f"{cand.state} {cand.approved_by}")
+    #: ⛔ rc=0 且探不到 ⇒ 那才是「装到了本系统认不出的位置」。
+    ck("C2c rc=0 但探不到 ⇒ 理由指向「探针找不到它」（落点问题）",
+       any("探针找不到它" in r for r in v.reasons), str(v.reasons[:3]))
 
     s = Script(["missing", "missing", "missing"],
                [(1, "", "Error: failed", False), (0, "", "", False)])
@@ -210,6 +213,20 @@ def main():
        v.state == IA.REJECTED and len(s.calls) == 2
        and "failed" in (v.evidence["exec"]["stderr_tail"] or ""),
        f"{v.state} calls={len(s.calls)}")
+    #: ⛔⛔ r60 G 生产实测抓到的那条：`brew install` 在本机执行宿主里被
+    #:    `sandbox-exec` 拒掉（rc=1，一秒都没装），而文案说的是
+    #:    「装完仍探不到 ⇒ 这个工具装完探针找不到它」—— 把**执行失败**
+    #:    说成了**落点问题**，两条路的下一件事完全不同（查执行环境 vs
+    #:    补 discover 的落点规则）。⇒ 原因必须按 rc 分叉。
+    ck("C3b ⛔ rc≠0 时说「执行失败」且**不**说「探针找不到它」",
+       any("执行失败" in r for r in v.reasons)
+       and not any("探针找不到它" in r for r in v.reasons),
+       str(v.reasons[:3]))
+    #: ⛔ 卸载 rc≠0（"No such keg"）但探针已 missing ⇒ 那是**干净的回滚**，
+    #:    不许念成"回滚失败"（判据是探针，rc 只作参照）。
+    ck("C3c 卸载 rc≠0 但探针确认还原 ⇒ 文案说「探针确认已还原」",
+       v.rolled_back and any("探针确认环境已还原" in r for r in v.reasons),
+       str(v.reasons[-1:]))
 
     s = Script(["missing", "missing", ("found", "/x/r2", "")],
                [(0, "", "", False), (1, "", "No such keg", False)])
@@ -226,6 +243,9 @@ def main():
        v.state == IA.REJECTED and v.rolled_back
        and v.evidence["exec"]["timed_out"] is True,
        f"{v.state} rb={v.rolled_back}")
+    ck("C5b 超时也走「执行失败」分支（不是落点问题）",
+       any("执行失败" in r and "超时" in r for r in v.reasons),
+       str(v.reasons[:2]))
 
     s = Script(["missing"])
     v = IA.machine_install(mk_cand(), T_R2, dry_run=True,
