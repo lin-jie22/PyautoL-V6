@@ -72,6 +72,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from . import discover as D
 #: ⛔ `ghprobe` 只 import 标准库 ⇒ 不会与这条链形成循环导入。
 from . import ghprobe as GH
+#: ⛔ `statem` 只 import 标准库（typing）⇒ 同样不会形成循环导入。
+from . import statem as SM
 from .ledger import content_hash
 
 __all__ = ["PENDING", "VALIDATED", "REJECTED", "APPROVED", "INSTALLED",
@@ -159,6 +161,20 @@ def merge(new: Candidate, old: Optional[Candidate],
        规则（r60 B 实测）：`kind` 由 `from_probe` 产出，只可能是
        `missing_tool` / `unwrapped_capability`，没有空值这条路径。
        ⇒ 改成按探针的**客观读数**判，跟 `seal()` / `verify()` 同口径。
+
+    ⛔⛔ 一个**如实但容易被读错**的中间态（r60 D 记在这里，别再修成"看着
+       顺眼"的样子）：`propose` **不跑闸** ⇒ 它产出的候选 `gate_passed`
+       恒为 `False`，而合并后 `state` 可能是 `approved`。于是档案里会出现
+       `approved + gate_passed=False`。
+
+       它读起来矛盾，其实是**两件不同的事**：
+         · `state=approved`  —— 人在某一轮批过（事实，不许机器撤销）；
+         · `gate_passed=False` —— **这一轮没有跑闸**（不是"跑了没过"）。
+
+       ⛔ 别用"把旧读数抄过来"来消除这个矛盾：那是拿上一轮的裁决冒充
+         这一轮的（第 51 条：`False` 与「从没被测过」同形，而抄过来会
+         让两者更分不清）。要看真实闸读数就跑一次 `validate` ——
+         它会重算，并把 `gate_passed` 刷成这一轮的结论。
     ⛔ 它管的是"候选仍在流水线上"的那条路（工具装了但还没包装，
        于是仍产出 `unwrapped_capability` 候选）；候选彻底消失的那条路
        由 `seal()` 管 —— 两条路互补，出口都收在 `verify()`。
@@ -187,6 +203,18 @@ VALIDATED = "validated"
 REJECTED = "rejected"
 APPROVED = "approved"
 INSTALLED = "installed"
+
+#: ⛔⛔ 状态序与「已裁决线」（r60 D）。`approved` 及以上是**人的裁决**，
+#:    机器（过闸 / 重新探针）一律不许回退它 —— 见 `statem` 里那条
+#:    生产账本时间线（seq 6955 → 7021 → 7022）：一次批准后连跑两次
+#:    机器调用，批准就没了，而且界面上和"从没提过"长得一样。
+#:
+#:    ⛔⛔ `rejected` 与 `pending` **同秩（0）**：它不是"比 pending 更差"，
+#:       而是"这一轮闸没过，重跑可以再判"。把它排在 pending 下面的话，
+#:       `validated → rejected`（闸重跑后变红）会被当成回退而挡住
+#:       ⇒ 闸失去牙（第 9 条：加一道闸就重审所有对照组）。
+STATE_RANK = SM.Rank({PENDING: 0, REJECTED: 0, VALIDATED: 1,
+                      APPROVED: 2, INSTALLED: 3}, settled=APPROVED)
 
 #: 寻址键前缀长度。⛔ 与 `genome/memory/nongression/environment/runtime`
 #: 的 `_ID_PREFIX` 同值（128 位）。
@@ -300,6 +328,14 @@ def validate(c: Candidate,
       4. **可复验**：必须带 `verify_hint`（装完怎么证明它成了）。
 
     ⛔ 四项**顺序固定、逐项记因**：只报第一个失败项会让人修完一个又冒一个。
+
+    ⛔⛔ 「过闸」的本职是**重算闸的结论**，不是**重设状态**（r60 D）：
+        已裁决的候选（`approved` / `installed`）**不许**被它降级。
+        但 `gate_passed` 与 `gate_reasons` **照常刷新** ——
+        ⛔ 保住 state 却把读数一起保住，是最危险的一种修法：
+          「人批了，闸后来变红」就再也看不见了（第 49 条：一个裁决
+          分支的观测不许比另一个少）。要的是两件事**分开记账**：
+          批准还在（state），闸现在的读数是红的（gate_passed）。
     """
     c.gate_reasons = []
     # ① 探针复核
@@ -330,7 +366,9 @@ def validate(c: Candidate,
     if not c.verify_hint.strip():
         c.gate_reasons.append("缺复验方式（装完怎么证明它成了）⇒ 不可验收")
     c.gate_passed = not c.gate_reasons
-    c.state = VALIDATED if c.gate_passed else REJECTED
+    #: ⛔⛔ 走**共用不变式**：已裁决 ⇒ 回退被挡住，state 原地不动。
+    c.state = STATE_RANK.move(c.state,
+                              VALIDATED if c.gate_passed else REJECTED)
     return c
 
 
@@ -353,7 +391,17 @@ def approve(c: Candidate, *, by: str, yes: bool = False) -> Candidate:
        因为"agent 自己决定装什么"正是这条设计要挡掉的东西。
     ⛔ 没通过闸的候选**不许**被批准 —— 批一条已知不过闸的提案，
        等于把闸当成摆设。
+
+    ⛔⛔ 已是**终态**（`installed`）的候选不许被"再批准"退回 `approved`
+       （r60 D，与 `cleanup.apply_patch` 同族）：终态只能由**复验**
+       授予，批准的手伸不到那儿。⛔ 这条**故意排在过闸检查之前** ——
+       "已经结案了"是比"闸现在红不红"更强的事实，先说前者。
     """
+    if STATE_RANK.of(c.state) >= STATE_RANK.of(INSTALLED):
+        c.gate_reasons.append(
+            f"候选已是 {c.state}（终态）：重复批准不会把它退回 "
+            f"{APPROVED}；装完之后请用 `verify --tool {c.tool}` 复验")
+        return c
     if not c.gate_passed or c.state == REJECTED:
         c.gate_reasons.append("未通过闸的候选不得批准（先把闸的问题解决）")
         return c
@@ -363,7 +411,7 @@ def approve(c: Candidate, *, by: str, yes: bool = False) -> Candidate:
     if not str(by).strip():
         c.gate_reasons.append("批准必须留名（approved_by 不能为空）")
         return c
-    c.state = APPROVED
+    c.state = STATE_RANK.move(c.state, APPROVED)
     c.approved_by = str(by).strip()
     c.approved_at = time.time()
     return c

@@ -35,6 +35,8 @@
 跑法：
     python tests/contract_cleanup_test.py
 """
+import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -320,7 +322,7 @@ def main():
     #:    `aether/interop.py:473` 的赋值到 10-19 还在原位 —— 批准了，
     #:    但补丁没被执行，账本上却看不出来。
     #:    ⇒ 链路上没有"执行后复验"这一环，`APPLIED` 就成了终点。
-    import shutil
+    #: （`shutil` 已在文件顶部导入 —— G 组与 H 组都要 `rmtree` 临时根）
     from aether.cleanup import (APPLIED, EXECUTED, CleanupProposal,
                                 _base_count, _dedup_key, _is_duplicate,
                                 verify_executed)
@@ -419,6 +421,80 @@ def main():
            not _is_duplicate(old, {}))
     finally:
         shutil.rmtree(gdir, ignore_errors=True)
+
+    # ── H 组：已裁决的提案不许被机器回退（r60 D）────────────────────
+    print("H 组：重跑过闸不许撤销人的批准（applied / executed 只能前进）")
+    #: ⛔⛔ 本组针对的形态：`validate()` 当年无条件写
+    #:      `state = proposed if gate_passed else rejected`
+    #:    过闸的本职是**重算闸的结论**，它顺手把状态也一起覆写了
+    #:    ⇒ 人批准过的提案，重跑一次过闸就降级。
+    #:    ⛔ 这条链后果比候选链更重：`cli.py` 的 `approve` 与 `patch`
+    #:    两个出口都按 `state != APPLIED` 判 —— 一旦被冲回
+    #:    `proposed`/`rejected`，**人已经批准的那份补丁就再也取不出来**，
+    #:    而界面上它与"还没批过"完全同形。
+    from aether.cleanup import (PENDING as CL_PENDING, PROPOSED,
+                                REJECTED as CL_REJECTED,
+                                apply_patch, save as cl_save,
+                                validate as cl_validate,
+                                EXECUTED as CL_EXECUTED)
+
+    def mkp2(state=CL_PENDING):
+        q = CleanupProposal(
+            kind="write_only", target="zz", where="aether_probe/mod.py:3",
+            state=state, gate_passed=True,
+            load_before={"dead_api": 2}, load_after_expected={"dead_api": 1})
+        q.patch = "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-zz\n"
+        q.prop_id = "h_dummy"
+        return q
+
+    p_appr2 = apply_patch(cl_validate(mkp2(), non_regression_ok=True),
+                          approved_by="linshaojie", yes=True)
+    ck("H1 前提：过闸 + 批准 ⇒ applied（否则下面全是空真）",
+       p_appr2.state == APPLIED, p_appr2.state)
+    p_kept = cl_validate(p_appr2, non_regression_ok=True)
+    ck("H2 ⛔⛔ 重跑过闸不许把 applied 降级（人的批准不许被机器撤销）",
+       p_kept.state == APPLIED
+       and p_kept.evidence.get("approved_by") == "linshaojie",
+       f"state={p_kept.state}")
+    #: ⛔⛔ 反证：保住 state 但读数**必须**照常刷新 —— 否则
+    #:    「人批了，闸后来变红」就永远看不见（第 49 条）。
+    p_red = cl_validate(p_appr2, non_regression_ok=None)
+    ck("H3 ⛔ 保住 state，但闸的读数照常刷新：applied 的提案仍被判红"
+       "（非回归 fail-closed）",
+       p_red.state == APPLIED and not p_red.gate_passed
+       and any("非回归" in r for r in p_red.gate_reasons),
+       f"state={p_red.state} gate={p_red.gate_passed}")
+    p_ex2 = apply_patch(mkp2(CL_EXECUTED), approved_by="linshaojie", yes=True)
+    ck("H4 ⛔ executed 的提案再批准 ⇒ 不许退回 applied；且要说清为什么",
+       p_ex2.state == CL_EXECUTED
+       and any("终态" in r for r in p_ex2.gate_reasons),
+       f"{p_ex2.state} {p_ex2.gate_reasons[-1:]}")
+    #: ⛔⛔ 反证：这条**不许**被写成「state 一概不许改」—— 那会让闸失去牙。
+    ck("H5 ⛔ 反证：pending 的提案闸红 ⇒ 仍变 rejected（闸有牙）",
+       cl_validate(mkp2(), non_regression_ok=None).state == CL_REJECTED)
+    ck("H6 ⛔ 反证：proposed 的提案复核失败 ⇒ 仍可回退到 rejected"
+       "（「不许回退」只从 applied 起算，不是从 proposed 起算）",
+       cl_validate(cl_validate(mkp2(), non_regression_ok=True),
+                   non_regression_ok=None).state == CL_REJECTED)
+    ck("H7 反证（续）：proposed 的提案复核通过 ⇒ 仍是 proposed",
+       cl_validate(mkp2(), non_regression_ok=True).state == PROPOSED)
+
+    #: ── 消费侧：**真跑 CLI**，不靠"读代码推断它会怎么走" ──
+    ch = Path(tempfile.mkdtemp(prefix="cl_h_"))
+    try:
+        cl_save(ch / "data" / "cleanup_proposals.json",
+                {p_kept.prop_id: p_kept})
+        rr = subprocess.run(
+            [sys.executable, "-B", "-m", "aether.cli", "--root", str(ch),
+             "caps", "cleanup", "patch", "--id", p_kept.prop_id],
+            cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=300)
+        oo = rr.stdout.decode("utf-8", "replace")
+        ck("H8 ⛔ 消费侧证据：重跑过闸之后 `caps cleanup patch` 仍取得出补丁"
+           "（改前它会被冲成 rejected ⇒ 人批准的补丁永远取不出来）",
+           rr.returncode == 0 and "+++" in oo, f"rc={rr.returncode} {oo[:80]}")
+    finally:
+        shutil.rmtree(ch, ignore_errors=True)
 
     print()
     if FAILS:

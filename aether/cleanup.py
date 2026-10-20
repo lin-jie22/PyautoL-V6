@@ -61,6 +61,8 @@ from .genome import (Gene, Harness, gene_remove_skill, gene_route_remove,
                      parse_route)
 from .ledger import content_hash
 from .paths import ROOT as _ROOT
+#: ⛔ `statem` 只 import 标准库 ⇒ 没有循环导入（同 `ghprobe` 的接法）。
+from . import statem as SM
 
 __all__ = ["PENDING", "PROPOSED", "REJECTED", "APPLIED", "EXECUTED",
            "CleanupProposal", "load", "save", "build", "validate",
@@ -84,6 +86,18 @@ APPLIED = "applied"
 #: ⛔ 终态：人执行了补丁，**且**复验证明目标真的不在原位了。
 #:    它是唯一能表示「这件事结案了」的状态 ⇒ `build()` 依此去重。
 EXECUTED = "executed"
+
+#: ⛔⛔ 状态序与「已裁决线」（r60 D）。`applied` 及以上是**人的裁决**，
+#:    机器（重跑过闸 / 重新提案）一律不许回退它。
+#:
+#:    与 `caps_candidate.STATE_RANK` **同构**（只是状态名不同）：
+#:        pending/rejected(0) → proposed/validated(1)
+#:        → applied/approved(2) → executed/installed(3)
+#:    ⛔ 两条链各自持有自己的序表，但**规则只有一份**（`statem.Rank`）——
+#:       规则抄两遍的话，下次只改一处就会出现"一条链守住了、另一条没有"，
+#:       而那正是 r60 A/B/D 三例共同的形态。
+STATE_RANK = SM.Rank({PENDING: 0, REJECTED: 0, PROPOSED: 1,
+                      APPLIED: 2, EXECUTED: 3}, settled=APPLIED)
 
 #: 提案档案文件名（走 `paths()` 的键，不手拼布局）。
 PROPOSALS_NAME = "cleanup_proposals.json"
@@ -498,7 +512,13 @@ def validate(p: CleanupProposal, *,
         p.gate_reasons.append(
             "不可达块缺结构化编辑 ⇒ 无法在副本里应用 ⇒ 拿不到对拍裁决")
     p.gate_passed = not p.gate_reasons
-    p.state = PROPOSED if p.gate_passed else REJECTED
+    #: ⛔⛔ 走**共用不变式**（r60 D）：已裁决（applied / executed）的提案
+    #:    不许被"重跑过闸"降级。`gate_passed` / `gate_reasons` **照常刷新**
+    #:    —— 保住 state 却把读数一起保住，「人批了但闸后来变红」就消失了。
+    #:    ⛔ 这条链后果更重：`cli.py` 的 `approve` / `patch` 两个出口都按
+    #:       `state != APPLIED` 判，一旦被冲回 `proposed` / `rejected`，
+    #:       人已经批准的那份补丁就**再也取不出来**了。
+    p.state = STATE_RANK.move(p.state, PROPOSED if p.gate_passed else REJECTED)
     return p
 
 
@@ -509,7 +529,17 @@ def apply_patch(p: CleanupProposal, *, approved_by: str,
     ⛔ 本函数**不写任何文件**：它只把提案标成可执行并附上补丁。
        真正改源码由人做 —— 自动改自己的源码与"判据必须离线可回归"冲突，
        而且删错了**不可逆**（账本只能留痕，不能还原没提交的删除）。
+
+    ⛔⛔ 已是**终态**（`executed`）的提案不许被"再批准"退回 `applied`
+       （r60 D，与 `caps_candidate.approve` 同构）：终态只能由
+       `verify_executed` 的**位置级复验**授予，批准的手伸不到那儿。
+       ⛔ 这条排在过闸检查之前 —— "已经结案了"比"闸现在红不红"更强。
     """
+    if STATE_RANK.of(p.state) >= STATE_RANK.of(EXECUTED):
+        p.gate_reasons.append(
+            f"提案已是 {p.state}（终态）：重复批准不会把它退回 {APPLIED}；"
+            f"要复核请重跑 `caps cleanup done --id {p.prop_id}`")
+        return p
     if not p.gate_passed or p.state == REJECTED:
         p.gate_reasons.append("未过闸的提案不得批准（先把闸的问题解决）")
         return p
@@ -519,7 +549,7 @@ def apply_patch(p: CleanupProposal, *, approved_by: str,
     if not str(approved_by).strip():
         p.gate_reasons.append("批准必须留名（approved_by 不能为空）")
         return p
-    p.state = APPLIED
+    p.state = STATE_RANK.move(p.state, APPLIED)
     p.evidence["approved_by"] = str(approved_by).strip()
     return p
 

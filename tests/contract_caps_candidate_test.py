@@ -29,6 +29,7 @@
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -335,6 +336,111 @@ def main() -> int:
                      and e.payload.get("state") == "installed")
     ck("G13 账本里真的出现了 installed（事实源上不再是 0 次）",
        n_inst >= 1, f"installed={n_inst}")
+
+    # ── H 组：已裁决的状态不许被机器回退（r60 D）──────────────────
+    print("H 组：机器不许回退「人的裁决」与「终态」")
+    #: ⛔⛔ 本组针对的形态（2026-10-19/20 生产账本实测，不是我推的）：
+    #:    一次人批准被两次机器调用抹掉的**全过程** ——
+    #:      seq=6955  23:56:18  approved   by='linshaojie'   ← 人批的
+    #:      seq=7021  00:52:13  validated                    ← 重跑 validate
+    #:      seq=7022  00:52:14  pending                      ← 重跑 propose
+    #:    ⇒ 它比"卡在 approved 不动"（r60 B）更隐蔽：那是**停住**，看得见；
+    #:      这是**往后退**，而"退回 pending"在界面上与"从没提过"同形。
+    def mk_c():
+        return CC.from_probe(D.probe(ghost),
+                             install_argv=["brew", "install", "ghost"])
+
+    c_appr4 = CC.approve(CC.validate(mk_c()), by="linshaojie", yes=True)
+    ck("H1 前提：过闸 + 批准 ⇒ approved（否则下面全是空真）",
+       c_appr4.state == CC.APPROVED, c_appr4.state)
+    kept = CC.validate(c_appr4)
+    ck("H2 ⛔⛔ 重跑 `validate` 不许把 approved 降级（生产事故的正题）",
+       kept.state == CC.APPROVED and kept.approved_by == "linshaojie",
+       f"{kept.state}")
+    #: ⛔ 别看内部记账 —— 看人能不能装（消费侧）
+    ck("H3 ⛔ 消费侧证据：批准没丢 ⇒ `install_hint` 仍读得出命令"
+       "（state 只是账本，取不出命令才是人感受到的失效）",
+       CC.install_hint(kept) == ["brew", "install", "ghost"],
+       str(CC.install_hint(kept)))
+
+    #: ⛔⛔ 反证（本组最要紧的一条）：**不许**「保住 state」顺带把读数也保住
+    #:    否则「人批了，闸后来变红」就永远看不见（第 49 条）
+    c_inst = CC.verify(CC.approve(CC.validate(mk_c()), by="linshaojie",
+                                 yes=True), fin)
+    red = CC.validate(c_inst, probe=fin)   # 候选说 missing，现在探到 found
+    ck("H4 ⛔ 保住 state，但**闸的读数照常刷新**：installed 的候选仍被判红",
+       red.state == CC.INSTALLED and not red.gate_passed,
+       f"state={red.state} gate={red.gate_passed}")
+    ck("H5 ⛔ 原因也留下来了（不是只把 gate_passed 置 False 了事）",
+       any(("过期" in r) or ("不一致" in r) for r in red.gate_reasons),
+       str(red.gate_reasons))
+
+    c_again = CC.approve(red, by="linshaojie", yes=True)
+    ck("H6 ⛔ 已 installed 的候选再批准 ⇒ 不许退回 approved；且要说清为什么"
+       "（否则 CLI 会打印一个 `?`）",
+       c_again.state == CC.INSTALLED
+       and any("终态" in r for r in c_again.gate_reasons),
+       f"{c_again.state} {c_again.gate_reasons[-1:]}")
+
+    #: ⛔⛔ 反证：这条**不许**被写成「state 一概不许改」—— 那会让闸失去牙。
+    ck("H7 ⛔ 反证：pending 的候选过闸失败 ⇒ 仍变 rejected（闸有牙）",
+       CC.validate(mk_c(), non_regression_ok=False).state == CC.REJECTED)
+    ck("H8 ⛔ 反证：pending 的候选过闸通过 ⇒ 仍变 validated",
+       CC.validate(mk_c()).state == CC.VALIDATED)
+    ck("H9 ⛔ 反证：**未裁决**的（validated）复核失败 ⇒ 仍可回退到 rejected"
+       "（「不许回退」只从 approved 起算，不是从 validated 起算）",
+       CC.validate(CC.validate(mk_c()), probe=fin).state == CC.REJECTED)
+    #: ⛔⛔ 边界：复验**不套**这条保护 —— 它的本职就是报"现在还成立吗"，
+    #:    "装好的工具后来被卸了"是必须能被看见的坏消息（r60 B 已定：
+    #:    复验失败只留痕、不落盘，「撤销批准」这条路本来就不存在）。
+    ck("H10 ⛔ 复验不受这条保护约束：installed 的候选探不到 ⇒ 仍报 rejected",
+       CC.verify(c_inst, D.Probe(tool="ghost", status="missing", path="",
+                                 detail="被卸了")).state == CC.REJECTED)
+
+    #: ── CLI 端到端：把生产事故那串调用**逐条重放**（不是读代码推断）──
+    print("H 组（续）：CLI 重放生产事故的那串调用（独立临时根）")
+    #: ⛔ 用新的临时根：G 组已经把 radare2 弄成 installed 了，
+    #:    复用会让"H2 到底测的是哪一段"说不清（第 35 条：对照组只差一个变量）。
+    th = Path(tempfile.mkdtemp(prefix="v6_cand_h_"))
+
+    def cli(*argv):
+        r = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
+                            str(th)] + list(argv),
+                           cwd=str(ROOT), stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, timeout=300)
+        return r.returncode, r.stdout.decode("utf-8", "replace")
+
+    def hstate():
+        #: ⛔ 读**档案**不读打印：打印读的是内存里的对象，档案才是跨进程真相
+        #:    （G12b 同一条纪律：只测打印的话，"整表替换"测不出来）。
+        try:
+            d = json.loads((th / "data" / "candidates.json").read_text(
+                encoding="utf-8"))
+        except Exception:                                    # noqa: BLE001
+            return {}
+        return {c["tool"]: c["state"] for c in (d.get("candidates") or [])}
+
+    try:
+        cli("caps", "candidates", "propose")
+        cli("caps", "candidates", "validate", "--tool", "radare2")
+        rc_a, _ = cli("caps", "candidates", "approve", "--tool", "radare2",
+                      "--by", "linshaojie", "--yes")
+        ck("H11 前提：CLI 批准成功（否则下面全是空真）",
+           rc_a == 0 and hstate().get("radare2") == "approved", str(hstate()))
+        cli("caps", "candidates", "validate", "--tool", "radare2")
+        ck("H12 ⛔⛔ 生产事故第 1 步：重跑 `validate` 后档案仍是 approved",
+           hstate().get("radare2") == "approved", str(hstate()))
+        cli("caps", "candidates", "propose")
+        ck("H13 ⛔⛔ 生产事故第 2 步：重跑 `propose` 后档案**仍是** approved"
+           "（改前这里是 pending，批准就这么没了）",
+           hstate().get("radare2") == "approved", str(hstate()))
+        rc_h, out_h = cli("caps", "candidates", "hint", "--tool", "radare2")
+        ck("H14 ⛔ 消费侧证据：`hint` 仍读得出安装命令"
+           "（改前 rc=1，提示『先 validate + approve --yes』）",
+           rc_h == 0 and out_h.strip().startswith("brew install"),
+           f"rc={rc_h} {out_h.strip()[:60]}")
+    finally:
+        shutil.rmtree(th, ignore_errors=True)
 
     print("\n" + "=" * 60)
     if FAILS:

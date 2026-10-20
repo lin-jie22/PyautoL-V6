@@ -1551,6 +1551,16 @@ def cmd_caps(args) -> int:
                 CC.save(cpath, saved)
                 CC.record(led, c)
                 print(json.dumps(c.to_dict(), ensure_ascii=False, indent=2))
+                #: ⛔ 已裁决的候选闸现在红了 ⇒ **必须说人话**（r60 D）。
+                #:    只打印 JSON 的话，「批准还在」与「闸现在是红的」会挤在
+                #:    同一个字典里，读者按先扫到的那个键理解 —— 而这两种
+                #:    理解的处置完全相反（不用重批 vs 去看闸为什么红）。
+                if CC.STATE_RANK.is_settled(c.state) and not c.gate_passed:
+                    print(f"⚠️ 这条候选已是 **{c.state}**"
+                          f"（人的批准**没有被撤销**），"
+                          f"但闸现在的读数是红的：")
+                    for r in c.gate_reasons:
+                        print(f"     ⇒ {r}")
                 return 0 if c.gate_passed else 1
             if sub == "approve":
                 #: ⛔ 先过闸再批准：批一条已知不过闸的提案等于把闸当摆设。
@@ -1695,6 +1705,13 @@ def cmd_caps(args) -> int:
                     print("     ✅ 对拍通过：删前删后冻结契约一致")
                 for r in p.gate_reasons:
                     print(f"     ⇒ {r}")
+                #: ⛔ 同 `caps candidates validate`：已裁决的提案闸红了，
+                #:    要明说「批准还在」—— 否则人会以为批准被撤销、
+                #:    去重跑一遍 approve，而重跑 approve 也不会修复任何东西。
+                if CL.STATE_RANK.is_settled(p.state) and not p.gate_passed:
+                    print(f"     ⚠️ 已是 **{p.state}**"
+                          f"（人的批准**没有被撤销**），"
+                          f"但闸现在的读数是红的")
                 bad += 0 if p.gate_passed else 1
             _save(saved)
             return 1 if bad else 0
