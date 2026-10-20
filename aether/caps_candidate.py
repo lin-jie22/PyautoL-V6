@@ -378,8 +378,12 @@ def install_hint(c: Candidate) -> List[str]:
     ⛔ 没批准就没有提示：产出"该怎么装"等于在催办一条没被批准的提案。
     ⛔ 没给 `install_argv` 也如实返回空表 + 说明：我们**不猜**包管理器
        （猜错会让人装错东西，比不给提示更糟）。
+    ⛔⛔ **已结案（`installed`）也不给命令**（r60 E）：原先把 `INSTALLED`
+       也算进"可以给提示"，于是装好的工具还会被催一遍"请人工执行"。
+       那不只是没用 —— 它把"已经完成"读成了"还差一步"。
+       ⇒ 只有 `approved`（人批了、还没装）才谈得上"该怎么装"。
     """
-    if c.state not in (APPROVED, INSTALLED):
+    if c.state != APPROVED:
         return []
     return list(c.install_argv)
 

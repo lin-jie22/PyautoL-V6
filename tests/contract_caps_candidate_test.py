@@ -442,6 +442,155 @@ def main() -> int:
     finally:
         shutil.rmtree(th, ignore_errors=True)
 
+    # ── I 组：装好之后，**读出面**不许塌掉（r60 E）────────────────
+    print("I 组：装好之后 validate / approve / hint 仍要走得通")
+    #: ⛔⛔ 本组针对的形态（实测）：工具装好且已被探针包装之后，
+    #:    `from_probe` 返回 `None`（"没有待办就不提候选"——这是**对的**），
+    #:    而 `_mk()` 把「工具名不认识」与「没有待办候选」压成同一个 `None`：
+    #:
+    #:      $ aether caps candidates validate --tool radare2
+    #:      不认识工具 'radare2'；已知：['ghidra', 'radare2', …]
+    #:
+    #:    —— 同一句话里自证它认识。r60 B 只给 `verify` 补了退路，
+    #:    另外三个出口没补 ⇒ 工具一装好，这三个命令就全废了。
+    #:
+    #: ⛔ 此处复用 G 组的 `tmp`（radare2 在里面已经是 installed）与
+    #:    `env_fake`（假 r2 让探针 found）—— 那是**同一条时间线**的后续，
+    #:    正好是"装好之后"这个时刻。
+
+    def icli(*argv):
+        r = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
+                            str(tmp)] + list(argv),
+                           cwd=str(ROOT), stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, timeout=300, env=env_fake)
+        return r.returncode, (r.stdout + r.stderr).decode("utf-8", "replace")
+
+    def i_state():
+        try:
+            d = json.loads((tmp / "data" / "candidates.json").read_text(
+                encoding="utf-8"))
+        except Exception:                                    # noqa: BLE001
+            return {}
+        return {c["tool"]: c["state"] for c in (d.get("candidates") or [])}
+
+    ck("I0 前提：G 组结束时 radare2 已是 installed（否则本组没测到那个时刻）",
+       i_state().get("radare2") == "installed", str(i_state()))
+
+    rc_v, o_v = icli("caps", "candidates", "validate", "--tool", "radare2")
+    #: ⛔ 判据刻意写成「**读到了档案里那条候选**」而不是「rc != 2」：
+    #:    事故版 E1（`c is None` 时不去取档案）会让 rc=0 并打印
+    #:    「档案里没有它的待办候选」—— 而档案里明明有一条 installed。
+    #:    "不是 rc=2" 这种**弱判据**会让那个谎话通关（E1 实测：只这 3 条红）。
+    ck("I1 ⛔ 装好之后 `validate` 真的**读到了档案里那条候选**"
+       "（输出里有它的读数，不是一句『没有可 validate 的东西』）",
+       rc_v != 2 and '"state": "installed"' in o_v, f"rc={rc_v} {o_v[-160:]}")
+    ck("I2 ⛔⛔ 那句自相矛盾的报错不再出现"
+       "（『不认识工具 radare2；已知：[…radare2…]』）",
+       "不认识工具" not in o_v, o_v[-160:])
+    ck("I3 ⛔ 并且说清闸红是**提案过期**、不需要处理"
+       "（不是让人去查一个不存在的工具名）",
+       "已经结案" in o_v and "不需要处理" in o_v, o_v[-200:])
+    ck("I4 ⛔ 走完 validate 后档案仍是 installed（r60 D 的 CLI 侧延伸）",
+       i_state().get("radare2") == "installed", str(i_state()))
+    #: ⛔ 复验是「现在还成立吗」，**必须随时可跑**（r60 D 第三条纪律：
+    #:    复验不套"不许回退"的保护 —— 装好的工具后来被卸了要能被看见）。
+    #:    实测踩过：`verify` 的 `if pr is None` 换成 `if c is None` ⇒
+    #:    已结案的工具报「不认识工具」⇒ 复验这条路在装好之后就断了，
+    #:    而 I 组原来**没有**覆盖它（事故版 E2 第一次注入时才暴露）。
+    rc_vf, o_vf = icli("caps", "candidates", "verify", "--tool", "radare2")
+    ck("I12 ⛔ 装好之后再 verify 一次仍走得通（复验随时可跑）",
+       rc_vf == 0 and "已装（复验过）" in o_vf, f"rc={rc_vf} {o_vf[-140:]}")
+
+    rc_a2, o_a2 = icli("caps", "candidates", "approve", "--tool", "radare2",
+                       "--by", "tester", "--yes")
+    ck("I5 ⛔ 装好之后再 approve ⇒ rc=0 且明说「不需要再批准」"
+       "（不是「未推进：?」，也不是退回 approved）",
+       rc_a2 == 0 and "不需要再批准" in o_a2
+       and i_state().get("radare2") == "installed",
+       f"rc={rc_a2} {o_a2[-140:]}")
+
+    rc_h2, o_h2 = icli("caps", "candidates", "hint", "--tool", "radare2")
+    ck("I6 ⛔ 装好之后 `hint` 说「不需要再装」，且**不再给安装命令**"
+       "（给命令等于把「已完成」读成「还差一步」）",
+       rc_h2 == 0 and "不需要再装" in o_h2
+       and "brew install" not in o_h2, f"rc={rc_h2} {o_h2[-140:]}")
+    ck("I7 消费侧（模块层）：install_hint 对 installed 返回空表",
+       CC.install_hint(CC.verify(CC.approve(CC.validate(
+           CC.from_probe(D.probe(ghost),
+                         install_argv=["brew", "install", "ghost"])),
+           by="linshaojie", yes=True), fin)) == [])
+
+    #: ⛔ 反证一：真不认识的名字**仍然**要报「不认识工具」且 rc=2
+    #:    （否则上面几条可以靠"把这个判断删掉"变绿 —— 第 9 条）
+    rc_x, o_x = icli("caps", "candidates", "validate", "--tool", "no_such_x")
+    ck("I8 ⛔ 反证：真不认识 ⇒ 仍报『不认识工具』且 rc=2（这条判断没被删掉）",
+       rc_x == 2 and "不认识工具" in o_x, f"rc={rc_x} {o_x[-120:]}")
+
+    #: ⛔ 反证二：工具已装、但档案里从来没提过它 ⇒ 如实说"没有待办"，
+    #:    而不是"不认识"，也**不许**说"先跑 propose"（那是个死循环式建议：
+    #:    已装且已探到的工具，propose 永远不会再提它）。
+    rc_g, o_g = icli("caps", "candidates", "validate", "--tool", "git")
+    ck("I9 ⛔ 已装但档案无候选 ⇒ rc=0、说『待办候选』、不报不认识、"
+       "不推『先跑 propose』",
+       rc_g == 0 and "待办候选" in o_g
+       and "不认识工具" not in o_g and "先跑" not in o_g,
+       f"rc={rc_g} {o_g[-160:]}")
+
+    #: ⛔⛔ 反证三：`propose` 的"空候选"分支在这台机器上**走不到**
+    #:    （radare2 缺 ⇒ 总有候选）。走不到的分支不许靠读代码断言
+    #:    （第 60 条：图里可达 ≠ 跑到了）⇒ 把 `KNOWN_TOOLS` 收窄成
+    #:    一个"已装且已探到 capability"的假工具，让那条分支真被执行。
+    ih = Path(tempfile.mkdtemp(prefix="v6_cand_i_"))
+    try:
+        code = (
+            "import sys\n"
+            "from aether import discover as D\n"
+            "D.KNOWN_TOOLS = (D.Tool(name='fake', exe='r2',"
+            " capability={'id': 'tool.fake', 'kind': 'tool'},"
+            " about='假工具（只为走到那条分支）'),)\n"
+            "from aether import cli\n"
+            "sys.exit(cli.main(['--root', %r, 'caps', 'candidates',"
+            " 'propose']))\n" % str(ih))
+        ri = subprocess.run([sys.executable, "-B", "-c", code], cwd=str(ROOT),
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            timeout=300, env=env_fake)
+        oi = (ri.stdout + ri.stderr).decode("utf-8", "replace")
+        ck("I10 空候选分支**真的跑到了**（不是『读代码看着对』）",
+           ri.returncode == 0 and "没有待办候选" in oi, f"rc={ri.returncode} {oi[-160:]}")
+        ck("I11 ⛔ 文案不再全称声称『都已包装』—— 探到的 argv 只是版本探针命令",
+           "已有的也都包装了" not in oi and "版本探针命令" in oi, oi[-220:])
+
+        #: ⛔ 第三条分支：**装了但探针失败**（`error`）。按设计它不生成安装
+        #:    候选（装一遍解决不了"装了但坏了"），所以它也会走到 `c is None`。
+        #:    ⛔ 不测这一条的话，那个分支就是"从没被执行的观测"——
+        #:    而它会说"已经装好"，把"坏了"读成"好了"（第 49/14 条）。
+        bad_dir = ih / "badbin"
+        bad_dir.mkdir()
+        badf = bad_dir / "rx_broken"
+        badf.write_text("#!/nonexistent/interpreter\n", encoding="utf-8")
+        badf.chmod(0o755)
+        env_bad = dict(os.environ)
+        env_bad["PATH"] = str(bad_dir) + os.pathsep + env_bad.get("PATH", "")
+        code2 = (
+            "import sys\n"
+            "from aether import discover as D\n"
+            "D.KNOWN_TOOLS = (D.Tool(name='broken', exe='rx_broken',"
+            " capability={'id': 'tool.broken', 'kind': 'tool'}),)\n"
+            "from aether import cli\n"
+            "sys.exit(cli.main(['--root', %r, 'caps', 'candidates', 'hint',"
+            " '--tool', 'broken']))\n" % str(ih))
+        r2 = subprocess.run([sys.executable, "-B", "-c", code2], cwd=str(ROOT),
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            timeout=300, env=env_bad)
+        o2 = (r2.stdout + r2.stderr).decode("utf-8", "replace")
+        ck("I13 ⛔ 「装了但探针失败」⇒ 说『去修』且 rc 非 0；"
+           "不许说『不认识工具』，更不许说『已经装好』",
+           r2.returncode != 0 and "探针失败" in o2
+           and "不认识工具" not in o2 and "已经装好" not in o2,
+           f"rc={r2.returncode} {o2[-200:]}")
+    finally:
+        shutil.rmtree(ih, ignore_errors=True)
+
     print("\n" + "=" * 60)
     if FAILS:
         print(f"❌ {len(FAILS)} 项未通过：")

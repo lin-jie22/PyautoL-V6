@@ -1386,13 +1386,36 @@ def cmd_caps(args) -> int:
         sub = getattr(args, "cand_cmd", "propose")
 
         def _mk(tool_name: str):
+            """取一条候选 + 它的探针结果。
+
+            ⛔⛔ 返回的两个 `None` **语义不同**，不许压成一义（r60 E 实测）：
+
+                `(None, None)` —— 工具不在 `KNOWN_TOOLS` 里 ⇒ **真不认识**
+                `(None, pr)`   —— 认识，但 `from_probe` 判「不值得提」
+                                  （已装且探到了 capability）⇒ 候选从流水线
+                                  上消失了，**只能回档案里取**
+
+            ⛔ 原来三个子命令都写 `if c is None: 报「不认识工具」`，把两义
+               压成一义。于是工具一装好，`validate` / `approve` / `hint`
+               全部退出 2，并打印：
+
+                  不认识工具 'radare2'；已知：['ghidra', 'radare2', …]
+
+               —— **同一句话里自证它认识**。读者会去查工具名写错没有，
+               而真正的问题是"装好之后没有退路"（r60 B 那条在 `verify`
+               上补了，另外三个出口没补）。
+            """
             tool = next((t for t in D.KNOWN_TOOLS if t.name == tool_name), None)
             if tool is None:
                 return None, None
             pr = D.probe(tool)
             c = CC.from_probe(pr, install_argv=list(tool.install_argv))
+            if c is None:
+                #: ⛔ 与 `verify` 子命令同一条退路：没有待办候选是**对的**，
+                #:    但档案里那条已批准/已结案的候选必须还能被读到。
+                return saved.get(tool_name), pr
             #: 与已存档状态合并：新探针更新事实，但不把已批准的打回 pending
-            return CC.merge(c, saved.get(tool_name)) if c else None, pr
+            return CC.merge(c, saved.get(tool_name)), pr
 
         def _gh_line(c) -> str:
             """外部上游事实的显示。⛔ **没查过就返回空串**（不显示 == 没查过）。
@@ -1468,7 +1491,27 @@ def cmd_caps(args) -> int:
                                  ensure_ascii=False, indent=2))
                 return 0
             if not cands and not sealed:
-                print("✅ 没有待办候选：本机没有缺的工具，已有的也都包装了")
+                #: ⛔ 「已有的也都包装了」是**过度声明**（r60 E）：`from_probe`
+                #:    认的只是"探针能给出 capability"，而那份 capability 的
+                #:    `impl.argv` 仅仅是 `[path]`（**版本探针命令**），
+                #:    `to_manifest` 里它一直标着 `discovered_unwrapped`。
+                #:    ⇒ 不写全称断言，**逐个点名**（第 59 条：文案里的全称
+                #:    量词会失真）。探针 `error` 的也要列出来 —— 按设计它们
+                #:    不生成候选（装一遍解决不了"装了但坏了"），不点名就等于
+                #:    让它们从所有读数里消失。
+                ok = [t.name for t, x in zip(D.KNOWN_TOOLS, probes)
+                      if x.status == "found"]
+                err = [(t.name, x.detail) for t, x in zip(D.KNOWN_TOOLS, probes)
+                       if x.status == "error"]
+                print(f"✅ 没有待办候选：{len(ok)} 个已知工具都探到了"
+                      f"（{'、'.join(ok) or '无'}）")
+                if err:
+                    print(f"   ⛔ 其中 {len(err)} 个探针失败："
+                          + "；".join(f"{n}（{d}）" for n, d in err))
+                    print("      那不是「缺」而是「去修」—— 所以这里不提安装候选"
+                          "（装一遍解决不了它）。")
+                print("   注意：探到的 argv 是**版本探针命令**，不是任务参数；"
+                      "`caps discover` 里仍标 discovered_unwrapped。")
                 return 0
             for c in cands:
                 mark = {"approved": "🟡 已批准（未安装）",
@@ -1500,15 +1543,21 @@ def cmd_caps(args) -> int:
                              f"已知：{[t.name for t in D.KNOWN_TOOLS]}")
                 return 2
             if c is None:
-                #: ⛔ 工具装好且已包装 ⇒ `from_probe` 返回 None（**这是对的**，
-                #:    没有待办就不提候选）。但档案里那条已批准的候选必须
-                #:    还能被结案 —— 这正是 r60 B 实测的"装好了就蒸发"：
-                #:    不这么接一下，这条工具就再也不会出现在任何读数里。
-                c = saved.get(args.tool)
-                if c is None:
-                    _log.warning(f"[caps] 档案里没有 {args.tool!r} 的候选；"
-                                 f"先跑 `caps candidates propose`")
-                    return 2
+                #: ⛔ 走到这里说明 `_mk` 已经把档案也查过了（r60 E：
+                #:    那里返回 `saved.get(tool_name)`）⇒ **档案里真的没有它**。
+                #:    ⛔ 原来这里还有一句 `c = saved.get(args.tool)`，在
+                #:    `_mk` 补上同一条退路之后它就是**死代码**了
+                #:    （`c is None` ⇒ 档案里必然也没有）。同一条退路写两遍
+                #:    的害处不是重复，是"下次只改一处"（第 95 条同族）。
+                if pr.status == "error":
+                    _log.warning(f"[caps] {args.tool} 找到了但探针失败"
+                                 f"（{pr.detail}）⇒ 那是「去修」，不是「去装」")
+                    return 1
+                #: ⛔ 别说"先跑 propose"：已装且已探到的工具 `propose` 永远
+                #:    不会再提它 ⇒ 那是个死循环式建议（第 35b 条）。
+                print(f"✅ {args.tool} 已经装好（{pr.path or pr.status}），"
+                      f"档案里从来没有它的候选 ⇒ 没有可复验的东西。")
+                return 0
             c = CC.verify(c, pr)
             if c.state == CC.INSTALLED:
                 #: 只有结案才落盘。
@@ -1541,10 +1590,27 @@ def cmd_caps(args) -> int:
 
         if sub in ("validate", "approve", "hint"):
             c, pr = _mk(args.tool)
-            if c is None:
+            #: ⛔ 「不认识」只认 `pr is None`（工具名真的不在 `KNOWN_TOOLS`）：
+            #:    用 `c is None` 判会让"工具装好了"冒充"工具名写错了"（r60 E）。
+            if pr is None:
                 _log.warning(f"[caps] 不认识工具 {args.tool!r}；"
                              f"已知：{[t.name for t in D.KNOWN_TOOLS]}")
                 return 2
+            if c is None:
+                #: 工具认识、也探过了，但档案里从来没有它的候选 ⇒ 无事可做。
+                #: ⛔ 先分出 `error`：那是「装了但坏了」（去修），
+                #:    不是「已经装好」（第 49 条：一个裁决分支的观测
+                #:    不许比另一个少 —— 三态都得有话说）。
+                if pr.status == "error":
+                    _log.warning(f"[caps] {args.tool} 找到了但探针失败"
+                                 f"（{pr.detail}）⇒ 那是「去修」，不是「去装」")
+                    return 1
+                #: ⛔ 别说"先跑 propose"：已装且已探到的工具 **propose 永远
+                #:    不会再提它**（`from_probe` 返回 None），那是个死循环式
+                #:    建议（第 35b 条：闸 reason 写的「出路」系统必须真有）。
+                print(f"✅ {args.tool} 已经装好（{pr.path or pr.status}），"
+                      f"档案里没有它的待办候选 ⇒ 没有可 `{sub}` 的东西。")
+                return 0
             if sub == "validate":
                 c = CC.validate(c, probe=pr)
                 saved[c.tool] = c
@@ -1555,7 +1621,17 @@ def cmd_caps(args) -> int:
                 #:    只打印 JSON 的话，「批准还在」与「闸现在是红的」会挤在
                 #:    同一个字典里，读者按先扫到的那个键理解 —— 而这两种
                 #:    理解的处置完全相反（不用重批 vs 去看闸为什么红）。
-                if CC.STATE_RANK.is_settled(c.state) and not c.gate_passed:
+                #: ⛔ 而且 `installed` 与 `approved` 要说**不同的话**（r60 E）：
+                #:    installed 的闸红是**提案本身过期**（它说 missing，工具
+                #:    已经在）—— 那是结案后的正常形态，不需要处理；
+                #:    approved 的闸红才是"要去看为什么红"。
+                if c.state == CC.INSTALLED and not c.gate_passed:
+                    print(f"✅ {c.tool} 已经结案（装好且复验过）。"
+                          f"闸红是因为**提案本身过期**了：")
+                    for r in c.gate_reasons:
+                        print(f"     ⇒ {r}")
+                    print("   不需要处理 —— 这条候选到此为止。")
+                elif CC.STATE_RANK.is_settled(c.state) and not c.gate_passed:
                     print(f"⚠️ 这条候选已是 **{c.state}**"
                           f"（人的批准**没有被撤销**），"
                           f"但闸现在的读数是红的：")
@@ -1570,6 +1646,15 @@ def cmd_caps(args) -> int:
                 saved[c.tool] = c
                 CC.save(cpath, saved)
                 CC.record(led, c)
+                #: ⛔ 已结案的再批一次不是失败，是**无事可做**（r60 E）：
+                #:    `approve()` 已经挡住了回退（终态不许退回 approved），
+                #:    这里只是把"没推进"说成它真正的原因。
+                if c.state == CC.INSTALLED:
+                    print(f"✅ {c.tool} 已经装好并结案"
+                          + (f"（批准人：{c.approved_by}）"
+                             if c.approved_by else "（⚠️ 未经人批准）")
+                          + "，不需要再批准 —— 状态没有变动。")
+                    return 0
                 if c.state != CC.APPROVED:
                     _log.warning("[caps] 未推进："
                                  + (c.gate_reasons[-1] if c.gate_reasons else "?"))
@@ -1588,6 +1673,19 @@ def cmd_caps(args) -> int:
                 return 0
             argv = CC.install_hint(c)
             if not argv:
+                #: ⛔ 已结案的不给命令，也**不许**再念一遍"先 validate +
+                #:    approve"（那条路对它已经走完了）。这里用探针的**当下
+                #:    读数**说事：档案说已装、而现在探不到，是个必须被看见
+                #:    的矛盾（第 45 条：两个证人不一致先找差异源）。
+                if c.state == CC.INSTALLED:
+                    if pr.status != "found":
+                        print(f"⚠️ 档案说 {c.tool} 已装（复验过），"
+                              f"但现在探到 {pr.status}（{pr.detail}）。")
+                        print(f"   跑 `aether caps candidates verify "
+                              f"--tool {c.tool}` 复验 —— 卸了就该让它红。")
+                        return 1
+                    print(f"✅ {c.tool} 已经装好（{pr.path}），不需要再装。")
+                    return 0
                 print(f"（没有可给的安装命令：候选状态={c.state}。"
                       f"先 validate + approve --yes；或本系统没给出 "
                       f"install_argv —— 我们不猜包管理器。）")
