@@ -50,6 +50,40 @@ def ck(name, cond, detail=""):
         FAILS.append(name)
 
 
+#: ⛔⛔ 夹具工具（2026-10-20 修，与 `contract_caps_candidate_test` 同一根因）。
+#:
+#: D 组原先靠「**本机没装 radare2**」才有一条待办候选可查上游。r60 G 的
+#: 机器自审在 10-20 15:17 真的把 radare2 装上了 ⇒ `propose --net` 找不到
+#: 任何待办候选 ⇒ **一次请求都不发** ⇒ D3/D4/D6/D7 一起变红。
+#: （D1 反而是绿的：它断言"零请求"，而零请求现在是因为没对象可查。）
+#:
+#: ⇒ 夹具自己造：逻辑名**仍是 `radare2`**（下游断言的字段名逐字不变），
+#:   探的是私有可执行文件 `r2_fixture` —— 本契约不建它，所以它一定 "missing"。
+#:   宿主机装了什么，与本契约无关（第 35c 条同族）。
+_FIXTURE_SRC = (
+    "D.Tool(name='radare2', exe='r2_fixture', probe_args=(('-v',),),"
+    " about='夹具：缺的工具（装没装由本契约决定）',"
+    " capability={'id': 'tool.radare2', 'kind': 'tool'},"
+    " install_argv=('brew', 'install', 'radare2'),"
+    " gh_repo='radareorg/radare2')"
+)
+
+
+def _propose_cmd(root, extra):
+    """拼一条 `propose` 调用，**前置**把 `KNOWN_TOOLS` 收窄成夹具工具。
+
+    ⛔ 不用 `-m aether.cli`：那读的是生产 `KNOWN_TOOLS`（这台机器真实装了
+       什么），而本组要测的是"显式 `--net` 时真的会去查上游"。
+    """
+    code = ("import sys\n"
+            "from aether import discover as D\n"
+            "D.KNOWN_TOOLS = (%s,)\n" % _FIXTURE_SRC
+            + "from aether import cli\n"
+              "sys.exit(cli.main(['--root', %r, 'caps', 'candidates',"
+              " 'propose'] + %r))\n" % (str(root), list(extra)))
+    return [sys.executable, "-B", "-c", code]
+
+
 class _GH(BaseHTTPRequestHandler):
     """假 GitHub。**数请求数**是本契约最硬的一条判据（见 D 组）。"""
 
@@ -227,11 +261,9 @@ def main() -> int:
     (tmp / "data").mkdir(exist_ok=True)
 
     def _run(*extra):
-        return subprocess.run(
-            [sys.executable, "-B", "-m", "aether.cli", "--root", str(tmp),
-             "caps", "candidates", "propose", *extra],
-            cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            timeout=300)
+        return subprocess.run(_propose_cmd(tmp, extra),
+                              cwd=str(ROOT), stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, timeout=300)
 
     _GH.code, _GH.body = 200, _real_repo()
     _GH.hits.clear()

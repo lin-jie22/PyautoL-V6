@@ -52,3 +52,13 @@ data/candidates.json
 #: 的历史"的唯一凭据。留在本地，按需归档。
 data/ledger.pre-*.jsonl
 data/ledger.v*.jsonl
+
+# 打包产物（`pip wheel .` / `pip install .` 的副产物，r61）
+build/
+dist/
+*.egg-info/
+
+# 打包产物（`pip wheel .` / `pip install .` 的副产物，r61）
+build/
+dist/
+*.egg-info/

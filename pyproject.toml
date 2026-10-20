@@ -42,7 +42,14 @@ dev = []
 
 [tool.setuptools]
 packages = ["aether"]
-include-package-data = true
+#: ⛔ 必须 **false**（r61 实测）：`aether/seeds/tasks` 是指向仓库 `tasks/` 的
+#:    符号链接，而 `include-package-data = true` 会把链接下**所有**文件都
+#:    收进去 —— 实测 wheel 里有 43 个文件（28 个真文件 + 各环境
+#:    `__pycache__/*.pyc` + 运行产物 `_worldgen_report.json`）。
+#:    发货 `__pycache__` 不只是脏：它会让"装出来的包"里混进**编译时**的
+#:    字节码，与源码是否一致无从判别。
+#:    ⇒ 改成只认下面 `package-data` 里**逐个点名**的那几个 glob。
+include-package-data = false
 
 [tool.setuptools.dynamic]
 version = { attr = "aether._version.CODE_VERSION" }
@@ -52,4 +59,16 @@ version = { attr = "aether._version.CODE_VERSION" }
 #:    它们是"这个仓库的资产"而不是"这个包的资源" —— 打进 wheel 会让
 #:    `--console` / `--caps` 的默认相对路径在安装后指向包内的副本，
 #:    于是"改了仓库的 console 却没生效"（两个事实源）。
-aether = ["py.typed"]
+#:
+#: ⛔ r61 增补：`aether/seeds/tasks` 是一个**符号链接**，指向仓库根的
+#:    `tasks/`。这么做是为了**同时**满足两件互相拉扯的事：
+#:      · 仓库里只能有**一份**任务集（复制一份 = 两个事实源，改一处漏一处）；
+#:      · 装成 wheel 之后必须**有**一份可跑的任务集（否则 `synth` / `evolve`
+#:        装完即废 —— 实测算过：wheel 里 46 个 .py、tasks/ 一个都没进去）。
+#:    实测：setuptools 构建时会**跟随**符号链接、把真实文件写进 wheel
+#:    （29 个条目）⇒ 仓库零重复，安装物是真快照。
+#:    ⛔ 只收 `task.py` 与 `tests.json`：`tasks/` 下还有 `_worldgen_report.json`
+#:       这类**运行产物**，用 `seeds/**/*` 会把它们一起发货（实测已中招）。
+aether = ["py.typed",
+          "seeds/tasks/*/task.py",
+          "seeds/tasks/*/tests.json"]

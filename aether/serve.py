@@ -41,7 +41,7 @@ from urllib.parse import parse_qs, urlparse
 from .entry import NO_CAPS, add_log_args, add_root_arg, add_serve_args
 #: ⛔ `ROOT` 与数据布局来自 `paths`（唯一事实源）—— 与 cli / ui 同源。
 #:    此前三个入口各写一行 `Path(__file__).resolve().parent.parent`。
-from .paths import ROOT, paths
+from .paths import ROOT, paths, resolve_root
 
 #: `/api/ledger/raw` 单次响应上限（字节）。账本 append-only ⇒ 无上限读取
 #: 会让内存峰值随历史线性增长；超限直接 413，让调用方走分页/同机直读路径。
@@ -497,7 +497,11 @@ def _collect(root: Path, limit: int = 200) -> Dict[str, Any]:
 
 
 class Handler(BaseHTTPRequestHandler):
-    root = ROOT
+    #: ⛔ r61：**占位值**，运行时由 `main()` 用 `Path(args.root)` 覆盖（第 1008 行）。
+    #:    占位也必须走 `resolve_root()` —— 写成 `ROOT`（包位置）意味着
+    #:    "没走 main 的那条路"会把账本指到 `site-packages`，而它照样能读能写
+    #:    （不是崩溃，是**悄悄写到安装目录**，比崩溃更坏）。
+    root = resolve_root()
     console_dir: Optional[Path] = None
     #: CORS 白名单（元组）。空 = **不发** CORS 头。
     #: ⛔ 默认不发。`Access-Control-Allow-Origin: *` 会让**任意网页**的 JS

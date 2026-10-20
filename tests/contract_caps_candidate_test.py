@@ -53,6 +53,59 @@ def ck(name, cond, detail=""):
         FAILS.append(name)
 
 
+#: ⛔⛔ 夹具工具（2026-10-20 修）。
+#:
+#: 原先 F/G/I 组**默认「本机没装 radare2」**：`propose` 会为它生成候选，
+#: `verify` 在没装时返回非 0。r60 G 的机器自审在 10-20 15:17 **真的把它
+#: 装上了**（`/opt/homebrew/bin/r2`），于是 F2/F3/F4/G9/G10/G11/G12/I*
+#: 一起变红，理由是「✅ radare2 已经装好 ⇒ 没有可 approve 的东西」。
+#:
+#: 那不是代码坏了，是**契约把宿主机状态当成了夹具** —— 而宿主机状态恰恰
+#: 是被测动作会改的东西（第 35c 条同族：随被测对象变化的量，不许在"建卷"
+#: 时量一次就写死）。同一台机器上"今天绿、明天红"，而两次的代码一模一样。
+#:
+#: ⇒ 夹具自己可造：逻辑名**仍是 `radare2`**（下游断言逐字不变），但探的是
+#:   私有可执行文件 `r2_fixture` —— 它只在本契约建的目录里存在，"装/没装"
+#:   完全由本契约决定。`ghost2` 用另一份**恒存在**的私有二进制，专门提供
+#:   「已装但档案里从没提过它」的样本（替掉原来的真 `git`）。
+_FIXTURE_TOOLS_SRC = (
+    "D.Tool(name='radare2', exe='r2_fixture', probe_args=(('-v',),),"
+    " about='夹具：主样本（装没装由本契约决定）',"
+    " capability={'id': 'tool.radare2', 'kind': 'tool'},"
+    " install_argv=('brew', 'install', 'radare2'))"
+    ", "
+    "D.Tool(name='ghost2', exe='ghost2_fixture', probe_args=(('-v',),),"
+    " about='夹具：恒存在的样本（测「已装但档案里没有」）',"
+    " capability={'id': 'tool.ghost2', 'kind': 'tool'})"
+)
+
+
+def _mk_exe(d: Path, name: str) -> Path:
+    """造一个假可执行文件（`-v` 打印一行版本，探针就认它）。"""
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / name
+    f.write_text("#!/bin/sh\necho 'radare2 5.9.8 fixture'\n", encoding="utf-8")
+    f.chmod(0o755)
+    return d
+
+
+def _cli_cmd(root, argv):
+    """拼一条 CLI 调用，**前置**把 `KNOWN_TOOLS` 收窄成夹具工具。
+
+    ⛔ 为什么不再用 `-m aether.cli`：那会读生产 `KNOWN_TOOLS`（这台机器
+       真实装了什么），而本契约要测的是**状态机**，不是宿主机装了什么。
+    ⛔ `sys.exit(cli.main(...))` 是唯一入口 —— 与 `contract_install_auto`
+       的手法一致（第 105 条：验一条路之前先确认没有别的闸把它短路掉）。
+    """
+    code = ("import sys\n"
+            "from aether import discover as D\n"
+            "D.KNOWN_TOOLS = (%s,)\n" % _FIXTURE_TOOLS_SRC
+            + "from aether import cli\n"
+              "sys.exit(cli.main(['--root', %r] + %r))\n"
+              % (str(root), list(argv)))
+    return [sys.executable, "-B", "-c", code]
+
+
 def main() -> int:
     from aether import caps_candidate as CC
     from aether import discover as D
@@ -60,6 +113,21 @@ def main() -> int:
 
     tmp = Path(tempfile.mkdtemp(prefix="v6_cand_"))
     led = Ledger(tmp / "ledger.jsonl")
+
+    #: ⛔ 夹具路径（见文件头）：`fb_wrapped` **恒在** PATH 上，提供"已装但
+    #:    档案里从没提过"的样本；`fb_installed` 只在需要"装好了"时挂上。
+    #:    ⇒ "装 / 没装"由本契约决定，不再由这台机器装没装 radare2 决定。
+    fb_wrapped = _mk_exe(tmp / "fixturebin", "ghost2_fixture")
+    fb_installed = _mk_exe(tmp / "fixturebin_installed", "r2_fixture")
+
+    def _env(*dirs):
+        e = dict(os.environ)
+        e["PATH"] = os.pathsep.join([str(d) for d in dirs]
+                                    + [e.get("PATH", "")])
+        return e
+
+    env_base = _env(fb_wrapped)                       # radare2：**没装**
+    env_installed = _env(fb_installed, fb_wrapped)    # radare2：装好了
 
     # ── A 组：候选只对值得提的情形生成 ───────────────────────────
     print("A 组：谁该成为候选（不硬凑提案）")
@@ -192,10 +260,9 @@ def main() -> int:
     #:    （实测：账本 170 条里署名 tester 的那 53 条就是这么来的），
     #:    收尾还会把生产 `data/candidates.json` 删掉。
     #:    ⇒ 测试不该是生产账本的并发写入者。
-    r1 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
-                         str(tmp), "caps", "candidates", "propose", "--json"],
+    r1 = subprocess.run(_cli_cmd(tmp, ["caps", "candidates", "propose", "--json"]),
                         cwd=str(ROOT), stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE, timeout=300)
+                        stderr=subprocess.PIPE, timeout=300, env=env_base)
     try:
         cands = json.loads(r1.stdout.decode("utf-8", "replace"))
     except Exception:                                        # noqa: BLE001
@@ -203,26 +270,24 @@ def main() -> int:
     ck("F1 `candidates propose --json` 输出结构化候选",
        isinstance(cands, list), r1.stderr.decode()[-160:])
     #: ⛔ 未加 --yes 时退出码必须非 0（否则脚本会把"没批准"当成功）
-    r2 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
-                         str(tmp), "caps", "candidates", "approve",
-                         "--tool", "radare2", "--by", "tester"],
+    r2 = subprocess.run(_cli_cmd(tmp, ["caps", "candidates", "approve",
+                                       "--tool", "radare2", "--by", "tester"]),
                         cwd=str(ROOT), stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE, timeout=300)
+                        stderr=subprocess.PIPE, timeout=300, env=env_base)
     ck("F2 ⛔ 无 --yes 的 approve 退出码非 0（脚本能判出没批准）",
        r2.returncode != 0, f"rc={r2.returncode}")
-    r3 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
-                         str(tmp), "caps", "candidates", "approve",
-                         "--tool", "radare2", "--by", "tester", "--yes"],
+    r3 = subprocess.run(_cli_cmd(tmp, ["caps", "candidates", "approve",
+                                       "--tool", "radare2", "--by", "tester",
+                                       "--yes"]),
                         cwd=str(ROOT), stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE, timeout=300)
+                        stderr=subprocess.PIPE, timeout=300, env=env_base)
     ck("F3 带 --yes 的 approve 成功且**说清仍未安装**",
        r3.returncode == 0 and "仍未安装" in r3.stdout.decode("utf-8", "replace"),
        r3.stdout.decode()[-200:])
-    r4 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
-                         str(tmp), "caps", "candidates", "hint",
-                         "--tool", "radare2"],
+    r4 = subprocess.run(_cli_cmd(tmp, ["caps", "candidates", "hint",
+                                       "--tool", "radare2"]),
                         cwd=str(ROOT), stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE, timeout=300)
+                        stderr=subprocess.PIPE, timeout=300, env=env_base)
     out4 = r4.stdout.decode("utf-8", "replace").strip()
     ck("F4 ⛔ 状态跨进程存活：hint 能读出批准后的命令（实测踩过不落盘的坑）",
        r4.returncode == 0 and out4.startswith("brew install"), out4[:80])
@@ -280,37 +345,29 @@ def main() -> int:
        CC.merge(c_new, c_appr3).state == CC.APPROVED)
 
     #: ── CLI 层：人装完之后回来结账 ──
-    #: 造一个假 r2，让 radare2 在探针里"装好了"
-    fbin = tmp / "fakebin"
-    fbin.mkdir(exist_ok=True)
-    fk = fbin / "r2"
-    fk.write_text("#!/bin/sh\necho 'radare2 5.9.8 fake'\n", encoding="utf-8")
-    fk.chmod(0o755)
-    env_fake = dict(os.environ)
-    env_fake["PATH"] = str(fbin) + os.pathsep + env_fake.get("PATH", "")
+    #: ⛔ 夹具在文件开头就备好了（`fb_installed/r2_fixture`）：不再在这里
+    #:    另造一个假 `r2` —— "每个用例各造一份夹具"正是上一版漏改的来源。
+    env_fake = env_installed
     #: ⛔ 先测**没装**就 verify：必须拒绝，且**不许**撤销人的批准
-    r5 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
-                         str(tmp), "caps", "candidates", "verify",
-                         "--tool", "radare2"],
+    r5 = subprocess.run(_cli_cmd(tmp, ["caps", "candidates", "verify",
+                                       "--tool", "radare2"]),
                         cwd=str(ROOT), stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE, timeout=300)
+                        stderr=subprocess.PIPE, timeout=300, env=env_base)
     o5 = r5.stdout.decode("utf-8", "replace")
     ck("G9 ⛔ 没装就 verify ⇒ 退出码非 0（脚本能判出没装）",
        r5.returncode != 0, f"rc={r5.returncode}")
     ck("G10 ⛔ 复验失败**不许**撤销批准（「没装」≠「装了没用」）",
        "你的批准没有被撤销" in o5, o5[-160:])
     #: 后测**装好**了：必须结案
-    r6 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
-                         str(tmp), "caps", "candidates", "verify",
-                         "--tool", "radare2"],
+    r6 = subprocess.run(_cli_cmd(tmp, ["caps", "candidates", "verify",
+                                       "--tool", "radare2"]),
                         cwd=str(ROOT), stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE, timeout=300, env=env_fake)
     o6 = r6.stdout.decode("utf-8", "replace")
     ck("G11 装完 verify ⇒ 结案为 installed（这是「人批准」的后半段）",
        r6.returncode == 0 and "已装（复验过）" in o6, o6[-200:])
     #: ⛔ 结案必须落到档案里（跨进程能读回来），而且账本里要有 installed
-    r7 = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
-                         str(tmp), "caps", "candidates", "propose"],
+    r7 = subprocess.run(_cli_cmd(tmp, ["caps", "candidates", "propose"]),
                         cwd=str(ROOT), stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE, timeout=300, env=env_fake)
     o7 = r7.stdout.decode("utf-8", "replace")
@@ -407,10 +464,9 @@ def main() -> int:
     th = Path(tempfile.mkdtemp(prefix="v6_cand_h_"))
 
     def cli(*argv):
-        r = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
-                            str(th)] + list(argv),
-                           cwd=str(ROOT), stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE, timeout=300)
+        r = subprocess.run(_cli_cmd(th, argv), cwd=str(ROOT),
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           timeout=300, env=env_base)
         return r.returncode, r.stdout.decode("utf-8", "replace")
 
     def hstate():
@@ -458,14 +514,13 @@ def main() -> int:
     #:    另外三个出口没补 ⇒ 工具一装好，这三个命令就全废了。
     #:
     #: ⛔ 此处复用 G 组的 `tmp`（radare2 在里面已经是 installed）与
-    #:    `env_fake`（假 r2 让探针 found）—— 那是**同一条时间线**的后续，
-    #:    正好是"装好之后"这个时刻。
+    #:    `env_fake`（夹具 `r2_fixture` 让探针 found）—— 那是**同一条
+    #:    时间线**的后续，正好是"装好之后"这个时刻。
 
     def icli(*argv):
-        r = subprocess.run([sys.executable, "-B", "-m", "aether.cli", "--root",
-                            str(tmp)] + list(argv),
-                           cwd=str(ROOT), stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE, timeout=300, env=env_fake)
+        r = subprocess.run(_cli_cmd(tmp, argv), cwd=str(ROOT),
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           timeout=300, env=env_fake)
         return r.returncode, (r.stdout + r.stderr).decode("utf-8", "replace")
 
     def i_state():
@@ -532,7 +587,9 @@ def main() -> int:
     #: ⛔ 反证二：工具已装、但档案里从来没提过它 ⇒ 如实说"没有待办"，
     #:    而不是"不认识"，也**不许**说"先跑 propose"（那是个死循环式建议：
     #:    已装且已探到的工具，propose 永远不会再提它）。
-    rc_g, o_g = icli("caps", "candidates", "validate", "--tool", "git")
+    #: ⛔ 用夹具 `ghost2` 而不是真 `git`：`git` 在不在是**宿主机**的事，
+    #:    而本契约要的是"一个已装、且档案里确实没有的东西"。
+    rc_g, o_g = icli("caps", "candidates", "validate", "--tool", "ghost2")
     ck("I9 ⛔ 已装但档案无候选 ⇒ rc=0、说『待办候选』、不报不认识、"
        "不推『先跑 propose』",
        rc_g == 0 and "待办候选" in o_g

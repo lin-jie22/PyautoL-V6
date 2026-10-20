@@ -130,6 +130,81 @@ FROZEN_BROKEN_PER_ENV = 1
 # ──────────────────────────────────────────────────────────────────
 # 各子命令
 # ──────────────────────────────────────────────────────────────────
+def cmd_init(args: argparse.Namespace) -> int:
+    """`aether init`：建工作区骨架（r61）。
+
+    ⛔ 目标目录只看 `--dir` / 当前目录（**不看 `--root`**，理由见 parser 处
+       的注释：`--root` 在安装态的默认值是用户数据目录，拿它当默认目标会把
+       工作区建到"家里"而不是"我现在站的地方"）。
+    ⛔ `noop`（在 V6 仓库根上跑）返回 **0** 而不是非 0：这不是失败，是
+       "本来就是它"。报非 0 会让脚本把正常情况当异常 —— 与"这次没装成 ≠
+       提案被否决"是同一条（第 138 条）。
+    """
+    from .workspace import init as _ws_init
+    target = Path(args.dir) if getattr(args, "dir", "") else Path.cwd()
+    r = _ws_init(target, dry_run=bool(getattr(args, "dry_run", False)))
+    print(json.dumps(r, ensure_ascii=False, indent=2))
+    if r["noop"]:
+        why = r["reasons"][0] if r["reasons"] else "不需要建"
+        print(f"✅ 无事可做：{why}")
+        return 0
+    if r["dry_run"]:
+        print(f"🧪 演练：以上 {len(r['created'])} 项**都没有落盘**"
+              f"（去掉 --dry-run 才真建）")
+        return 0
+    root = Path(r["root"])
+    print(f"✅ 工作区已就绪：{root}")
+    #: ⛔ 落点必须从 `_paths` 取，不许手拼 `root / "data" / "ledger.jsonl"`
+    #:    —— 本轮实测就被 `contract_entrypoints` 的 E1 静态闸抓了一次
+    #:    （第 46 条：布局只有一份。抓到了说明那道闸有牙，不是装饰）。
+    print(f"   数据落点：{_paths(root)['ledger']}")
+    if r["existing"]:
+        print(f"   已存在未动：{', '.join(r['existing'])}")
+    #: ⛔ 示例任务的读物必须分开三态（第 14 条）：
+    #:    写进去的 / 本来就有的 / 包里根本没有的 —— 合成一句"已就绪"，
+    #:    用户跑 `synth` 时才发现 tasks/ 是空的，那才是真的伤信任。
+    sd = r.get("seeds") or {}
+    if sd.get("seeded"):
+        envs = sorted({p.split("/")[1] for p in sd["seeded"]})
+        print(f"   示例任务集：{', '.join(envs)}"
+              f"（{len(sd['seeded'])} 个文件，来自 {sd.get('source')}）")
+    if sd.get("existing"):
+        print(f"   示例任务集已存在未覆盖：{len(sd['existing'])} 个文件"
+              f"（你自己改过的那份**没有被动**）")
+    if not sd.get("available"):
+        print(f"⚠️ {sd.get('reason') or '包里没有示例任务集'}")
+        print("   要跑合成任务：在 V6 仓库目录里直接跑（仓库自己就是数据根）")
+    print("   下一步：aether status / aether selfcheck")
+    if sd.get("seeded"):
+        #: ⛔ 必须给一个**真能出数**的参数：实测 `--max 2` 时 attempted=2、
+        #:    两条变异恰好都是"无行为差异"⇒ yield=0、rc=1，看起来像坏了。
+        #:    `--max 24` 实测 attempted=10 / valid=5。让用户第一步就撞红
+        #:    是最伤的（"装完就不能用"）。
+        print("   跑一次合成任务（出数需要样本量）：aether synth --max 24")
+    return 0
+
+
+def cmd_selfcheck(args: argparse.Namespace) -> int:
+    """`aether selfcheck`：秒级自证（r61）。
+
+    ⛔ 与 `check` 是**两件事**，别合并（合并只会得到一个"两边都不像"的命令）：
+       · `check`    —— 跑 `tests/` 里的 68 份契约，33–37 分钟，**只在仓库里**；
+       · `selfcheck` —— 跑内核自带的不变式，秒级，**装出来的 wheel 里也有**。
+       装完之后 `check` 只会说"0 份契约 ⇒ 判失败"（fail-closed 是对的），
+       那时用户该敲的命令是这一条。
+    ⛔ 只读：自检不写账本、不改工作区、不碰包目录（数据全落临时目录）。
+    """
+    from .selfcheck import run as _sc_run
+    from .selfcheck import summarize as _sc_sum
+    rep = _sc_run(Path(args.root) if getattr(args, "root", "") else None,
+                  only=(getattr(args, "only", "") or None))
+    if getattr(args, "json", False):
+        print(json.dumps(rep, ensure_ascii=False, indent=2))
+    else:
+        print(_sc_sum(rep))
+    return int(rep["exit_code"])
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     from .ledger import Ledger
     from .serve import MemoryLedgerAgg, memory_report
@@ -467,7 +542,27 @@ def cmd_synth(args: argparse.Namespace) -> int:
     from .environment import (DEFAULT_MUTATION_KINDS, Environment,
                               synthesize_tasks, verify_source)
     p = _paths(Path(args.root))
-    env = Environment.from_dir(p["task"])
+    #: ⛔ r61：装成 wheel 后**本来就没有任务源**（`tasks/` 是仓库资产，
+    #:    刻意不打进包，见 `pyproject.toml` 的 `package-data` 注释）。
+    #:    不拦这一下的话用户拿到的是**裸栈**，而栈里那句话（`task.py`
+    #:    的 `read_text` 抛 `FileNotFoundError`）既不说是"装出来的包没有
+    #:    任务源"，也不说该怎么办 —— 于是"环境坏了"和"这个安装里没有
+    #:    燃料"看起来一模一样，而两者的下一件事完全相反（第 108 条）。
+    #:    ⛔ 仍然返回 1：没有燃料**就是**失败，不是"这次跳过"。
+    task_dir = p["task"]
+    if not (task_dir / "task.py").is_file():
+        print(f"⛔ 没有任务源：{task_dir}/task.py 不存在", file=sys.stderr)
+        print("   原因：V6 自带的任务源随仓库走、**不进 wheel**"
+              "（装出来的包里 tasks/ 是空的）。", file=sys.stderr)
+        print("   三条出路（都验过）：", file=sys.stderr)
+        print("     ① 在仓库目录里跑 —— 仓库自己就是数据根：", file=sys.stderr)
+        print("        cd <V6 仓库> && aether synth", file=sys.stderr)
+        print(f"     ② 自己放一套任务源进来：{task_dir}/task.py + tests.json",
+              file=sys.stderr)
+        print("     ③ 指向一个已有任务的工作区：aether --root <工作区> synth",
+              file=sys.stderr)
+        return 1
+    env = Environment.from_dir(task_dir)
     base = verify_source(env)
     print(f"环境 {env.env_id} fingerprint={env.fingerprint} "
           f"基线通过 {base.n_passed}/{len(base.checks)}")
@@ -2278,6 +2373,22 @@ def build_parser() -> argparse.ArgumentParser:
         return sp
 
     _sub("status", help="账本 + 库统计 + 投影一致性")
+    #: ⛔ r61：`init` 的目标目录**只看 `--dir` / 当前目录**，不看 `--root`。
+    #:    理由：`--root` 在安装态的默认值是用户数据目录（`~/.local/share/aether`），
+    #:    若拿它当默认目标，用户在一个空目录里敲 `aether init` 会建到**家里**
+    #:    —— 而人的直觉永远是"在我现在站的地方建"。要指定位置请显式 `--dir`。
+    ini = _sub("init", help="在当前目录建工作区骨架（幂等，已存在的不动）")
+    ini.add_argument("--dir", default="",
+                     help="建在这里（默认：当前目录；与 --root 无关）")
+    ini.add_argument("--dry-run", action="store_true",
+                     help="只报要建什么，一个字节都不落")
+    #: ⛔ r61：`selfcheck` 与 `check` 是**两件不同的事**，不许合并 ——
+    #:    `check` 跑 `tests/` 里的契约（33–37 分钟，**只有仓库里有**）；
+    #:    `selfcheck` 跑内核自带的不变式（秒级，**装出来的包里也有**）。
+    #:    装成 wheel 之后 `check` 只会报"0 份契约 ⇒ 判失败"，那时该跑的是这里。
+    sc = _sub("selfcheck", help="自检：秒级、离线、不写生产（装完就能跑）")
+    sc.add_argument("--only", default="", help="只跑 key 含该子串的项")
+    sc.add_argument("--json", action="store_true", help="输出结构化报告")
     _sub("verify-chain", help="校验账本哈希链")
     #: ⛔ `check` 是把"全部验收"收成一条命令的入口：它自己聚合退出码，
     #:    是全仓库**唯一**能回答"这套代码现在算不算通过"的命令。
@@ -2625,6 +2736,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         "check": cmd_check,
         "doctor": cmd_doctor,
         "caliber": cmd_caliber,
+        "init": cmd_init,
+        "selfcheck": cmd_selfcheck,
     }[args.cmd](args)
 
 

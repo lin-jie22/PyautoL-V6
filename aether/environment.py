@@ -610,12 +610,30 @@ def _audit_allowed_paths(workdir: str) -> List[str]:
        **冷 import 也会触发 open 事件**（要读 .py 源文件）。只放行工作
        目录的话，被测代码 `import math` 就会被拒 ⇒ 沙箱把自己要执行的代码
        一起拒了（实测：放行 stdlib 后冷 import 零误伤）。
+    ⛔⛔ 为什么还必须有 `sys.base_prefix` / `base_exec_prefix`（r61 实测）：
+       在 **venv** 里 `sys.prefix` 是 venv 目录，而 **stdlib 在
+       `sys.base_prefix`**（解释器本体）—— 只放行前者，等于在"正常安装"
+       的形态下把 stdlib 关在门外。实测后果：`pip install` 出来的包
+       （必然跑在 venv 里）执行任何需要**冷 import** 的任务都报
+       `PermissionError: V6_SANDBOX_DENY:open`，而错误信息还被同一道
+       机制掩盖成了 `traceback.format_exc()` 里的二次拒绝 ——
+       看起来是"任务写错了"，实际是沙箱配置漏了一个前缀。
+       ⛔ 它在仓库里永远测不出来：仓库直接用解释器本体跑，两个 prefix
+       恰好相等 ⇒ 这条分支**只**在安装态暴露。
     ⛔ `/dev/null` 与 `/dev/urandom`：子进程的 stdout/stderr 与随机源。
     """
     out = [os.path.realpath(workdir)]
-    for p in (getattr(sys, "prefix", ""), getattr(sys, "exec_prefix", "")):
-        if p:
-            out.append(os.path.realpath(p))
+    seen = set(out)
+    for p in (getattr(sys, "prefix", ""), getattr(sys, "exec_prefix", ""),
+              getattr(sys, "base_prefix", ""), getattr(sys, "base_exec_prefix", "")):
+        if not p:
+            continue
+        rp = os.path.realpath(p)
+        #: ⛔ 去重：非 venv 时四个值全是同一个目录（写四遍只会让
+        #:    白名单看起来比实际更宽，掩盖真正缺的那一项）。
+        if rp not in seen:
+            seen.add(rp)
+            out.append(rp)
     for p in ("/dev/null", "/dev/urandom", "/dev/zero"):
         out.append(p)
     return out

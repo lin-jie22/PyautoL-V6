@@ -157,6 +157,99 @@ $PY -m aether.cli caps --caps capabilities.rea.json \
 "零新红""非回归"这些判据就会随供给波动而失效
 （V5 实测：链首供应商 82% 429，整条供给链废掉两轮）。
 
+### 2-bis. 作为**安装包**使用（`pip install`，r61）
+
+```bash
+python3 -m pip install .        # 零依赖；装完直接有 `aether` 命令
+cd ~/my-agent-project           # ⛔ 换一个**空目录**，别有仓库
+aether init                     # 建骨架：data/ tasks/ backups/ .aether
+aether status                   # 数据落点 = ./data/ledger.jsonl
+```
+
+**装完就有能真跑的事（r61 修掉的「内容断层」）**
+
+以前 `tasks/` 是仓库资产、刻意不打进 wheel ⇒ 装完能建骨架，但**没有一件能真跑
+的事**（`synth` 直接报「没有任务源」）。现在 wheel 里带一份**示例任务集**：
+
+```
+aether/seeds/tasks/          ← 仓库里是 symlink → ../../tasks（零重复）
+   _inspect/{task.py,tests.json}
+   textscore/{task.py,tests.json}
+   …（14 个任务 / 28 个文件）
+```
+
+- 构建时 setuptools 会**跟随符号链接**把真实文件写进 wheel ⇒ 仓库只有一份源码，
+  安装物是真快照（不是指向仓库的指针）。
+- `aether init` 把它们**物化**到 `<root>/tasks/`：已存在的不覆盖（记 `existing`）、
+  `--dry-run` 一字节不落、包里没有就 `available=false` 并给理由。
+- 判据是**装完能出数**，不是「文件在不在」：
+
+```
+$ cd ~/my-agent-project && aether init
+   示例任务集：_inspect, _parser, …, utils（28 个文件，来自 …/aether/seeds/tasks）
+$ aether synth --max 24
+   "attempted": 10,  "valid": 5,  "yield_rate": 0.5
+```
+
+⚠️ `--max 24` 只跑出 10 次尝试：**受可变异点总数限制，不是坏了**。
+`--max 2` 会给出 `yield=0`，看着像"示例跑不动"，其实是样本量不够。
+
+**装完怎么知道自己没装坏（r61 修掉的「可信断层」）**
+
+68 份契约是仓库资产、全量要 30+ 分钟，装出来的包里一份都没有 ⇒
+`aether check` 在安装态只会说「0 份契约」。所以另有一条**自检子集**：
+
+```bash
+aether selfcheck              # 10 项 / ~1.5s / 预算 60s
+aether selfcheck --only ledger,seed
+aether selfcheck --json
+```
+
+| 项 | 守什么 |
+|---|---|
+| `root.priority` | 五支优先级 + 兜底不落包目录 |
+| `root.not_pkg` | 安装态解析到 home，**包目录零写入** |
+| `ledger.roundtrip` | 跨实例读回一致，hash/prev_hash 都在 |
+| `ledger.chain` | 干净过、篡改被抓住 |
+| `ledger.replay` | 两次重放逐条相同 |
+| `gate.teeth` | 人审闸拒未知启动词 / `--force` / 缺复验；机器闸只认 `brew install` |
+| `state.no_downgrade` | 已裁决状态不许被机器回退 |
+| `backup.roundtrip` | 还原后 sha256 一致 |
+| `seed.tasks` | **物化出来的示例真能跑**（不是"文件在"） |
+| `deps.zero` | 除自己外没有第三方模块被加载 |
+
+三态 `ok / broken / skip` **不许合并**：`skip` 是「这条没条件测」，
+既不算过也不算坏事；而 `selfcheck` 红的时候你该相信它 —— 这一点由
+`contract_selfcheck_test.py` 的 **10 个注入反证**逐项钉住（把每道闸的
+背后机制打断，对应那一项必须红，一条不漏）。
+
+**数据根怎么定（五支，顺序固定；`path_source` 可查）**：
+
+| # | 判据 | 来源标签 | 语义 |
+|---|---|---|---|
+| ① | `--root X` | `flag` | 用户说了算 |
+| ② | `$AETHER_ROOT` | `env` | 脚本 / CI 说了算 |
+| ③ | 包位置是仓库 | `repo` | **开发态**（与 r60 逐字相同） |
+| ④ | 向上找到 `.aether` | `workspace` | `aether init` 过的工作区 |
+| ⑤ | `~/.local/share/aether` | `home` | 安装态兜底 |
+
+⛔⛔ `paths.ROOT` 的语义是**「代码在哪」**，`resolve_root()` 才是「**数据在哪**」。
+两者在仓库里恰好相等，装成 wheel 后就分开了 —— 实测（干净 venv）修前：
+
+```
+$ aether status
+"path": "…/venv/lib/python3.13/site-packages/data/ledger.jsonl"
+```
+
+它**不是崩溃**：能读能写、`rc=0`、读数看着正常。三条后果没有一条会报错 ——
+`pip install -U` 重装即丢账本、两个项目共用一个 venv 就混库、只读镜像第一次
+写账本就崩。**「悄悄写错地方」比「崩」更坏**：崩了会有人查，写错了没人查。
+
+⛔ ③ 排在 ④ 前面是**刻意的取舍**：仓库内任何命令都必须落在仓库自己的库上，
+否则 68 份在仓库根跑的契约会随机指向别处。代价是开发态想用别的工作区必须
+显式 `--root` —— `contract_root_resolve_test.py` 的 **F1 用负结果契约钉住它**，
+而不是假装没有。
+
 ---
 
 ## 3. 目录
@@ -3895,6 +3988,197 @@ rc=1、一秒都没装上。而当时的文案写的是：
 · 原因按 `rc` 分叉 —— `rc≠0` ⇒ 说执行失败 + stderr 末行；
   `rc==0` 且探不到 ⇒ 才说落点问题。
 · 回滚的判据是**探针**（回滚后再探一次是否 missing），rc 只作参照。
+
+---
+
+## 108. ⛔⛔ 「代码在哪」与「数据在哪」是两件事 —— 仓库里它们恰好相等，于是没人发现
+
+`paths.ROOT = Path(__file__).resolve().parent.parent`。在仓库里它等于仓库根，
+**看起来**就是数据根 —— 于是 11 个模块直接拿它当数据根用，68 份契约也跟着它指。
+这个等式只在**开发态**成立；`pip install` 之后同一个表达式指向 `site-packages`。
+
+实测（干净 venv，修前）：`aether status` 给的账本路径是
+`…/venv/lib/python3.13/site-packages/data/ledger.jsonl`，而且它**真的能跑**：
+`rc=0`、账本 0 条、链完整 ✅、`site-packages/data` 被 `mkdir` 出来了。
+
+⛔ 三条后果一条都不会报错：`pip install -U` 重装即丢账本、两个项目共用一个
+venv 就混库、只读镜像第一次写账本就崩。⇒ **「悄悄写错地方」比「崩」更坏**：
+崩了会有人查，写错了没人查（与第 97 条同族）。
+
+修法**不是**把 `ROOT` 改成函数（11 个模块 import 它取**代码资产**：`console/`、
+`arch_baseline` —— 那些跟着代码走才是对的），而是新增一个语义：
+
+| | 含义 | 装成 wheel 后 |
+|---|---|---|
+| `ROOT` | 代码在哪（包位置） | `site-packages` —— **正确** |
+| `resolve_root()` | 数据在哪（工作区根） | 五支解析，永不落包位置 |
+
+## 109. ⛔⛔ 五支里「仓库态」必须排在「工作区」前面，且判据只能是**仓库资产在不在**
+
+判据试过三种，只有一种成立：
+
+| 判据 | 结果 |
+|---|---|
+| `(p/"aether"/"paths.py").is_file()` | ❌ `site-packages` 里也有它 |
+| 路径里含 `site-packages` | ❌ `-e` 安装、vendor 到别处都不长这样 |
+| **`tasks/` 与 `tests/` 都在** | ✅ 恰恰是**刻意不打进 wheel** 的那批 |
+
+⛔ 顺序不能调：若让「工作区」先跑，`cd <仓库>/tasks && aether status` 会掉到
+兜底目录 ⇒ **同一台机器两个库**，而两边都可能「看着正常」。
+
+⛔ 代价要写明、不许隐藏：开发态下 `.aether` 被仓库支遮蔽（包位置=仓库时 ④
+永远走不到），要用它必须显式 `--root`。这是**负结果契约**（`F1`）钉住的取舍，
+不是「已知 bug 懒得修」。
+
+## 110. ⛔ `--root` 的默认值只有一个收口点，改那一处就够
+
+三个入口（cli / serve / ui）加全部子命令的 `--root`，都由
+`entry.add_root_arg` / `normalize_log_args` / `build_forward` 三处决定，
+而命令实现一律 `Path(args.root)`。所以**不用动那 11 个模块**，只要让这三处
+从 `resolve_root()` 取值 —— 实测改完 `args.root == str(paths.ROOT)` 逐字不变，
+7412 条生产账本照读。
+
+⛔ 若改成「每个 `cmd_*` 各自解析」，第 46 条的老病立刻复发（布局有两份）。
+
+## 111. ⛔ 安装态的失败必须是**人话**，且「没有燃料」≠「环境坏了」
+
+装出来的包里 `tasks/` 原来是空的，`aether synth` 直接抛 `FileNotFoundError`
+栈 —— 用户从中读不出「这个安装没有任务源」，也读不出该怎么办，而这两件事的
+下一件事完全相反（补燃料 vs 查环境）。改成前置判断 + 三条出路，仍然 `rc=1`：
+没有燃料**就是**失败，不是「这次跳过」。
+
+⛔ 顺带被自己的静态闸抓了一次：`cmd_init` 里手拼 `root / "data" / "ledger.jsonl"`
+⇒ `contract_entrypoints` 的 E1 立刻转红。**抓到了才说明那道闸有牙** ——
+落点已改成从 `_paths()` 取（第 46 条）。
+
+> ⚠️ 本条的**前提**已被第 112 条改掉：现在 wheel 里带示例任务集，
+> `aether init` 会物化到 `<root>/tasks/`，新装的包不再是「没有燃料」。
+> 这段前置判断仍然保留 —— 用户手动清空 `tasks/` 之后要走的正是这条路。
+
+## 112. ⛔⛔ 「装得上」与「装完有活干」是两件事，而第二件没人测
+
+第 108 条修完之后，安装态的命令都能跑、账本落在正确位置、`rc=0`。
+**但那时链路上没有任何一件事可做**：`tasks/`（14 个任务）、`tests/`（68 份契约）、
+`console/`、`supervisor/` 全都不进 wheel ⇒ 一个用户 `pip install` 完，
+能建骨架、能看 `status`，然后**无事可做**。
+
+⛔ 它不会被任何"安装测试"抓到：所有断言（能跑吗 / rc 是不是 0 / 文件在不在）
+在「没事可做」的状态下**全绿**。判据必须钉在**产出**上：
+
+```
+$ aether init && aether synth --max 24
+   "attempted": 10,  "valid": 5,  "yield_rate": 0.5
+```
+
+修法是**带一份示例任务集**进 wheel，用符号链接做到仓库零重复：
+
+```
+aether/seeds/tasks -> ../../tasks        # 仓库里只有一份源码
+```
+
+setuptools 构建时**跟随符号链接**把真实文件写进 wheel ⇒ 安装物是**真快照**
+（不是指向仓库的指针，删掉仓库也照样能跑）。
+
+⛔ `workspace.SEED_FILES = ("task.py", "tests.json")` 与 `pyproject.toml` 的
+`package-data` 是两个地方，会漂 ⇒ `contract_seeds_test` 的 `Z0` 断言两者同源
+（第 76 条：同一份数据两处消费，构造口径必须同源）。
+
+## 113. ⛔⛔ `include-package-data = true` 会把 `__pycache__/*.pyc` 一起打进 wheel
+
+符号链接带来一个反直觉的副作用：开了 `include-package-data` 之后，**链接目标下
+的所有文件**都被当成包数据。实测三次读数：
+
+| 配置 | wheel 内条目 | 脏文件 |
+|---|---|---|
+| `seeds/**/*` | 29 | 含 `_worldgen_report.json` |
+| 点名两个 glob + `include-package-data=true` | 42 | 14 个 `__pycache__/*.pyc` |
+| 点名两个 glob + **`false`** | 28 | 0 |
+
+⇒ 判据是**数 wheel 里的条目**，不是看本地目录干不干净（本地 `find -name '*.pyc'`
+看不见它们在不在包里）。
+
+## 114. ⛔⛔ `pip install /path` 会复用 `~/.cache/pip` 里的同名旧 wheel
+
+改完 `pyproject.toml`、重装、再数 —— **还是 42 条脏文件**。代码是新的，
+包是旧的：`pip` 按 `名字-版本` 命中缓存就跳过重新构建。
+
+⇒ 一律 `pip wheel --no-cache-dir` / `pip install --no-cache-dir`。
+⇒ 更一般的纪律：**「改了没生效」先查缓存，再查代码**。它和第 24 条同族 ——
+量具（这里是构建缓存）比被测对象更常说谎。
+
+## 115. ⛔⛔ venv 里 stdlib 在 `sys.base_prefix` —— 这条缺陷**在仓库里永远测不出来**
+
+安装态 `selfcheck` 报 `seed.tasks` 红：`_inspect` 这个示例任务跑不过。
+而**同一份** `task.py` 在仓库里逐字节相同、在仓库解释器下 pass。
+
+取证过程（值得记，因为前三次全错）：
+
+| 假设 | 结果 |
+|---|---|
+| 文件内容不同 | ❌ `cmp` 逐字节相同 |
+| 解释器版本不同 | ❌ 都是 3.13.12 |
+| 是 `expect` 写错了 | ❌ 仓库里同一份通过 |
+| **真实异常是什么** | 看不到 —— `traceback.format_exc()` 自己读源码行时又被同一条机制拒了 |
+
+差异落在**有没有 import**：通过的 `textscore` 不 import，失败的 `_inspect` 有
+`from typing import ...`（冷 import）。真根因：
+
+```
+_audit_allowed_paths() 只放行 sys.prefix / sys.exec_prefix
+而 venv 里 stdlib 在 sys.base_prefix（解释器本体）
+⇒ 安装态下任何冷 import 都 PermissionError: V6_SANDBOX_DENY:open
+```
+
+⛔⛔ 为什么仓库里测不出来：仓库直接用解释器本体跑，`prefix == base_prefix`
+⇒ 漏掉那一项也看不出差别。**只有安装态暴露**。
+⛔ 而"看出来"之前先看到的是**假象**：任务像是"代码写错了"，实际是沙箱配置
+少了一个前缀 —— 与第 25 条（一个异常两种含义）同族。
+
+修法：白名单补 `base_prefix` / `base_exec_prefix` 并去重（非 venv 时四个值
+全是同一个目录，写四遍只会让白名单**看起来比实际更宽**）。
+
+反证写在 `contract_sandbox_test.py` 的 **I 组**——它不建 venv，而是**伪造**
+`sys.prefix` 指向空目录（白名单在父进程算好写进 cfg，所以与真 venv 同义）：
+
+```
+I2 venv 形态下冷 import 零误伤            → rc=0 passed=1
+I3 ⛔ 退回「只放行 prefix」⇒ 必须红        → rc=1 PermissionError: V6_SANDBOX_DENY:open
+```
+
+没有 I3，I2 在本机是**恒真**的（`prefix==base_prefix` 时它永远绿）。
+
+## 116. ⛔ 自检子集不能是「全量的缩水版」，它的价值在**能被打破**
+
+68 份契约全量 30–37 分钟。想加个「快检」时最自然的做法是挑几份快的跑一遍 ——
+那是**缩水版**：它红的时候你不知道是坏了还是没跑全，绿的时候也不知道它到底
+测了什么。
+
+`aether selfcheck` 换了个口径：不跑契约，**跑不变量**（10 项 / 1.5s）。
+它与 `check` 的分工由契约钉住 —— 在没有 `tests/` 的根上，`check` 判失败、
+`selfcheck` 照跑，而**这恰恰就是安装态的形态**（`contract_selfcheck_test` E 组）。
+
+⛔ 关键不在"10 项全绿"，而在**每一项都能被打破**：
+`contract_selfcheck_test` 的 C 组逐个注入破坏（拆掉链接校验 / 放宽人审白名单 /
+机器白名单混进 `curl` / 拆掉「不许回退」…），断言**对应那一项必须红**。
+没有这一组，`selfcheck` 的绿灯与"什么都没测"在输出上完全一样（第 9/24 条）。
+
+## 117. ⛔ 契约夹具不许依赖「本机没装某个工具」
+
+r60 G 把装工具的人审换成机器自审之后，它**真的装上了 radare2**。
+于是三份契约集体转红 —— 不是回归，是它们把「本机没有 radare2」当成了夹具：
+
+```
+✅ radare2 已经装好（/opt/homebrew/bin/r2），档案里没有它的待办候选
+   ⇒ 没有可 approve 的东西
+```
+
+`git stash -u` 后在 HEAD 上跑**同样红**（这就是"不是本轮引入"的取证方式，
+第 96 条：代码不是本轮写的，但要说清是谁弄坏的）。
+
+修法：夹具自造 —— 逻辑名仍是 `radare2`（判据要认的名字不变），但 exe 换成
+私有文件 `r2_fixture`，由契约在临时目录里现造并注入时钟清单。
+⇒ **夹具的可控性必须由契约自己持有**，不许借用"这台机器恰好没装"。
+
 
 ---
 

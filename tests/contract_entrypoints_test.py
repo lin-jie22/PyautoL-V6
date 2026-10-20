@@ -89,10 +89,20 @@ def main():
         a = _acts(p)
         ck(f"A1 {p_name} 三个公共参数都在",
            all(k in a for k in common), str(sorted(a)))
-    ck("A2 cli / serve 的 --root 默认 == paths.ROOT（不再各自推导仓库根）",
+    #: ⛔ r61：事实源从 `paths.ROOT`（包位置）换成 `paths.resolve_root()`
+    #:    （工作区根）。这不是放宽 —— 恰恰相反：`ROOT` 在仓库里**恰好**
+    #:    等于数据根，所以旧断言在开发态永远绿，装成 wheel 后才会暴露
+    #:    "数据写进 site-packages"（而那时这份契约根本不在产品里）。
+    ck("A2 cli / serve 的 --root 默认 == paths.resolve_root()（唯一事实源）",
        _acts(cli_p)["root"].default == _acts(srv_p)["root"].default
-       == str(paths.ROOT),
+       == str(paths.resolve_root()),
        f"{_acts(cli_p)['root'].default} / {_acts(srv_p)['root'].default}")
+    #: ⛔ 单列一条守"开发态零变化"：A2 守的是**同源**（三个入口一个值），
+    #:    这条守的是**不漂移**（仓库内那个值就是仓库根）。两件事，
+    #:    合成一条就会出现"同源地错了"仍然全绿。
+    ck("A2a 仓库内 resolve_root() == ROOT ⇒ 开发态行为零变化",
+       paths.resolve_root() == paths.ROOT,
+       f"{paths.resolve_root()} vs {paths.ROOT}")
     #: ⛔ ui 与其子命令刻意**不给**默认值（SUPPRESS = 由上层决定）：
     #:    给了默认值，子 parser 就会把 `aether --root /x ui` 的 /x 盖掉
     #:    （与 D13 那条反证是同一个 argparse 行为）。
@@ -100,8 +110,9 @@ def main():
        _acts(ui_p)["root"].default is argparse.SUPPRESS
        and _acts(cli_ui_p)["root"].default is argparse.SUPPRESS,
        f"{_acts(ui_p)['root'].default} / {_acts(cli_ui_p)['root'].default}")
-    ck("A2c SUPPRESS 之后有兜底 ⇒ 独立跑 ui 时 root 仍是 paths.ROOT",
-       entry.normalize_log_args(ui_p.parse_args([])).root == str(paths.ROOT),
+    ck("A2c SUPPRESS 之后有兜底 ⇒ 独立跑 ui 时 root 仍是 resolve_root()",
+       entry.normalize_log_args(ui_p.parse_args([])).root
+       == str(paths.resolve_root()),
        str(entry.normalize_log_args(ui_p.parse_args([])).root))
     for p_name, p in (("cli", cli_p), ("serve", srv_p), ("ui", ui_p)):
         ck(f"A3 {p_name} --log-level 的 choices == LEVELS（唯一事实源）",

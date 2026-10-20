@@ -24,6 +24,10 @@
 3. **OS 层拿不到就降级，但降级不许静默**：`tier` / `fs_isolated` 必须
    如实反映（实测 macOS `sandbox-exec` 的 deny-default 一律
    `Operation not permitted` ⇒ 本环境只能用进程层）。
+4. **白名单必须覆盖"装出来的包"会跑在 venv 里这件事**（I 组）：
+   venv 里 stdlib 在 `sys.base_prefix` 而非 `sys.prefix`；只放行后者 ⇒
+   安装态下任何冷 import 都被拒。⛔ 它在**仓库里永远测不出来**
+   （`prefix == base_prefix`），所以 I 组是**伪造 prefix** 来复现的。
 
 跑法（离线，秒级）：
     python tests/contract_sandbox_test.py
@@ -362,6 +366,70 @@ try:
        f"{ex4.sandbox.get('mem_watchdog')}")
 finally:
     E.MEM_CAP_BYTES = _orig_cap
+
+# ══ I 组：venv 里的 stdlib 在 base_prefix（只放行 prefix ⇒ 冷 import 全拒）══
+#     ⛔ 2026-10-20 实测（r61 安装态）：`pip install` 出来的包装在 venv 里跑，
+#        `sys.prefix` 是 venv 根、**stdlib 在 `sys.base_prefix`**（解释器本体）。
+#        白名单只放行前者 ⇒ 任何需要**冷 import** 的任务都报
+#        `PermissionError: V6_SANDBOX_DENY:open`。
+#     ⛔⛔ 为什么这条缺陷在仓库里测不出来：仓库直接用解释器本体跑，
+#        `prefix == base_prefix` ⇒ 那一项漏了也看不出差别。**只在安装态暴露**。
+#        所以这里**伪造** prefix（指向一个空临时目录，等价于 venv 根）——
+#        白名单是在**父进程**算好写进 cfg 的，所以这一伪造与真 venv 同义。
+print()
+print("== I 组：venv 形态（prefix ≠ base_prefix）下 stdlib 不许被关在门外 ==")
+
+_COLD_SRC = ("import statistics\n"
+             "def f(x):\n    statistics.mean([x])\n    return x + 1\n")
+_FAKE_PRE = _tf.mkdtemp(prefix="v6fakeprefix_")
+_real_pre, _real_epre = sys.prefix, sys.exec_prefix
+try:
+    sys.prefix = sys.exec_prefix = _FAKE_PRE      # 空的：里面没有 stdlib
+    _allow = E._audit_allowed_paths(_FAKE_PRE)
+    ck("I1 白名单同时收 `prefix` 与 `base_prefix`"
+       "（venv 里 stdlib 在后者的地盘）",
+       os.path.realpath(_FAKE_PRE) in _allow
+       and os.path.realpath(sys.base_prefix) in _allow, str(_allow))
+
+    ex_v = E.run_in_sandbox(_COLD_SRC, _TESTS, timeout=10)
+    ck("I2 venv 形态下**冷 import 零误伤**（这条就是安装态真跑的复现）",
+       ex_v.rc == 0 and ex_v.n_passed == 1
+       and ex_v.sandbox.get("denied_count", 0) == 0,
+       f"rc={ex_v.rc} passed={ex_v.n_passed} "
+       f"stderr={(ex_v.stderr or '').strip().splitlines()[-1:]}")
+
+    # ⛔ 反证：退回「只放行 prefix」的旧实现 ⇒ 同一个任务必须红
+    #    （否则 I2 是恒真的 —— 本机 prefix==base_prefix 时它永远绿）
+    def _old_allow(wd):
+        out = [os.path.realpath(wd)]
+        for p in (getattr(sys, "prefix", ""), getattr(sys, "exec_prefix", "")):
+            rp = os.path.realpath(p)
+            if rp not in out:
+                out.append(rp)
+        return out
+
+    _sav_allow = E._audit_allowed_paths
+    E._audit_allowed_paths = _old_allow
+    try:
+        ex_old = E.run_in_sandbox(_COLD_SRC, _TESTS, timeout=10)
+    finally:
+        E._audit_allowed_paths = _sav_allow
+    _tail = (ex_old.stderr or "").strip().splitlines()[-1:]
+    ck("I3 ⛔ 反证：退回只放行 prefix ⇒ 冷 import 被拒"
+       "（证明 I2 不是恒真，这条闸有牙）",
+       ex_old.rc != 0 and ex_old.n_passed == 0
+       and any("V6_SANDBOX_DENY" in ln for ln in _tail),
+       f"rc={ex_old.rc} passed={ex_old.n_passed} tail={_tail}")
+finally:
+    sys.prefix, sys.exec_prefix = _real_pre, _real_epre
+    import shutil as _sh
+    _sh.rmtree(_FAKE_PRE, ignore_errors=True)
+
+#: ⛔ 非 venv 时四个 prefix 全是同一个目录 ⇒ 不许因此把白名单写宽四遍
+_dup = [p for p in E._audit_allowed_paths("/tmp/v6dup_probe")
+        if os.path.realpath(p) == os.path.realpath(sys.base_prefix)]
+ck("I4 四个 prefix 相同时**去重**（白名单不许看起来比实际更宽）",
+   len(_dup) == 1, str(E._audit_allowed_paths("/tmp/v6dup_probe")))
 
 print()
 print("=" * 60)

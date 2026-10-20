@@ -28,7 +28,7 @@ import argparse
 from typing import Any, List, Optional, Sequence
 
 from .logging_setup import LEVELS
-from .paths import CAPS_EXAMPLE, ROOT
+from .paths import CAPS_EXAMPLE, resolve_root
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8611
@@ -69,6 +69,12 @@ def add_root_arg(p: argparse.ArgumentParser, *, suppress: bool = False
     ⛔ `suppress` 的语义与 `add_log_args` 完全一样：子 parser 的默认值会
        盖掉主 parser 已解析的值 ⇒ `aether --root /x ui` 的 /x 会被
        子命令的默认值（仓库根）悄悄换掉。子命令一律用 `suppress=True`。
+
+    ⛔⛔ r61：默认值来自 `paths.resolve_root()` 而**不是** `paths.ROOT`。
+       `ROOT` 是"代码在哪"（= 包位置），装成 wheel 后就是 `site-packages`
+       ⇒ 拿它当数据根意味着往安装目录里写账本（重装即丢、多项目混库、
+       只读镜像直接崩）。`resolve_root()` 才是"数据在哪"，且在仓库里
+       它的返回值与 `ROOT` **完全相同**（`repo` 那一支）⇒ 开发态零变化。
     """
     #: ⛔ **幂等**：同一个 parser 上重复调用必须无害。
     #:    实测踩过：给每个子命令挂 `--root`（好让 `aether doctor --root X`
@@ -79,7 +85,9 @@ def add_root_arg(p: argparse.ArgumentParser, *, suppress: bool = False
     if any("--root" in a.option_strings for a in p._actions):
         return
     p.add_argument("--root", default=(argparse.SUPPRESS if suppress
-                                      else str(ROOT)), help="V6 根目录")
+                                      else str(resolve_root())),
+                   help="工作区根目录。默认：①$AETHER_ROOT ②本仓库（开发态）"
+                        "③向上找 .aether ④~/.local/share/aether")
 
 
 def add_log_args(p: argparse.ArgumentParser, *, suppress: bool = False
@@ -121,8 +129,10 @@ def normalize_log_args(ns: Any) -> Any:
     if not hasattr(ns, "log_json"):
         ns.log_json = False
     #: `--root` 同样可能是 SUPPRESS 的（cli 的 ui 子命令）⇒ 一并兜底。
+    #: ⛔ 兜底也必须走 `resolve_root()`：写成 `str(ROOT)` 就等于在所有
+    #:    SUPPRESS 分支上偷偷退回"包位置=数据根"的老语义（第 97 条同族）。
     if not hasattr(ns, "root"):
-        ns.root = str(ROOT)
+        ns.root = str(resolve_root())
     return ns
 
 
@@ -181,7 +191,7 @@ def build_forward(ns: Any, *, parser: argparse.ArgumentParser,
     #:    否则子进程去连一个（可能属于别人的）端口 ⇒ "读数看着正常其实是
     #:    别人家的服务"（与 `_free_port` 的注释同一条纪律）。
     cmd: List[str] = [
-        "--root", str(getattr(ns, "root", ROOT)),
+        "--root", str(getattr(ns, "root", None) or resolve_root()),
         "--port", str(port if port is not None
                       else getattr(ns, "port", DEFAULT_PORT))]
     for act in parser._actions:                       # noqa: SLF001

@@ -22,11 +22,19 @@
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
-from typing import Dict, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 #: 仓库根（= `aether/` 的上一级）。三个入口此前各写一行
 #: `Path(__file__).resolve().parent.parent` ⇒ 三处可能漂移。
+#:
+#: ⛔⛔ r61：这个常量的语义是**「代码在哪」**（包位置），不是**「数据在哪」**。
+#:     两者在仓库里恰好相等，装成 wheel 后就分开了 —— `site-packages` 下
+#:     既没有 `tasks/` 也没有 `tests/`，往那里写账本意味着：重装即丢、
+#:     多项目混库、只读镜像直接崩。要"数据在哪"请用 `resolve_root()`。
+#:     ⛔ 不要把这个常量改成函数：11 个模块 import 它取**代码资产**
+#:     （`console/`、`arch_baseline`），那些跟着代码走才是对的。
 ROOT: Path = Path(__file__).resolve().parent.parent
 
 DATA_DIRNAME = "data"
@@ -66,6 +74,43 @@ CAPS_EXAMPLE = "capabilities.example.json"
 ARCH_BASELINE_DIRNAME = "scripts"
 ARCH_BASELINE_NAME = "arch_baseline.json"
 
+#: 包内示例任务集的落点（相对**包目录**，不是数据根）。
+#:
+#: ⛔⛔ 为什么需要它：装成 wheel 之后 `tasks/` 不存在（那是仓库资产，
+#:    见 `pyproject.toml`）。没有任务集 ⇒ `synth` / `evolve` 装完即废 ——
+#:    实测 `aether synth` 在空目录里抛的是裸 Python 栈。
+#:    ⇒ 包内带一份**可跑的最小示例**，由 `aether init` 物化到工作区。
+#:
+#: ⛔ 它不是数据根的一部分：`looks_like_repo()` 判的是 `pkg_root / tasks`，
+#:    而这里是 `aether/seeds/tasks` ⇒ 不会被误判成"仓库态"。
+#:    ⛔ 也不参与 `paths()` 的任何键（数据根里没有它）。
+SEEDS_DIRNAME = "seeds"
+SEED_TASKS_DIRNAME = "tasks"
+
+#: 工作区标记文件名（`aether init` 写的那个，r61）。#: ⛔ 为什么要有**显式标记**而不是"看到 data/ 就当工作区"：后者是"目录里
+#:    有什么就认什么"，你在任何目录里 `mkdir data` 都会把数据根拽过去 ——
+#:    与 `BACKUP_TARGETS` 拒绝"扫描目录"是同一条理由（必须声明式）。
+WORKSPACE_MARKER = ".aether"
+
+#: 显式指定工作区根的环境变量（优先级仅次于 `--root`）。
+#: ⛔ 名字里带 AETHER 而不是 V6：`AETHER_ROOT` 是**用户契约**，与仓库代号解耦。
+ENV_ROOT = "AETHER_ROOT"
+
+#: 工作区根的来源标签（r61）。⛔ 四种来源必须可分辨：
+#:   同一个 `data/ledger.jsonl` 路径，可能是"用户指定的"、"仓库自带的"、
+#:   也可能是"兜底目录里刚建的空库" —— 三种情况下"账本里只有 0 条事件"
+#:   的**含义完全不同**（前两种是异常，第三种是还没开始）。
+ROOT_FROM_FLAG = "flag"              # `--root` 显式
+ROOT_FROM_ENV = "env"                # `$AETHER_ROOT`
+ROOT_FROM_REPO = "repo"              # 包位置本身是仓库（开发态）
+ROOT_FROM_WORKSPACE = "workspace"    # 向上找到 `.aether` 标记
+ROOT_FROM_HOME = "home"              # 用户数据目录（安装态兜底）
+
+#: "包位置还是个仓库"的判据：**同时**有这些目录才算。
+#: ⛔ 只查 `aether/paths.py` 不够 —— site-packages 里也有它。
+#:    必须查**仓库资产**（`tasks/` `tests/`），那些恰恰不进 wheel。
+_REPO_SENTINELS: Tuple[str, ...] = ("tasks", "tests")
+
 #: 备份清单：**唯一**被带走的文件（相对 root 的路径，kind）。
 #: ⛔ 与 `backup.BACKUP_TARGETS` 是同一个值（那里直接引用本常量），
 #:    不在两处各写一份 —— 否则"备份了什么"就有了两个答案。
@@ -80,8 +125,14 @@ __all__ = [
     "CONSOLE_DIRNAME", "REA_DIRNAME", "LEDGER_NAME", "DB_NAME",
     "MEMORY_NAME", "CHECKPOINT_NAME", "CAPS_EXAMPLE", "AUTONOMY_DIRNAME",
     "ARCH_BASELINE_DIRNAME", "ARCH_BASELINE_NAME",
+    "SEEDS_DIRNAME", "SEED_TASKS_DIRNAME",
+    "WORKSPACE_MARKER", "ENV_ROOT",
+    "ROOT_FROM_FLAG", "ROOT_FROM_ENV", "ROOT_FROM_REPO",
+    "ROOT_FROM_WORKSPACE", "ROOT_FROM_HOME",
     "BACKUP_TARGETS",
-    "data_dir", "paths", "flat_name", "BACKUP_FLAT",
+    "data_dir", "paths", "flat_name", "BACKUP_FLAT", "seeds_dir",
+    "looks_like_repo", "find_workspace", "user_data_dir",
+    "resolve_root", "resolve_root_with_source",
 ]
 
 
@@ -133,6 +184,130 @@ def paths(root: Union[str, Path], *, default_env: str = "textscore"
         #: 架构基线（代码属性，随代码进版本库 —— 唯一的非 data/ 键）。
         "arch_baseline": r / ARCH_BASELINE_DIRNAME / ARCH_BASELINE_NAME,
     }
+
+
+def _safe_cwd() -> Optional[Path]:
+    """当前目录；站着的目录已被删时返回 `None`。
+
+    ⛔ `Path.cwd()` 在父目录被删后会抛 `OSError`。这里要回答的是"数据根
+       在哪"，不该因为进程恰好站在一个被删掉的目录里就让整个 CLI 起不来
+       —— 那会把"位置未知"伪装成"程序坏了"（两种故障的下一件事相反）。
+    """
+    try:
+        return Path.cwd()
+    except OSError:
+        return None
+
+
+def seeds_dir(pkg_root: Optional[Union[str, Path]] = None) -> Path:
+    """包内示例任务集的目录（`<pkg>/seeds/tasks`）。
+
+    ⛔ 位置只在这里推导一次（第 46 条）。`pkg_root` 是可注入的旋钮：
+       契约要能模拟"这个包里没有示例"（负结果），否则那条分支永远走不到。
+    ⛔ 读不到时**不抛异常**：这是"有没有"的查询，缺了是正常输入 ——
+       由调用方决定怎么说（`init` 要说"没有示例可物化"，不是崩）。
+    """
+    base = Path(pkg_root) if pkg_root is not None else ROOT
+    return base / "aether" / SEEDS_DIRNAME / SEED_TASKS_DIRNAME
+
+
+def looks_like_repo(pkg_root: Union[str, Path]) -> bool:
+    """`pkg_root` 是不是一个**仓库**（而不是装进 site-packages 的包）。
+
+    判据只有一条：**仓库资产在不在**。`aether/paths.py` 两边都有，所以它
+    不能当判据；`tasks/` 与 `tests/` 恰恰是刻意**不打进 wheel** 的那批
+    （见 `pyproject.toml` 的 `package-data` 注释）⇒ 它们的存在等价于
+    "这是开发态仓库"。
+    """
+    r = Path(pkg_root)
+    if not (r / "aether" / "paths.py").is_file():
+        return False
+    return all((r / s).is_dir() for s in _REPO_SENTINELS)
+
+
+def find_workspace(start: Union[str, Path]) -> Optional[Path]:
+    """从 `start` 向上找带 `.aether` 标记的目录（含 `start` 自己）。
+
+    ⛔ 向上找而不是只看当前目录：人在子目录里（`cd data && aether status`）
+       敲命令是常态，只看当前层会凭空造出第二个库 —— 而"库里是空的"
+       与"你站错地方了"在读数上一模一样（第 97 条同族）。
+    """
+    cur = Path(start).resolve()
+    for p in (cur, *cur.parents):
+        try:
+            if (p / WORKSPACE_MARKER).is_file():
+                return p
+        except OSError:
+            continue
+    return None
+
+
+def user_data_dir(env: Optional[Dict[str, str]] = None) -> Path:
+    """安装态兜底的数据目录（XDG 口径，不引依赖）。
+
+    ⛔ 为什么要有兜底：装成 wheel 后如果既没有 `--root`、也不在仓库、
+       也不在工作区里，唯一"错得最少"的落点是用户数据目录 ——
+       **绝不能**是 `site-packages`（重装即丢 / 多项目混库 / 只读镜像崩）。
+    """
+    e = os.environ if env is None else env
+    xdg = (e.get("XDG_DATA_HOME") or "").strip()
+    if xdg:
+        return Path(xdg).expanduser() / "aether"
+    return Path.home() / ".local" / "share" / "aether"
+
+
+def resolve_root_with_source(
+        explicit: Optional[Union[str, Path]] = None, *,
+        pkg_root: Optional[Union[str, Path]] = None,
+        cwd: Optional[Union[str, Path]] = None,
+        env: Optional[Dict[str, str]] = None,
+) -> Tuple[Path, str]:
+    """解析**工作区根**，并返回它的来源标签。五支，顺序固定。
+
+    | # | 判据 | 来源标签 | 什么时候命中 |
+    |---|---|---|---|
+    | ① | `--root` 显式 | `flag` | 用户说了算 |
+    | ② | `$AETHER_ROOT` | `env` | 脚本/CI 说了算 |
+    | ③ | 包位置是仓库 | `repo` | **开发态**（行为与 r60 逐字相同） |
+    | ④ | 向上找到 `.aether` | `workspace` | `aether init` 过的工作区 |
+    | ⑤ | 用户数据目录 | `home` | 安装态兜底 |
+
+    ⛔⛔ ③ 必须排在 ④ 前面，且判据只看"仓库资产在不在"：仓库根**没有**
+       `.aether` 标记，若让 ④ 先跑，`cd <仓库>/tasks && aether status`
+       会走到 ⑤，于是**同一台机器上两个库**，而两边都可能"看着正常"。
+       —— 这是本函数唯一不可调换的一对顺序。
+
+    ⛔ 四个入参都可注入（`pkg_root` / `cwd` / `env` 都是测试用的旋钮）：
+       否则"安装态"这件事只能靠真的 `pip install` 一遍才能验，
+       而那种验法在契约里既慢又不可重复（第 99 条同族）。
+    """
+    if explicit:
+        return Path(explicit).expanduser(), ROOT_FROM_FLAG
+    e = os.environ if env is None else env
+    v = (e.get(ENV_ROOT) or "").strip()
+    if v:
+        return Path(v).expanduser(), ROOT_FROM_ENV
+    base = Path(pkg_root) if pkg_root is not None else ROOT
+    if looks_like_repo(base):
+        return base, ROOT_FROM_REPO
+    start = Path(cwd) if cwd is not None else _safe_cwd()
+    ws = find_workspace(start) if start is not None else None
+    if ws is not None:
+        return ws, ROOT_FROM_WORKSPACE
+    return user_data_dir(e), ROOT_FROM_HOME
+
+
+def resolve_root(explicit: Optional[Union[str, Path]] = None, *,
+                 pkg_root: Optional[Union[str, Path]] = None,
+                 cwd: Optional[Union[str, Path]] = None,
+                 env: Optional[Dict[str, str]] = None) -> Path:
+    """只要位置（来源见 `resolve_root_with_source`）。
+
+    ⛔ 薄包装，不重写一遍顺序 —— 同一条优先级写两遍，改一处就两处不一致
+       （第 97 条：同一条退路写两遍的害处是"下次只改一处"）。
+    """
+    return resolve_root_with_source(
+        explicit, pkg_root=pkg_root, cwd=cwd, env=env)[0]
 
 
 def flat_name(rel: str) -> str:

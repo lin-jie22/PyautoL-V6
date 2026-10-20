@@ -349,6 +349,22 @@ def summarize(rep: Dict[str, Any]) -> str:
                  f"{rep['n_runs']} 次执行 "
                  f"(pass={c[PASS]} fail={c[FAIL]} skip={c[SKIP]} "
                  f"timeout={c[TIMEOUT]} error={c[ERROR]})")
+    #: ⛔ 0 份契约有**两种截然不同的原因**，出路也相反（第 97 条同族）：
+    #:    ① 装成 wheel 的用户 —— `tests/` 是仓库资产，刻意不进包。
+    #:       他该跑的是 `aether selfcheck`（秒级、随包分发）。
+    #:    ② 仓库里的人把 tests/ 弄丢了 —— 那是真事故，要去查。
+    #:    合成一句"判失败"会让 ① 以为东西坏了、让 ② 以为正常。
+    #:    ⛔ 判据只看"仓库资产在不在"（与 `paths.looks_like_repo` 同源口径），
+    #:       不看路径里有没有 site-packages。
+    if rep.get("empty"):
+        rp = Path(rep.get("root") or ".")
+        if not (rp / "aether" / "paths.py").is_file():
+            lines.append("   ℹ️ 这里不是 V6 仓库根 ⇒ 多半是装出来的包："
+                         "`tests/` 是仓库资产，不进 wheel。")
+            lines.append("   要验这套安装是否自洽，跑：aether selfcheck")
+        else:
+            lines.append(f"   ⛔ 这是 V6 仓库根（{rp}），却没有 tests/ 里的契约 "
+                         f"⇒ 仓库不完整，不是安装形态的问题")
     if rep["subset"]:
         lines.append(f"⚠️ 这是**子集**（--only {rep['only']}）⇒ "
                      f"不能当作全量验收")
