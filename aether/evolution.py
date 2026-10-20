@@ -102,6 +102,33 @@ _ERROR_TO_KIND: Tuple[Tuple[str, str], ...] = (
 )
 
 
+#: 失败证据 → **粗类别**。⛔ 与 `_ERROR_TO_KIND` 是两件事，别合并：
+#:   `_ERROR_TO_KIND` 决定"缺什么能力"（走哪条修法），这张表决定
+#:   "**给模型看**的粒度"（只给类别，不给检查名）。合并 ⇒ 粗化会连带
+#:   改变弱点归类 ⇒ 那就不只是换考法，而是换判据了。
+_FAILURE_MODE_HINTS: Tuple[Tuple[str, str], ...] = (
+    ("checks_failed", "behavior_mismatch"),
+    #: ⛔ 真实现代 Python 报的是 `ModuleNotFoundError: No module named 'x'`
+    #:    —— 里面**没有** "import" 这个词 ⇒ 只写 "import" 会把最常见的
+    #:    缺包错误判成 unknown（r62 契约 C3 抓到的正是这一条）。
+    ("modulenotfound", "import_failed"),
+    ("no module named", "import_failed"),
+    ("importerror", "import_failed"),
+    ("import", "import_failed"),
+    ("timeout", "timeout"),
+    ("traceback", "crash"),
+    ("raise", "crash"),
+)
+
+
+def _failure_mode(text: str) -> str:
+    low = (text or "").lower()
+    for needle, mode in _FAILURE_MODE_HINTS:
+        if needle in low:
+            return mode
+    return "unknown"
+
+
 @dataclass
 class Weakness:
     """一个被挖出来的弱点：**必须由失败证据支撑**，不能凭感觉。"""
@@ -115,6 +142,41 @@ class Weakness:
         return {"kind": self.kind, "topic": self.topic,
                 "task_ids": self.task_ids, "evidence": self.evidence[:5],
                 "n_failed": self.n_failed}
+
+    def coarse_dict(self) -> Dict[str, Any]:
+        """给提议器看的**粗化**版本：只给失效类别与数量，**不给检查名**。
+
+        ⛔⛔ 存在理由（r62 实测）：`evidence` 里带的是
+            `checks_failed:clamp_low,clamp_high,...` 这种**具体检查名**。
+            qwen2.5:7b 拿到这份名单后，直接把 7 个名字逐字写进技能正文
+            （`L3.skills.patch:textscore` = "修复 clamp_low,clamp_high, ..."）
+            ⇒ dev 0/5 → 5/5 满血，held-out 一点没动 ⇒ 被判 `overfit`。
+
+            检查名是**发展集**的信息。把它当输入，等于让模型抄答案：
+            它抄得越好，越不可能给出跨环境的通用修法。
+
+        ⛔ 只粗化**给模型的那一份**：`weakness.mined` 账本事件仍记原文
+            （审计要能复查"当时到底看到了什么"），判据一律不粗化。
+        """
+        modes: Dict[str, int] = {}
+        n_checks = 0
+        for e in self.evidence:
+            m = _failure_mode(e)
+            modes[m] = modes.get(m, 0) + 1
+            if e.startswith("checks_failed:"):
+                n_checks += len([t for t in e[len("checks_failed:"):].split(",")
+                                 if t.strip()])
+        out: Dict[str, Any] = {
+            "kind": self.kind,
+            "topic": self.topic,
+            "task_ids": self.task_ids,
+            "n_failed": self.n_failed,
+            "failure_modes": modes,
+            "n_failing_checks": n_checks,
+            "evidence_granularity": "coarse",
+            "note": "判据名已按类别粗化：只给失效类别与数量，不给具体检查名。",
+        }
+        return out
 
 
 def classify_error(text: str) -> str:
@@ -411,6 +473,21 @@ class EvolutionConfig:
     #:    （执行一次判据）⇒ 不封顶就是把挂钟交给循环自己。
     ho_grow_max_n: int = 64
     ho_grow_max_tasks: int = 96
+    #: ⛔⛔ **给提议器的证据粒度**（r62 新口径）。默认 `exact` = 历史逐字同口径。
+    #:
+    #:    `exact`  —— 弱点里带具体检查名（`checks_failed:clamp_low,...`）。
+    #:    `coarse` —— 只带失效**类别**与数量（`behavior_mismatch: 3`、
+    #:                `n_failing_checks: 7`），**不出现任何检查名**。
+    #:
+    #:    存在理由（实测）：`exact` 下 qwen2.5:7b 把 7 个检查名逐字抄进
+    #:    技能正文 ⇒ dev 0/5→5/5，held-out 0.0→0.0 ⇒ `overfit` 被拦。
+    #:    检查名是**发展集**的信息，等于给模型抄答案；抄得越好越不会写
+    #:    跨环境的通用修法。
+    #:
+    #:    ⛔ 它换的是**给模型的视图**，不是判据：`weakness.mined` 账本事件
+    #:       仍记原文，闸一条没少 ⇒ 但模型输入变了 ⇒ 属新口径，必须进
+    #:       run_config（与 `--ho-grow` 同族）。
+    evidence: str = "exact"
 
 
 @dataclass
@@ -846,6 +923,19 @@ class EvolutionLoop:
         failed = ",".join(c.name for c in (getattr(v, "checks", ()) or ())
                           if not getattr(c, "passed", True))
         return ("checks_failed:" + failed) if failed else ""
+
+    def _evidence_for_prompt(self, w: Weakness) -> Dict[str, Any]:
+        """按 `cfg.evidence` 决定喂给**提议器**的弱点视图。
+
+        ⛔ 只影响提议器输入；`weakness.mined` 账本事件始终写 `w.to_dict()`
+           的原文（审计要能复查"当时到底看到了什么"），闸与判据一条不动。
+        ⛔ 未知取值 ⇒ 按 `exact` 处理并**留痕**：静默回退会让 run_config
+           里的口径与真实行为不一致（第 24 条：缺字段被读成 None 那一类）。
+        """
+        mode = str(getattr(self.cfg, "evidence", "exact") or "exact").lower()
+        if mode == "coarse":
+            return w.coarse_dict()
+        return w.to_dict()
 
     @staticmethod
     def _runs_from_verdicts(vs: List[Verdict], h: Harness) -> List[RunRow]:
@@ -1791,7 +1881,7 @@ class EvolutionLoop:
                     actor="evolution").seq)
                 return rep
             capsules += list(self.proposer.propose(
-                w.to_dict(), h, n=self.cfg.group_size))
+                self._evidence_for_prompt(w), h, n=self.cfg.group_size))
             if self.budget is not None:
                 self.budget.spend(propose_calls=1)
 

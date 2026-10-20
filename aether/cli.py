@@ -1056,6 +1056,18 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                     f"只有在发展集和 held-out **都**变好才会被采纳；"
                     f"只针对某一个环境（或某几道特定题）的修法会被判"
                     f" overfit 拦下。提变异时优先考虑**跨环境都成立**的改法。")
+                #: ⛔ **只讲逻辑后果，不讲答案**（r62 实验口径，默认关）：
+                #:    "`patch::<env>` 只在点名环境生效"这句接口契约本来就在
+                #:    prompt 里，但它到"held-out 必然 0 增益"这一步的**推论**
+                #:    模型没做（实测它照样提 patch::textscore）。这里只把
+                #:    推论写明，仍然不告诉它该改哪一层、该加哪个技能。
+                if bool(getattr(args, "ho_implication", False)):
+                    ho_note += (
+                        f"\n由上面两条可直接推出：只在 `patch::{ho_name}` 或"
+                        f"`patch::<发展集环境>` 上生效的改法，在 `{ho_name}`"
+                        f" 上**必然**是 0 增益 ⇒ 必然被拦。要让它在两个环境"
+                        f"上都起作用，改动必须落在**与环境无关**的层"
+                        f"（例如通用技能正文、或把它们接进路由链）。")
             proposer = LLMProposer(
                 OllamaProvider(model=model, think=False),
                 route_keys=(TASK_CLASS,),
@@ -1238,7 +1250,12 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                              #: ⛔ 默认 0 = 串行（与历史基线同口径）。并行只
                              #:    包住 runner 计算，记账仍串行（见 §23.5）。
                              parallel_workers=int(
-                                 getattr(args, "parallel", "0") or 0)))
+                                 getattr(args, "parallel", "0") or 0),
+                             #: ⛔ 默认 `exact` = 弱点里带具体检查名（历史同
+                             #:    口径）。`coarse` 只给失效类别与数量 ——
+                             #:    换的是**给模型的视图**，闸与判据不动（r62）。
+                             evidence=str(
+                                 getattr(args, "evidence", "exact") or "exact")))
 
     #: ── 断点续跑 ──────────────────────────────────────────────
     #: ⛔ resume 时**不**重新 register_root：root 已经在上一次运行里写进
@@ -1353,6 +1370,13 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "archive_resample": _arch_n,
         "archive_cap": int(getattr(args, "archive_cap", "8") or 8),
         "archive_path": (_archive.path if _archive is not None else ""),
+        #: ⛔ 证据粒度换的是**模型看到的世界**（不是判据）⇒ 必须进账本：
+        #:    同一份代码下 `exact` 与 `coarse` 提出来的胶囊完全不同，
+        #:    不记 ⇒ "这次为什么没被 overfit 拦"事后无从归因。
+        "evidence": str(getattr(args, "evidence", "exact") or "exact"),
+        #: ⛔ 它改的是**prompt 内容**（给模型的规则），不是判据 ⇒ 同样是
+        #:    实验变量：开着它跑出来的胶囊不可与历史相比。
+        "ho_implication": bool(getattr(args, "ho_implication", False)),
         "parallel": getattr(args, "parallel", "0"),
         "embedder": args.embedder,
         "budget": {k: (getattr(args, k, "") or "")
@@ -2726,6 +2750,26 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--archive-cap", default="8",
                    help="每层前沿保留上限（默认 8）。⛔ 无上限 = 全存 ⇒ "
                         "重采样会退化成「按旧 reward 全局排序」。")
+    e.add_argument("--ho-implication", action="store_true",
+                   help="⛔ 新实验口径（默认关）：给 LLM 提议器的 held-out 规则里\n"
+                        "**补一句逻辑推论** —— 「只在 patch::<环境> 上生效的改法\n"
+                        "在该环境上必然 0 增益 ⇒ 必然被 overfit 拦；要跨环境就得\n"
+                        "落在与环境无关的层」。\n"
+                        "存在理由（r62 实测）：`patch::<env>` 只在点名环境生效这句\n"
+                        "接口契约本来就在 prompt 里，但模型没做那一步推论（照样提\n"
+                        "patch::textscore）。⛔ 只写推论，不写该改哪一层/该加哪个\n"
+                        "技能 —— 那是答案，说了就是替模型考试。")
+    e.add_argument("--evidence", choices=("exact", "coarse"), default="exact",
+                   help="⛔ 新实验口径（默认 exact = 历史逐字同口径）：喂给"
+                        "**提议器**的弱点证据粒度。\n"
+                        "exact  ⇒ 带具体检查名（`checks_failed:clamp_low,...`）。\n"
+                        "coarse ⇒ 只给失效类别与数量（`behavior_mismatch: 3`、\n"
+                        "         `n_failing_checks: 7`），不出现任何检查名。\n"
+                        "存在理由（r62 实测）：exact 下 qwen2.5:7b 把 7 个检查名\n"
+                        "逐字抄进技能正文 ⇒ dev 0/5→5/5 而 held-out 0.0→0.0 ⇒\n"
+                        "被判 overfit。检查名是**发展集**的信息，等于让模型抄答案。\n"
+                        "⛔ 只换给模型的视图：`weakness.mined` 账本仍记原文，\n"
+                        "   闸与判据一条不动。")
     e.add_argument("--parallel", default="0",
                    help="并发评估线程数。0/1=串行（**默认**，与历史基线同口径）。\n"
                         "⛔ 并行只包住 runner 计算，run_id 分配与账本写入仍串行\n"

@@ -123,15 +123,26 @@ def main() -> int:
     ck("D5 轮报告里有 `world_facts` 与 `facts_promoted` 读数",
        "world_facts" in src and "facts_promoted" in src)
     #: 真实跑一轮：报告里必须真的有 world_facts 字段（有机制 ≠ 被走到）
-    with tempfile.TemporaryDirectory() as td:
+    #: ⛔ 必须在**临时 root** 上跑（r62 修）：原先 `cwd=ROOT` 且不给 `--root`
+    #:    ⇒ 解析落回生产仓库 ⇒ 每跑一次验收就往 `data/ledger.jsonl` 追加
+    #:    1 条 run_config + 约 50 条事件（实测 10-20 三次验收：seq 7565 /
+    #:    7614 / 7679）。判据是"报告里有读数"，跟"记在哪个账本上"无关。
+    with tempfile.TemporaryDirectory(prefix="v6wf_") as td:
+        ws = Path(td)
+        (ws / "tasks").symlink_to(ROOT / "tasks")
+        (ws / "data").mkdir(exist_ok=True)
         r = subprocess.run(
             [sys.executable, "-B", "-m", "aether.cli", "evolve",
+             "--root", str(ws),
              "--rounds", "1", "--group", "2", "--max-tasks", "5"],
             cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             timeout=900)
         out = r.stdout.decode("utf-8", "replace")
         ck("D6 真跑一轮 ⇒ 报告里真有 world_facts 读数",
            '"world_facts"' in out, out[-200:])
+        ck("D6b ⛔ 这一轮记在**临时**账本上（生产账本零写入）",
+           (ws / "data" / "ledger.jsonl").exists(),
+           "临时 root 下没有账本 ⇒ 又跑到生产去了")
     ck("D7 ⛔ 继承**不许永久封死**：仍尊重试探出口（probation）",
        "deadend_probation_every" in src
        and src.count("deadend_probation_every") >= 2,
