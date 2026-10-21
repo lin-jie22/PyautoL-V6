@@ -85,6 +85,75 @@ def capsule_from_dict(d: Dict[str, Any]) -> Capsule:
 
 
 # ──────────────────────────────────────────────────────────────────
+# 取回并装配（r63f 抽出）
+# ──────────────────────────────────────────────────────────────────
+def reseed(archive: "Archive", harness_id: str, capsules: Sequence[Capsule],
+           n_wanted: int, round_no: int
+           ) -> Tuple[List[Capsule], Dict[str, Any], List[Dict[str, Any]]]:
+    """从存档取回**待重测**的候选，还原成可执行的 `Capsule`。
+
+    ⛔ **为什么抽成独立函数**（不是为了好看）：这段装配原来内联在
+       `evolution._run_round` 里，而它的可达条件是**一个合取** ——
+       「同一轮里 ≥2 个够格候选」且「其中一条被提交」（提交那条的 harness
+       变成当前 harness，被 `exclude_harness` 排除；另一条才算旧基线待重测）。
+       实测生产 81 轮里 80 轮只有 1 个候选进闸，四次专门运行 11 次 resample
+       全部 `n_picked=0` ⇒ **契约构造不出这个条件，这段代码从没被执行过**。
+       抽出后三重排除与非装配情形可以逐个打回去
+       （见 `contract_archive_reseed_test`）。
+
+    ⛔ **本函数不碰 ledger**：失败以 `errors` 返回，由调用方落账。
+       这样单测不需要账本，账本里也不会出现单测伪造的事件。
+
+    返回 `(restored, payload, errors)`：
+
+    | 项 | 含义 |
+    |---|---|
+    | `restored` | 还原成功的 `Capsule`，**已去重**（与本轮已有名字冲突的跳过、空壳跳过） |
+    | `payload`  | `archive.resample` 事件的字段，调用方原样落账 |
+    | `errors`   | `[{kind, payload}]`：`archive.resample_failed` / `archive.restore_failed` |
+    """
+    have = {c.name for c in capsules}
+    errors: List[Dict[str, Any]] = []
+    picked: List[Dict[str, Any]] = []
+    try:
+        picked = archive.resample(
+            n_wanted, exclude_harness=(harness_id,),
+            exclude_capsules=tuple(have),
+            #: ⛔ 与 `exclude_harness` 不是一回事：这个排除的是
+            #:    "读数就是在**当前**基线上量的"（无重测价值）。
+            exclude_baseline=(harness_id,))
+    except Exception as e:                             # noqa: BLE001
+        errors.append({"kind": "archive.resample_failed",
+                       "payload": {"round_no": round_no,
+                                   "error": f"{type(e).__name__}: {e}"}})
+    restored: List[Capsule] = []
+    for g in picked:
+        try:
+            cap = capsule_from_dict(g["capsule"])
+        except Exception as e:                         # noqa: BLE001
+            errors.append({"kind": "archive.restore_failed",
+                           "payload": {"round_no": round_no,
+                                       "error": f"{type(e).__name__}: {e}"}})
+            continue
+        if cap.name in have or not cap.genes:
+            continue
+        restored.append(cap)
+        have.add(cap.name)
+    payload = {"round_no": round_no, "harness_id": harness_id,
+               "n_wanted": n_wanted, "n_picked": len(picked),
+               "n_restored": len(restored),
+               "capsules": [c.name for c in restored],
+               #: ⛔ 打上 stale：这批评分**来自旧基线**，账本读者要先
+               #:    看到这个标记，才不会把"存档里当初很好"当成"现在很好"。
+               "stale": [{"capsule": g["capsule"].get("name"),
+                          "reward_at_store": g.get("reward_at_store"),
+                          "baseline_reward": g.get("baseline_reward"),
+                          "stored_at_round": g.get("stored_at_round")}
+                         for g in picked]}
+    return restored, payload, errors
+
+
+# ──────────────────────────────────────────────────────────────────
 # 一条存档记录
 # ──────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)

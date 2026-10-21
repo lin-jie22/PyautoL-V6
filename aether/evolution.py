@@ -1944,54 +1944,25 @@ class EvolutionLoop:
         #     重新投进这一轮。⛔ 它们**不豁免任何闸**，且必须在**当前**
         #     基线上重算 reward —— 存档里记的 `reward_at_store` 是旧读数，
         #     只用于"挑哪几条回来"，绝不参与判据（见 archive.py 纪律③）。
+        #: ⛔ 装配已抽成 `archive.reseed`（r63f）：内联时它的可达条件是
+        #:    一个合取（同轮 ≥2 个够格候选 + 其中一条被提交），实测生产
+        #:    81 轮里 80 轮只有 1 个候选进闸、四次专门运行 11 次 resample
+        #:    全 `n_picked=0` ⇒ 契约构造不出这个条件 ⇒ 这段从没被执行过。
+        #:    抽出去之后三重排除与非装配情形各自可打（见
+        #:    `contract_archive_reseed_test`）。⛔ 失败事件也由这里落账
+        #:    （`reseed` 不碰 ledger ⇒ 单测不需要账本、也不会伪造事件）。
         n_res = int(getattr(self.cfg, "archive_resample", 0) or 0)
         if self.archive is not None and n_res > 0:
-            have = {c.name for c in capsules}
-            try:
-                picked = self.archive.resample(
-                    n_res, exclude_harness=(h.harness_id,),
-                    exclude_capsules=tuple(have),
-                    #: ⛔ 与 `exclude_harness` 不是一回事：这个排除的是
-                    #:    "读数就是在**当前**基线上量的"（无重测价值）。
-                    exclude_baseline=(h.harness_id,))
-            except Exception as e:                    # noqa: BLE001
-                picked = []
-                self.ledger.append(
-                    "archive.resample_failed",
-                    {"round_no": round_no, "error": f"{type(e).__name__}: {e}"},
-                    actor="evolution")
-            from .archive import capsule_from_dict as _cap_from_dict
-            restored: List[Any] = []
-            for g in picked:
-                try:
-                    cap = _cap_from_dict(g["capsule"])
-                except Exception as e:                # noqa: BLE001
-                    self.ledger.append(
-                        "archive.restore_failed",
-                        {"round_no": round_no, "error": f"{type(e).__name__}: {e}"},
-                        actor="evolution")
-                    continue
-                if cap.name in have or not cap.genes:
-                    continue
-                restored.append(cap)
-                have.add(cap.name)
+            from .archive import reseed as _reseed
+            restored, _rs_payload, _rs_errors = _reseed(
+                self.archive, h.harness_id, capsules, n_res, round_no)
+            for _e in _rs_errors:
+                self.ledger.append(_e["kind"], _e["payload"], actor="evolution")
             if restored:
                 capsules += restored
+            _rs_payload["archive"] = self.archive.to_report()
             rep.ledger_seqs.append(self.ledger.append(
-                "archive.resample",
-                {"round_no": round_no, "harness_id": h.harness_id,
-                 "n_wanted": n_res, "n_picked": len(picked),
-                 "n_restored": len(restored),
-                 "capsules": [c.name for c in restored],
-                 #: ⛔ 打上 stale：这批评分**来自旧基线**，账本读者要先
-                 #:    看到这个标记，才不会把"存档里当初很好"当成"现在很好"。
-                 "stale": [{"capsule": g["capsule"].get("name"),
-                            "reward_at_store": g.get("reward_at_store"),
-                            "baseline_reward": g.get("baseline_reward"),
-                            "stored_at_round": g.get("stored_at_round")}
-                           for g in picked],
-                 "archive": self.archive.to_report()},
-                actor="evolution").seq)
+                "archive.resample", _rs_payload, actor="evolution").seq)
 
         if not capsules:
             #: 两边都没得提 ⇒ 才是真的"这一轮无事可做"（与"到顶"同族）。

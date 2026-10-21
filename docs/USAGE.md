@@ -135,6 +135,12 @@ held-out 上掉了分数，说明它那几处"中性"陪衬真的碰到了别的
 ⛔ `--archive-resample` 取回来的候选带 `stale=true`：存档里的 reward 是
 **旧基线**读数，只用来挑"取哪几条"，必须在当前基线上重算才能进判据。
 
+⛔⛔ `--archive-resample` **在没有提交的运行里按设计是空转的**：存档里每条
+都量在**当前**基线上 ⇒ 重测结果必然一样 ⇒ 一条都取不回来（账本里是
+`n_picked=0`）。要真的取回，需要「同一轮里 ≥2 个够格候选」且「其中一条被
+提交」—— 生产 81 轮里 80 轮只有 1 个候选进闸。⇒ 开了开关没反应**不是**开关
+坏了；短跑（比如 `--rounds 1`）根本走不到这条路上。详见 README 135。
+
 ⛔ 用 `--proposer llm` 时，账本里会有**两条**事件：`evolution.run_config`
 （跑之前的**意图**：`kind` / `model` / `provider`）和 `evolution.llm_result`
 （跑完之后的**实际**：`error` / `raw_len` / `propose_calls`）。端点连不上时
