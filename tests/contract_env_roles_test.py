@@ -20,6 +20,11 @@ import sys
 import tempfile
 from pathlib import Path
 
+#: ⛔ 显式声明（而非靠"没声明就只跑默认模式"兜底）：check 会把未声明当成
+#:    一种**未知**，每次全量验收都报一句警告 —— 降噪的办法是声明真实情况，
+#:    不是把警告关掉（"没声明 ≠ 只有一种模式"）。
+SUPPORTED_MODES = ("default",)
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 

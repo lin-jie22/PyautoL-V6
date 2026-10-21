@@ -10,6 +10,8 @@
   D 反证①：通用胶囊（沾路由）开闸后**仍**判 overfit（放宽只对 env 范围生效）
   E 反证②：env 胶囊但把 held-out 那个环境也点上了 ⇒ 仍判 overfit
   F 账本可分辨：`scoped` 不冒充 `generalize`，且带 `scope` 字段
+  G 反证④（r63）：定点胶囊却把 held-out **拉低** ⇒ 必须拦
+    （`scoped` 只豁免"0 增益"，不豁免"掉分"—— 负数证伪了豁免的前提）
 
 ⛔ 为什么必须开这道口（不是"把闸关小"）：
    `patch:<env>` **只对点名的环境生效** ⇒ 它在别的环境上 0 增益是**构造
@@ -239,6 +241,58 @@ def main():
     ck("F1 ⛔ 开关真的承重（关 ⇒ overfit，开 ⇒ scoped）",
        verdict_of(rep_f) == "overfit" and verdict_of(rep_c) == "scoped",
        f"{verdict_of(rep_f)} vs {verdict_of(rep_c)}")
+
+    print("\nG 组：反证④ —— 定点胶囊却把 held-out 拉低 ⇒ 必须拦（r63）")
+    #: ⛔ `scoped` 的成立理由只有**一句**：「held-out 上 0 增益是构造必然」。
+    #:    **负数不是必然** —— 它恰恰是"陪衬真的碰到了别的环境"的实据
+    #:    （典型：`op="set"` 的路由把 held-out 原本依赖的通用修法**顶掉**，
+    #:    链上只剩一个在 B 里因 env 门控调不动的定点技能）。
+    #:    拿负数一起当"没资格判" = 放行一次**真回归**。
+    #: ⛔ 与 r63 实跑的区别：提交的 `258a11ba` 走 `append`（链尾追加，旧的仍在）
+    #:    ⇒ ho_gain=0.0 没踩到；踩到需要 `set` 语义 + held-out 原本有可用兜底。
+    from aether.genome import parse_route as _parse_route
+
+    def _runner_chain(h, spec):
+        """链语义（与生产同形）：`patch:<env>` 只对点名环境可用，通用技能到处可用。"""
+        env = spec.get("env", "")
+        if spec.get("frozen"):
+            return _ok("frozen")
+        usable = [s for s in _parse_route(h.routing.get("repair"))
+                  if s in h.skills
+                  and (not str(s).startswith("patch:") or s == f"patch:{env}")]
+        if env == DEV:
+            return _ok(env) if f"patch:{DEV}" in usable else _bad(env)
+        if not any(not str(s).startswith("patch:") for s in usable):
+            return _bad(env)
+        #: ⛔ **不许让基线贴天花板**：基线 3/3 会先撞 `base_at_ceiling` 而判
+        #:    `inconclusive`（那是"无从判别"），根本走不到 scoped 分支 ⇒
+        #:    夹具会"通过得莫名其妙"。留一条修不好的 ⇒ 基线 2/3。
+        return _bad(env) if spec.get("idx") == 2 else _ok(env)
+
+    h_seed = Harness(routing={"repair": "gen_fix"},
+                     skills={"gen_fix": "通用兜底修法"})
+    cap_reg = cap([g_skill(f"patch:{DEV}"),
+                   Gene(op="set", target="L1.routing.repair",
+                        value=f"patch:{DEV}", rationale="为了让新技能可达")])
+    h_reg = _apply(h_seed, cap_reg)
+    _ho3 = [FrozenTask(task_id=f"ho{i}", spec={"env": HO, "idx": i})
+            for i in range(3)]
+    _gg = GeneralizationGate(make_heldout(HO, _ho3),
+                             dev_task_ids=[t.task_id for t in dev_tasks()],
+                             base_at_ceiling=1.0)
+    pr_g = _gg.probe(h_seed, h_reg, _runner_chain, dev_gain=1.0,
+                     capsule=cap_reg, allow_scoped=True)
+    ck("G1 夹具自证：发展集真涨、held-out 真掉、且基线未贴天花板",
+       pr_g.dev_gain > 0 and pr_g.heldout_gain < 0
+       and pr_g.base_heldout < 1.0,
+       f"dev={pr_g.dev_gain:+.3f} ho={pr_g.heldout_gain:+.3f} "
+       f"base={pr_g.base_heldout:.3f}")
+    ck("G2 ⛔ 负数**不是**构造必然 ⇒ 必须拦（放行它 = 放行一次真回归）",
+       pr_g.blocks and pr_g.verdict != "scoped",
+       f"{pr_g.verdict} blocks={pr_g.blocks} ho={pr_g.heldout_gain:+.3f}")
+    ck("G3 拦也要留痕：scope / neutral_targets 照记（读得出它靠什么被豁免过）",
+       (pr_g.scope or {}).get("kind") == "env"
+       and bool((pr_g.scope or {}).get("neutral_targets")), str(pr_g.scope))
 
     print("\n" + "=" * 62)
     if FAILS:

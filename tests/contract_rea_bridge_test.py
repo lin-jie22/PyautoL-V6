@@ -250,8 +250,18 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as td2:
         sample2 = make_sample(td2)
+        #: ⛔⛔ 账本归属（r63）：`caps invoke` 会往**工作区根**的 `data/ledger.jsonl`
+        #:    追加 `cap.invoke` 事件。原先这里 `cwd=ROOT` 且不传 `--root`
+        #:    ⇒ 解析落回**生产仓库** ⇒ **每跑一次验收往生产账本写 2 条**
+        #:    （实测 10-21 12:26 / 13:31 两次，各 `seq 7718/7719` 一对，
+        #:    与 C2/C4 两次调用逐字对上）。这与 `contract_world_facts` 的 D6
+        #:    是同一个病、换了个契约 —— 说明"验收不写生产账本"这条必须
+        #:    **每个会落盘的子命令各自钉一次**，不能靠"上次修过了"。
+        #:    ⇒ 显式 `--root` 到临时工作区（① flag 优先级最高，不受 cwd 影响）。
+        ws2 = Path(td2) / "ws"
         p = subprocess.run(
-            [PY, "-m", "aether.cli", "caps", "--caps", str(MANIFEST),
+            [PY, "-m", "aether.cli", "caps", "--root", str(ws2),
+             "--caps", str(MANIFEST),
              "invoke", "rea.analyze_javascript_application",
              "--json", json.dumps({"path": sample2})],
             cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -290,7 +300,8 @@ def main() -> int:
                f"child_envelope.timeout_reason={env.get('timeout_reason')!r}")
 
         p2 = subprocess.run(
-            [PY, "-m", "aether.cli", "caps", "--caps", str(MANIFEST),
+            [PY, "-m", "aether.cli", "caps", "--root", str(ws2),
+             "--caps", str(MANIFEST),
              "invoke", "rea.not_registered", "--json", "{}"],
             cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             timeout=120,
@@ -298,6 +309,22 @@ def main() -> int:
         ck("C4 ⛔ 未注册的能力叫不动（不是静默成功）",
            p2.returncode != 0 or b"ok" not in p2.stdout[:200],
            f"rc={p2.returncode} out={p2.stdout[:120]}")
+        #: ⛔⛔ C5 是上面那个 `--root` 的**牙齿**：只改随从不加断言 ⇒ 下次
+        #:    谁把 `--root` 删掉，事件又回生产账本，而契约照样全绿。
+        #:    判据是"两次调用的 `cap.invoke` 落在**临时工作区**账本上" ——
+        #:    删掉 `--root` ⇒ 临时账本里一条都没有 ⇒ 这里立刻红。
+        #:    ⛔ 不写死路径：数据布局由 `paths` 决定，遍历找 `ledger.jsonl`。
+        def _cap_invokes_under(base):
+            n = 0
+            for lf in Path(base).rglob("ledger.jsonl"):
+                for line in lf.read_text(encoding="utf-8", errors="replace").splitlines():
+                    if '"cap.invoke"' in line:
+                        n += 1
+            return n
+
+        _n = _cap_invokes_under(td2)
+        ck("C5 ⛔ 两次调用的账落在**临时工作区**（验收不写生产账本）",
+           _n >= 2, f"临时账本里的 cap.invoke={_n}（期望 ≥2：C2 一次 + C4 一次）")
 
     # ── D 组：反证（证明 A 组的闸不是恒真）──────────────────────────
     print()

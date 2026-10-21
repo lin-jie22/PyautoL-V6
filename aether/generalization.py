@@ -790,17 +790,39 @@ class GeneralizationGate:
             #:     只是"没资格用这道闸来判"。闸的另一半（非回归）照常生效。
             if (allow_scoped and _scope.get("kind") == "env"
                     and self.suite.env_id not in (_scope.get("envs") or ())):
+                #: ⛔⛔ r63：**负数不是构造必然**。`scoped` 的成立理由只有一句
+                #:    ——「在别的环境上 0 增益是构造必然」。可这条豁免一旦用在
+                #:    **负数**上就把它自己证伪了：掉分说明那几处被记成
+                #:    `neutral_targets` 的"陪衬"**真的碰到了** held-out
+                #:    （典型：`op="set"` 的路由把 held-out 原本依赖的通用修法
+                #:    **顶掉**，链上只剩一个因 env 门控调不动的定点技能）。
+                #:    实测可达（`contract_scoped_commit` G 组）：dev +1.0 /
+                #:    ho −0.667 ⇒ 修前判 `scoped` 放行 = 放行一次真回归。
+                #:  ⛔ 容差与 `probe_removal` 同源（`< -1e-9`）：浮点求和得到的
+                #:    −1e-17 不是"变差"。两处判据必须同一个数，否则"删掉一条"
+                #:    与"改一条"对同一个偏差给出相反的裁决。
+                #:  ⛔ 不新增裁决名：`VERDICTS` 是封闭集合（A3 守着），加名字
+                #:    要走人工确认；而**收紧**不需要新状态 —— 负数落回既有的
+                #:    `overfit`（拦截），差异由 `heldout_gain` 这个数值字段承载。
+                _regress = ho_gain < -1e-9
                 return ProbeResult(
-                    verdict="scoped", dev_gain=dev_gain, heldout_gain=ho_gain,
+                    verdict=("overfit" if _regress else "scoped"),
+                    dev_gain=dev_gain, heldout_gain=ho_gain,
                     base_heldout=base_ho, cand_heldout=cand_ho,
                     n_tasks=self.suite.n_tasks, by_difficulty=by_diff,
                     dev_by_difficulty=dict(dev_by_difficulty or {}),
                     headroom=dict(headroom), thin=tuple(thin),
                     saturated=tuple(saturated), scope=dict(_scope),
-                    reason=(f"候选只改定点技能 {_scope.get('envs')} ⇒ 在 "
-                            f"{self.suite.env_id} 上 0 增益是构造必然，"
-                            f"不作 overfit 证据（发展集 +{dev_gain:.4f} 照常"
-                            f"由非回归闸与能力地板裁决）"))
+                    reason=(
+                        f"候选只改定点技能 {_scope.get('envs')}，却在 "
+                        f"{self.suite.env_id} 上**掉了** {abs(ho_gain):.4f} ⇒ "
+                        f"那不是构造必然的 0，是「中性」陪衬真的碰到了 held-out"
+                        f"（{_scope.get('neutral_targets')}）⇒ 不豁免"
+                        if _regress else
+                        f"候选只改定点技能 {_scope.get('envs')} ⇒ 在 "
+                        f"{self.suite.env_id} 上 0 增益是构造必然，"
+                        f"不作 overfit 证据（发展集 +{dev_gain:.4f} 照常"
+                        f"由非回归闸与能力地板裁决）"))
             #: ⛔⛔ r54：这里原先**带走了 `by_diff` 却丢掉了 `headroom`
             #:    / `thin` / `dev_by_difficulty`** —— 而进化循环是把
             #:    `dev_by_difficulty` 一路传进来的（evolution.py 的

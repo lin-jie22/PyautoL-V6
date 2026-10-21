@@ -4496,6 +4496,62 @@ n_world, n_selection, n_frozen_only, frozen_only[], note}`，
 `envs_role.frozen_only == ["scheduler"]`、`n_selection == 2`，
 `n_envs` 与 `n_world` 都是 3（两个字段不许打架）。
 
+## 131. ⛔⛔ `scoped` 的豁免理由只有一句，**负数不在其中**
+
+`scoped` 放行的唯一依据是：「`patch:<env>` 在别的环境上 0 增益是**构造
+必然**」（第 127 条）。可原实现写的是 `if ho_gain <= heldout_floor:`
+（floor 默认 0.0）—— **负数一起放行**。负数不是必然：它恰恰是"那几处被记
+成 `neutral_targets` 的陪衬**真的碰到了** held-out"的实据，等于把豁免的
+前提自己证伪了 ⇒ 放行一次**真回归**。
+
+可达路径（不是理论假设）：路由是**链**，`op="set"` 会把基线那条链**顶掉**
+（`op="append"` 不会 —— r63 提交的 `258a11ba` 用的是 append，所以
+ho_gain 恰好 0.0 没踩到）。`set L1.routing.repair=patch:A` ⇒ 在 held-out
+里 `patch:A` 因 env 门控调不动 ⇒ 链上可用的只剩空 ⇒ 基线原本依赖的通用
+兜底消失 ⇒ 掉分，而这颗胶囊的 `capsule_scope` 仍是 `env`。
+
+⛔ 修法**不新增裁决名**：`VERDICTS` 是封闭集合（A3 守着），加名字要走人工
+确认；而**收紧**不需要新状态 —— 负数落回既有的 `overfit`（拦截），差异由
+`heldout_gain` 这个数值字段承载。容差 `< -1e-9` 与 `probe_removal` **同一个
+数**（两处对同一个偏差必须给出同一裁决）。
+
+⛔⛔ 契约 G 组的两次教训，第二次比第一次值钱：
+1. **先只加断言、不修代码 ⇒ G2 必须红**（否则不知道断言是不是死的）。
+   实测红：`scoped blocks=False ho=-0.667` ⇒ 洞复现。
+2. 第一版夹具**打偏了**：held-out 基线给成 3/3 ⇒ 候选还没走到 scoped 分支，
+   就先撞 `base_at_ceiling` 判 `inconclusive` —— G2 居然"绿"了（因为
+   `blocks=True`），只有 G3（scope 为空）露了馅。
+   ⇒ **"被拦"不等于"按我预期的那条规则被拦"**，夹具必须自证走的是那条路
+   （G1 现在断言 `base_heldout < 1.0`）。
+
+⛔ 同一族还剩一个**口径**问题（未动，先记着）：`RoundReport.improved`
+的定义是 `committed is not None` ⇒ 一次 `scoped` 提交也算"变强了一次"。
+裁决名在 `generalization.verdict` 里分得开，但全仓没有任何统计在数 `scoped`
+⇒ 谁拿 `improved` 当计数，就会把"发展集修好了"读成"变强了"。
+改它等于改历史口径，要单独拍板。
+
+## 132. ⛔⛔ 「验收不写生产账本」要**每个会落盘的子命令各自钉一次**
+
+第 129 轮修好 `contract_world_facts` 的 D6（`evolve` 落回仓库账本）之后，
+我写下了"验收零写入"。**这个结论是错的**：第二轮全量验收期间
+`data/ledger.jsonl` 的 mtime 变成了 13:31，末尾多出 4 条 `cap.invoke`
+（`seq 7716–7719`，12:26 与 13:31 各一对）。
+
+真因：`contract_rea_bridge_test.py` 的 C 组用
+`cwd=ROOT` + 不传 `--root` 跑 `caps invoke` ⇒ 解析落回仓库 ⇒ **每跑一次
+验收写 2 条**（C2 一次 + C4 一次，与账本逐字对上）。
+同一个病、换了个契约 —— "上次修过了"不是理由，**收口点必须是"每个会写
+盘的子命令"**。
+
+⛔ 顺带做了一次穷举（16 处契约里的 `aether` 子进程调用）：5 处没传
+`--root`，其中 4 处只读（`--version` ×2 / `caps list` / `discover`），
+实测账本行数不变；**只有 rea_bridge 那 2 处真写**。⇒ 结论要这样得到，
+不能靠"应该没事"。
+
+⛔ 断言不许写成"我传了 `--root`"（那是抄答案），要写成**事件落在哪**：
+C5 遍历临时目录里的 `ledger.jsonl` 数 `cap.invoke` ≥ 2。
+反证时**用 `AETHER_ROOT` 当诱饵**验证它真会红 —— 这样反证本身也不写生产库。
+
 ## 6. 与 V5 的关系
 
 V6 不是 V5 的替代品，是它的**结构化重写**：
