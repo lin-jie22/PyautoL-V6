@@ -407,7 +407,7 @@ def main():
     from aether.ledger import Ledger as _Lg
     #: ⛔ 受控原因码：**封闭集合**，新增分支必须同时加到这里，
     #:    否则 `unverified_reasons` 里会冒出没被任何断言看住的键。
-    _CODES = frozenset({"verified_ok", "verified_fail",
+    _CODES = frozenset({"verified_ok", "verified_fail", "verified_sampled",
                         "probe_unverified", "no_contracts",
                         "over_budget", "heuristic_no_edits"})
     #: ⛔ 原因码记在**内层实现**里（外层只剩可重入守卫）⇒ 静态检查必须
@@ -455,10 +455,16 @@ def main():
         _EL._probe_runner_factory = _cheap_factory
         try:
             _lg2 = _Lg(_td + "/l2.jsonl")
+            #: ⛔⛔ `max_source_contracts=200` 是**故意的**：本组要验的是
+            #:    「预算 > 0 会把对拍跑起来」，不能让结论取决于仓库当前
+            #:    恰好有几份契约 import 了被选中的模块 —— r63k 实测踩过：
+            #:    新增一份契约把 providers.py 从 12 推到 13 ⇒ 选不齐 ⇒
+            #:    runner 零调用 ⇒ I6 红，而代码本身没有回归。
             _lp2 = _EL(ledger=_lg2, gate=None, dev_suite=[], runner=None,
                        proposer=None,
                        config=EvolutionConfig(source_cleanup_enabled=True,
-                                              max_source_probes=1))
+                                              max_source_probes=1,
+                                              max_source_contracts=200))
             _lp2._source_cleanup_pass([])
             ev2 = [json.loads(x) for x in open(_td + "/l2.jsonl") if x.strip()]
             p2 = [e for e in ev2
@@ -469,6 +475,70 @@ def main():
                f"n_probed={p2.get('n_probed')} runner_calls={_seen['n']}")
             ck("I7 ⛔ 反证：预算=1 时 note **不带**「预算为 0」警告",
                "预算为 0" not in str(p2.get("note", "")))
+
+            #: ⛔⛔ 抽样语义（r63k 新增）：契约份数**随项目增长单调上升**，
+            #:    而「跑不完 ⇒ 什么都不跑」会让越核心的模块越永远得不到验证。
+            #:    ⇒ 允许跑一个子集，但结论必须降级成 `verified_sampled`。
+            _seen["n"] = 0
+            _EL._probed_once = False
+            _lg8 = _Lg(_td + "/l8.jsonl")
+            _lp8 = _EL(ledger=_lg8, gate=None, dev_suite=[], runner=None,
+                       proposer=None,
+                       config=EvolutionConfig(source_cleanup_enabled=True,
+                                              max_source_probes=1,
+                                              max_source_contracts=1))
+            _lp8._source_cleanup_pass([])
+            ev8 = [json.loads(x) for x in open(_td + "/l8.jsonl") if x.strip()]
+            pe = [e for e in ev8 if e.get("kind") == "cleanup.source_pass"]
+            p8 = pe[-1]["payload"] if pe else {}
+            ck("I8 ⛔⛔ 抽样：`max_source_contracts=1` ⇒ 只跑 1 份、"
+               "且**不算通过**（抽样 ≠ 验证）",
+               _seen["n"] == 2
+               and dict(p8.get("unverified_reasons") or {}
+                        ).get("verified_sampled", 0) >= 1
+               and dict(p8.get("unverified_reasons") or {})
+               .get("verified_ok", 0) == 0,
+               f"runner_calls={_seen['n']} reasons="
+               f"{json.dumps(p8.get('unverified_reasons'), ensure_ascii=False)}")
+            #: ⛔ 反证的另一半：抽样到底**跑了没有**、跑了几份 —— 只写
+            #:    "不许算通过"还不算钉住，必须证明它真的执行过。
+            #:    ⛔ 读的是 `payload.evidence.nonregression`（不是
+            #:    `payload.nonregression`）—— 第一版读错层 ⇒ 恒空 ⇒ 假红。
+            _cn = [e for e in ev8 if e.get("kind") == "cleanup.proposal"]
+            _nt = [dict((e.get("payload") or {}).get("evidence") or {}
+                        ).get("nonregression") or {} for e in _cn]
+            _nt = [x for x in _nt if x.get("n_contracts_run")]
+            ck("I9 ⛔⛔ 抽样读数落在证据里：n_contracts_run/n_total 必须写清楚"
+               "（只写『未通过』与『没跑』不可分辨）",
+               bool(_nt) and all(
+                   int(x.get("n_contracts_run", 0)) == 1
+                   and int(x.get("n_contracts_total", 0)) >= 1
+                   and x.get("sampled") is True for x in _nt),
+               str(_nt[:1])[:160])
+
+            #: ⛔⛔ 「数的是动作，不是意图」：把样例上限压到 0 ⇒ 一份都选不出
+            #:    ⇒ `n_probed` 必须是 0。原实现把 `probed += 1` 写在
+            #:    `if sel:` **之前** ⇒ 实测报出 `n_probed=1 / runner_calls=0`，
+            #:    外部读到"探过一条"，实际一次都没跑。
+            _EL._probed_once = False
+            _lg10 = _Lg(_td + "/l10.jsonl")
+            _lp10 = _EL(ledger=_lg10, gate=None, dev_suite=[], runner=None,
+                        proposer=None,
+                        config=EvolutionConfig(source_cleanup_enabled=True,
+                                               max_source_probes=1,
+                                               max_source_contracts=0))
+            _lp10._source_cleanup_pass([])
+            ev10 = [json.loads(x) for x in
+                    open(_td + "/l10.jsonl") if x.strip()]
+            pe10 = [e for e in ev10
+                    if e.get("kind") == "cleanup.source_pass"]
+            p10 = pe10[-1]["payload"] if pe10 else {}
+            ck("I10 ⛔⛔ 选不出一份契约 ⇒ n_probed 必须为 0"
+               "（计数只算真跑过的，不算打算跑的）",
+               int(p10.get("n_probed", -1)) == 0
+               and int(p10.get("n_provable", 0)) > 0,
+               f"n_probed={p10.get('n_probed')} "
+               f"reasons={json.dumps(p10.get('unverified_reasons'), ensure_ascii=False)}")
         finally:
             _EL._probe_runner_factory = None
     #: ⛔ 「源码清理不进 best 选择」这条**不写成断言**：它是一条**设计说明**，
@@ -556,7 +626,8 @@ def main():
         _lp_i = _EL(ledger=_lg_i, gate=None, dev_suite=[], runner=None,
                     proposer=None,
                     config=EvolutionConfig(source_cleanup_enabled=True,
-                                           max_source_probes=1))
+                                           max_source_probes=1,
+                                           max_source_contracts=200))
         _EL._probe_runner_factory = _nest_factory
         try:
             #: ⛔ 进程级闩锁**必须显式复位**才能再测一次：I 组的 I6 已经
@@ -566,10 +637,16 @@ def main():
             _lp3 = _EL(ledger=_lg3, gate=None, dev_suite=[], runner=None,
                        proposer=None,
                        config=EvolutionConfig(source_cleanup_enabled=True,
-                                              max_source_probes=1))
+                                              max_source_probes=1,
+                                              max_source_contracts=200))
             _lp3._source_cleanup_pass([])
             ks3 = _kinds(_td + "/k.jsonl")
-            ci = _kinds(_td + "/i.jsonl")
+            #: ⛔⛔ `i.jsonl` 是**嵌套那一层**写的。它不存在 = 嵌套根本没发生
+            #:     ⇒ 必须是一条**明确的红**，不许把 `FileNotFoundError` 抛出去
+            #:    （r63k 实测：断言没读上，整个契约以 traceback 崩掉，
+            #:     J5 的结论丢失，只留下一个看不懂的栈）。
+            _ip = _td + "/i.jsonl"
+            ci = (_kinds(_ip) if os.path.exists(_ip) else ["<没有 i.jsonl>"])
             ck("J5 ⛔⛔ 嵌套的清理 pass 被守卫拦下 ⇒ 只记 skipped、不 scan"
                "（否则 run()→清理→probe→契约→run() 无限递归）",
                ci == ["cleanup.source_skipped"]
@@ -577,6 +654,69 @@ def main():
         finally:
             _EL._probe_runner_factory = None
             _EL._probed_once = False
+
+    # ══ K 组：⛔⛔ 「选哪些」与「够不够格」是两个问题（plan_contracts）════
+    #: ⛔⛔ 夹具**只用临时仓库**，不碰真实仓库：这一组要钉的是份数语义，
+    #:    若拿真仓库当夹具，断言就随"现在恰好有几份契约"漂移 —— 而漂移
+    #:    正是这条缺陷的成因（新增契约 ⇒ 越过上限 ⇒ 从能验证变成不能）。
+    print("K 组：选契约的份数语义（抽样 ≠ 全量，全量 ≠ 抽样）")
+    from aether import srcmut as _SM
+
+    def _mk_repo(base, n_contracts, n_modules=1):
+        from pathlib import Path as _P
+        r = _P(base)
+        (r / "aether").mkdir(parents=True, exist_ok=True)
+        (r / "tests").mkdir(parents=True, exist_ok=True)
+        for i in range(n_modules):
+            (r / "aether" / f"m{i}.py").write_text("X = 1\n", encoding="utf-8")
+        for i in range(n_contracts):
+            (r / "tests" / f"contract_c{i}_test.py").write_text(
+                "from aether.m0 import X\nassert X == 1\n", encoding="utf-8")
+        #: 一份**不 import** 的契约：证明选择是按 import 关系，不是数文件
+        (r / "tests" / "contract_unrelated_test.py").write_text(
+            "V = 2\n", encoding="utf-8")
+        return r
+
+    with tempfile.TemporaryDirectory() as _tk:
+        want = ["aether/m0.py"]
+        #: ① 份数**不超**上限 ⇒ 全选、sampled=False
+        r1 = _mk_repo(_tk + "/r1", 3)
+        p1 = _SM.plan_contracts(r1, want, max_contracts=10)
+        ck("K1 ⛔ 不超上限 ⇒ 全选 3 份、sampled=False（不误标抽样）",
+           len(p1["selected"]) == 3 and p1["n_total"] == 3
+           and p1["sampled"] is False, json.dumps(p1["selected"]))
+        ck("K2 ⛔ 只数**按 import 命中**的（不相关的契约不进清单）",
+           all("unrelated" not in s for s in p1["selected"]),
+           str(p1["selected"]))
+        #: ② 超上限 + 允许抽样 ⇒ 跑子集、但仍报全量份数
+        r2 = _mk_repo(_tk + "/r2", 7)
+        p2 = _SM.plan_contracts(r2, want, max_contracts=3, allow_sample=True)
+        ck("K3 ⛔⛔ 超上限 + allow_sample ⇒ 只选前 3 份，但 n_total 仍是 7"
+           "（外部必须知道『跑了几份 / 一共几份』）",
+           len(p2["selected"]) == 3 and p2["n_total"] == 7
+           and p2["sampled"] is True,
+           f"sel={len(p2['selected'])} total={p2['n_total']}")
+        #: ③ 同一条，**不允许**抽样 ⇒ 必须退成空（写入路径用这条）
+        p3 = _SM.plan_contracts(r2, want, max_contracts=3, allow_sample=False)
+        ck("K4 ⛔⛔ 超上限 + 不许抽样 ⇒ 空清单 + 带 `n_total`"
+           "（写入路径不许拿抽样结果授权落盘）",
+           p3["selected"] == [] and p3["n_total"] == 7
+           and p3["sampled"] is False, f"n_total={p3['n_total']}")
+        #: ④ 反证：上限给到 0 ⇒ 一份都不许选（不是"至少跑一份"）
+        p4 = _SM.plan_contracts(r2, want, max_contracts=0, allow_sample=True)
+        ck("K5 ⛔⛔ 上限 0 ⇒ 一份都不跑（不许「至少跑一份」偷偷加码）",
+           p4["selected"] == [] and p4["sampled"] is False, str(p4["selected"]))
+        #: ⑤ 空仓库：没有契约 import 它 ⇒ 必须能区分"没人守"
+        p5 = _SM.plan_contracts(_mk_repo(_tk + "/r5", 0), want)
+        ck("K6 ⛔ 没有契约守着 ⇒ n_total=0 且原因写明「补一份契约」"
+           "（与「超预算」是两条不同的出路）",
+           p5["n_total"] == 0 and "补一份契约" in p5["reason"],
+           p5["reason"][:60])
+        #: ⑥ 严格版与带账版必须同源：不超上限时逐字相同
+        sel6, _w6 = _SM.select_contracts(r1, want, max_contracts=10)
+        ck("K7 ⛔ `select_contracts` 是 `plan_contracts` 的严格视图"
+           "（同一批文件选出同一批，不许各算一套）",
+           list(sel6) == list(p1["selected"]), f"{sel6} vs {p1['selected']}")
 
     print()
     if FAILS:

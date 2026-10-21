@@ -50,7 +50,26 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from aether.paths import paths                                    # noqa: E402
+from aether.paths import paths, resolve_root                  # noqa: E402
+
+
+def _data_root() -> Path:
+    """证据该写到**哪个根**下。
+
+    ⛔⛔ 不许用模块级 `ROOT = __file__ 的父父目录`：那是**代码位置**，不是
+        **数据位置**。两者在开发态碰巧相同，装成 wheel 之后 `ROOT` 变成
+        `site-packages` ⇒ 证据写进 `site-packages/data/rea`（r61 修的 Y109
+        在脚本里又活了一遍）。
+
+    ⛔ 顺序由 `paths.resolve_root()` 一处说了算（① --root ② $AETHER_ROOT
+        ③ 仓库 ④ 向上找 .aether ⑤ 用户数据目录），本脚本**不另写一份**。
+        `CliAdapter` 会在启动子进程时显式注入 `AETHER_ROOT`（它是净化
+        env 的，不继承宿主）—— 那条注入就是这里的输入。
+    """
+    try:
+        return resolve_root()
+    except Exception:                                      # noqa: BLE001
+        return ROOT
 
 #: ⛔ 绝对路径，不依赖 PATH：`CliAdapter` 会净化环境变量，而 WorkBuddy /
 #:    定时任务等宿主环境的 PATH 里**不一定**有受管 node（实测过：
@@ -158,7 +177,7 @@ def _ensure_ps_shim() -> Optional[str]:
        `process_table_source` 记成 `unavailable`。静默降级 = 假仪表。
     ⛔ 产物放 `data/rea_shims`（不入备份：它是投影，缺了现编）。
     """
-    outdir = paths(ROOT)["rea_shims"]
+    outdir = paths(_data_root())["rea_shims"]
     try:
         outdir.mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -600,7 +619,7 @@ def main() -> int:
     duration_ms = int((time.time() - t0) * 1000)
 
     #: 全量落盘（**先写后摘要**）：即使后面解析失败，原始输出也留下了。
-    outdir = paths(ROOT)["rea"]
+    outdir = paths(_data_root())["rea"]
     outdir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     name = f"{stamp}__{cmd}__{os.getpid()}.json"

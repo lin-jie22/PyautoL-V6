@@ -55,7 +55,8 @@ from .ledger import content_hash
 from .paths import ROOT
 
 __all__ = ["SOURCE_PROTECTED", "Edit", "from_lines", "verify", "apply_edits",
-           "probe", "select_contracts", "contract_runner", "EDIT_ID_PREFIX"]
+           "probe", "select_contracts", "plan_contracts", "contract_runner",
+           "EDIT_ID_PREFIX"]
 
 #: ⛔ 这些模块**扫都不扫**（不是"扫出来再拦掉"）。
 #:    与 `judge.JUDGE_MODULES` 同源，加上它自己与 `judge`/`srcmut`。
@@ -465,21 +466,74 @@ def select_contracts(root: Any, rel_files: Sequence[str], *,
        超过上限 ⇒ 返回空并说明"需要 N 份，超预算"。
        ⛔ **不静默截断**：只跑前 12 份就宣称"验证通过"，等于拿一把
        断掉一半的尺子量东西（与「跑错对象等于没跑」同族）。
+       → 想抽样请走 `plan_contracts(..., allow_sample=True)`，
+         那条路的结论是 `verified_sampled`（仍 unverified），不是通过。
 
     ⛔ 一律**同时**给出原因：返回空的两条路（"没人守" vs "超预算"）
        修法完全不同 —— 前者要补契约，后者要给预算。
+
+    ⛔ 本函数**严格**：选不全就返回空。要"先跑一部分看有没有立刻坏"
+       请用 `plan_contracts(..., allow_sample=True)` —— 那条路必须配
+       `verified_sampled` 原因码，**不许**冒充 `verified_ok`。
+    """
+    plan = plan_contracts(root, rel_files, max_contracts=max_contracts,
+                          allow_sample=False, subdir=subdir, prefix=prefix,
+                          suffix=suffix)
+    return list(plan["selected"]), str(plan["reason"])
+
+
+def plan_contracts(root: Any, rel_files: Sequence[str], *,
+                   max_contracts: int = 12, allow_sample: bool = False,
+                   subdir: str = "tests", prefix: str = "contract_",
+                   suffix: str = "_test.py") -> Dict[str, Any]:
+    """`select_contracts` 的**带账版本**：分开回答「选哪些」与「够不够格」。
+
+    ⛔⛔ 为什么要拆（r63k 实测的**自锁**，不是假想）：
+       上游只把「超过 `max_contracts`」当成「不能验证」⇒ 返回空。
+       而契约份数**随项目增长单调上升** ⇒ 被 import 得越多的模块越早撞线
+       ⇒ 越是核心模块越**永远**得不到验证。整仓实测：
+
+           ledger.py        需要 35 份 ⇒ 空
+           genome.py        需要 31 份 ⇒ 空
+           environment.py   需要 20 份 ⇒ 空
+           evolution.py     需要 19 份 ⇒ 空
+           nongression.py   需要 18 份 ⇒ 空
+           verifier.py      需要 18 份 ⇒ 空
+           generalization.py 需要 13 份 ⇒ 空
+           providers.py     需要 13 份 ⇒ 空
+           其余 39 个模块          ⇒ 能跑
+
+       `providers.py` 原本正好 12 份（卡在上限），本轮新增一份契约
+       `contract_ghost_route_test` 恰好把它推到 13 ⇒ 全仓唯一一条
+       「可证明」的提案当场从「能对拍」变成「未验证」。
+       ⇒ **加契约反而让验收能力下降** —— 这就是自锁的形状（第 66–70 条）。
+
+    ⛔ 解法不是把上限调大：对拍跑两遍，12 份 → 24 次子进程已经十几分钟，
+       调到 40 份等于把这道闸变成永不执行。解法是**把话说准**：
+
+         · `sampled=False` ⇒ 选全了，通过就是 `verified_ok`
+         · `sampled=True`  ⇒ 只跑了一部分，通过只能叫 `verified_sampled`
+           （仍是 `unverified`，**不放行**，但外部拿到了「跑过前 N 份没坏」
+            这个真读数，而不是「什么都没跑」）
+
+    ⛔ `allow_sample` **默认关**：写入路径（`autonomy.auto_apply`）必须全量
+       —— 抽样结果不足以授权落盘。只有"出报告"的路径才开。
+
+    返回 `{"selected", "n_total", "sampled", "reason"}`。
     """
     root = Path(root)
     tdir = root / subdir
     if not tdir.is_dir():
-        return [], f"没有 {subdir}/ 目录 ⇒ 找不到冻结契约"
+        return {"selected": [], "n_total": 0, "sampled": False,
+                "reason": f"没有 {subdir}/ 目录 ⇒ 找不到冻结契约"}
     stems: List[str] = []
     for rel in rel_files:
         s = Path(str(rel)).stem
         if s and s not in stems:
             stems.append(s)
     if not stems:
-        return [], "没有给出被改文件 ⇒ 无从选择契约"
+        return {"selected": [], "n_total": 0, "sampled": False,
+                "reason": "没有给出被改文件 ⇒ 无从选择契约"}
     hits: List[str] = []
     for cf in sorted(tdir.glob(f"{prefix}*{suffix}")):
         try:
@@ -500,14 +554,24 @@ def select_contracts(root: Any, rel_files: Sequence[str], *,
                     mods.update(str(a.name).split("."))
         if mods & set(stems):
             hits.append(str(cf.relative_to(root)))
-    if not hits:
-        return [], (f"没有任何冻结契约 import 被改模块 {stems} ⇒ "
-                    f"这次删除没有冻结判据验证过（要过闸请先补一份契约）")
-    if len(hits) > max_contracts:
-        return [], (f"需要跑 {len(hits)} 份契约（{hits[:3]}…）> 上限 "
-                    f"{max_contracts} ⇒ 超出预算，未验证；"
-                    f"要跑请显式放宽 max_contracts")
-    return hits, f"按 import 关系选中 {len(hits)} 份契约"
+    n_total = len(hits)
+    if not n_total:
+        return {"selected": [], "n_total": 0, "sampled": False,
+                "reason": (f"没有任何冻结契约 import 被改模块 {stems} ⇒ "
+                           f"这次删除没有冻结判据验证过（要过闸请先补一份契约）")}
+    if n_total <= max_contracts:
+        return {"selected": hits, "n_total": n_total, "sampled": False,
+                "reason": f"按 import 关系选中 {n_total} 份契约"}
+    if allow_sample and max_contracts > 0:
+        return {"selected": hits[:max_contracts], "n_total": n_total,
+                "sampled": True,
+                "reason": (f"需要跑 {n_total} 份契约 > 上限 {max_contracts} ⇒ "
+                           f"**只跑前 {max_contracts} 份**（抽样）。"
+                           f"抽样通过 ≠ 已验证：结论只能是 verified_sampled")}
+    return {"selected": [], "n_total": n_total, "sampled": False,
+            "reason": (f"需要跑 {n_total} 份契约（{hits[:3]}…）> 上限 "
+                       f"{max_contracts} ⇒ 超出预算，未验证；"
+                       f"要跑请显式放宽 max_contracts 或改用抽样")}
 
 
 def contract_runner(rel_paths: Sequence[str], *, timeout_s: float = 900.0,

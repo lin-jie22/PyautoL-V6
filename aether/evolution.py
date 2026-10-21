@@ -467,6 +467,12 @@ class EvolutionConfig:
     #:    **可分辨**。此前它只是在事件里永远记 `n_probed=0`，
     #:    外部看起来与"没有问题"完全一样 —— 那才是真正的伤。
     max_source_probes: int = 0
+    #: ⛔⛔ 一次对拍最多跑几份冻结契约（跑**两遍**，成本 ×2）。
+    #:    收进配置是为了让「抽样」这件事可被**测试钉住**：默认 12 时，
+    #:    仓库里到底有没有一条能选全的提案取决于契约份数（r63k 实测：
+    #:    `providers.py` 从 12 涨到 13 ⇒ 唯一可证明的提案当场变未验证）。
+    #:    硬编码在这里会让契约测试依赖"仓库当前恰好长什么样"。
+    max_source_contracts: int = 12
     dev_pass_threshold: float = 0.0     # 发展集 reward 阈值（0=全部计入）
     #: 提交后做一次**反事实层归因**（哪一层带来了这次提升）。
     attribute_layers: bool = True
@@ -1756,25 +1762,54 @@ class EvolutionLoop:
                         "reason": ("本进程已对拍过一次 ⇒ 源码未变，"
                                    "重跑无信息量（想强制重跑请换进程）")}
                 else:
-                    probed += 1
-                    type(self)._probed_once = True
                     eds = [_sm.Edit.from_dict(x) for x in p.edits]
-                    sel, why = _sm.select_contracts(
-                        _root, [e.file for e in eds])
+                    #: ⛔⛔ `allow_sample=True`：只在「出报告」这条路开抽样。
+                    #:    抽样通过会降级成 `verified_sampled`（仍是 unverified），
+                    #:    绝不冒充 `verified_ok`。写入路径（autonomy）不开。
+                    plan = _sm.plan_contracts(
+                        _root, [e.file for e in eds],
+                        max_contracts=int(self.cfg.max_source_contracts),
+                        allow_sample=True)
+                    sel = list(plan["selected"])
                     pr: Dict[str, Any]
                     if sel:
+                        #: ⛔⛔ 计数点必须落在**真跑**这一支里。原先把
+                        #:    `probed += 1` 写在 `if sel` 之前 ⇒ 选了但跑不了
+                        #:    也记成"探过 1 条"（实测 n_probed=1 /
+                        #:    runner_calls=0）—— 数的是意图，不是动作。
+                        probed += 1
+                        type(self)._probed_once = True
                         factory = (type(self)._probe_runner_factory
                                    or _sm.contract_runner)
                         pr = _sm.probe(_root, eds, runner=factory(sel))
                     else:
-                        pr = {"ok": False, "unverified": True, "reason": why}
+                        pr = {"ok": False, "unverified": True,
+                              "reason": plan["reason"]}
+                    pr["n_contracts_total"] = plan["n_total"]
+                    pr["n_contracts_run"] = len(sel)
+                    pr["sampled"] = bool(plan["sampled"])
+                    if (plan["sampled"] and bool(pr.get("ok"))
+                            and not pr.get("unverified")):
+                        #: ⛔ 抽样通过 ≠ 验证通过：保留读数（跑过的那几份
+                        #:    确实没坏），但结论必须是 unverified。
+                        pr["unverified"] = True
+                        pr["reason"] = (
+                            f"抽样 {len(sel)}/{plan['n_total']} 份契约全部通过，"
+                            f"但**未跑全** ⇒ 不算已验证（要全量请放宽 "
+                            f"max_contracts）")
                     p.evidence["nonregression"] = pr
                     verdict = bool(pr.get("ok")) and not pr.get("unverified")
-                    code = "verified_ok" if verdict else (
-                        "verified_fail" if not pr.get("unverified")
-                        else "probe_unverified")
-                    if not sel:
-                        code = "no_contracts"
+                    if verdict:
+                        code = "verified_ok"
+                    elif not pr.get("unverified"):
+                        code = "verified_fail"
+                    elif plan["sampled"]:
+                        code = "verified_sampled"
+                    elif not sel:
+                        code = ("over_budget" if plan["n_total"]
+                                else "no_contracts")
+                    else:
+                        code = "probe_unverified"
             else:
                 #: ⛔ 前两类是**启发式** ⇒ 拿不出可应用的编辑 ⇒ 无从对拍。
                 #:    它们本来就该红 —— 这不是缺陷，是判据的边界：

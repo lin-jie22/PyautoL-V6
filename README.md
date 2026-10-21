@@ -4735,3 +4735,71 @@ V6 不是 V5 的替代品，是它的**结构化重写**：
   （默认 stub，保证判据可回归）、不做「允许少量回归换取大增益」的权衡开关。
 
 详细取舍见 `docs/ARCHITECTURE.md`，前沿依据与出处见 `docs/FRONTIER_2026.md`。
+
+## 137. ⛔⛔ 「超过上限 ⇒ 什么都不做」会自锁：契约越多，能验证的模块越少
+
+源码清理的非回归闸要「删掉这段代码后，冻结契约还过不过」。选契约的规则是
+`select_contracts`：按 import 关系扫出所有消费方，**超过 `max_contracts`
+就返回空**（理由正当：跑前 12 份就宣称通过，等于拿断掉的尺子量东西）。
+
+但契约份数**随项目增长单调上升**，而"被很多契约 import"的模块**恰恰是
+核心模块** ⇒ 越核心越早撞线 ⇒ **永远得不到验证**。全仓实测：
+
+| 模块 | 需要份数 | 结果 |
+|---|---|---|
+| `ledger.py` | 35 | 空 |
+| `genome.py` | 31 | 空 |
+| `environment.py` | 20 | 空 |
+| `evolution.py` | 19 | 空 |
+| `nongression.py` / `verifier.py` | 18 | 空 |
+| `generalization.py` / `providers.py` | 13 | 空 |
+| 其余 39 个模块 | ≤ 12 | 能跑 |
+
+触发点很具体：`providers.py` 原本恰好 12 份，r63k 新增一份契约
+（`contract_ghost_route_test`）把它推到 13 ⇒ 全仓唯一一条「可证明」的
+提案当场从「能对拍」变成「未验证」。**加契约反而让验收能力下降。**
+
+⇒ 解法不是调大上限（跑两遍，12 份 ≈ 十几分钟，调到 40 等于这道闸永不执行），
+而是**把话说准**：拆成 `plan_contracts()`，分开回答「选哪些」与「够不够格」。
+
+- `sampled=False` ⇒ 选全了，通过才是 `verified_ok`
+- `sampled=True` ⇒ 只跑了子集，通过只能叫 `verified_sampled`（**仍 unverified**）
+- `allow_sample` **默认关**：`autonomy.auto_apply` 会真的往根上写，
+  抽样不足以授权落盘 —— 抽样只出现在出报告的路径
+
+## 138. ⛔⛔ 计数只算「真跑过的」，不算「打算跑的」
+
+同一处还有一条独立的谎：`probed += 1` 写在 `if sel:` **之前**，于是
+「选不出契约」（跑不了）也记成"探过一条"。实测读数
+`n_probed=1 / runner_calls=0` —— 外部读到的是意图，不是动作。
+
+⛔ 这与第 85 条（状态名叫 `applied` ≠ 做了）、第 14 条（写入成功 ≠ 可用）
+同族：**计数点必须落在动作之后的唯一那一支里**，不在分支入口。
+
+配套：抽样读数（`n_contracts_run` / `n_contracts_total` / `sampled`）必须
+落在 `evidence.nonregression` 里 —— 只写"未通过"会让「跑了但没过」与
+「一份都没跑」不可分辨。
+
+## 139. ⛔⛔ 净化子进程环境是对的，但**数据根不是秘密** —— 它会退回 `__file__`
+
+`CliAdapter` 故意不继承宿主环境（`env_allow` 只有 PATH/HOME/LANG/TMPDIR），
+这是对的。但外部实现（`scripts/rea_bridge.py`）需要知道「证据该写哪」，
+而它唯一能拿到的是环境变量 ⇒ 不给就只能退回
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+—— 这是**代码位置**，不是**数据位置**（Y109 换了个地方复发）。实测：
+`aether caps --root /tmp/ws invoke rea.doctor` 把账写对了，却把 7 个证据
+文件写进了**生产仓库**的 `data/rea/`；装成 wheel 后会写进
+`site-packages/data/rea`。
+
+修法三处，缺一不可：
+
+1. 桥改用 `paths.resolve_root()`（① --root ② `$AETHER_ROOT` ③ 仓库
+   ④ 向上找 `.aether` ⑤ 用户数据目录），**不另写一份顺序**；
+2. `CliAdapter.env_extra` —— 显式注入，不走白名单（是我们算出来的，不是继承的）；
+3. `mount_capabilities(..., root=)` —— **唯一接线点**，CLI / HTTP / doctor
+   都经过这里；`root=None` ⇒ 走 `resolve_root()`，不许"什么都不给"。
+
+契约 C6 判据是**两侧都数**：临时根下必须 ≥1、生产仓库必须**零增长**。
+反证：桥退回 `paths(ROOT)` ⇒ C6 立刻红。

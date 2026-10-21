@@ -326,6 +326,35 @@ def main() -> int:
         ck("C5 ⛔ 两次调用的账落在**临时工作区**（验收不写生产账本）",
            _n >= 2, f"临时账本里的 cap.invoke={_n}（期望 ≥2：C2 一次 + C4 一次）")
 
+        #: ⛔⛔ C6：**证据**（不是账本）也必须落临时根。
+        #:    实测（r63k 第七轮验收）：账本修好之后，`data/rea/` 仍然多出
+        #:    7 个文件 —— 桥脚本的 `ROOT = __file__ 的父父目录` 是**代码位置**，
+        #:    它把"操作 A 工作区、证据写进 B 仓库"这件事留在了明面上。
+        #:    装成 wheel 后同一个 bug 会写进 `site-packages/data/rea`（Y109）。
+        #:    判据是**两侧都数**：临时根下必须 ≥1，生产根下必须 0 增长。
+        def _rea_files(base):
+            d = Path(base) / "data" / "rea"
+            return sorted(p.name for p in d.glob("*.json")) if d.is_dir() else []
+
+        _repo_before = set(_rea_files(ROOT))
+        _ws2 = Path(td2) / "ws"
+        _before_ws = set(_rea_files(_ws2))
+        _r2 = subprocess.run(
+            [PY, "-m", "aether.cli", "caps", "--root", str(_ws2),
+             "--caps", str(MANIFEST),
+             "invoke", "rea.doctor", "--json", "{}"],
+            cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=600,
+        )
+        _repo_after = set(_rea_files(ROOT))
+        _after_ws = set(_rea_files(_ws2))
+        ck("C6 ⛔⛔ 证据落在**指定的根**下（生产仓库零增长）",
+           len(_after_ws - _before_ws) >= 1
+           and _repo_after == _repo_before,
+           f"ws 新增={len(_after_ws - _before_ws)} "
+           f"仓库新增={sorted(_repo_after - _repo_before)[:3]} "
+           f"rc={_r2.returncode}")
+
     # ── D 组：反证（证明 A 组的闸不是恒真）──────────────────────────
     print()
     print("== D 组：反证 —— 拿掉白名单的对照实现会放行同一个输入 ==")

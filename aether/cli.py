@@ -1655,7 +1655,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     return 0
 
 
-def _caps_gateway(path: str, ledger=None):
+def _caps_gateway(path: str, ledger=None, root=None):
     """装载能力清单并返回网关。
 
     ⛔ 直接调 `interop.mount_capabilities` —— 与 HTTP 服务（启动时装载 +
@@ -1664,9 +1664,12 @@ def _caps_gateway(path: str, ledger=None):
 
     ⛔ `ledger` 必须传：不传 ⇒ 网关没有账本 ⇒ 调用能力时 `cap.invoke`
        一条也写不出（实测账本 0 次，见 `Gateway.invoke` 的说明）。
+    ⛔ `root` 必须传：网关要把**数据根**注入给外部实现（如 REA 桥），
+       否则子进程只能退回自己的 `__file__` ⇒ 操作 A 工作区、写进 B 仓库
+       （装成 wheel 后是 `site-packages/data/`）。
     """
     from .interop import mount_capabilities
-    return mount_capabilities(path, ledger=ledger)
+    return mount_capabilities(path, ledger=ledger, root=root)
 
 
 def cmd_caps(args) -> int:
@@ -1674,7 +1677,8 @@ def cmd_caps(args) -> int:
     from .ledger import Ledger
     #: ⛔ 记账：CLI 调能力必须进账本 —— 否则"执行链不进账"这条缺口永远补不上。
     led = Ledger(_paths(Path(args.root))["ledger"])
-    gw, rep = _caps_gateway(getattr(args, "caps", "") or "", ledger=led)
+    gw, rep = _caps_gateway(getattr(args, "caps", "") or "", ledger=led,
+                            root=getattr(args, "root", None))
     for s in rep.skipped:
         _log.warning(f"[caps] ⚠️ 跳过 {s.get('id')}：{s.get('reason')}")
     reg = gw.registry
@@ -2130,20 +2134,35 @@ def cmd_caps(args) -> int:
                 if p.edits and probed < probe_limit:
                     probed += 1
                     eds = [SM.Edit.from_dict(x) for x in p.edits]
-                    sel, why = SM.select_contracts(
+                    plan = SM.plan_contracts(
                         src_root, [e.file for e in eds],
                         max_contracts=int(
-                            getattr(args, "max_contracts", 12) or 12))
+                            getattr(args, "max_contracts", 12) or 12),
+                        #: ⛔ `verify` 是**出报告**的一条路 ⇒ 允许抽样；
+                        #:    抽样通过会被降级成 unverified（下面显式做）。
+                        allow_sample=True)
+                    sel = list(plan["selected"])
                     if not sel:
                         p.evidence["nonregression"] = {
                             "unverified": True, "ok": False,
-                            "reason": why}
+                            "reason": plan["reason"],
+                            "n_contracts_total": plan["n_total"],
+                            "n_contracts_run": 0}
                     else:
                         pr = SM.probe(src_root, eds,
                                       runner=SM.contract_runner(
                                           sel,
                                           python_exe=getattr(args, "python",
                                                              None)))
+                        pr["n_contracts_total"] = plan["n_total"]
+                        pr["n_contracts_run"] = len(sel)
+                        pr["sampled"] = bool(plan["sampled"])
+                        if (plan["sampled"] and bool(pr.get("ok"))
+                                and not pr.get("unverified")):
+                            pr["unverified"] = True
+                            pr["reason"] = (
+                                f"抽样 {len(sel)}/{plan['n_total']} 份契约"
+                                f"全部通过，但未跑全 ⇒ 不算已验证")
                         p.evidence["nonregression"] = pr
                         verdict = bool(pr.get("ok")) and not pr.get("unverified")
                 elif p.edits:

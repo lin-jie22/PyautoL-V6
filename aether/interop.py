@@ -65,6 +65,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from .ledger import Ledger, canonical_json, content_hash
+from .paths import resolve_root
 from .verifier import (Check, Verdict, assert_verdict_sane, env_fingerprint,
                        error_verdict)
 
@@ -436,6 +437,13 @@ class CliAdapter(BaseAdapter):
     """
     argv: List[str] = field(default_factory=list)
     env_allow: Tuple[str, ...] = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR")
+    #: ⛔⛔ **显式**注入的环境变量（不走 `env_allow` 的白名单继承）。
+    #:    为什么必须有这一条：子进程需要知道**数据根在哪**，而白名单
+    #:    故意不继承宿主环境（那是对的，密钥泄漏入口）。但"根"不是秘密，
+    #:    它决定子进程把证据写到哪里。缺了它 ⇒ 桥退回"自己的 `__file__`"
+    #:    ⇒ 操作 `/tmp/ws` 的工作区，证据却写进仓库（装成 wheel 后写进
+    #:    `site-packages/data/rea`，与 r61 修的 Y109 是同一个病）。
+    env_extra: Dict[str, str] = field(default_factory=dict)
     cwd: Optional[str] = None
 
     def __post_init__(self) -> None:
@@ -476,6 +484,9 @@ class CliAdapter(BaseAdapter):
     def __call__(self, args: Dict[str, Any], budget: Budget) -> Any:
         payload = json.dumps(args, ensure_ascii=False).encode("utf-8")
         env = {k: os.environ[k] for k in self.env_allow if k in os.environ}
+        #: ⛔ 白名单之后再叠显式值：`env_extra` 是**我们**算出来的（数据根），
+        #:    不是从宿主继承的 ⇒ 不需要也不应该被 `env_allow` 过滤。
+        env.update({str(k): str(v) for k, v in self.env_extra.items()})
         prefix = self._resolve_seatbelt()
         try:
             p = subprocess.run(
@@ -1012,7 +1023,8 @@ def load_manifest(registry: Registry, src: Union[str, Dict[str, Any]],
 
 
 def mount_capabilities(src: Union[str, Dict[str, Any], None],
-                       ledger: Optional[Ledger] = None
+                       ledger: Optional[Ledger] = None,
+                       root: Union[str, "os.PathLike[str]", None] = None
                        ) -> Tuple[Any, LoadReport]:
     """装载能力并返回可直接用的网关 —— **两个入口唯一的装载接线**。
 
@@ -1037,7 +1049,24 @@ def mount_capabilities(src: Union[str, Dict[str, Any], None],
     if not src:
         return Gateway(_default_registry(), ledger=ledger), LoadReport()
     reg = Registry()
-    return Gateway(reg, ledger=ledger), load_manifest(reg, src)
+    gw = Gateway(reg, ledger=ledger)
+    rep = load_manifest(reg, src)
+    #: ⛔⛔ 把**数据根**告诉每一个 CLI 适配器（唯一接线点）。理由：
+    #:    外部实现（如 `scripts/rea_bridge.py`）需要知道"该把证据写哪"，
+    #:    而子进程的环境是**净化**过的（不继承宿主）⇒ 不显式给，它只能
+    #:    退回自己的 `__file__` ⇒ 操作 A 工作区、写进 B 仓库。
+    #:    ⛔ 放在 `mount_capabilities` 而不是各入口：CLI / HTTP / doctor
+    #:       三处都会经过这里，各写一遍就是三份实现（判据两处 = 没有判据）。
+    #: ⛔ `None` ⇒ 走**统一解析**（不是"什么都不给"）：`serve` / `doctor`
+    #:    没有 `--root` 参数，但它们同样需要把根告诉子进程。
+    _root_s = str(root) if root is not None else str(resolve_root())
+    if _root_s:
+        for spec in reg.list():
+            ent = reg.entry(spec.id)
+            ad = getattr(ent, "adapter", None) if ent is not None else None
+            if isinstance(ad, CliAdapter):
+                ad.env_extra.setdefault("AETHER_ROOT", _root_s)
+    return gw, rep
 
 
 # ──────────────────────────────────────────────────────────────────

@@ -119,6 +119,11 @@ def auto_apply(prop: Any, root: Union[str, Path], *,
             "（要自动落盘请让提案器带 edits）"])
 
     files = sorted({str(e.file) for e in edits})
+    #: ⛔⛔ 这里**故意**用严格版 `select_contracts`（选不全就返回空），
+    #:    而不是 `plan_contracts(..., allow_sample=True)`：
+    #:    本函数会**真的往根上写**，抽样通过不足以授权落盘 ——
+    #:    抽样只能出现在"出报告"的路径（`evolve` 的清理 pass / `caps
+    #:    cleanup verify`），那里的结论是 `verified_sampled`（仍 unverified）。
     contracts, why = S.select_contracts(root, files, max_contracts=max_contracts)
     if not contracts:
         #: ⛔ 「没人守着」与「超预算」修法完全不同，原因原样透出。
