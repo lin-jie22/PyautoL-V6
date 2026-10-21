@@ -1323,7 +1323,13 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                              #: ⛔ 默认 False = 历史逐字同口径（env 专属胶囊
                              #:    在 held-out 上 0 增益仍判 overfit）。
                              allow_scoped_commit=bool(
-                                 getattr(args, "allow_scoped_commit", False))))
+                                 getattr(args, "allow_scoped_commit", False)),
+                             #: ⛔ 默认**开**（r64）：它不是实验口径，是
+                             #:    读数正确性 —— 关掉会让"提交"重新把
+                             #:    已存在的状态再记一遍（实测 105/120 次）。
+                             #:    `--no-novelty` 是**看得见的关闭**。
+                             novelty_guard=not bool(
+                                 getattr(args, "no_novelty", False))))
 
     #: ── 断点续跑 ──────────────────────────────────────────────
     #: ⛔ resume 时**不**重新 register_root：root 已经在上一次运行里写进
@@ -1438,6 +1444,10 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "archive_resample": _arch_n,
         "archive_cap": int(getattr(args, "archive_cap", "8") or 8),
         "archive_path": (_archive.path if _archive is not None else ""),
+        #: ⛔ 新颖性守卫换的是**候选来源**（已经在账本里的状态不再提交）⇒
+        #:    必须进账本：开着跑与关着跑，账本里 `harness.commit` 的条数
+        #:    相差一个数量级（实测历史 105/120 是重复状态）⇒ 两者不可比。
+        "novelty_guard": not bool(getattr(args, "no_novelty", False)),
         #: ⛔ 证据粒度换的是**模型看到的世界**（不是判据）⇒ 必须进账本：
         #:    同一份代码下 `exact` 与 `coarse` 提出来的胶囊完全不同，
         #:    不记 ⇒ "这次为什么没被 overfit 拦"事后无从归因。
@@ -2862,6 +2872,16 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--archive-cap", default="8",
                    help="每层前沿保留上限（默认 8）。⛔ 无上限 = 全存 ⇒ "
                         "重采样会退化成「按旧 reward 全局排序」。")
+    e.add_argument("--no-novelty", action="store_true",
+                   help="⛔ **看得见的关闭**（默认开）：新颖性守卫在候选进闸"
+                        "**之前**，用内容地址（`harness_id`）判断这个状态是不是"
+                        "已经存在；已存在就不花闸/评估预算，也不再记一次假提交。\n"
+                        "存在理由（实测 `data/ledger.jsonl`）：120 条 "
+                        "`harness.commit` 里 **105 条（87.5%）**是在重复提交一个"
+                        "已存在的状态，去重后只有 18 个真实状态 —— 同一父节点 + "
+                        "同一胶囊被提交过 **57** 遍。\n"
+                        "关掉它 ⇒ 回到「每轮都从同一个基线重爬、把同一份结果"
+                        "再记一遍」的旧口径（与历史账本可比，但读数是假的）。")
     e.add_argument("--allow-scoped-commit", action="store_true",
                    help="⛔ 新口径（默认关 = 历史逐字同口径）：允许**只改定点"
                         "技能**（`L3.skills.patch:<env>`）的候选提交。\n"

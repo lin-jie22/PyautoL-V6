@@ -60,6 +60,7 @@ aether evolve --rounds 1            # 跑一轮进化（默认 4 个环境，几
 |---|---|---|
 | `improved` | 这一轮有没有候选被接受 | `false` 是**正常**的，不代表坏了 |
 | `commits` | 按裁决拆开：`total` / `generalized` / `scoped` / `no_gate` | **只有 `generalized` 才算变强**；`scoped` 是"闸没资格判它" |
+| `duplicates_blocked` | 这一轮有几个候选因为**状态已存在**而没进闸 | `>0` 说明你的提议器在原地打转（换提议器，不是加班） |
 | `improved=false` + `gate.result.passed=true` | 过了非回归闸，但泛化证据不足 | 说明你的题太少，不是代码坏了 |
 | `cost_s` | 这一轮花了多少秒 | 与历史同口径比，别跨口径比 |
 | `ledger.count` | 这一轮写了多少条事件 | 每条都能 `verify-chain` 复核 |
@@ -127,6 +128,32 @@ aether evolve --resume                             # 断点续跑（r58 起默�
 ⛔ 后三个都是**实验口径**，各自的实测结论（含一个被推翻的假设）见 README
 第 126–127 条。尤其 `--allow-scoped-commit`：它放宽的是一道**闸**，
 账本里 `scoped` 与 `generalize` 永远分开数 —— 放行 ≠ 证明泛化。
+
+### 3.2.1 默认**开着**的那一个：新颖性守卫（`--no-novelty` 关闭）
+
+绝大多数开关默认关是为了与历史可比。这个相反 —— **默认开**，因为它修的
+不是实验口径，是**读数本身**：
+
+```
+data/ledger.jsonl 实测（novelty.blocked_replay，纯诊断）
+  harness.commit                      120 条
+  其中重复提交一个已存在的状态        105 条（87.5%）
+  去重后真实状态                        18 个
+  单条最狠：同一父 + 同一胶囊提交了      57 遍
+```
+
+所以在候选进闸**之前**先算一遍内容地址（`Harness.harness_id`）：已经在
+账本里出现过 ⇒ 不花闸/评估预算，也不再记一次 `harness.commit`。账本里
+改为记 `evolution.novelty_rejected`（带 `n_known_states`），整轮全被拦时
+记 `evolution.no_novelty` + `revert_reason = no_novel_state(...)`。
+
+- 想让账本恢复"每轮都从同一基线重爬、把结果再记一遍"的旧口径：
+  `aether evolve --no-novelty`（`run_config.novelty_guard=false` 可查）
+- 看到 `duplicates_blocked > 0` **不是故障**，是"提议器没有新东西可提"——
+  该换提议器（`--proposer llm`）或换基线（`--warm-start`），不是加班重跑
+
+⛔ 它与"死路冷却"是两件事：冷却管**被拦过的**（基线变了值得重试，有
+probation 出口）；守卫管**已经存在的**（重试结果由内容寻址定死，无出口）。
 
 ⛔ 这条开关**只豁免"0 增益"**，不豁免"掉分"（README 131）：定点胶囊却在
 held-out 上掉了分数，说明它那几处"中性"陪衬真的碰到了别的环境

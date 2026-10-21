@@ -71,6 +71,25 @@ def _data_root() -> Path:
     except Exception:                                      # noqa: BLE001
         return ROOT
 
+
+def _rel_to_root(p: Path) -> str:
+    """把证据路径转成**相对数据根**的短路径（转不了就返回绝对路径）。
+
+    ⛔⛔ 别再用 `relative_to(ROOT)`：那是**代码根**。数据根由
+        `$AETHER_ROOT` / `--root` / 安装态决定，与代码根无关 ——
+        两者一旦不同，`relative_to` 直接抛 `ValueError`，整条能力 rc=1，
+        而报错只说"不在子路径下"（r64 实测：`AETHER_ROOT` 指到临时目录，
+        `doctor` / `analyze` / `capabilities` 三条全崩）。
+    ⛔ 这是 Y109 的第三种形态：前两次是**写错位置**，这次是**读错根**。
+       判据统一成"相对 `_data_root()`"，转不了也不许抛 —— 读数难看
+       比整条能力崩掉好（第 97 条：返回值语义要能区分"没读到"与"坏了"）。
+    """
+    try:
+        return str(Path(p).relative_to(_data_root()))
+    except (ValueError, OSError):
+        return str(p)
+
+
 #: ⛔ 绝对路径，不依赖 PATH：`CliAdapter` 会净化环境变量，而 WorkBuddy /
 #:    定时任务等宿主环境的 PATH 里**不一定**有受管 node（实测过：
 #:    `#!/usr/bin/env node` 那套在 MCP 启动时会失败）。
@@ -643,7 +662,13 @@ def main() -> int:
         "duration_ms": duration_ms,
         "timeout_ms_effective": tms,
         "full_output": {
-            "path": str(fpath.relative_to(ROOT)),
+            #: ⛔⛔ 相对谁？必须相对**数据根**（`_data_root()`），不是代码根
+            #:    （`ROOT`）。此前写死 `relative_to(ROOT)`：数据根与代码根
+            #:    一旦分开（`$AETHER_ROOT` / 安装态 / 指定工作区），
+            #:    这一行直接抛 `ValueError` ⇒ 整条能力 rc=1，
+            #:    而错误信息只说"不在子路径下"，看不出是路径口径错了
+            #:    （Y109 第三次换衣服：前两次是"写错位置"，这次是"读错根"）。
+            "path": _rel_to_root(fpath),
             "bytes": len(out.encode("utf-8")),
             "sha256": _sha256_file(fpath),
         },

@@ -42,6 +42,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 #: ⛔ 老化（跨轮退化）检测与 `runtime` 轨迹记账，此前**从未**被生产链路
 #:    import —— 兑现审计实测：它们只活在 demo 脚本里。这里接上主流程。
 from . import checkpoint as _cp
+from . import novelty as _novelty
 from .aging import RoundTrace
 from .generalization import VERDICTS
 from .genome import Capsule, Harness, apply_capsule, blast_radius, diff
@@ -311,6 +312,14 @@ class RoundReport:
     #: ⛔ 单独计数：没有它，"这一轮有没有在收拾自己的产出"在报告里查不到
     #:    —— 而那正是"努力分配"要被看见的那个数。
     cleanup_proposed: int = 0
+    #: 本轮被**新颖性守卫**拦下的候选数（状态已存在 / 空变异）。
+    #: ⛔ 必须与 `gate_reject` 分开计数：闸拦是"试了但不够好"（值得换招），
+    #:    状态重复是"这条根本不用试"（换招也无用，因为结果由内容寻址定死）。
+    #:    混在一起会把"没新东西可做"读成"候选质量差"。
+    duplicates_blocked: int = 0
+    #: 被拦下来的明细（胶囊名 / 状态 id / 成因）。⛔ 只留前 12 条：这是
+    #: 读数不是台账，全量在账本 `evolution.novelty_rejected` 里。
+    duplicates: List[Dict[str, Any]] = field(default_factory=list)
     #: 本轮基线 harness 的**自指负载**（基因组侧死条目数）。-1 = 没扫出来。
     #: ⛔ 与 `load_gain` 是两件事：这是**存量**，那些是**增量**。
     #:    只看增量 ⇒ 不知道债是在减少还是在增加。
@@ -367,6 +376,9 @@ class RoundReport:
                 "facts_promoted": self.facts_promoted,
                 #: 减负轴的两个读数：本轮提了几个清理候选 + 清理前的存量
                 "cleanup_proposed": self.cleanup_proposed,
+                #: 新颖性守卫的读数：这一轮有几个候选因为"状态已存在"而没试
+                "duplicates_blocked": self.duplicates_blocked,
+                "duplicates": self.duplicates,
                 "genome_load_before": self.genome_load_before,
                 "heldout_grow": self.heldout_grow}
 
@@ -473,6 +485,27 @@ class EvolutionConfig:
     #:    `providers.py` 从 12 涨到 13 ⇒ 唯一可证明的提案当场变未验证）。
     #:    硬编码在这里会让契约测试依赖"仓库当前恰好长什么样"。
     max_source_contracts: int = 12
+    # ── 新颖性守卫（r64）──────────────────────────────────────────
+    #: ⛔⛔ **默认开**：这不是实验口径，是**读数正确性**。
+    #:
+    #:    实测（`data/ledger.jsonl`，`novelty.blocked_replay` 纯诊断）：
+    #:        `harness.commit` 120 条
+    #:        历史上**已经存在**的状态被重复提交 **105** 次（87.5%）
+    #:        去重后真实状态 18 个
+    #:    最狠的一条：同一个父节点 + 同一个胶囊，被提交了 **57** 遍。
+    #:
+    #:    ⇒ 账本写"提交 120 次"，事实是"产生了 12 个新状态"。看账本的人
+    #:      会以为自己变强了 120 次 —— 这是**读数撒谎**，不是效率问题。
+    #:
+    #: ⛔ 为什么此前没人拦：`archive.add` 的重复检查在**闸之后**（浪费已
+    #:    发生，且只去重"已入档的"）；`_in_cooldown` 只管"被拦过的"，
+    #:    提交成功的恰恰不在它视野里。
+    #: ⛔ 判据用**内容地址**（`Harness.harness_id`），不另做指纹：
+    #:    另算签名要回答"rationale 算不算""基因顺序算不算"，而这两个问题
+    #:    的答案都会与内容寻址不一致（第 99 条）。
+    #: ⛔ 与冷却**不重叠**：冷却管"被拦过"（有 probation 出口），本项管
+    #:    "已存在"（重试结果由内容寻址决定，恒等，无出口）。
+    novelty_guard: bool = True
     dev_pass_threshold: float = 0.0     # 发展集 reward 阈值（0=全部计入）
     #: 提交后做一次**反事实层归因**（哪一层带来了这次提升）。
     attribute_layers: bool = True
@@ -760,6 +793,12 @@ class EvolutionLoop:
         #:    ⛔ 刻意**不**在这里自动构造（与 `cleanup` 相反）：存档会
         #:    改变候选来源，默认开就等于悄悄换了实验口径。
         self.archive = archive
+        #: 新颖性守卫的事实源（账本里的"已存在状态"集合，增量读）。
+        #: ⛔ 惰性构造：`novelty_guard=False` 时不建、也不读账本 ⇒ 关掉
+        #:    就等于零开销、零行为（不是"建了不用"的假关闭）。
+        #: ⛔ 挂在实例上而不是每轮新建：新建 = 每轮全扫一遍账本
+        #:    （O(轮 × 账本)），而它正需要增量。
+        self._seen_states: Optional[_novelty.SeenStates] = None
         #: 跨轮纵向读数（老化检测的事实源，可投影到账本）。
         self.aging_traces: List[RoundTrace] = []
         #: 内存态 run 账（**不依赖 store**）：机制正确性不该依赖外部存储存在。
@@ -1292,6 +1331,18 @@ class EvolutionLoop:
             out["harness_id"] = new_h.harness_id
             out["world_facts"] = new_h.world_facts
         return out
+
+    def _seen(self) -> _novelty.SeenStates:
+        """取（必要时建）新颖性守卫的「已存在状态」集合。
+
+        ⛔ 挂在实例上 + 增量读：每轮新建 = 每轮全扫账本（O(轮 × 账本)），
+           而账本会到十万行。失效判据（文件变小 / 无新增却被写过 /
+           链接不上）由 `SeenStates` 自己做，并在 `stats` 里留痕。
+        """
+        if self._seen_states is None:
+            self._seen_states = _novelty.SeenStates()
+        self._seen_states.refresh(self.ledger)
+        return self._seen_states
 
     def _deadend_map(self) -> Dict[str, int]:
         """从账本统计每个 (候选, 环境对) 的**连续**被拦次数。
@@ -2061,6 +2112,12 @@ class EvolutionLoop:
         #: 死路账：**从账本读**（事实源），不是进程内状态 —— 否则换一次
         #:    运行就"忘了"这条死路，冷却形同虚设。
         deadend = self._deadend_map()
+        #: ── 3d) 新颖性守卫的**事实源**（r64）────────────────────────
+        #:    ⛔ 在**候选循环之前**读一次，循环内只查内存集合：
+        #:       每候选读一遍账本 = O(候选 × 账本)，而账本会到十万行。
+        #:    ⛔ 账本是事实源（不是进程内缓存）：105/120 次重复提交是
+        #:       **跨运行**发生的，内存集合挡不住。
+        seen = self._seen() if self.cfg.novelty_guard else None
         env_pair = self.heldout.env_pair if self.heldout is not None else "unknown"
         cands: List[Candidate] = []
         for cap in capsules:
@@ -2137,8 +2194,45 @@ class EvolutionLoop:
                              "error": f"{type(e).__name__}: {e}"},
                             actor="evolution")
                 continue
+            #: ── 3e) **新颖性守卫**（r64）────────────────────────────
+            #:    ⛔⛔ 为什么必须在 `apply_capsule` **之前**：判据是内容地址，
+            #:        `apply_capsule` 是纯函数（无 runner / 无 IO）⇒ 在这里
+            #:        判定是**免费**的；一旦进了闸，评估成本已经付掉了。
+            #:        实测 105/120 次提交是在重复一个已存在的状态 —— 那些
+            #:        闸与 held-out 全都是白跑的。
+            #:    ⛔ 与冷却严格分工：冷却管"被拦过的"（有 probation 出口，
+            #:        因为基线变了可能值得重试）；本项管"已存在的"（重试
+            #:        结果由内容寻址决定，恒等 ⇒ 无出口）。
+            #:    ⛔ `apply_failed` **不在这里吞**：回原路径，让
+            #:        `Candidate.reason` 带上异常名（那是另一个事实）。
+            cand_h: Optional[Harness] = None
+            if seen is not None:
+                nv = _novelty.judge(h, cap, seen)
+                if nv.blocks:
+                    rep.duplicates_blocked += 1
+                    if len(rep.duplicates) < 12:
+                        rep.duplicates.append({
+                            "capsule": cap.name, "kind": nv.kind,
+                            "harness_id": nv.harness_id, "detail": nv.detail})
+                    cands.append(Candidate(
+                        capsule_name=cap.name, harness_id=nv.harness_id,
+                        reason=f"duplicate_state:{nv.kind}"))
+                    self.ledger.append(
+                        "evolution.novelty_rejected",
+                        {"round_no": round_no, "capsule": cap.name,
+                         "parent_id": h.harness_id,
+                         "harness_id": nv.harness_id, "kind": nv.kind,
+                         "detail": nv.detail,
+                         "n_known_states": len(seen),
+                         "note": "该状态已存在（内容地址相同）⇒ 不为它"
+                                 "花闸/评估预算；账本不再记一次假提交"},
+                        actor="evolution")
+                    continue
+                if nv.harness is not None:
+                    cand_h = nv.harness
             try:
-                cand_h = apply_capsule(h, cap)
+                if cand_h is None:
+                    cand_h = apply_capsule(h, cap)
             except Exception as e:  # noqa: BLE001
                 cands.append(Candidate(capsule_name=cap.name, harness_id="",
                                        reason=f"apply_failed:{type(e).__name__}: {e}"))
@@ -2400,11 +2494,34 @@ class EvolutionLoop:
 
         # 8) 提交 / 回滚 —— 两种结果都进账本
         if best is None:
-            #: ⛔ 「没提交」有两种截然不同的含义，不能合并成一句
-            #:    `no_candidate_passed`：被闸拦下（失败，值得重试）与发展集
-            #:    已到顶（正常终止，再跑也是空转）。混在一起 ⇒ 10 轮压力跑
-            #:    里 r2–r10 全部长成同一个样子，看不出系统其实早就没有
-            #:    可提升空间了（实测：base 恒 1.0 / advantage 恒 0.000）。
+            #: ⛔ 「没提交」有三种截然不同的含义，不能合并成一句：
+            #:    ① 被闸拦下（失败，值得重试）；
+            #:    ② 发展集已到顶（正常终止，再跑也是空转）；
+            #:    ③ **全部候选都是已存在的状态**（r64；换招也无用 ——
+            #:       结果由内容寻址定死）。
+            #:    混在一起 ⇒ 10 轮压力跑里 r2–r10 全部长成同一个样子。
+            if (self.cfg.novelty_guard and rep.duplicates_blocked > 0
+                    and rep.duplicates_blocked == len(cands)):
+                rep.idle = True
+                rep.revert_reason = (
+                    f"no_novel_state（{rep.duplicates_blocked} 个候选的状态"
+                    f"全部已存在 ⇒ 再跑也是空转；换基线或换提议器才有新状态）")
+                self.ledger.append(
+                    "evolution.no_novelty",
+                    {"round_no": round_no, "harness_id": h.harness_id,
+                     "n_blocked": rep.duplicates_blocked,
+                     "blocked": rep.duplicates,
+                     "n_known_states": len(seen) if seen else 0,
+                     "note": "新颖性守卫拦下全部候选 ⇒ 与'到顶'同族："
+                             "不是失败，是这一轮没有新状态可达"},
+                    actor="evolution")
+                rep.ledger_seqs.append(self.ledger.append(
+                    "harness.revert",
+                    {"round_no": round_no, "harness_id": h.harness_id,
+                     "reason": rep.revert_reason,
+                     "candidates": [c.to_dict() for c in cands]},
+                    actor="evolution").seq)
+                return rep
             sat = self._saturation(base_vs, scored, overfit_reason, h,
                                    base_reward)
             if sat is not None:
@@ -2430,6 +2547,10 @@ class EvolutionLoop:
         new_h = apply_capsule(h, next(cp for cp in capsules
                                       if cp.name == best.capsule_name))
         rep.committed = new_h.harness_id
+        #: ⛔ 本轮刚诞生的状态要**立刻**进集合：否则同一轮里第二个候选
+        #:    走到同一个状态时仍会被判"新"（同一轮内的重复同样存在）。
+        if seen is not None:
+            seen.add(new_h.harness_id)
         rep.ledger_seqs.append(self.ledger.append(
             "harness.commit", {
                 "round_no": round_no, "harness_id": new_h.harness_id,

@@ -61,12 +61,45 @@ def ck(name, cond, detail=""):
     return bool(cond)
 
 
+#: ⛔⛔ 桥的**证据根**必须指向临时目录（r64 实测踩到）。
+#:    桥内部走 `paths.resolve_root()`，而直接调用（不经 Gateway）时
+#:    既没有 `--root` 也没有 `AETHER_ROOT` ⇒ 命中 ③「仓库」分支
+#:    ⇒ 一次契约跑完往**生产仓库** `data/rea/` 写 6 个证据文件
+#:    （实测 2026-10-21 21:42：analyze / doctor / capabilities /
+#:     inspect_android×2 / analyze_javascript 各一个）。
+#:    ⛔ 修法不是改桥（分支③对开发态是对的），而是**给子进程一个根**：
+#:      ② `$AETHER_ROOT` 优先级高于 ③，且它正是"脚本/CI 说了算"那一支。
+_EVIDENCE_HOME = tempfile.mkdtemp(prefix="rea_evidence_")
+
+
+def _repo_rea_files():
+    d = ROOT / "data" / "rea"
+    return sorted(p.name for p in d.glob("*.json")) if d.is_dir() else []
+
+
+def _evidence_path(rel) -> Path:
+    """把信封里的 `full_output.path` 还原成真实路径。
+
+    ⛔ 它是**相对数据根**的（r64 起桥改成 `relative_to(_data_root())`），
+       而本契约把 `AETHER_ROOT` 指向 `_EVIDENCE_HOME` ⇒ 必须相对它拼。
+       原写法 `ROOT / path`（代码根）在数据根分离后一律 `is_file()=False`
+       ⇒ B4 说"文件不存在"、G5–G10 读到空 env ⇒ 六条假红。
+       ⛔ 这正是"数据根 ≠ 代码根"的第四次反扑：**读的一方**也要认同一个根。
+    """
+    p = Path(str(rel or ""))
+    return p if p.is_absolute() else (Path(_EVIDENCE_HOME) / p)
+
+
 def run_bridge(argv, stdin_obj):
     """跑桥，返回 (rc, stdout 解析结果 or None, stderr)。"""
+    import os as _os
+    env = dict(_os.environ)
+    env["AETHER_ROOT"] = _EVIDENCE_HOME
     p = subprocess.run(
         [PY, str(BRIDGE)] + list(argv),
         input=json.dumps(stdin_obj).encode("utf-8"),
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600,
+        env=env,
     )
     out = p.stdout.decode("utf-8", "replace").strip()
     try:
@@ -116,6 +149,11 @@ def main() -> int:
     t0 = time.time()
     print("=" * 60)
     print("契约：REA 桥（外部逆向工具 → V6 能力）")
+    #: ⛔⛔ 整份契约的**生产零增长**判据（r64）：不是"某一次调用没写"，
+    #:    而是"跑完这一整份，生产仓库 `data/rea/` 一个文件都没多"。
+    #:    上一轮只钉住了 C 组那一次 `--root`（C6），而 A 组是**直接调桥**、
+    #:    不经 Gateway ⇒ 绕过了 `--root` 注入 ⇒ 每次验收仍写 6 个文件。
+    _repo_rea0 = _repo_rea_files()
 
     if not BRIDGE.is_file():
         print(f"  ⛔ 找不到桥脚本 {BRIDGE}")
@@ -181,7 +219,7 @@ def main() -> int:
                    if got != want}
             ck(f"B3 埋点逐项对拍（{len(expect)} 项）", not bad, str(bad))
             fo = out.get("full_output") or {}
-            fpath = ROOT / str(fo.get("path", ""))
+            fpath = _evidence_path(fo.get("path"))
             ck("B4 全量落盘文件存在且 sha256 与信封一致",
                bool(fo.get("path")) and fpath.is_file()
                and fo.get("bytes") == fpath.stat().st_size,
@@ -499,7 +537,7 @@ def main() -> int:
 
             env: dict = {}
             if isinstance(out, dict):
-                fp = ROOT / str((out.get("full_output") or {}).get("path", ""))
+                fp = _evidence_path((out.get("full_output") or {}).get("path"))
                 if fp.is_file():
                     env = json.loads(fp.read_text(encoding="utf-8"))
             nr = env.get("normalized_result") or {}
@@ -624,7 +662,7 @@ def main() -> int:
                 ["--command", "analyze"],
                 {"path": str(cbin), "provider": "ghidra"})
             if (out_j or {}).get("ok"):
-                fp = ROOT / str((out_j.get("full_output") or {}).get("path", ""))
+                fp = _evidence_path((out_j.get("full_output") or {}).get("path"))
                 full = json.loads(fp.read_text(encoding="utf-8")) if fp.is_file() else {}
                 nr = full.get("normalized_result") or {}
                 subj = full.get("subject") or {}
@@ -697,6 +735,12 @@ def main() -> int:
                 print(f"       ↳ 引擎缺失/超时，J2–J12 无法验证：{dg.get('code')}")
 
     print()
+    #: ⛔⛔ 收尾判据：整份契约跑完，生产仓库零增长。⛔ 必须放在**所有组之后**：
+    #:    放在 C 组里只能证明"那一次调用没写"，A 组（直接调桥）照样写。
+    _growth = sorted(set(_repo_rea_files()) - set(_repo_rea0))
+    ck("Z1 ⛔⛔ 整份契约跑完，生产仓库 `data/rea/` **零增长**"
+       "（证据根由 `$AETHER_ROOT` 指向临时目录）",
+       not _growth, f"新增={_growth[:5]}")
     print("=" * 60)
     if FAILS:
         print(f"⛔ {len(FAILS)} 条失败：")
