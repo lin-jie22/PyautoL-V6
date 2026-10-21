@@ -43,6 +43,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 #:    import —— 兑现审计实测：它们只活在 demo 脚本里。这里接上主流程。
 from . import checkpoint as _cp
 from .aging import RoundTrace
+from .generalization import VERDICTS
 from .genome import Capsule, Harness, apply_capsule, blast_radius, diff
 from .judge import identity as _judge_identity
 from .ledger import Ledger
@@ -1037,6 +1038,25 @@ class EvolutionLoop:
         p = ev.payload or {}
         key = f"{p.get('capsule', '')}|{p.get('env_pair', 'unknown')}"
         v = str(p.get("verdict"))
+        #: ⛔⛔ **读不懂的裁决单独计数**（2026-10-21 实测，README 134）。
+        #:
+        #:    坑在 `str()`：字段缺失时 `str(None)` == `"None"` —— 它既不是
+        #:    `generalize`，也不在 `NO_EVIDENCE_VERDICTS` ⇒ 原实现把它
+        #:    **静默算成「被拦 +1」**（污染冷却 streak，且不报错）。
+        #:    判据必须拿**原始值**判：`in 集合` / `is None`，不能先 `str()`。
+        #:
+        #:    ⛔ 现实里真会缺：同一裁决在 `gen.probe` 里是扁平
+        #:      `payload.verdict`，在 `harness.commit` 里是嵌套
+        #:      `payload.generalization.verdict` —— 两种形状并存（实测
+        #:      140/140 与 0/120 互补），写入方一漂移，这里就会读到 None。
+        #:
+        #:    ⛔ 处置：**只让异常可见，不改判据**。`streak` 照旧 +1
+        #:      （fail-closed，历史决策可复现）；`unknown` 计数器让它
+        #:      不再隐形。要改 streak 语义是另一件事，得有自己的交叉表。
+        if p.get("verdict") not in VERDICTS:
+            self._ensure_deadend_stats()
+            self._deadend_stats["unknown"] = (
+                self._deadend_stats.get("unknown", 0) + 1)
         if v in self.NO_EVIDENCE_VERDICTS:
             #: ⛔ 单独计数（第 16 条）：「因看不清而没判」与「判了没过」
             #:    是两件事，合并成一个数 ⇒ 出口到底被用了几次永远读不出来。

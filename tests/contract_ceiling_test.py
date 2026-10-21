@@ -719,6 +719,71 @@ def main() -> int:
        "if best is not None and self.heldout is not None" in src,
        "挂载点变了这条要跟着改")
 
+    print("\n== T11 组：读不懂的裁决 ⇒ 单独计数（不许静默当成「被拦」） ==")
+    #: ⛔ 起因（2026-10-21 实测）：`gen.probe` 的裁决是扁平 `payload.verdict`，
+    #:    `harness.commit` 的是嵌套 `payload.generalization.verdict` —— **同一
+    #:    概念两种形状**。消费方猜错键会静默拿到 140/140 或 120/120 个 `None`。
+    #:    而 `_deadend_accum` 的写法是 `str(p.get("verdict"))`：
+    #:    `str(None)` == `"None"`，既不是 `generalize` 也不在
+    #:    `NO_EVIDENCE_VERDICTS` ⇒ **静默计入「被拦 +1」**（污染冷却 streak）。
+    #:    T1–T5 覆盖了 inconclusive / generalize / 键分离，**没有一条**测这个。
+
+    class _RawEv:
+        kind = "gen.probe"
+
+        def __init__(self, payload):
+            self.payload = payload
+
+    KEY9 = "add_skill:x|a->b"
+    loop9 = _loop()
+    streak9: dict = {}
+    #: 字段**缺失**（不是空串、不是 None，是整个键不存在）
+    loop9._deadend_accum(_RawEv({"capsule": "add_skill:x",
+                                 "env_pair": "a->b"}), streak9)
+    st9 = loop9._deadend_stats or {}
+    ck("T11.1 ⛔⛔ 缺 `verdict` 键 ⇒ 记进 `unknown`（不再静默当「被拦」）",
+       st9.get("unknown") == 1, f"stats={st9}")
+    ck("T11.1b 且 `streak` 仍 +1（fail-closed 口径**不改**，决策可复现）",
+       streak9.get(KEY9) == 1, f"streak={streak9}")
+
+    loop9b = _loop()
+    streak9b: dict = {}
+    loop9b._deadend_accum(_Ev("GENERALIZE", "add_skill:x", "a->b"), streak9b)
+    st9b = loop9b._deadend_stats or {}
+    ck("T11.2 封闭集合外的串（`GENERALIZE` 不折叠大小写）⇒ 同样记 unknown",
+       st9b.get("unknown") == 1 and streak9b.get(KEY9) == 1,
+       f"stats={st9b} streak={streak9b}")
+
+    #: ⛔ 反证：正常裁决**不许**进 unknown（否则 T9.1/T9.2 可能只是恒真）
+    loop9c = _loop()
+    loop9c._deadend_accum(_Ev("overfit", "add_skill:x", "a->b"), {})
+    loop9c._deadend_accum(_Ev("inconclusive", "add_skill:x", "a->b"), {})
+    st9c = loop9c._deadend_stats or {}
+    ck("T11.3 ⛔ 反证：`overfit` / `inconclusive` 都不计入 unknown",
+       not st9c.get("unknown"), f"stats={st9c}")
+
+    #: 读数（不是断言）：生产账本里到底出现过几次「读不懂」
+    led9 = ROOT / "data" / "ledger.jsonl"
+    if led9.exists():
+        import json as _json
+        from aether.generalization import VERDICTS as _VERDICTS
+        bad = tot = 0
+        for line in led9.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or '"gen.probe"' not in line:
+                continue
+            try:
+                ev = _json.loads(line)
+            except Exception:                            # noqa: BLE001
+                continue
+            if ev.get("kind") != "gen.probe":
+                continue
+            tot += 1
+            if (ev.get("payload") or {}).get("verdict") not in _VERDICTS:
+                bad += 1
+        ck("T11.4 生产账本读数：`gen.probe` 里读不懂的裁决条数（只报数）",
+           True, f"{bad}/{tot}")
+
     print()
     print("=" * 60)
     if FAILS:

@@ -4601,6 +4601,41 @@ r62 的结论是「`OrderedSet` 那种模块没法自动拉覆盖率，只能人
 上，多出来的 20 条一条都没碰上。补上 `E == E`（撞 `__eq__` 反转）之后
 才对 0.1 → 0.2。**契约里必须有两种以上的变异类型**，否则"够用"是假的。
 
+## 134. ⛔⛔ `str()` 会把「字段缺失」变成**合法字符串**
+
+`evolution._deadend_accum` 的原写法：
+
+```python
+v = str(p.get("verdict"))
+if v in self.NO_EVIDENCE_VERDICTS: ...   # {"inconclusive"}
+if v == "generalize": streak[key] = 0
+else: streak[key] = streak.get(key, 0) + 1
+```
+
+字段缺失时 `str(None)` == `"None"` —— 它既不是 `generalize`，也不在
+`NO_EVIDENCE_VERDICTS` ⇒ **静默计入「被拦 +1」**。不报错、不告警，
+只是冷却 streak 被污染物、某条候选被误判成死路。
+
+⛔ 判据必须拿**原始值**判（`in 集合` / `is None`），不能先 `str()` 再比。
+只有"要写进日志/拼接"时才 `str()`，那是格式化，不是判定。
+
+**这个洞现实里真会踩**，因为同一条裁决在账本里有**两种形状**（实测
+7719 条事件）：
+
+| 事件 | 裁决字段 | 另一形状 |
+|---|---|---|
+| `gen.probe`（140 条） | `payload.verdict`（扁平） | `generalization` 键 **140/140 不存在** |
+| `harness.commit`（120 条） | `payload.generalization.verdict`（嵌套） | 扁平 `verdict` **0/120** |
+
+⇒ 消费方猜错键**不会报错**，只会拿到一整列 `None`。所以"同一个概念
+在账本里只有一种形状"是必须显式维持的纪律，不是自然事实。
+
+处置：**只让异常可见，不改判据** —— `unknown` 计数器 +1，`streak` 照旧
++1（fail-closed，历史决策可复现）。要改 streak 语义是另一件事。
+契约 `contract_ceiling_test` 的 T11 组 4 条钉住（缺失 / 未知串 /
+反证 `overfit` 不涨 / 生产读数 0/140）。T1–T5 原来只覆盖
+`inconclusive`、`generalize`、键分离，**没有一条**测"读不懂"。
+
 ## 6. 与 V5 的关系
 
 V6 不是 V5 的替代品，是它的**结构化重写**：

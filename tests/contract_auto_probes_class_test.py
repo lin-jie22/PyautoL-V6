@@ -31,6 +31,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 FAILS = []
 
+#: ⛔ 必须声明：不声明 ⇒ `check` 会报「未声明支持的模式」并只按默认模式跑一次。
+#:    本契约不跑 `aether` 子进程、不依赖 `--e2e` 开关，故只有默认模式。
+SUPPORTED_MODES = ("default",)
+
 
 def ck(name: str, ok: bool, detail: str = "") -> None:
     print(f"{'✅' if ok else '❌'} {name}" + (f"  {detail}" if detail else ""))
