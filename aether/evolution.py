@@ -2462,11 +2462,34 @@ class EvolutionLoop:
                     overfit_reason = pr0.reason
                     cand0.accepted = False
                     rep.generalization = pr0.to_dict()
-                    #: ⛔ 同轮试过但没过的，理由要能区分"我排第二，没轮到"
-                    #:    与"我也被拦了" ⇒ 否则观测侧会把它们读成"没探测"。
-                    for cand in queue:
-                        if cand is not cand0:
-                            cand.accepted = False
+                    #: ⛔ 其它候选的 `accepted=False` + 「没轮到/也被拦」的
+                    #:    区分统一在下面的「not_probed」那段做（它遍历
+                    #:    `eligible` 全体，含这里 `queue` 之外的候选）。
+
+        #: ⛔⛔ 「没被闸看过」不许与「被闸拦了」长得一样（r65 实测）。
+        #:    `eligible` 是按发展集排序的**全部**准入候选，而 7.5 只让前
+        #:    `gate_tries`（默认 1）个去闯泛化闸 ⇒ 排在后面的从没被评估过，
+        #:    它们的 `reason` 一直是空字符串、「accepted=False」也与被拦的
+        #:    那个完全一样（第 25 条：一个值两种含义）。
+        #:    ⛔ 这条不是"可读性改善" —— 实测同一个数据根、同一个
+        #:       `--proposer llm`：`gate_tries=1` ⇒ 0 提交且第二名 `reason=""`；
+        #:       `--gate-tries 2` ⇒ 它判 `generalize` **并被提交**。也就是说
+        #:       空 reason 盖住的是一个**真实存在的提交**，而观测侧看到的是
+        #:       "这条也试过了、也被拦了"。
+        #:    ⛔ 这里**只写读数，不改任何判据**：谁去闯闸由 7.5 决定，这段
+        #:       不参与 ⇒ 历史行为逐字不变，只是终于说得出来。
+        _tries = max(1, int(getattr(self.cfg, "gate_tries", 1) or 1))
+        _tail = ("本轮没装 held-out ⇒ 没有泛化闸可闯"
+                 if self.heldout is None else
+                 f"本轮只让前 {_tries} 个闯泛化闸"
+                 f"（开 --gate-tries {len(eligible)} 可让它上）")
+        for _rank, cand in enumerate(eligible, 1):
+            if cand.accepted:
+                continue          #: 已提交的那个：理由由判据写好，不许覆盖
+            if not cand.reason:
+                cand.reason = (f"not_probed(rank={_rank}/{len(eligible)},"
+                               f" tries={_tries}) ⇒ {_tail}")
+            cand.accepted = False
 
         rep.candidates = cands
 

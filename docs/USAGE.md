@@ -122,6 +122,7 @@ aether evolve --resume                             # 断点续跑（r58 起默�
 | `--archive-resample N` | **候选来源** | `0` 关 | 从分层存档取回 ≥N 个旧解重测 |
 | `--proposer llm` | **提议器** | `template` | 真模型生成候选（闸一个不少） |
 | `--evidence coarse` | **模型看到的证据粒度** | `exact` | 只给失效类别与数量，不给检查名 |
+| `--gate-tries N` | **每轮让几个候选闯泛化闸** | `1` | 排第一的被拦时，让第 2…N 名也试试（见下） |
 | `--ho-implication` | **给模型的规则文案** | 关 | 补一句「只在 `patch:<env>` 生效 ⇒ 必然 0 增益」的推论 |
 | `--allow-scoped-commit` | **泛化闸的适用范围** | 关 | 只碰定点技能的候选可提交（判 `scoped`） |
 
@@ -173,6 +174,30 @@ held-out 上掉了分数，说明它那几处"中性"陪衬真的碰到了别的
 （跑之前的**意图**：`kind` / `model` / `provider`）和 `evolution.llm_result`
 （跑完之后的**实际**：`error` / `raw_len` / `propose_calls`）。端点连不上时
 前者照样写 `kind="llm"`，只有后者的 `error` 非空 —— 两者缺一不可。
+
+#### 3.4.1 `--gate-tries`：不是"多试几次"，是**换不等于放弃**
+
+默认每轮只让 `eligible` 里排第一的那个去闯泛化闸（`gate_tries=1`，为了与
+历史逐字可比）。它被拦 ⇒ 这一轮结束 —— 哪怕后面还站着一条真解。
+
+实测（同一数据根、同一 `--proposer llm`，三次同参数运行**逐字可复现**）：
+
+```
+add_textscore_skill  adv=+1.5882  overfit（发展集 +1.0 / held-out +0.0）  ← 第 1 名
+fix_literals_skill   adv=+0.1222  （没被评估过）                          ← 第 2 名
+
+--gate-tries 2  ⇒ fix_literals_skill 判 generalize，提交。
+```
+
+⇒ **排第二的候选会在账本里自报 `not_probed(rank=2/2, tries=1)`**，告诉你
+它没轮到、以及该怎么让它上。看到这个记号时先别急着换提议器 —— 先把
+`--gate-tries` 提到 `n_eligible`（`gen.probe` 事件里记着它）。
+
+⛔ `not_probed` 是**读数不是裁决**：它不进 `VERDICTS`，也不产生
+`gen.probe`（没被评估 ⇒ 没有裁决可记）⇒ 不会污染死路账。
+
+⛔ 代价是线性的：每个多出来的 try 都要真跑一遍 held-out 评测。这是"拿
+算力换召回"，与"放宽判据"是两件事 —— 闸一个字没松。
 
 一轮 `evolve` 内部是五步，每步都落账本：
 
