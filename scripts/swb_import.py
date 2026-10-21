@@ -279,11 +279,26 @@ def auto_probes(src: str) -> List[Dict[str, str]]:
        这与 V5 的结论同源：**产率瓶颈是判据覆盖率，不是代码真假**。
        判据覆盖率上去了，同样的源码立刻就有产率。
 
-    能自动生成的只有两类（其余需要人给输入，不猜）：
+    能自动生成的三类：
       · 模块级**常量赋值**（`NAME = <可 JSON 序列化的值>`）⇒ 探针 `NAME`
       · 模块级**无参函数** ⇒ 探针 `foo()`
+      · **类**（`_CLASS_TEMPLATES` + `_CLASS_OBSERVERS`，见下）
     ⛔ 有参函数**不生成**：猜参数等于用我编的行为当判据（与"手写 expect"
        同一个错）。宁可覆盖率低，不可判据不真。
+
+    ═══ 为什么类可以模板化，有参函数不行（这两件事看起来一样，其实不一样）═══
+
+    判据的真值**从来不来自我**：`auto_probes` 只枚举**候选表达式**，
+    真值一律由 `calibrate_coverage` 拿 gold 源码真跑得出，求值失败的
+    候选当场丢弃 ⇒ 模板给的夹具就算不合适，也只会被丢掉，**不会留下假判据**。
+    也就是说模板扩大的是**候选集**，验收标准一点没松。
+
+    纯类库模块（r62 的 `OrderedSet`）没有常量、也没有无参函数 ⇒
+    旧路径 0 条 ⇒ 7 条判据配 22K 源码 ⇒ `yield=0.0`。
+    r62 的结论是"只能人给问法"—— 本段把那 5 条人手写的同类探针
+    （`list(OrderedSet([1, 2, 3]))` / `len(...)` / `... in ...`）
+    变成模板生成，且**不含**任何带内存地址的表达式（`repr`/`str`/`id`：
+    那种"判据"两次求值就自相矛盾，变异体永远被判失败）。
     """
     import ast
     out: List[Dict[str, str]] = []
@@ -308,7 +323,81 @@ def auto_probes(src: str) -> List[Dict[str, str]]:
                 and not node.args.kwonlyargs and node.name.isidentifier() \
                 and not node.name.startswith("_"):
             out.append({"name": f"fn_{node.name}", "expr": f"{node.name}()"})
+        elif isinstance(node, ast.ClassDef) and node.name.isidentifier() \
+                and not node.name.startswith("_"):
+            out.extend(_class_probes(node.name))
+    return out[:AUTO_PROBES_CAP]
+
+
+#: 构造模板。`%s` 处填类名。
+#: ⛔ 第一项是**零参**构造（`__init__` 全默认时确定成立，不是猜）；
+#:    其余是**标准夹具枚举** —— 合不合适不在这里判，交给 calibrate 用真值筛。
+_CLASS_TEMPLATES: Tuple[str, ...] = (
+    "%s()",
+    "%s([])",
+    "%s([1, 2, 3])",
+    "%s('ab')",
+    "%s(0)",
+    "%s('')",
+)
+
+#: 单目观察模板。`%s` 处填**构造表达式**。
+#: ⛔ 只收"不引入新输入"的纯观察，且必须排除两类"看起来能用"的：
+#:    · `repr` / `str` / `id` —— 把内存地址写进 expect ⇒ 两次求值就不同；
+#:    · `tuple(...)` —— expect 要落进 JSON，JSON 没有 tuple：
+#:      `tuple([1,2,3])` 存成 `[1,2,3]`，执行器求回 `(1,2,3)` ⇒ **恒不相等**。
+#:      实测代价（r63）：25 条自动探针里 5 条基线就是红的
+#:      （`got=(1, 2, 3) expect=[1, 2, 3]`）—— 而且只在我自己的求值器里看不出来。
+#:      ⇒ 判据"能生成"不等于"能落盘用"（同规则 109）。
+#: `list(reversed(...))` 是刻意留的：迭代协议（`__reversed__`/`__iter__`）
+#: 只在被真消费时才暴露，`reversed(x)` 单独求值返回的是迭代器（不可序列化，
+#: 会被丢弃）⇒ 必须用 `list(...)` 包一层才有覆盖率。
+#:
+#: ⛔ `%s == %s` 那两个同表达式：`__eq__` 里的比较符只有**两边相等**时才
+#:    暴露（反转成 `!=` 后返回 False）。只用单目观察的话，`__eq__` 这一整
+#:    个维度一条都撞不到 —— 实测：196 行夹具上 22 条判据的 `yield` 与
+#:    2 条**完全相同**（0.1 vs 0.1），因为唯一能撞的变异点都在 `__eq__` 里。
+#:    ⛔ 这也是"多生成几条"与"多覆盖一个维度"的分界：数量涨了不算，
+#:    撞不到的那一类仍然撞不到。
+_CLASS_OBSERVERS: Tuple[str, ...] = (
+    "len(%s)",
+    "list(%s)",
+    "bool(%s)",
+    "list(reversed(%s))",
+    "%s == %s",
+    #: 索引是**协议**（`__getitem__`），够得着。⛔ 普通方法（`last()`/
+    #: `snapshot()`）**不碰** —— 调用它们要传参，那就是猜。
+    #: ⛔ 诚实标注：196 行夹具上这 2 个模板**没有新增撞到的点位**
+    #:    （剩余 8 个全在 `any_of`/`all_of`/`count_if` 这类普通方法里，
+    #:    要传谓词 ⇒ 模板不该碰）。留着是因为它对"`__getitem__` 内部有
+    #:    索引常量"的类有效，而那种类还没造夹具测过 —— 属于**未经实测的
+    #:    通用覆盖**，不是已证收益。
+    "%s[0]",
+    "%s[-1]",
+)
+
+#: 候选总量上限。类多的大文件不至于把判据表撑到跑不动（每个候选一次求值）。
+AUTO_PROBES_CAP = 240
+
+
+def _class_probes(cls: str) -> List[Dict[str, str]]:
+    """一个类 ⇒ 构造候选 + 单目观察候选。具名函数，便于反证时整段关掉。
+
+    观察模板里 `%s` 出现几次就填几次（`%s == %s` 需要两次同一个构造表达式），
+    ⛔ 不写死成一次：写死就等于那些多占位模板永远生成不出来，
+    而它们正是覆盖 `__eq__` 这类"两边相等才暴露"的维度的唯一入口。
+    """
+    ctors = [t % cls for t in _CLASS_TEMPLATES]
+    out: List[Dict[str, str]] = []
+    for i, e in enumerate(ctors):
+        out.append({"name": f"cls_{cls}_ctor{i}", "expr": e})
+    for i, e in enumerate(ctors):
+        for j, obs in enumerate(_CLASS_OBSERVERS):
+            n = obs.count("%s")
+            out.append({"name": f"cls_{cls}_obs{i}_{j}",
+                        "expr": obs % ((e,) * n)})
     return out
+
 
 
 def calibrate_coverage(src_fixed: str,
