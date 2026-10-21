@@ -177,12 +177,27 @@ def main() -> int:
        G.stale_days("") is None)
     ck("B2 坏值 ⇒ None（不是抛出来，也不是 0）",
        G.stale_days("not-a-date") is None)
+    import calendar
     import time
     _day = 86400
-    now = time.time()
+    #: ⛔⛔ 这里曾经是 `now = time.time() + 3 * _day` —— 一条**定时炸弹**断言：
+    #:    被减数是写死的时间戳（2026-10-19T16:16:32Z），被减数之外那一头却
+    #:    跟着挂钟走 ⇒ 写这条断言的那天刚好跨 3 天，隔两天再跑就变 4 天。
+    #:    它 2026-10-21 的验收里红了，而红的原因与 `stale_days` 毫无关系
+    #:    （于是连带 `contract_autonomy` 六条一起红：它把这批契约当对拍基线）。
+    #:    ⇒ `now` 必须**从同一个固定时间戳派生**，这样"不依赖跑的这一刻"
+    #:      才真的成立（断言名原本就是这么写的，实现没做到）。
+    _t = calendar.timegm((2026, 10, 19, 16, 16, 32, 0, 0, 0))
+    now = _t + 3 * _day
     ck("B3 正常值 ⇒ 天数（拿固定的 now 算，不依赖跑的这一刻）",
-       G.stale_days("2026-10-19T16:16:32Z", now=now + 3 * _day) == 3,
-       str(G.stale_days("2026-10-19T16:16:32Z", now=now + 3 * _day)))
+       G.stale_days("2026-10-19T16:16:32Z", now=now) == 3,
+       str(G.stale_days("2026-10-19T16:16:32Z", now=now)))
+    ck("B3b ⛔ 反证：它真的在算差（now 挪一天 ⇒ 天数跟着变）",
+       G.stale_days("2026-10-19T16:16:32Z", now=now + 7 * _day) == 10,
+       str(G.stale_days("2026-10-19T16:16:32Z", now=now + 7 * _day)))
+    ck("B3c 反证：now 早于 pushed_at ⇒ 0（不许出现负数天数）",
+       G.stale_days("2026-10-19T16:16:32Z", now=_t - 5 * _day) == 0,
+       str(G.stale_days("2026-10-19T16:16:32Z", now=_t - 5 * _day)))
     ck("B4 ⛔ 许可标签：空 与 NOASSERTION 必须不同"
        "（前者是没声明，后者是声明了但 SPDX 没认出来）",
        G.license_label("") != G.license_label("NOASSERTION"),

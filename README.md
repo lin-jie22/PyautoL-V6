@@ -4440,6 +4440,62 @@ unknown）与 `n_failing_checks`，**不出现任何检查名**；账本
    `run_config`、且新增放行态要过 `contract_generalization` 的 A3/A4
    （那两条是写死的"须人工确认"，这次是 2026-10-21 人工确认过的）。
 
+## 128. ⛔ 契约里"固定时间戳 + 挂钟 now" = 定时炸弹
+
+`contract_ghprobe_test` 的 B3 原本这么写：
+
+```python
+now = time.time()
+G.stale_days("2026-10-19T16:16:32Z", now=now + 3 * _day) == 3
+```
+
+被减数是**写死的时间戳**，另一头却跟着挂钟走 ⇒ 写这条断言的那天刚好跨
+3 天，能过；隔两天再跑就是 4 天。2026-10-21 的验收里它红了，而红的原因
+与 `stale_days` 毫无关系。
+
+⛔ 更贵的是它的**连带面**：`contract_autonomy` 把"消费该模块的契约"
+当机器自审的对拍基线（`srcmut.select_contracts` 按 import 关系挑）——
+基线一红，`auto_apply` 直接拒判（"删前基线就是红的 ⇒ 对拍无意义"）⇒
+**6 条断言一起红**，而真正的根因只有一行 `time.time()`。
+⇒ 读验收报告时，先看有没有"级联"：一处红会点亮它的所有下游。
+
+修法：`now` 从**同一个固定时间戳**派生（`calendar.timegm(...) + 3*_day`）。
+断言名原本就写着"不依赖跑的这一刻"，是实现没做到，不是判据改了。
+另补两条反证：挪 7 天 ⇒ 天数 +7；`now` 早于 `pushed_at` ⇒ 0（不许负数）。
+
+## 129. ⛔ 层名前缀只有一份 —— 新代码想"判层"就去用 `genome.split_target`
+
+我写 `capsule_scope()` 时直接在 `generalization.py` 里写了
+`"L3.skills." / "L1.routing." / "L2.tools"` 三个前缀字面量。
+`contract_genome_source` 当场转红（A1/A2：target 字面量只许出现在
+`genome.py` 的四个 `_t_*` 里）。
+
+⛔ 这不是"契约太严"：层名有两份 ⇒ 改层名时必漏一处，而**漏的那处不会
+报错** —— `capsule_scope` 会静默匹配不到，把所有定点技能判成 `generic`，
+表现成"模型给的都是通用修法"，也就是**又回到"定点修法永远提交不了"**。
+症状会被归因到模型/判据，真因是一处没同步的前缀。
+
+修法：`genome.split_target(target) -> (层, 子键)`，前缀由 `_t_*` 现算
+（`_t_skill("") == "L3.skills."`），所以"改层名"依旧只有四个落点。
+`split_target` 不认得的一律 `("other", target)` ⇒ 保守算通用（收紧，不是放宽）。
+
+## 130. ⛔ `n_envs` 是**世界**规模，不是**选择面**
+
+`--envs auto` 把 `tasks/` 下全部合法目录读进来（当前 13 个），可
+`--dev-env` / `--heldout-env` 的默认值仍是 `textscore` / `eventflow`
+⇒ 另外 11 个环境**只以冻结题身份进入非回归闸**，既不进发展集也不进
+held-out。原实现对这件事**完全静默**：读 `n_envs=13` 的人会以为
+选择面也是 13。
+
+⛔ 没有自动挑 —— 替用户挑 dev/heldout 是改实验语义（第 103 条）。
+只把事实算清楚并写进账本：`run_config.envs_role = {dev, heldout,
+n_world, n_selection, n_frozen_only, frozen_only[], note}`，
+并在 `frozen_only` 非空时往 stderr 说一句（人能看见，不只账本能）。
+
+实测（`--envs textscore,eventflow,scheduler`）：
+`envs_role.frozen_only == ["scheduler"]`、`n_selection == 2`，
+`n_envs` 与 `n_world` 都是 3（两个字段不许打架）。
+
 ## 6. 与 V5 的关系
 
 V6 不是 V5 的替代品，是它的**结构化重写**：

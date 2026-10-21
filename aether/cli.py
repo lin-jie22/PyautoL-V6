@@ -73,6 +73,39 @@ def discover_envs(tasks_root: "Path") -> Tuple[str, ...]:
     tail = tuple(sorted(found - set(head)))
     return head + tail
 
+
+def env_roles(names, dev_name: str, ho_name: str):
+    """把环境分成三类：**参与选择**的 dev / held-out，与**只守不选**的其余。
+
+    ⛔ 存在理由（r63 实测）：`--envs auto` 会把 `tasks/` 下全部合法目录读进来
+       （当前 13 个），但 `--dev-env` / `--heldout-env` 的默认值仍是
+       `textscore` / `eventflow`。于是另外 11 个环境**只以冻结题身份进入
+       非回归闸**，既不在发展集、也不在 held-out —— 而输出与账本里没有
+       任何一处说明这件事。读 `n_envs=13` 的人会以为"选择面也是 13"。
+
+    ⛔ 这里**不替用户挑** dev/heldout：那会改变实验语义（第 103 条：换口径
+       必须显式开启）。只把"世界多大 / 选择面多大"如实算出来，让读数能自己
+       说话；要不要换环境，由人传 `--dev-env`。
+
+    ⛔ `frozen_only` 必须保留**传入顺序**：它要能和 `discover_envs` 的输出
+       逐字对上（那个顺序是历史可比性的一部分）。
+    """
+    sel = [n for n in names if n in (dev_name, ho_name)]
+    only = [n for n in names if n not in (dev_name, ho_name)]
+    n = len(list(names))
+    return {
+        "dev": dev_name,
+        "heldout": ho_name,
+        "n_world": n,
+        "n_selection": len(sel),
+        "n_frozen_only": len(only),
+        "frozen_only": only,
+        "note": ("世界 %d 个环境，但只有 dev/heldout 参与选择；"
+                 "其余 %d 个只进非回归闸（既不在发展集也不在 held-out）"
+                 % (n, len(only))) if only else "",
+    }
+
+
 def resume_window(target_rounds: Any, ck_round_no: Any,
                   ) -> Optional[Tuple[int, int]]:
     """算出续跑窗口，返回 `(start_round, remaining)`；无需续跑则返回 None。
@@ -663,6 +696,13 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         raise SystemExit(f"未知环境：dev={dev_name} heldout={ho_name}，可用 {sorted(envs)}")
     if dev_name == ho_name:
         raise SystemExit("发展环境与 held-out 环境不能是同一个 ⇒ 泛化闸会自我取消")
+    #: ⛔ 静默的"世界变大了、选择面没变"必须说出口（见 env_roles 的 docstring）。
+    _roles = env_roles(names, dev_name, ho_name)
+    if _roles["frozen_only"]:
+        print(f"ℹ️ {_roles['note']}："
+              f"{', '.join(_roles['frozen_only'])}"
+              f"（要换选择面请显式传 --dev-env / --heldout-env）",
+              file=sys.stderr)
 
     led = Ledger(p["ledger"])
     store = Store(p["db"])
@@ -1396,6 +1436,10 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         #:    实验"要靠猜 ⇒ 账本失去可比性。
         "n_envs": len(names),
         "envs": list(names),
+        #: ⛔ `n_envs` 是**世界**规模，不等于**选择面**（r63）：
+        #:    只有 dev/heldout 参与选择，其余只进非回归闸。
+        #:    不记 ⇒ "13 个环境的实验"会被读成"选择面也是 13 个"。
+        "envs_role": _roles,
         "world": "auto" if _want == "auto" else ("custom" if _want else "default4"),
         #: ⛔ 记 `0` 而不是 `None`：None 分不清「不是续跑」和「忘了记」。
         #:    （与 checkpoint 的 `n_below_min_content` 同源纪律：读数要么

@@ -183,6 +183,22 @@ aether ui --host 0.0.0.0 --api-token xxx   # ⛔ 非回环地址**必须**给 to
 
 ## 4. 怎么加自己的任务（核心扩展点）
 
+一条要点先说清楚，否则加完环境会觉得"不生效"：
+
+⛔ **加环境 ≠ 改选择面。** `--envs auto` 会把 `tasks/` 下**全部**合法目录
+读进来参与"非回归闸"（守住别变坏），但**发展集与 held-out 仍由
+`--dev-env` / `--heldout-env` 决定**（默认 `textscore` / `eventflow`）。
+也就是说新增的环境默认只"守"不"选"。想知道这一轮到底几个环境参与选择：
+
+```bash
+aether evolve --rounds 1 --envs auto 2>&1 | grep 非回归闸
+# ℹ️ 世界 13 个环境，但只有 dev/heldout 参与选择；其余 11 个只进非回归闸…
+```
+
+账本里对应 `run_config.envs_role`（`n_world` / `n_selection` /
+`frozen_only[]`）。要换选择面就显式传 `--dev-env X --heldout-env Y`
+—— 系统**不会替你挑**（那会改掉实验语义）。
+
 一个任务集 = `<root>/tasks/<env>/` 下两个文件：
 
 ```

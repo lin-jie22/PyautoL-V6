@@ -635,6 +635,31 @@ def _t_policy(key: str) -> str:
     return f"L4.memory_policy.{key}"
 
 
+#: 层序：判定顺序按"最长前缀优先"其实不需要 —— 四者互不为前缀。
+_TARGET_KINDS = (("skill", _t_skill), ("route", _t_route),
+                 ("tools", _t_tools), ("policy", _t_policy))
+
+
+def split_target(target: str) -> "tuple":
+    """把 `target` 拆成 `(层, 子键)`；不认识 ⇒ `("other", target)`。
+
+    ⛔ 存在理由（r63）：泛化闸要判"这颗胶囊碰了哪一层"，而它**不许**
+       自己写 `L3.skills.` 这类字面量 —— 那正是 `contract_genome_source`
+       A1/A2 守的东西（唯一来源）。实测我第一版直接在 `generalization.py`
+       里写了三个前缀字面量，契约当场转红：**层名有两份，改一处必漏一处**，
+       而漏的那处不会报错，只会静默匹配不到（`capsule_scope` 会把所有
+       定点技能判成 generic，看起来像"模型太保守"）。
+
+    ⛔ 这里仍然不出现字面量：前缀由 `_t_*` 现算（`_t_skill("")` = `"L3.skills."`），
+       所以"改层名"依旧只有四个落点。
+    """
+    for kind, fn in _TARGET_KINDS:
+        pre = fn("") if kind != "tools" else fn()
+        if target.startswith(pre):
+            return kind, target[len(pre):]
+    return "other", target
+
+
 def gene_add_skill(name: str, body: str, rationale: str = "") -> Gene:
     return Gene(op="set", target=_t_skill(name), value=body,
                 rationale=rationale or f"新增技能 {name}")

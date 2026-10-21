@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Sequence,
                     Tuple)
 
-from .genome import Harness
+from .genome import Harness, split_target
 from .nongression import FrozenTask
 from .verifier import Verdict, error_verdict
 
@@ -56,9 +56,10 @@ VERDICTS = ("generalize", "overfit", "partial", "no_gain", "inconclusive",
 PASS_VERDICTS = ("generalize", "removal_safe", "scoped")
 
 
-#: 定点技能的前缀（真实键名，**单冒号**）。`patch::x` 是死名
-#: （`agent.is_known_strategy` 判 False），不在此列。
-_ENV_SKILL_PREFIX = "L3.skills.patch:"
+#: 定点技能的前缀 = 技能层前缀 + `patch:`（真实键名，**单冒号**）。
+#: `patch::x` 是死名（`agent.is_known_strategy` 判 False），不在此列。
+#: ⛔ 层名前缀由 `genome` 现算，这里**只拼 `patch:`** —— 见 `split_target`。
+_ENV_SKILL_MARK = "patch:"
 
 
 def capsule_scope(capsule: Any) -> Dict[str, Any]:
@@ -93,9 +94,15 @@ def capsule_scope(capsule: Any) -> Dict[str, Any]:
     neutral: List[str] = []
 
     def _env_of(name: str) -> str:
-        """`patch:<env>` ⇒ env；其余（含死名 `patch::x`）⇒ 空串。"""
-        pre = "L3.skills."
-        raw = name[len(pre):] if name.startswith(pre) else name
+        """`patch:<env>` ⇒ env；其余（含死名 `patch::x`）⇒ 空串。
+
+        ⛔ 接受**两种写法**：带层前缀的完整 target（`<skill 前缀>patch:a`）
+           与裸技能名（`patch:a`，路由/工具表里写的就是裸名）。
+           ⛔ 前缀一律由 `genome.split_target` 判 —— 见该函数的理由：
+              层名字面量只许有一份。
+        """
+        kind, rest = split_target(name)
+        raw = rest if kind == "skill" else name
         if raw.startswith("patch:") and not raw.startswith("patch::"):
             return raw[len("patch:"):]
         return ""
@@ -104,9 +111,11 @@ def capsule_scope(capsule: Any) -> Dict[str, Any]:
         t = str(getattr(g, "target", "") or "")
         raw_val = getattr(g, "value", None)
         vals = list(raw_val) if isinstance(raw_val, (list, tuple)) else [raw_val]
+        #: ⛔ 层由 `genome.split_target` 判（唯一来源），本文件不写层名字面量。
+        kind, _sub = split_target(t)
 
         # ① 技能正文：承载能力本身
-        if t.startswith("L3.skills."):
+        if kind == "skill":
             e = _env_of(t)
             if e:
                 if e not in envs:
@@ -115,7 +124,7 @@ def capsule_scope(capsule: Any) -> Dict[str, Any]:
                 generic.append(t)
             continue
         # ② 路由：只决定"可达性" ⇒ 指向定点技能时是 env 门控的
-        if t.startswith("L1.routing."):
+        if kind == "route":
             hit = [v for v in vals if isinstance(v, str) and _env_of(v)]
             rest = [v for v in vals if not (isinstance(v, str) and _env_of(v))]
             for v in hit:
@@ -128,7 +137,7 @@ def capsule_scope(capsule: Any) -> Dict[str, Any]:
                 neutral.append(f"{t}={hit[0]}")
             continue
         # ③ 工具表：挂一个定点技能名不是能力（它不是真工具）
-        if t == "L2.tools" or t.startswith("L2."):
+        if kind == "tools":
             hit = [v for v in vals if isinstance(v, str) and _env_of(v)]
             rest = [v for v in vals if not (isinstance(v, str) and _env_of(v))]
             for v in hit:
@@ -140,7 +149,7 @@ def capsule_scope(capsule: Any) -> Dict[str, Any]:
             elif hit:
                 neutral.append(f"{t}+={hit[0]}")
             continue
-        # ④ 其余层（L0/L4/L5/未知）：与环境无关 ⇒ 保守算通用
+        # ④ 其余层（policy / world_facts / 未知）：与环境无关 ⇒ 保守算通用
         generic.append(t)
 
     if envs and not generic:
