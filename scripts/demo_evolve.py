@@ -107,6 +107,18 @@ def main() -> int:
     # ── 报告 ────────────────────────────────────────────────────
     ts = time.strftime("%Y%m%d_%H%M%S")
     out = ROOT / "docs" / f"demo_report_{ts}.md"
+    #: ⛔ 以前这里印「是否进化：✅ 是」，判据是 `improved`（= 有没有提交）。
+    #:    r63 加了 `scoped` 之后，"只改定点技能、held-out 一动没动"也算
+    #:    `improved=True` ⇒ 那个标签承诺了数据没有的东西（README 136）。
+    #:    改成读拆开后的数：`generalize` 才算变强，`scoped` 只是放行。
+    _c = evo.get("commits") or {}
+    _commit_line = (
+        f"- 提交 **{_c.get('total', 0)}** 次"
+        f"（generalize {_c.get('generalized', 0)} ／ "
+        f"scoped {_c.get('scoped', 0)} ／ no_gate {_c.get('no_gate', 0)}）"
+        + ("　⛔ 只有 generalize 才算「变强了」（scoped = 闸没资格判它）"
+           if _c.get("scoped") else "")
+        + ("" if _c.get("total") else "：本轮无有效增益"))
     lines = [
         f"# V6 端到端 demo 报告（{ts}）",
         "",
@@ -118,7 +130,7 @@ def main() -> int:
          f"{evo['synthesis_heldout']['yield_rate']:.0%}）"
          if evo.get("synthesis_heldout") else "- 合成（held-out）：未启用"),
         f"- 种子 harness `{evo['seed_harness_id'][:8]}` → 最终 `{evo['final_harness_id'][:8]}`",
-        f"- 是否进化：{'✅ 是' if evo['improved'] else '否（本轮无有效增益）'}",
+        _commit_line,
         f"- 耗时：{evo['cost_s']}s（总计 {time.time() - t0:.1f}s）",
         "",
         "## 账本可审计性",

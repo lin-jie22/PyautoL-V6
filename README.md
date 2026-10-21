@@ -4687,6 +4687,41 @@ E 真接回循环）：
 口径顺带钉住：**`--archive-resample` 在没有提交的运行里按设计是空转的**
 （已写进 `docs/USAGE.md`）。别把"开了开关没反应"读成开关坏了。
 
+## 136. ⛔ `improved` 答的是「有没有提交」，不是「变强了」
+
+`RoundReport.improved` 的定义是 `committed is not None`。r63 加了 `scoped`
+之后，一次只改定点技能的提交（实测 `dev=+1.0 ho=0`，held-out 一动没动）
+也算 `improved=True`。于是同一句话在三个消费方被读成三种意思：
+
+| 位置 | 它印出来的 | 数据实际支持的 |
+|---|---|---|
+| `scripts/demo_evolve.py` | 「是否进化：✅ 是」 | 发展集修好了 |
+| `scripts/llm_e2e.py` | 「赢过 = improved == True（必须同时过泛化闸）」 | 闸放行了，可能是构造必然的 0 增益 |
+| `docs/USAGE.md` | 「有没有候选被接受」 | ✅ 这句是准的 |
+
+⇒ 不是数据错，是**标签承诺了数据没有的东西**。
+
+⛔ **不改 `improved` 的语义**。它是历史口径（生产 120 次提交：110 次
+`generalize` / 10 次无裁决），改掉等于让新老读数不可比。处置是**加一层
+聚合 + 修标签**：
+
+- `RoundReport.commit_verdict` —— `""` = 没提交；`"no_gate"` = 提交了但闸
+  没跑；否则是裁决名。⛔ `no_gate` 不许归空串：空串已经被"没提交"占用
+  （第 134 条同族：缺字段不许变成合法值）。
+- `evolution.summarize_commits(reports)` → `{total, by_verdict, generalized,
+  scoped, no_gate}`，与 `improved` **同一份 reports**、进**同一个字典**。
+- 两个脚本读拆开后的数；`demo_evolve` 的「是否进化」那一行删掉。
+
+端到端实测（`--allow-scoped-commit`，qwen2.5:7b，1 轮）：
+`improved=True` 而 `commits = {"total": 1, "scoped": 1, "generalized": 0}`
+—— 正是旧标签会说成"进化了"的那种情况。
+
+契约 `contract_commit_verdict_test` 15 条（A 缺口 / B 聚合分得开 /
+C `no_gate` 与空串不同形 / D 真进输出且脚本改读 / E 生产读数）。
+其中 **B3 主动断言 `scoped` 仍算 `improved=True`** —— 它不是实现细节，
+是在**保护一个决定**：谁想把语义改成"只有 `generalize` 才算"，这条会先红，
+逼出一次显式拍板，而不是悄悄改掉历史口径。
+
 ## 6. 与 V5 的关系
 
 V6 不是 V5 的替代品，是它的**结构化重写**：

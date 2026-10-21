@@ -665,7 +665,8 @@ def _verify_fixed(env, broken_src, fixed_src, timeout: float = 10.0):
 def cmd_evolve(args: argparse.Namespace) -> int:
     from .environment import (DEFAULT_MUTATION_KINDS, Environment,
                               synthesize_tasks)
-    from .evolution import EvolutionConfig, EvolutionLoop, RunBudget
+    from .evolution import (EvolutionConfig, EvolutionLoop, RunBudget,
+                            summarize_commits)
     from .generalization import GeneralizationGate, make_heldout
     from .genome import Harness
     from .ledger import Ledger
@@ -1580,6 +1581,11 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         #:    贴进实验记录。两者同源（就是上面那一份），不各写一遍。
         "run_config": run_config,
         "improved": any(r.improved for r in reports),
+        #: ⛔ 与 `improved` **同一个字典、同一份 reports**（同源，不另算一遍）：
+        #:    `improved` 只答"有没有提交"，这里答"提交的是什么强度的证据"。
+        #:    缺了它，一次 `scoped` 提交（发展集修好、held-out 一动没动）
+        #:    与一次 `generalize` 在输出里长得一样（README 136）。
+        "commits": summarize_commits(reports),
         "cost_s": round(time.time() - t0, 2),
         #: ⛔ 续跑读数必须可见：不打印，"开了 --checkpoint"与"进度真的
         #:    存下来了"在外部无从区分（假仪表）。`resumable=False`

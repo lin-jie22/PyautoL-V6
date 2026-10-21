@@ -59,6 +59,7 @@ aether evolve --rounds 1            # 跑一轮进化（默认 4 个环境，几
 | 字段 | 含义 | 什么算好 |
 |---|---|---|
 | `improved` | 这一轮有没有候选被接受 | `false` 是**正常**的，不代表坏了 |
+| `commits` | 按裁决拆开：`total` / `generalized` / `scoped` / `no_gate` | **只有 `generalized` 才算变强**；`scoped` 是"闸没资格判它" |
 | `improved=false` + `gate.result.passed=true` | 过了非回归闸，但泛化证据不足 | 说明你的题太少，不是代码坏了 |
 | `cost_s` | 这一轮花了多少秒 | 与历史同口径比，别跨口径比 |
 | `ledger.count` | 这一轮写了多少条事件 | 每条都能 `verify-chain` 复核 |

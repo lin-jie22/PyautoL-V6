@@ -128,10 +128,17 @@ def main() -> int:
     print(f"  └ 过非回归闸              {n_gate_ok}")
     print(f"  └ 泛化闸放行              {n_gen_ok}")
     print(f"最终 improved               {j.get('improved')}")
+    _c = j.get("commits") or {}
+    print(f"提交按裁决拆开              total={_c.get('total', 0)} "
+          f"generalize={_c.get('generalized', 0)} "
+          f"scoped={_c.get('scoped', 0)} no_gate={_c.get('no_gate', 0)}")
     print()
     print("⛔ 判读口径：")
     print("  跑通 = 产出候选 > 0 且有过非回归闸的")
-    print("  赢过 = improved == True（必须同时过泛化闸）")
+    print("  赢过 = 提交里有 generalize（held-out 真的涨了）")
+    print("  ⛔ `improved=True` 只说明**有提交**：一次 `scoped` 提交")
+    print("     （发展集修好、held-out 一动没动）也算 True ⇒ 别拿它当")
+    print("     「变强了几次」（README 136）")
     if prop.get("error"):
         print(f"  ⚠️ 提议器报错：{prop['error']}")
     if prop.get("rejects"):

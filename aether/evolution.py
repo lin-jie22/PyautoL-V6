@@ -324,12 +324,34 @@ class RoundReport:
     def improved(self) -> bool:
         return self.committed is not None
 
+    @property
+    def commit_verdict(self) -> str:
+        """提交时的泛化裁决。
+
+        `""`      —— 这一轮**没提交**（与"提交了但没有裁决"是两件事）
+        `"no_gate"` —— 提交了，但泛化闸没跑（`--heldout off` / 没有 held-out）
+        其它      —— 裁决名（`generalize` / `scoped` / …）
+
+        ⛔ 为什么不复用 `improved`：`improved` 只答"有没有提交"。r63 加了
+           `scoped` 之后，一次只改定点技能的提交（`dev=+1.0 ho=0`，held-out
+           一动没动）也算 `improved=True` ⇒ 拿它当"变强了几次"会把"发展集
+           修好了"读成"变强了"（README 136）。
+        ⛔ `no_gate` 不许归空串：空串已经被"没提交"占用（README 134 同族：
+           缺字段不许变成合法值）。
+        """
+        if self.committed is None:
+            return ""
+        v = (self.generalization or {}).get("verdict")
+        return v if isinstance(v, str) and v else "no_gate"
+
     def to_dict(self) -> Dict[str, Any]:
         return {"round_no": self.round_no,
                 "weakness": self.weakness.to_dict() if self.weakness else None,
                 "baseline_reward": round(self.baseline_reward, 4),
                 "candidates": [c.to_dict() for c in self.candidates],
                 "committed": self.committed, "revert_reason": self.revert_reason,
+                #: ⛔ 单轮也要能看出"这次提交是什么强度的证据"（README 136）
+                "commit_verdict": self.commit_verdict,
                 "ledger_seqs": self.ledger_seqs,
                 "generalization": self.generalization,
                 #: ⛔ 「同轮试了几个候选过闸」必须出得来（r52）：不出的话
@@ -347,6 +369,30 @@ class RoundReport:
                 "cleanup_proposed": self.cleanup_proposed,
                 "genome_load_before": self.genome_load_before,
                 "heldout_grow": self.heldout_grow}
+
+
+def summarize_commits(reports: List["RoundReport"]) -> Dict[str, Any]:
+    """把「提交了几次」按**裁决**拆开（r63f）。
+
+    ⛔ 与 `improved` 是两个问题，别合并：`improved` 答"有没有提交"，
+       本函数答"提交的是什么强度的证据"。`scoped` 是"这道闸没资格判它"，
+       不是"它泛化了"（README 131）⇒ 两者必须分开数。
+
+    ⛔ 也不改 `improved` 的语义：它是历史口径（生产 120 次提交、110 次
+       `generalize` / 10 次无裁决），改掉等于让新老读数不可比。
+       契约 `contract_commit_verdict_test` 的 B3 **主动断言** `scoped`
+       仍算 `improved=True` —— 谁想改语义，那条会先红。
+    """
+    by: Dict[str, int] = {}
+    for r in reports:
+        v = r.commit_verdict
+        if not v:
+            continue
+        by[v] = by.get(v, 0) + 1
+    return {"total": sum(by.values()), "by_verdict": by,
+            "generalized": by.get("generalize", 0),
+            "scoped": by.get("scoped", 0),
+            "no_gate": by.get("no_gate", 0)}
 
 
 @dataclass
