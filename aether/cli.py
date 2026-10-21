@@ -810,6 +810,29 @@ def cmd_evolve(args: argparse.Namespace) -> int:
                  tools=("read_file", "write_file", "python_exec"),
                  memory_policy={"recall_topk": 5, "min_content_len": 150})
 
+    # ── 跨运行热启动（r63i，`--warm-start`，默认关）──────────────────
+    #: ⛔⛔ 为什么需要它（实测，不是设计推演）：账本 120 条
+    #:    `harness.commit` 里 **104 条（87%）的 `parent_id` 是同一个根**、
+    #:    `round_no` **全是 1** ⇒ 每次调用 `aether evolve` 从上面这个
+    #:    裸种子重爬一遍，「用一百次」与「用一次」等价。
+    #: ⛔ 热启动**不豁免任何判据**：它只换起点 —— 冻结基线照样重跑、
+    #:    非回归闸照样审、泛化闸照样判。失败一律回退裸种子并落账。
+    #: ⛔ 失败**不许静默**：`ok=False` 的每种成因都由 `warmstart.load`
+    #:    给出一句人可读的 `reason`，这里原样写进账本并打到 stderr。
+    _ws = None
+    if bool(getattr(args, "warm_start", False)):
+        from . import warmstart as _wsm
+        _ws = _wsm.load(led, store, dev_env=dev_name, heldout_env=ho_name,
+                        seed=args.seed, envs=names)
+        led.append("evolution.warm_start", _ws.to_payload(
+            dev_env=dev_name, heldout_env=ho_name, seed=str(args.seed),
+            envs=list(names)), actor="cli")
+        if _ws.ok:
+            h0 = _ws.harness
+            print(f"♻️ {_ws.summary()}", file=sys.stderr)
+        else:
+            print(f"⚠️ {_ws.summary()} ⇒ 本轮从裸种子开始", file=sys.stderr)
+
     # 冻结套件 v2 = 原始源码（防"读不到/跑不动"这类**粗**回归）
     #              + 真破坏题（防"已具备的修法被顶掉"这类**细**回归）
     #: ⛔ v1 只有原始源码 ⇒ 裸种子的通过集 = {本来就不需要修的题}
@@ -2753,6 +2776,18 @@ def build_parser() -> argparse.ArgumentParser:
                    choices=["both", "general", "narrow"],
                    help="提议池：both=两类都给（定点修法必赢）/ general / narrow")
     e.add_argument("--seed", default="0")
+    #: ⛔⛔ **跨运行热启动**（r63i，默认关）。存在理由是一条实测：
+    #:    账本 120 条 `harness.commit` 里 104 条（87%）的 `parent_id`
+    #:    是同一个根、`round_no` 全是 1 ⇒ 每次调用都从裸种子重爬，
+    #:    「用一百次」与「用一次」等价。开了它，本次从**同口径下最后
+    #:    一次提交成功**的 harness 开始（快照表恢复，判据一条不改）。
+    #: ⛔ 默认关是第 103 条纪律：新口径必须显式开启，否则历史账本
+    #:    与基线不可比。产品用法见 `docs/USAGE.md`。
+    e.add_argument("--warm-start", action="store_true",
+                   help="⛔ 新口径（默认关）：从**同口径下最后一次提交成功**的"
+                        "harness 热启动，而不是每次从裸种子重爬。"
+                        "不改任何判据；口径不同则不继承（fail-closed），"
+                        "原因会写进账本 `evolution.warm_start`")
     e.add_argument("--dev-env", default="textscore", help="发展集所在环境")
     e.add_argument("--heldout-env", default="eventflow", help="held-out 环境（不参与选择）")
     #: ⛔ 世界规模是**实验变量**，不是常量。默认仍是 `DEFAULT_ENVS` 四个
