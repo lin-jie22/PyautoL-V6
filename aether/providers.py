@@ -23,12 +23,15 @@ from dataclasses import dataclass, field, replace
 from typing import (Any, Callable, Dict, List, Optional, Protocol, Sequence,
                     Tuple)
 
-from .genome import (Capsule, Gene, Harness, gene_add_skill, gene_route_append,
-                     gene_tool, gene_tune, parse_route)
+from .genome import (Capsule, Gene, Harness, apply_capsule, gene_add_skill,
+                     gene_route_append, gene_tool, gene_tune, parse_route)
 from .runtime import Trajectory
 #: ⛔ 清理提案器需要它。依赖方向：`providers → cleanup → agent → genome`，
 #:    链条上没有回指 providers 的边（有则会循环导入）。
 from . import cleanup as _cleanup
+#: ⛔ 路由**可达性**的唯一判据（`_apply_one` 的分派顺序就是它的来源）。
+#:    写入侧必须与执行侧同源，否则"闸说合法、运行时跳过"。
+from .agent import is_known_strategy
 
 
 def _accepts(fn: Any, arg: str) -> bool:
@@ -614,6 +617,43 @@ class CleanupProposer:
 # ──────────────────────────────────────────────────────────────────
 # 真模型提议器
 # ──────────────────────────────────────────────────────────────────
+def unreachable_routes(h: Harness) -> List[str]:
+    """胶囊应用之后，路由链里**执行体不认识**的名字（"幽灵路由"）。
+
+    ⛔⛔ 存在理由（2026-10-21 实测，不是推测）：
+
+        LLM 提议器第一次在真实 evolve 里跑起来（`--proposer llm`，
+        Qwen3.5-4B / provider=ollama / raw_len=538）就写出了
+        `routing.repair = ["patch:textscore", "fix_boolops"]` —— 这一次
+        两个名字都合法（前者进了 `skills`，后者在 `KNOWN_STRATEGIES`）。
+        但 `validate_gene` **只看层名与标量类型**，全程不看路由值有没有
+        执行体：模型写一个 `fix_nonexistent`，语法闸放行、`apply_gene`
+        也不抛（它只把字符串写进 dict），直到运行时 `_apply_one` 才跳过
+        并记 `missing`。
+
+        `agent.py` 自己的纪律已经写明后果：「一个幽灵技能名比『没有技能』
+        更糟：没有技能时 L4 还能兜底，挂着一个不认识的技能反而把唯一的
+        退路堵死了」。而它至今只能靠**事后**清理轴（`cleanup.ghost_skill`）
+        扫出来 —— 而清理轴是"提出来等人批"，不是拦。
+
+        ⇒ 写入侧必须自己拦：模型输出是不可信输入，不该由下游替它兜底。
+
+    ⛔ 判据与执行侧**同源**：`skills` 里真装上的（同一 capsule 自己加的）
+       ∪ `is_known_strategy()` 认识的（内置策略 / `uci:` / `patch:<env>`）。
+       两处各写一份判断 = 没有判断（`patch::x` 这种死名只有那边判得对）。
+    """
+    bad: List[str] = []
+    skills = getattr(h, "skills", None) or {}
+    for key, val in (getattr(h, "routing", None) or {}).items():
+        for name in parse_route(val):
+            if name in skills:
+                continue
+            if is_known_strategy(name):
+                continue
+            bad.append(f"{key}={name}")
+    return bad
+
+
 #: 允许的操作。⛔ 白名单，不是黑名单：模型能发明的东西必须落在集合内。
 ALLOWED_OPS: Tuple[str, ...] = ("set", "append", "tune", "remove")
 
@@ -1091,12 +1131,46 @@ class LLMProposer:
             self.last_rejects = [r for r in self.last_rejects
                                  if not r.startswith("retry#")] + rejects
             if caps:
-                return caps[:max(1, n)]
+                kept = self._drop_ghost_routes(caps, harness)
+                if kept:
+                    return kept[:max(1, n)]
+                #: ⛔ 全被幽灵路由拒掉 ⇒ **继续重试**：这是一次真实可修的
+                #:    失败（模型会乱起名），与"输出为空"处置不同。拒因已经
+                #:    在 `last_rejects` 里，账本看得见。
+                continue
         if not self.last_rejects:
             self.last_error = "empty_model_output"
         else:
             self.last_error = f"no_valid_capsule（{'; '.join(self.last_rejects[:3])}）"
         return []
+
+    def _drop_ghost_routes(self, caps: List[Capsule],
+                           harness: Harness) -> List[Capsule]:
+        """丢掉「装完以后路由链里有执行体不认识的名字」的 capsule。
+
+        ⛔ 这是**写入侧**的可达性闸，不是判据闸：它不评价候选好坏
+           （那要跑执行判据），只拒绝那些「语法合法但运行时会被跳过」
+           的候选 —— 后者过闸后会变成一个悄悄减少能力的 harness，而
+           reward 不变，所以判据**永远**抓不到它。
+        ⛔ `apply_capsule` 会抛（base 与 capsule 不兼容）⇒ 同样算不可用，
+           但拒因必须区分：`capsule_apply_failed` ≠ `ghost_route`。
+        """
+        out: List[Capsule] = []
+        for cap in caps:
+            try:
+                h2 = apply_capsule(harness, cap)
+            except Exception as e:                      # noqa: BLE001
+                self.last_rejects.append(
+                    f"capsule_apply_failed:{cap.name}:{type(e).__name__}: {e}")
+                continue
+            bad = unreachable_routes(h2)
+            if bad:
+                self.last_rejects.append(
+                    f"ghost_route:{cap.name}:{bad[:4]}"
+                    f"{'' if len(bad) <= 4 else f'(共 {len(bad)} 处)'}")
+                continue
+            out.append(cap)
+        return out
 
     def diagnostics(self) -> Dict[str, Any]:
         """把"这一轮为什么没产出变异"讲清楚。
