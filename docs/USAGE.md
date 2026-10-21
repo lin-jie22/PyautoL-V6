@@ -112,13 +112,20 @@ aether evolve --archive-resample 2                 # 把历轮「够格但没被
 aether evolve --resume                             # 断点续跑（r58 起默认写 checkpoint）
 ```
 
-三个「换口径」的开关，**默认全关**（关了与历史逐字同口径，可同表比）：
+六个「换口径」的开关，**默认全关**（关了与历史逐字同口径，可同表比）：
 
 | 开关 | 换的是什么 | 默认 | 开了之后 |
 |---|---|---|---|
 | `--ho-grow` | **考卷**（held-out 题量） | 关 | 判别力不足时自己补采样 |
 | `--archive-resample N` | **候选来源** | `0` 关 | 从分层存档取回 ≥N 个旧解重测 |
 | `--proposer llm` | **提议器** | `template` | 真模型生成候选（闸一个不少） |
+| `--evidence coarse` | **模型看到的证据粒度** | `exact` | 只给失效类别与数量，不给检查名 |
+| `--ho-implication` | **给模型的规则文案** | 关 | 补一句「只在 `patch:<env>` 生效 ⇒ 必然 0 增益」的推论 |
+| `--allow-scoped-commit` | **泛化闸的适用范围** | 关 | 只碰定点技能的候选可提交（判 `scoped`） |
+
+⛔ 后三个都是**实验口径**，各自的实测结论（含一个被推翻的假设）见 README
+第 126–127 条。尤其 `--allow-scoped-commit`：它放宽的是一道**闸**，
+账本里 `scoped` 与 `generalize` 永远分开数 —— 放行 ≠ 证明泛化。
 
 ⛔ `--archive-resample` 取回来的候选带 `stale=true`：存档里的 reward 是
 **旧基线**读数，只用来挑"取哪几条"，必须在当前基线上重算才能进判据。

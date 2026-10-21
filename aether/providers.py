@@ -976,8 +976,14 @@ def build_prompt(weakness: Dict[str, Any], harness: Harness, n: int = 3,
             "可用的技能名**只有**这些（写别的名字 ⇒ 空转，reward 为 0）："
             + "、".join(f"`{s}`" for s in skill_vocab) + "。")
     if env_ids:
+        #: ⛔ 这里是**给模型看的接口契约**，必须写真实键名 `patch:<env_id>`
+        #:    （单冒号）。此前写成 `patch::<env_id>`（双冒号）—— 那恰好是
+        #:    `agent.is_known_strategy` 判死的形态（`patch::x` 切出来是
+        #:    `":x"`，永不等于任何 env_id ⇒ 结构上永不生效）。照文档写
+        #:    就是教模型造死名。
         contract.append("已知环境 id：" + "、".join(f"`{e}`" for e in env_ids)
-                        + "（`patch::<env_id>` 只在点名的环境生效）。")
+                        + "（技能名 `patch:<env_id>` 只在点名的环境生效；"
+                          "注意是**单冒号**。）")
     #: ⛔⛔ 评估规则 vs 解法：这里只能讲**规则**，绝不能讲解法。
     #    讲"要在另一个环境上验证、只对当前环境有效的会被拦"是规则；
     #    讲"你应该提通用修法 fix_control_flow"是**预置答案** ——

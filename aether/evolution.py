@@ -488,6 +488,22 @@ class EvolutionConfig:
     #:       仍记原文，闸一条没少 ⇒ 但模型输入变了 ⇒ 属新口径，必须进
     #:       run_config（与 `--ho-grow` 同族）。
     evidence: str = "exact"
+    #: ⛔⛔ **定点修法能不能提交**（r62 新口径）。默认 False = 历史逐字同口径。
+    #:
+    #:    背景：`patch:<env>` 只对点名的环境生效 ⇒ 它在 held-out 上 0 增益是
+    #:    **构造必然**。旧判据拿这个 0 判 `overfit`（"讨好判据"）⇒
+    #:    环境专属的定点修法**永远提交不了**，哪怕它在发展集上是真修好了。
+    #:    实测（10-20）：dev 0/5→5/5、held-out 0.0→0.0 ⇒ overfit ⇒ 连续
+    #:    6 轮空转，`committed=null`。这不是闸严，是**把构造必然当证据**。
+    #:
+    #:    开了之后：只碰定点技能（`L3.skills.patch:<env>`）、且**没碰**
+    #:    held-out 那个环境的候选 ⇒ 判 `scoped`（放行，但不是 `generalize`：
+    #:    它没有证明泛化，只是"没资格用这道闸来判"）。非回归闸与能力地板
+    #:    照常生效。
+    #:
+    #:    ⛔ 沾了路由 / 工具 / 通用技能 / 记忆策略的候选**不受影响** ——
+    #:    那些层对 held-out 是有影响的，0 增益就真的是没泛化。
+    allow_scoped_commit: bool = False
 
 
 @dataclass
@@ -2194,9 +2210,11 @@ class EvolutionLoop:
             passed: Optional[Candidate] = None
             first_blocked: Optional[Dict[str, Any]] = None
             for cand in queue:
-                new_h_probe = apply_capsule(
-                    h, next(cp for cp in capsules
-                            if cp.name == cand.capsule_name))
+                #: ⛔ 把胶囊对象本身也带上：泛化闸要判它的**能力范围**
+                #:    （只看 `patch:<env>` ⇒ 别的环境上 0 增益是构造必然）。
+                _cp = next(cp for cp in capsules
+                           if cp.name == cand.capsule_name)
+                new_h_probe = apply_capsule(h, _cp)
                 if cand.is_cleanup:
                     #: ⛔ 清理走泛化闸的**退化面**（`probe_removal`：held-out
                     #:    不许变差）。走 `probe()` 必得 `no_gain` ⇒ blocks
@@ -2210,7 +2228,12 @@ class EvolutionLoop:
                         dev_gain=cand.reward - base_reward,
                         # ⛔ 同层对照：没有它，"能力边界"会被误判成"挑食"，
                         #    通用修法将永远过不了闸 ⇒ 进化循环永久空转。
-                        dev_by_difficulty=cand.dev_by_difficulty or None)
+                        dev_by_difficulty=cand.dev_by_difficulty or None,
+                        #: ⛔ 默认 False ⇒ 与历史逐字同口径（env 专属胶囊
+                        #:    在 held-out 上 0 增益仍判 overfit）。
+                        capsule=_cp,
+                        allow_scoped=bool(
+                            getattr(self.cfg, "allow_scoped_commit", False)))
                 cand.generalization = pr.to_dict()
                 #: ⛔⛔ 每个被拦的候选**都要**记 `gen.probe`：死路账的维度
                 #:    是 (候选, 环境对)，而此前只有 `best` 会被记 ⇒ 其余

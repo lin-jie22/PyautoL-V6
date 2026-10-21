@@ -4376,6 +4376,70 @@ V6 环境的语义是"**这段代码是对的**，变异它来造题"，合成�
 而不是换更大的模型、也不是去修判据。⛔ 若把这道闸放宽（"dev 涨了就提交"），
 得到的就是一颗把 7 个检查名硬编码进去、换个模块就归零的胶囊。
 
+## 126. ⛔ 把检查名喂给模型 = 让它抄答案（假设被实测推翻了一半）
+
+`weakness.evidence` 里带的是 `checks_failed:clamp_low,clamp_high,...` 这种
+**具体检查名**。qwen2.5:7b 拿到这份名单后的行为极其一致：把 7 个名字
+**逐字写进技能正文**（`L3.skills.patch:textscore` = "修复 clamp_low,
+clamp_high, normalize_basic, ..."）⇒ 发展集 0/5 → 5/5 满血，held-out
+0.0 → 0.0 ⇒ 判 `overfit`。
+
+检查名是**发展集**的信息。把它当输入，等于让模型抄答案：它抄得越好，
+越不可能给出跨环境的通用修法。于是加了 `--evidence coarse`：只给
+`failure_modes`（behavior_mismatch / crash / import_failed / timeout /
+unknown）与 `n_failing_checks`，**不出现任何检查名**；账本
+`weakness.mined` 仍记原文（审计要能回答"它当时到底看到了什么"）。
+
+⛔ **但它没解决问题** —— 2×2 实测（rounds=1 / group=2 / max-tasks=4）：
+
+| 证据粒度 | 给不给推论 | 模型产出 | 结局 |
+|---|---|---|---|
+| exact | 不给 | `fix_textscore_skills` | dev +1.0 / ho 0 ⇒ **overfit** |
+| coarse | 不给 | `fix_textscore`（dev +1.0）+ `fix_control_flow`（0.0） | overfit / no_advantage |
+| exact | 给 | `fix_textscore_common`(0.0) + `fix_textscore_eventflow`(routing 语法错) | 全拦 |
+| coarse | 给 | `fix_textscore_common`(0.0) | no_advantage |
+
+⇒ 粗化**不改变**"修法只对点名环境生效"这个选择，反而让模型失去依据；
+补一句逻辑推论（`--ho-implication`）也没用，它转头写出
+`L1.routing.repair.patch:eventflow` 这种被 `apply` 闸（`routing target
+需形如 routing.<kind>`）当场挡下的东西。**假设不成立，如实记在这里，
+别重复试**。
+
+## 127. ⛔⛔ `patch:<env>` 在别的环境上 0 增益是**构造必然** —— 不是"讨好判据"
+
+上面那张表暴露的真问题不在模型，在判据：泛化闸把 `ho_gain <= floor`
+一律判 `overfit`，可对一颗**只改定点技能**的胶囊来说，held-out 上必然是
+0 —— 这不是"证据说明它没泛化"，这是**构造上不可能涨**。拿它判 overfit
+⇒ 定点修法永久封死：实测 dev 0/5→5/5 也被拦，连续 6 轮 `committed=null`。
+
+⇒ `--allow-scoped-commit`：这类候选判 `scoped`（放行，**不是** generalize）。
+
+判定用 `capsule_scope()`，而它的判据是**内容承载，不是层名**：
+
+· 只看层名（第一版）⇒ 把所有 LLM 胶囊判成 generic，因为模型为了让新技能
+  **可达**，必然会顺手写 `L1.routing.<kind>` 与 `L2.tools`。可那两处写的
+  值是 `patch:textscore` —— 一个只对某环境生效的技能名：路由指向它，
+  别的环境走到也调不动；工具表挂它，它不是真工具。
+  ⛔ 把层名当成能力，就会把"结构必需的陪衬"读成"通用能力"。
+· 放宽只到"值本身是定点技能名"为止：路由指向 `fix_control_flow`（通用）
+  ⇒ generic；工具表出现 `read_file`（真工具）⇒ generic；
+  `L4.memory_policy` / `L5.world_facts` / `L0.*` ⇒ 一律 generic。
+· 被当成"中性"的目标写进账本 `scope.neutral_targets`（放行必须可复核）。
+
+实测（3 轮 / LLM / `--allow-scoped-commit`）：
+
+    probe r1  fix_textscore_skills  verdict=scoped  dev +1.0  ho 0
+              neutral = [L1.routing.repair=patch:textscore, L2.tools+=patch:textscore]
+    ⇒ harness.commit 1 次，committed=258a11ba…，improved=True
+    r2/r3    no_weakness_evidence（dev 5/5 全绿 ⇒ 没弱点了，不是失败）
+
+⛔ 两条不许含糊的话：
+1. **这是"发展集修好了"，不是"变强了"。** 账本的 `scoped` 与 `generalize`
+   分开数；把两者相加去算"泛化了几次"就是自欺。
+2. 它放宽了一道闸的**适用范围**，所以必须显式开（默认关）、必须进
+   `run_config`、且新增放行态要过 `contract_generalization` 的 A3/A4
+   （那两条是写死的"须人工确认"，这次是 2026-10-21 人工确认过的）。
+
 ## 6. 与 V5 的关系
 
 V6 不是 V5 的替代品，是它的**结构化重写**：

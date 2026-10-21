@@ -157,10 +157,17 @@ def main():
     #         那不是闸太严，是**用错了闸**：对清理该问"删完变差没有"。
     #         见 aether/generalization.py 的 `probe_removal` 与
     #         contract_cleanup_test 的 E 组。
+    #: ⛔ `scoped` 是**人工确认**过的（2026-10-21，用户拍板放宽定点修法）：
+    #:    理由见 aether/generalization.py `capsule_scope` —— `patch:<env>`
+    #:    在别的环境上 0 增益是**构造必然**，拿它判 overfit 会把定点修法
+    #:    永久封死（实测 dev 0/5→5/5 仍被拦、连续 6 轮 committed=null）。
+    #:    ⛔ 它只在 CLI 显式开 `--allow-scoped-commit` 时才产生，且**不算**
+    #:    generalize：账本里 `scoped` 与 `generalize` 必须能分开数。
     ck("A3 裁决取值是封闭集合（新增取值须人工确认，"
-       "已确认 partial / removal_safe / removal_regress）",
+       "已确认 partial / removal_safe / removal_regress / scoped）",
        set(VERDICTS) == {"generalize", "overfit", "partial", "no_gain",
-                         "inconclusive", "removal_safe", "removal_regress"},
+                         "inconclusive", "removal_safe", "removal_regress",
+                         "scoped"},
        f"{VERDICTS}")
     ck("A3b partial 是**拦截**态（新增取值不得偷偷放行）",
        ProbeResult(verdict="partial").blocks is True)
@@ -170,9 +177,13 @@ def main():
     #:    ⇒ 这里从 `ProbeResult.blocks` 的**实测行为**反推出放行集合，
     #:      再与写死的期望比对（A4b 才去核对源码常量）。
     _pass_observed = {v for v in VERDICTS if not ProbeResult(verdict=v).blocks}
-    ck("A4 ⛔ blocks 实测：放行集合恰好 = generalize + removal_safe"
+    ck("A4 ⛔ blocks 实测：放行集合恰好 = generalize + removal_safe + scoped"
        "（多一个放行态 ⇒ 此处转红，须人工确认）",
-       _pass_observed == {"generalize", "removal_safe"}, f"{_pass_observed}")
+       _pass_observed == {"generalize", "removal_safe", "scoped"},
+       f"{_pass_observed}")
+    ck("A4e ⛔ `scoped` 不许被当成 `generalize`（放行 ≠ 证明泛化）",
+       ProbeResult(verdict="scoped").verdict != "generalize"
+       and ProbeResult(verdict="overfit").blocks is True)
     ck("A4b 实测放行集合与源码 PASS_VERDICTS 一致"
        "（改了源码忘改这里 / 反之 ⇒ 转红，两处不许漂移）",
        _pass_observed == set(PASS_VERDICTS),

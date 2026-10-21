@@ -47,10 +47,108 @@ Runner = Callable[[Harness, Dict[str, Any]], Verdict]
 #:    ⇒ 清理在结构上永远无法提交。不是闸太严，是**用错了闸**：
 #:    对清理该问的是"删完之后 held-out 变差没有"，不是"涨了没有"。
 VERDICTS = ("generalize", "overfit", "partial", "no_gain", "inconclusive",
-            "removal_safe", "removal_regress")
+            "removal_safe", "removal_regress", "scoped")
 
 #: 放行的裁决。**封闭集合**（与 VERDICTS 同源）。
-PASS_VERDICTS = ("generalize", "removal_safe")
+#: ⛔ `scoped` 只在显式开 `allow_scoped` 时才会产生（默认口径下不可能出现），
+#:    且它**不是** `generalize`：账本里两个名字必须能分辨，否则"泛化了几次"
+#:    这个读数会被"环境专属的定点修法"灌水。
+PASS_VERDICTS = ("generalize", "removal_safe", "scoped")
+
+
+#: 定点技能的前缀（真实键名，**单冒号**）。`patch::x` 是死名
+#: （`agent.is_known_strategy` 判 False），不在此列。
+_ENV_SKILL_PREFIX = "L3.skills.patch:"
+
+
+def capsule_scope(capsule: Any) -> Dict[str, Any]:
+    """候选的**能力范围**：只承载定点能力 ⇒ `env`；沾了任何通用能力 ⇒ `generic`。
+
+    ⛔ 为什么这个判定是承重的（r62）：`patch:<env>` 只在点名的环境生效
+       ⇒ 它在**别的**环境上 0 增益是**构造必然**。旧判据拿这个 0 判
+       `overfit`（"讨好判据"）⇒ 环境专属的定点修法**永远提交不了**，
+       哪怕它在发展集上是真修好了（实测：dev 0/5→5/5、held-out 0.0→0.0
+       ⇒ overfit ⇒ 连续 6 轮 `committed=null`）。
+
+    ⛔⛔ **判据是"内容承载"，不是"层名"**（r62 第二次修正）：
+       第一版只看层名（"碰了 L1/L2 ⇒ generic"）⇒ 实测把 LLM 的胶囊
+       一律判成 generic，因为模型为了让新技能**可达**，必然会同时写
+       `L1.routing.<kind>` 和 `L2.tools`。可那两处写的值是
+       `patch:textscore` —— 一个**只对某个环境生效**的技能名：
+         · 路由指向它 ⇒ 别的环境走到这条路由也调不动任何东西；
+         · 工具表里挂它 ⇒ 它不是真工具，不授予任何通用能力。
+       把它们算成"通用能力"是把**层名**当成了**能力**。
+
+    ⛔ 但放宽只到"值本身是定点技能名"为止：
+       · `L1.routing.x = fix_control_flow`（通用技能）⇒ generic；
+       · `L2.tools` 里出现任何**非** `patch:` 名字 ⇒ generic；
+       · `L3.skills.<非 patch 名>` ⇒ generic；
+       · `L4.memory_policy` / `L5.world_facts` / `L0.*` ⇒ 一律 generic
+         （这些层与具体环境无关，改了就可能影响 held-out）。
+    ⛔ 判定为"中性"的目标要写进 `neutral_targets` —— 放行必须可复核，
+       不能只留一句"我认为它没影响"。
+    """
+    envs: List[str] = []
+    generic: List[str] = []
+    neutral: List[str] = []
+
+    def _env_of(name: str) -> str:
+        """`patch:<env>` ⇒ env；其余（含死名 `patch::x`）⇒ 空串。"""
+        pre = "L3.skills."
+        raw = name[len(pre):] if name.startswith(pre) else name
+        if raw.startswith("patch:") and not raw.startswith("patch::"):
+            return raw[len("patch:"):]
+        return ""
+
+    for g in (getattr(capsule, "genes", ()) or ()):
+        t = str(getattr(g, "target", "") or "")
+        raw_val = getattr(g, "value", None)
+        vals = list(raw_val) if isinstance(raw_val, (list, tuple)) else [raw_val]
+
+        # ① 技能正文：承载能力本身
+        if t.startswith("L3.skills."):
+            e = _env_of(t)
+            if e:
+                if e not in envs:
+                    envs.append(e)
+            else:
+                generic.append(t)
+            continue
+        # ② 路由：只决定"可达性" ⇒ 指向定点技能时是 env 门控的
+        if t.startswith("L1.routing."):
+            hit = [v for v in vals if isinstance(v, str) and _env_of(v)]
+            rest = [v for v in vals if not (isinstance(v, str) and _env_of(v))]
+            for v in hit:
+                e = _env_of(v)
+                if e and e not in envs:
+                    envs.append(e)
+            if rest:
+                generic.append(t)
+            elif hit:
+                neutral.append(f"{t}={hit[0]}")
+            continue
+        # ③ 工具表：挂一个定点技能名不是能力（它不是真工具）
+        if t == "L2.tools" or t.startswith("L2."):
+            hit = [v for v in vals if isinstance(v, str) and _env_of(v)]
+            rest = [v for v in vals if not (isinstance(v, str) and _env_of(v))]
+            for v in hit:
+                e = _env_of(v)
+                if e and e not in envs:
+                    envs.append(e)
+            if rest:
+                generic.append(t)
+            elif hit:
+                neutral.append(f"{t}+={hit[0]}")
+            continue
+        # ④ 其余层（L0/L4/L5/未知）：与环境无关 ⇒ 保守算通用
+        generic.append(t)
+
+    if envs and not generic:
+        return {"kind": "env", "envs": sorted(envs), "generic_targets": [],
+                "neutral_targets": sorted(neutral)}
+    return {"kind": "generic", "envs": sorted(envs),
+            "generic_targets": sorted(set(generic))[:6],
+            "neutral_targets": sorted(neutral)}
 
 
 @dataclass(frozen=True)
@@ -151,6 +249,11 @@ class ProbeResult:
     #:     合并后"该去补题"与"该去换环境"这两条出路会一起消失，而账面
     #:     仍然显示"这一层被豁免了"（第 14 条：两种含义共用一个字段 ⇒ 读错）。
     saturated: Tuple[str, ...] = ()
+    #: ⛔ 候选的**能力范围**（r62）：`{"kind": "env"|"generic", "envs":[...]}`。
+    #:   `scoped` 裁决靠它成立 —— 只看 `patch:<env>` 这类定点技能的胶囊，
+    #:   在**别的**环境上 0 增益是**构造必然**，不是"讨好判据"的证据。
+    #:   判据用到的量必须是结构化字段（第 35d 条），不是 reason 里的一句话。
+    scope: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def blocks(self) -> bool:
@@ -179,6 +282,7 @@ class ProbeResult:
                 "headroom": dict(self.headroom),
                 "thin": list(self.thin),
                 "saturated": list(self.saturated),
+                "scope": dict(self.scope),
                 "reason": self.reason}
 
 
@@ -557,7 +661,9 @@ class GeneralizationGate:
     # ── 裁决 ────────────────────────────────────────────────────────
     def probe(self, base_h: Harness, cand_h: Harness, runner: Runner,
               dev_gain: float,
-              dev_by_difficulty: Optional[Dict[str, float]] = None
+              dev_by_difficulty: Optional[Dict[str, float]] = None,
+              capsule: Any = None,
+              allow_scoped: bool = False
               ) -> ProbeResult:
         """公开入口 = 裁决 + **统一后处理**。真正的判据在 `_probe_inner`。
 
@@ -569,14 +675,17 @@ class GeneralizationGate:
             而同一套 held-out 在放行时是 `False`）。
         """
         res = self._probe_inner(base_h, cand_h, runner, dev_gain,
-                                dev_by_difficulty)
+                                dev_by_difficulty, capsule=capsule,
+                                allow_scoped=allow_scoped)
         if res.discriminative is None:
             res.discriminative = self.suite.discriminative
         return res
 
     def _probe_inner(self, base_h: Harness, cand_h: Harness, runner: Runner,
                      dev_gain: float,
-                     dev_by_difficulty: Optional[Dict[str, float]] = None
+                     dev_by_difficulty: Optional[Dict[str, float]] = None,
+                     capsule: Any = None,
+                     allow_scoped: bool = False
                      ) -> ProbeResult:
         """对 (基线, 候选) 做一次泛化裁决。
 
@@ -658,7 +767,31 @@ class GeneralizationGate:
                        f"（按拦截处理，需换一批更难的任务）")
         # ⛔ 用 `<=`：等于地板也算"没跟着涨"。用 `<` 的话 0 增益会被判成
         #    泛化 —— 那正好放过最典型的一种 reward hacking（dev 涨、held-out 纹丝不动）。
+        #: ⛔ 候选能力范围算**一次**，两个分支共用（第 13 条：判据名单
+        #:    两处同形互不相干 ⇒ 改一处必漏一处）。
+        _scope = capsule_scope(capsule) if capsule is not None else {}
         if ho_gain <= self.heldout_floor:
+            #: ⛔⛔ r62：`env` 范围的候选在**别的**环境上 0 增益是**构造必然**
+            #:    （`patch:<env>` 只对点名的环境生效）⇒ 拿这个 0 判 overfit
+            #:    等于把"构造必然"当证据，定点修法**永远提交不了**。
+            #:    实测：dev 0/5→5/5、held-out 0.0→0.0 ⇒ overfit ⇒ 6 轮空转。
+            #:  ⛔ 只有**显式开** `allow_scoped` 且该胶囊只碰定点技能、
+            #:     且没碰 held-out 那个环境时才走这条路（碰了就不必然是 0）。
+            #:  ⛔ 裁决名是 `scoped`，不是 `generalize`：它**没有**证明泛化，
+            #:     只是"没资格用这道闸来判"。闸的另一半（非回归）照常生效。
+            if (allow_scoped and _scope.get("kind") == "env"
+                    and self.suite.env_id not in (_scope.get("envs") or ())):
+                return ProbeResult(
+                    verdict="scoped", dev_gain=dev_gain, heldout_gain=ho_gain,
+                    base_heldout=base_ho, cand_heldout=cand_ho,
+                    n_tasks=self.suite.n_tasks, by_difficulty=by_diff,
+                    dev_by_difficulty=dict(dev_by_difficulty or {}),
+                    headroom=dict(headroom), thin=tuple(thin),
+                    saturated=tuple(saturated), scope=dict(_scope),
+                    reason=(f"候选只改定点技能 {_scope.get('envs')} ⇒ 在 "
+                            f"{self.suite.env_id} 上 0 增益是构造必然，"
+                            f"不作 overfit 证据（发展集 +{dev_gain:.4f} 照常"
+                            f"由非回归闸与能力地板裁决）"))
             #: ⛔⛔ r54：这里原先**带走了 `by_diff` 却丢掉了 `headroom`
             #:    / `thin` / `dev_by_difficulty`** —— 而进化循环是把
             #:    `dev_by_difficulty` 一路传进来的（evolution.py 的
@@ -675,7 +808,7 @@ class GeneralizationGate:
                 n_tasks=self.suite.n_tasks, by_difficulty=by_diff,
                 dev_by_difficulty=dict(dev_by_difficulty or {}),
                 headroom=dict(headroom), thin=tuple(thin),
-                saturated=tuple(saturated),
+                saturated=tuple(saturated), scope=dict(_scope),
                 reason=(f"发展集 +{dev_gain:.4f} 但 held-out {ho_gain:+.4f} "
                         f"（{base_ho:.2f}→{cand_ho:.2f}）⇒ 讨好判据，不提交"))
         # ⛔ 分层裁决：总体涨了，但某一难度层没涨 ⇒ **不能直接判挑食**，
