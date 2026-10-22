@@ -264,6 +264,19 @@ def main() -> None:
         ck("C5 `V6_NODE` 显式覆盖生效（不许被 PATH 抢走）",
            got.get("node") == str(fake),
            f"got={got!r} isfile={fake.is_file()} want={str(fake)!r}")
+        #: ⛔⛔ 这条是 C5 红在 CI 上的真因，单独钉一次：`_discover_rea(node)`
+        #:    曾经写 `Path(node).resolve().parents[3]` 去反推受管布局。
+        #:    层级够深的路径（本机 `<…>/node/versions/<ver>/bin/node`）能取到，
+        #:    **浅路径**（`/tmp/tmpXXXX/fake_node`、`/usr/bin/node`）直接
+        #:    `IndexError: 3`。而它在**模块顶层**执行（`REA = _discover_rea(NODE)`）
+        #:    ⇒ 整个 import 崩掉，表现成"这份契约在 Linux 上跑不起来"，
+        #:    与"V6_NODE 覆盖没生效"长得一模一样（第 9 条的老形状）。
+        #:    ⛔ 断言的不是"能发现 REA"（那取决于本机装没装），而是
+        #:      **反推布局这一步不许抛异常**。
+        ck("C5b ⛔ 从 node 反推 REA 时，浅路径不许抛异常"
+           "（`parents[3]` 越界是模块级硬崩）",
+           "_err" not in got,
+           str(got.get("_err", ""))[-200:])
         gone = run_probe({"V6_NODE": str(ROOT / "__no_such_node__")})
         ck("C6 ⛔ 显式给了不存在的路径 ⇒ 返回空并报错，不许静默 fallback",
            gone.get("node") == "", f"得到 {gone.get('node')!r}")

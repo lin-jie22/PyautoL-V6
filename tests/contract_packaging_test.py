@@ -37,6 +37,19 @@ sys.path.insert(0, str(ROOT))
 #: ⛔ 声明支持的模式（`aether check` 静态读这一行）。
 SUPPORTED_MODES = ("default",)
 
+#: ⛔⛔ 这份契约**顶层** `import tomllib`（3.11+），在 3.9 上整份
+#:    ModuleNotFoundError ⇒ 那台机器上它是零覆盖。`aether check` 静态读这一行，
+#:    低于该版本时记 SKIP 并把原因印进报告（不记 fail —— 3.9 上没有 tomllib
+#:    不是代码缺陷）。
+#:
+#: ⛔ 覆盖缺口**如实写在这里**，不假装 3.9 上也验过：A 组（零第三方依赖）
+#:    本来不需要 tomllib，但它现在和 B–D 组同住一个文件；拆出去并不划算 ——
+#:    `_stdlib_names()` 取的是**当前解释器**的 stdlib 名单，3.9 的名单比 3.13
+#:    小，同一个 import 在两个版本上会得出相反结论，那会把"环境差异"读成
+#:    "代码缺陷"。要拆就得先把口径改成"在所有支持版本里都存在"，
+#:    那是另一件事（见 README 待办），不在这里顺手做。
+MIN_PYTHON = (3, 11)
+
 FAILS = []
 
 

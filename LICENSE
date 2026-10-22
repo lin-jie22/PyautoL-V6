@@ -1,11 +1,6 @@
 MIT License
 
-Copyright (c) 2026 <版权持有人：请替换为你的名字或组织>
-
-⛔ 这一行**必须**由版权持有人自己填：本文件是 AI 助手按"最宽松的常见
-   默认"生成的，**不构成法律意见**。要换授权（Apache-2.0 / BSL /
-   闭源商业许可等），改本文件与 `pyproject.toml` 的 `license` 字段即可 ——
-   两处必须一致，否则 `tests/contract_packaging_test.py` 会指出不一致。
+Copyright (c) 2026 林少杰
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

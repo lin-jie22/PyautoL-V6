@@ -147,10 +147,18 @@ def _discover_rea(node: str) -> str:
         return env if os.path.isfile(env) else ""
     cands = ["~/.workbuddy/binaries/node/workspace/node_modules/rea-agents/scripts/rea.mjs"]
     if node:
-        #: 受管布局：<versions>/<ver>/bin/node ←→ <workspace>/node_modules/...
-        cands.append(str(Path(node).resolve().parents[3]
-                          / "workspace" / "node_modules" / "rea-agents"
-                          / "scripts" / "rea.mjs"))
+        #: 受管布局：`<node根>/versions/<ver>/bin/node` ←→ `<node根>/workspace/…`
+        #: ⛔⛔ 不许直接写 `parents[3]`：层级浅的路径（`/usr/bin/node`、
+        #:    契约临时目录里的假 node）根本没有那一层，Python 抛的是
+        #:    `IndexError: 3` —— 一个**模块加载期**的硬崩（`REA = _discover_rea(NODE)`
+        #:    就在顶层），表现成"这份契约在 CI 上整个 import 不进来"。
+        #:    实测出处：`contract_portability_test.py` C5，本机（路径够深）恒绿、
+        #:    Linux runner（`/tmp/tmpXXXX/fake_node`）恒红。
+        #:    ⇒ 反推布局只能"有那一层就试，没有就跳过"，不许假设它存在。
+        ups = Path(node).resolve().parents
+        if len(ups) > 3:
+            cands.append(str(ups[3] / "workspace" / "node_modules"
+                             / "rea-agents" / "scripts" / "rea.mjs"))
     cands.append("~/.npm-global/lib/node_modules/rea-agents/scripts/rea.mjs")
     return _first_file(*[os.path.expanduser(c) for c in cands])
 

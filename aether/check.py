@@ -39,7 +39,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 __all__ = ["PASS", "FAIL", "SKIP", "TIMEOUT", "ERROR",
            "Run", "discover", "supports_e2e", "is_exclusive", "declared_modes",
@@ -76,6 +76,18 @@ _MODES_RE = re.compile(
 _EXCLUSIVE_RE = re.compile(
     r"^\s*EXCLUSIVE\s*=\s*(True|False)\s*$", re.MULTILINE)
 
+#: 声明"我这份契约要求解释器不低于某版本"的标记。契约里写一行
+#:     `MIN_PYTHON = (3, 11)`
+#: 即可（不写 ⇒ 不设限，与 `requires-python` 同语义）。
+#: ⛔⛔ 为什么由**框架**裁定，而不是让契约自己 `try: import tomllib`：
+#:    每份契约各写一套 try 边界，很容易滑成"悄悄跳过"（用户只看到绿）；
+#:    而 `check` 记 SKIP 会把这条缺口**计进报告**，skip 数看得见。
+#: ⛔ 真实起因：`contract_packaging_test.py` 顶层 `import tomllib`（3.11+），
+#:    3.9 上整份 ModuleNotFoundError ⇒ 那份契约在 3.9 上**零覆盖**，
+#:    而 `requires-python = ">=3.9"` 是仓库自己声明的 —— 不能靠删 job 糊过去。
+_MIN_PY_RE = re.compile(
+    r"^\s*MIN_PYTHON\s*=\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)", re.MULTILINE)
+
 
 @dataclass
 class Run:
@@ -98,8 +110,12 @@ class Run:
 #: 失败输出的"信号行"：契约的判据都在这些形态上留痕。
 #: ⛔ 不能只认 `❌`：断言失败会先印 `AssertionError` 和 `!` 比较，
 #:    traceback 里也可能只有 `Error:` 一行是真正的原因。
+#: ⛔⛔ `✗` / `×` 必须单列：`contract_serve_test.py` 用的是 `✗`，
+#:    漏了它 ⇒ 那份契约红了以后**一条判据文字都进不了尾巴**，
+#:    只剩"退出码 1"（CI 3.9 上就是这样，看得到 I7/I8/I9/I11 的名字
+#:    却看不到任何一个 detail，等于给了四个没有诊断的红点）。
 _BAD_LINE_RE = re.compile(
-    r"❌|\bFAIL\b|\bERROR\b|Traceback|AssertionError|"
+    r"❌|✗|×|\bFAIL\b|\bERROR\b|Traceback|AssertionError|"
     r"\bError:|异常|失败|断言|\bassert\b|!=",
     re.IGNORECASE)
 
@@ -238,6 +254,23 @@ def supports_e2e(script: Path) -> bool:
     return bool(modes and "e2e" in modes)
 
 
+def min_python(script: Path) -> Optional[Tuple[int, int]]:
+    """读契约声明的最低解释器版本；**没声明 ⇒ `None`**（不设限）。
+
+    ⛔ 与 `declared_modes` / `is_exclusive` 同为**静态读取**（不 import）：
+       import 契约等于在 check 自己的进程里执行它的顶层断言。
+    ⛔ 返回 `None`（不设限）与 `(3, 9)`（下限就是 3.9）是两件事，别合并。
+    """
+    try:
+        txt = script.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    m = _MIN_PY_RE.search(txt)
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)))
+
+
 def is_exclusive(script: Path) -> bool:
     """这份契约是否声明了「必须独占」（**测墙钟 / 测内存**的那类）。
 
@@ -312,7 +345,18 @@ def run_checks(root: str | Path,
     plan: List[tuple] = []
     undeclared: List[str] = []
     not_e2e: List[str] = []
+    ver_skip: Dict[str, str] = {}
     for s in scripts:
+        #: ⛔ 版本闸在**最前面**：低于契约声明的 `MIN_PYTHON` 时它连跑都不该跑
+        #:    （跑也是 ModuleNotFoundError，那份契约在被测版本上等于零覆盖）。
+        #:    记 SKIP 并写清"谁要求什么版本、当前是什么版本"。
+        mp = min_python(s)
+        if mp and sys.version_info[:2] < mp:
+            ver_skip[s.name] = (f"声明 MIN_PYTHON={mp[0]}.{mp[1]}，当前解释器 "
+                                f"{sys.version_info[0]}.{sys.version_info[1]}"
+                                f" ⇒ 这份契约在该版本上不适用（不是失败）")
+            plan.append((s, "version_skip"))
+            continue
         modes_decl = declared_modes(s)
         if modes_decl is None:
             undeclared.append(s.name)
@@ -327,9 +371,15 @@ def run_checks(root: str | Path,
     #: ⛔ **分段调度**：独占契约（测量型）**串行**，其余按 `jobs` 并发。
     #:    混在一段里跑 ⇒ 性能契约在 CPU 争抢下失真并稳定超时
     #:    （根因与实测见 `is_exclusive` 的 docstring）。
-    plan_excl = [(s, m) for (s, m) in plan if is_exclusive(s)]
-    plan_par = [(s, m) for (s, m) in plan if not is_exclusive(s)]
+    plan_excl = [(s, m) for (s, m) in plan if m != "version_skip" and is_exclusive(s)]
+    plan_par = [(s, m) for (s, m) in plan if m != "version_skip" and not is_exclusive(s)]
     done: Dict[tuple, Run] = {}
+
+    #: ⓪ 版本闸段：**不执行**，直接按声明记 SKIP（原因进 `Run.reason`）。
+    for s, _m in plan:
+        if _m == "version_skip":
+            done[(s.name, "version_skip")] = Run(
+                s.name, "default", SKIP, None, 0.0, reason=ver_skip[s.name])
 
     #: ① 独占段：**一次只跑一份**，不与任何契约（含彼此）并发。
     for s, m in plan_excl:
@@ -357,6 +407,13 @@ def run_checks(root: str | Path,
         runs.append(cross_language(root_p))
     n = {k: sum(1 for r in runs if r.status == k)
          for k in (PASS, FAIL, SKIP, TIMEOUT, ERROR)}
+    #: ⛔⛔ 版本闸（`MIN_PYTHON`）带来的新风险，必须自己堵住：
+    #:    若**契约级**的 run 全部被跳过（解释器比所有契约声明的下限都老），
+    #:    那"全绿"是**空的** —— 一个断言都没执行，却和"全量验过"同形。
+    #:    这与上面"0 份契约 ⇒ fail-closed"完全同源，不再重复一遍道理。
+    _contract_runs = [r for r in runs if r.mode != "cross-language"]
+    all_skipped = bool(_contract_runs) and all(
+        r.status == SKIP for r in _contract_runs)
     return {
         "root": str(root_p),
         "n_scripts": len(scripts),
@@ -380,10 +437,13 @@ def run_checks(root: str | Path,
         #:    结论，与"全量验过"在输出上几乎同形。契约测试是这套系统的
         #:    判据本身，判据为空必须当失败处理。
         "empty": len(scripts) == 0,
-        "ok": (bool(scripts) and n[FAIL] == 0 and n[TIMEOUT] == 0
-               and n[ERROR] == 0),
-        "exit_code": 0 if (scripts and n[FAIL] == 0 and n[TIMEOUT] == 0
-                           and n[ERROR] == 0) else 1,
+        #: ⛔ `all_skipped` 与 `empty` 是**同一类假绿的两个入口**：前者是
+        #:    "一份都没发现"，后者是"发现了但一份都没执行"。两个都 fail-closed。
+        "all_skipped": all_skipped,
+        "ok": (bool(scripts) and not all_skipped and n[FAIL] == 0
+               and n[TIMEOUT] == 0 and n[ERROR] == 0),
+        "exit_code": 0 if (scripts and not all_skipped and n[FAIL] == 0
+                           and n[TIMEOUT] == 0 and n[ERROR] == 0) else 1,
     }
 
 
@@ -393,6 +453,9 @@ def summarize(rep: Dict[str, Any]) -> str:
     lines: List[str] = []
     if rep.get("empty"):
         head = "❌ 一份契约都没发现（无从判别 ⇒ 按失败处理）"
+    elif rep.get("all_skipped"):
+        head = ("❌ 全部契约都被跳过（一个断言都没执行 ⇒ 按失败处理，"
+                "不许当绿）")
     else:
         head = "✅ 全部通过" if rep["ok"] else "❌ 有未通过项"
     lines.append(f"{head}：{rep['n_scripts']} 份契约，"
@@ -425,6 +488,11 @@ def summarize(rep: Dict[str, Any]) -> str:
             if r["tail"]:
                 for ln in r["tail"].splitlines():
                     lines.append(f"       {ln}")
+    #: ⛔ SKIP 不许只留一个数字：`skip=1` 说不了"哪份"和"为什么不适用"。
+    #:    跨语言那一步另有专门点名（下面），这里管**契约级**的 SKIP。
+    for r in rep["runs"]:
+        if r["status"] == SKIP and r["mode"] != "cross-language":
+            lines.append(f"  ⏭ {r['script']}：{r['reason']}")
     if rep["undeclared_modes"]:
         lines.append(f"⚠️ {len(rep['undeclared_modes'])} 份契约没声明支持的模式"
                      f"（未声明 ≠ 只有一种模式）⇒ 只按默认模式跑："

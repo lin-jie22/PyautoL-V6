@@ -417,12 +417,24 @@ def main() -> int:
         )
         _repo_after = set(_rea_files(ROOT))
         _after_ws = set(_rea_files(_ws2))
-        ck("C6 ⛔⛔ 证据落在**指定的根**下（生产仓库零增长）",
-           len(_after_ws - _before_ws) >= 1
-           and _repo_after == _repo_before,
-           f"ws 新增={len(_after_ws - _before_ws)} "
-           f"仓库新增={sorted(_repo_after - _repo_before)[:3]} "
-           f"rc={_r2.returncode}")
+        #: ⛔⛔ 这条判据是**两件事的合取**，而它们的成立条件完全不同：
+        #:     ① 生产仓库零增长 —— **任何环境**下都必须成立（这是安全属性，
+        #:        写错地方比崩更坏，第 108 条）；
+        #:     ② 临时根下确实新增了证据 —— 需要 invoke 真跑通一次。
+        #:     原来合在一起判 ⇒ 没装 REA 的机器上 ② 恒假，连 ① 的绿也一起
+        #:     被标成红（CI 实测：`ws 新增=0 ... rc=1`）。零增长那一半是**真的
+        #:     验过了**，不该被连坐（第 144 条：一个原因不许伪装成两个缺陷）。
+        ck("C6a ⛔⛔ 生产仓库零增长（证据不许落进代码目录）",
+           _repo_after == _repo_before,
+           f"仓库新增={sorted(_repo_after - _repo_before)[:3]}")
+        if _r2.returncode != 0:
+            sk("C6 证据落在**指定的根**下（ws 新增 ≥1）",
+               f"invoke 没成功（rc={_r2.returncode}，多半是引擎未安装）⇒ "
+               f"没有证据可数；零增长那半已由 C6a 验过")
+        else:
+            ck("C6 证据落在**指定的根**下（ws 新增 ≥1）",
+               len(_after_ws - _before_ws) >= 1,
+               f"ws 新增={len(_after_ws - _before_ws)} rc={_r2.returncode}")
 
     # ── D 组：反证（证明 A 组的闸不是恒真）──────────────────────────
     print()

@@ -159,26 +159,36 @@ def scan_file(path: Path) -> Dict[str, Any]:
     try:
         src = path.read_text(encoding="utf-8")
     except Exception as e:                              # noqa: BLE001
-        return {"bad": [{"line": 0, "kind": "stringy",
+        return {"bad": [{"line": 0, "kind": "syntax",
                          "text": f"读不到：{type(e).__name__}: {e}"}],
-                "params": [], "n_calls": 0}
+                "params": [], "n_calls": 0, "parsed": False}
     try:
         tree = ast.parse(src)
     except SyntaxError as e:
-        return {"bad": [{"line": 0, "kind": "stringy",
-                         "text": f"语法错误（判据无意义）：{e}"}],
-                "params": [], "n_calls": 0}
+        #: ⛔⛔ 这一支**不许**伪装成 stringy / too_few。
+        #:    原来它返回 kind="stringy"，于是同一个语法错误同时把
+        #:    A2（定位不到条件位）、A4（条件位是字符串 ⇒ 恒真）、B1（不记账）
+        #:    三条全弄红 —— 而这三条判的是三种完全不同的缺陷，全都不是实情。
+        #:    真实标本：tests/contract_commit_verdict_test.py 的 f-string 里有
+        #:    `\"`（3.11 及以下 SyntaxError）⇒ 3.9 上 4 红同源（第 128 条：
+        #:    「被拦」≠「按预期那条规则被拦」）。
+        #:    修法：单列 kind="syntax" + parsed=False，让 A0 一条专属断言报它，
+        #:    其余组把它从分母里排除并**显式披露**（排除不等于静默忽略）。
+        return {"bad": [{"line": int(getattr(e, "lineno", 0) or 0),
+                         "kind": "syntax",
+                         "text": f"语法错误（本文件其余判据无意义）：{e.msg}"}],
+                "params": [], "n_calls": 0, "parsed": False}
 
     params, _ = _ck_signature(tree)
     if not params:
         return {"bad": [{"line": 0, "kind": "stringy",
                          "text": "找不到 def ck(...) ⇒ 无法核对条件位"}],
-                "params": [], "n_calls": 0}
+                "params": [], "n_calls": 0, "parsed": True}
     ci = _cond_index(params)
     if ci < 0:
         return {"bad": [{"line": 0, "kind": "stringy",
                          "text": f"ck 形参里没有 ok/cond：{params}"}],
-                "params": params, "n_calls": 0}
+                "params": params, "n_calls": 0, "parsed": True}
 
     fn = next(n for n in ast.walk(tree)
               if isinstance(n, ast.FunctionDef) and n.name == "ck")
@@ -205,7 +215,8 @@ def scan_file(path: Path) -> Dict[str, Any]:
 
     fv = _fail_var(tree)
     return {"bad": bad, "params": params, "n_calls": n_calls,
-            "fail_var": fv, "rc_honest": _rc_honest(tree, fv)}
+            "fail_var": fv, "rc_honest": _rc_honest(tree, fv),
+            "parsed": True}
 
 
 def _pick(bad: List[Dict[str, Any]], kind: str) -> List[str]:
@@ -222,26 +233,43 @@ def group_a() -> None:
 
     no_sig: List[str] = []
     all_bad: Dict[str, List[Dict[str, Any]]] = {}
+    unparsed: List[str] = []
     total = 0
     for f in files:
         r = scan_file(f)
         total += int(r["n_calls"])
+        if not r.get("parsed", True):
+            unparsed.append(f.name)
+            if r["bad"]:
+                all_bad[f.name] = list(r["bad"])
+            continue
         if not r["params"]:
             no_sig.append(f.name)
         if r["bad"]:
             all_bad[f.name] = list(r["bad"])
 
-    ck("A2 每个文件都能定位到 ck 的条件位（形参含 ok 或 cond）",
-       not no_sig, f"定位不了={no_sig}")
-
     flat = [b for v in all_bad.values() for b in v]
+    syntax = _pick(flat, "syntax")
+    n_ok = len(files) - len(unparsed)
+    excl = (f"；{len(unparsed)} 份因语法错误未参与（见 A0）：{unparsed[:3]}"
+            if unparsed else "")
+
+    #: ⛔ A0 单独一条，只说语法错误这一件事。它红了以后 A2/A3/A4/B1/B2 会
+    #:    把那些文件从分母里排除，于是**只有 A0 红**，不再是四条同源红。
+    ck("A0 ⛔ 每个契约文件都能被解析（语法错误不许伪装成\"参数错位\"或\"恒真断言\"）",
+       not syntax,
+       "; ".join(syntax[:3]) or f"{len(files)} 份全部可解析")
+
+    ck("A2 每个文件都能定位到 ck 的条件位（形参含 ok 或 cond）",
+       not no_sig, (f"定位不了={no_sig}" if no_sig else f"{n_ok} 份全部定位到{excl}"))
+
     too_few = _pick(flat, "too_few")
     stringy = _pick(flat, "stringy")
 
     ck(f"A3 {total} 条 ck() 调用的实参个数都够（不许整体前移）",
-       not too_few, "; ".join(too_few[:3]) or f"{total} 条全部够数")
+       not too_few, "; ".join(too_few[:3]) or f"{total} 条全部够数{excl}")
     ck("A4 条件位上站的不是字符串（否则是恒真断言）",
-       not stringy, "; ".join(stringy[:3]) or "无条件位是字符串")
+       not stringy, "; ".join(stringy[:3]) or f"无条件位是字符串{excl}")
 
 
 # ── B 组：失败记账与退出码必须诚实 ─────────────────────────────────
@@ -252,8 +280,13 @@ def group_b() -> None:
     no_append: Dict[str, str] = {}
     no_rc: Dict[str, str] = {}
     used: Dict[str, int] = {}
+    unparsed: List[str] = []
     for f in files:
         r = scan_file(f)
+        if not r.get("parsed", True):
+            #: 语法错误的文件读不出 ck 的失败变量 ⇒ 记进 B1 只会重复 A0 那条红。
+            unparsed.append(f.name)
+            continue
         var = str(r.get("fail_var") or "")
         used[var or "<无>"] = used.get(var or "<无>", 0) + 1
         if not var:
@@ -261,18 +294,20 @@ def group_b() -> None:
         elif not bool(r.get("rc_honest")):
             no_rc[f.name] = (f"失败列表叫 {var!r}，但退出码没有引用它"
                              f" ⇒ 跑红了也会报 0")
+    n_ok = len(files) - len(unparsed)
+    excl = (f"；{len(unparsed)} 份未参与（语法错误，见 A0）" if unparsed else "")
 
     #:    ⛔ 命名分布只作 detail 披露（分诊用），不单独设一条断言 ——
     #:       它跟 B1 判的是同一件事，写成独立断言只会多一条重复项。
     ck("B1 每个契约的 ck 都把失败**记下来**（不是只 print 一眼）",
        not no_append,
        "; ".join(f"{k}: {v}" for k, v in list(no_append.items())[:3])
-       or f"{len(files)} 个全部记账")
+       or f"{n_ok} 个全部记账{excl}")
 
     ck("B2 失败列表会传到**退出码**（红了 run_contracts 看得见）",
        not no_rc,
        "; ".join(f"{k}: {v}" for k, v in list(no_rc.items())[:3])
-       or f"{len(files)} 个全部诚实")
+       or f"{n_ok} 个全部诚实{excl}")
 
 
 # ── X 组：反证（扫描器自己必须能被翻转）─────────────────────────────
@@ -377,6 +412,39 @@ def group_x() -> None:
     ck("X6 干净版（return 1 if FAILS）⇒ B2 判它诚实（X5 因此不是恒真）",
        r6.get("rc_honest") is True,
        f"fail_var={r6.get('fail_var')!r} rc_honest={r6.get('rc_honest')}")
+
+    #: ⛔⛔ X7 是「一因一果」的核心反证：一个语法错误只许出 A0 一条红。
+    #:     在修之前，同一份文件会把 A2（定位不到条件位）、A4（条件位是字符串）、
+    #:     B1（不记账）三条全弄红 —— 三条判的都是别的缺陷，全是误报。
+    #:     真实标本：contract_commit_verdict_test.py 的 f-string 里有 `\"`
+    #:     （3.11- 才 SyntaxError，3.12+ 的 PEP 701 允许 ⇒ 那条判据只能靠
+    #:      真实最低版本解释器编译，见 contract_pycompat_test.py）。
+    #:     这里造一个**各版本都语法错**的夹具（缺右括号），只验分类。
+    syn = d / "syntax.py"
+    syn.write_text(
+        'FAILS = []\n'
+        'def ck(name, cond, detail="":\n'        # ⛔ 缺右括号
+        '    if not cond:\n'
+        '        FAILS.append(name)\n'
+        'def main():\n'
+        '    return 1 if FAILS else 0\n',
+        encoding="utf-8")
+    r7 = scan_file(syn)
+    ck("X7 ⛔ 语法错误的文件：只记 kind=syntax 且 parsed=False（不伪装成 stringy/too_few）",
+       bool(r7["bad"]) and all(b["kind"] == "syntax" for b in r7["bad"])
+       and r7.get("parsed") is False,
+       f"kind={[b['kind'] for b in r7['bad']]} parsed={r7.get('parsed')}")
+
+    #: 对照：同一份文件仅仅把那个括号补上 ⇒ 必须 parsed=True 且无 bad。
+    #: 否则 X7 只是"扫描器对任何文件都报 syntax"，等于恒真。
+    syn_ok = d / "syntax_ok.py"
+    syn_ok.write_text(
+        syn.read_text(encoding="utf-8").replace('detail="":', 'detail=""):'),
+        encoding="utf-8")
+    r8 = scan_file(syn_ok)
+    ck("X8 对照：补上那个括号后 ⇒ parsed=True 且无 bad（X7 因此不是恒真）",
+       r8.get("parsed") is True and not r8["bad"],
+       f"parsed={r8.get('parsed')} bad={r8['bad'][:1]}")
 
 
 def main() -> int:

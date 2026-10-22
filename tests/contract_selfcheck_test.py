@@ -94,9 +94,23 @@ def main() -> int:
     t0 = time.time()
     rep = SC.run(ws)
     secs = time.time() - t0
-    ck("A1 全跑一遍：10 项都在，且没有坏项",
+
+    def _broken_detail(r):
+        """把"哪一项坏了、坏在哪"直接写进断言 detail。
+
+        ⛔ 原来只报 `broken=1` —— 那是个数字，说不出是 11 项里的哪一项。
+           CI 上就是这样：A1/E2 一起红，两份日志都只有一个计数，远端只能猜
+           （第 134 条：某分支的读数不带结构，等于把量具的空转当结论）。
+           这里把 key 与该项自己的 detail 一起印出来，下一轮 CI 自证根因。
+        """
+        bad = [(r2["key"], str(r2.get("detail", ""))[:140])
+               for r2 in r["results"] if r2["status"] == SC.BROKEN]
+        return "; ".join(f"{k}: {d}" for k, d in bad[:3]) or "无坏项"
+
+    ck("A1 全部自检项都在，且没有坏项",
        rep["n"] == len(SC.CHECKS) and rep["counts"][SC.BROKEN] == 0,
-       f"n={rep['n']} broken={rep['counts'][SC.BROKEN]}")
+       f"n={rep['n']}/{len(SC.CHECKS)} broken={rep['counts'][SC.BROKEN]} "
+       f"⇒ {_broken_detail(rep)}")
     ck("A2 每项都写了理由（沉默 ≠ 通过）",
        all(str(r["detail"]).strip() for r in rep["results"]),
        str([r["key"] for r in rep["results"] if not r["detail"].strip()]))
@@ -285,9 +299,13 @@ def main() -> int:
     rep_ck = CK.run_checks(no_tests, cross_lang=False)
     ck("E1 没有 tests/ ⇒ `check` 判失败（fail-closed 是对的）",
        rep_ck["empty"] and rep_ck["exit_code"] != 0, str(rep_ck["counts"]))
+    _r_nt = SC.run(no_tests)
     ck("E2 但 `selfcheck` 照跑（它不依赖 tests/）",
-       SC.run(no_tests)["counts"][SC.BROKEN] == 0,
-       str(SC.run(no_tests)["counts"]))
+       _r_nt["counts"][SC.BROKEN] == 0,
+       f"{_r_nt['counts']} ⇒ "
+       + ("; ".join(f"{r2['key']}: {str(r2.get('detail', ''))[:140]}"
+                    for r2 in _r_nt["results"]
+                    if r2["status"] == SC.BROKEN)[:400] or "无坏项"))
 
     print("\n" + "=" * 60)
     if FAILS:

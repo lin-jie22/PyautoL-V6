@@ -326,6 +326,101 @@ sys.exit(1)
         finally:
             C._summarize_out = _orig_s
 
+    #: ⛔⛔ `✗` 必须算信号行：`contract_serve_test.py` 全部判据都用 `✗`。
+    #:    漏了它 ⇒ 那份契约红了以后尾部**一条判据文字都没有**，只剩"退出码 1"
+    #:    —— CI 3.9 上就是这样：看得到 I7/I8/I9/I11 四个名字，却看不到
+    #:    任何一个 detail，四个红点等于零诊断。
+    #:    夹具用 40 行填充，确保命中不是"恰好落在末几行"。
+    #:    夹具必须把 `✗` 行放在**中段**：`_summarize_out` 失败时无条件保留
+    #:    头 6 行 + 尾 12 行，放在那两段里的话"命中"跟信号检测毫无关系
+    #:    —— 第一版我就写在第二行，注入反证时正则删掉了 `✗` 它**照样绿**，
+    #:    是个恒真断言（第 9 条的老形状）。
+    _noisy = ("  ✓ 前 18 行都正常\n" * 18
+              + "  ✗ I7 ⛔ 装载 0 条 ⇒ 409\n"
+              + "  .. filler ..\n" * 24
+              + "  ✓ I12 结尾\n")
+    ck("G6 ⛔ `✗` 也算信号行（serve 契约用它 ⇒ 漏了就没有任何 detail）",
+       "I7" in C._summarize_out(_noisy, False),
+       C._summarize_out(_noisy, False)[-160:])
+    ck("G7 对照：同一段输出把 `✗` 换成 `✓` ⇒ 中段那行必须被省略"
+       "（否则 G6 是恒真）",
+       "I7" not in C._summarize_out(_noisy.replace("✗", "✓"), False),
+       C._summarize_out(_noisy.replace("✗", "✓"), False)[-160:])
+
+    # ── H 组：MIN_PYTHON 版本闸 ────────────────────────────────────
+    print("H 组：MIN_PYTHON 版本闸（低于声明 ⇒ SKIP，且不许变成假绿）")
+    #: ⛔ 夹具契约在超版本时**一被执行就会红**（打印 FAIL 且 rc=1）。
+    #:    这样"闸坏了"立刻可见 —— 若它被跳过，报告里必须是 skip 而不是 pass，
+    #:    也不能是 fail（exit 1 会伪装成"契约本身有缺陷"）。
+    _OVER = (
+        'MIN_PYTHON = (99, 0)\n'
+        'SUPPORTED_MODES = ("default",)\n'
+        'import sys\n'
+        'print("  FAIL 这份契约根本不该被执行（MIN_PYTHON 闸失效了）")\n'
+        'sys.exit(1)\n')
+    _PLAIN = (
+        'SUPPORTED_MODES = ("default",)\n'
+        'import sys\n'
+        'print("  PASS 正常的契约")\n'
+        'sys.exit(0)\n')
+    with tempfile.TemporaryDirectory() as _td2:
+        _root = Path(_td2)
+        (_root / "tests").mkdir()
+        (_root / "tests" / "contract_overpy_test.py").write_text(
+            _OVER, encoding="utf-8")
+        (_root / "tests" / "contract_plain_test.py").write_text(
+            _PLAIN, encoding="utf-8")
+
+        _h = C.run_checks(_root, timeout_s=60.0, cross_lang=False)
+        _by = {r["script"]: r for r in _h["runs"]}
+        _o = _by.get("contract_overpy_test.py", {})
+        _p = _by.get("contract_plain_test.py", {})
+        ck("H1 超过声明版本的契约记 SKIP（不记 fail —— 版本老不是代码缺陷）",
+           _o.get("status") == C.SKIP, f"status={_o.get('status')}")
+        ck("H2 而且**根本没执行**（rc 为 None）；跑了就会是 rc=1 的假红",
+           _o.get("rc") is None, f"rc={_o.get('rc')!r}")
+        ck("H3 SKIP 的原因必须点名版本差（不能只留一个数字）",
+           "MIN_PYTHON" in str(_o.get("reason", "")),
+           str(_o.get("reason", ""))[:120])
+        ck("H4 未声明版本的契约照常跑（闸不许误伤）",
+           _p.get("status") == C.PASS, f"status={_p.get('status')}")
+        ck("H5 部分跳过不拦整轮（skip 不算通过，但也不该让命令红）",
+           _h["ok"] is True and _h["exit_code"] == 0, str(_h["counts"]))
+        ck("H6 摘要里必须印出被跳过的那份与原因（不许只有 skip=1）",
+           "⏭" in C.summarize(_h) and "contract_overpy_test.py"
+           in C.summarize(_h), C.summarize(_h)[:160])
+
+    #: ⛔⛔ 全跳过 = 一个断言都没执行。它与"0 份契约"是**同一类假绿**，
+    #:     必须同样 fail-closed；否则某个比所有下限都老的解释器上会看到
+    #:     `✅ 全部通过` 而实际上什么都没验。
+    with tempfile.TemporaryDirectory() as _td3:
+        _root = Path(_td3)
+        (_root / "tests").mkdir()
+        (_root / "tests" / "contract_overpy_test.py").write_text(
+            _OVER, encoding="utf-8")
+        _h2 = C.run_checks(_root, timeout_s=60.0, cross_lang=False)
+        ck("H7 ⛔ 全部契约都被跳过 ⇒ 必须 fail-closed（假绿的另一扇门）",
+           _h2["ok"] is False and _h2["exit_code"] == 1
+           and _h2.get("all_skipped") is True,
+           f"ok={_h2['ok']} rc={_h2['exit_code']} "
+           f"all_skipped={_h2.get('all_skipped')}")
+        ck("H8 而且摘要的点名是「全部被跳过」，不是「全部通过」",
+           "全部契约都被跳过" in C.summarize(_h2), C.summarize(_h2)[:120])
+
+    #: ⛔ 反证：把同一份夹具的 MIN_PYTHON 去掉 ⇒ 它必须被真执行并红。
+    #:    否则 H1 只是"扫描器对任何契约都记 skip"，等于恒真。
+    with tempfile.TemporaryDirectory() as _td4:
+        _root = Path(_td4)
+        (_root / "tests").mkdir()
+        (_root / "tests" / "contract_overpy_test.py").write_text(
+            _OVER.replace('MIN_PYTHON = (99, 0)\n', ''), encoding="utf-8")
+        _h3 = C.run_checks(_root, timeout_s=60.0, cross_lang=False)
+        _o3 = {r["script"]: r for r in _h3["runs"]}.get(
+            "contract_overpy_test.py", {})
+        ck("H9 ⛔⛔ 反证：去掉 MIN_PYTHON 后它**真被执行**并红（H1 因此不是恒真）",
+           _o3.get("status") == C.FAIL and _o3.get("rc") == 1,
+           f"status={_o3.get('status')} rc={_o3.get('rc')!r}")
+
     print("\n" + "=" * 60)
     if FAILS:
         print(f"❌ {len(FAILS)} 项未通过：")

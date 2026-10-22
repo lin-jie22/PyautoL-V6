@@ -151,13 +151,22 @@ def main() -> int:
        f"命中={src.replace(' ', '').count('summarize_commits(reports)')} 处")
     demo_src = (ROOT / "scripts" / "demo_evolve.py").read_text(encoding="utf-8")
     e2e_src = (ROOT / "scripts" / "llm_e2e.py").read_text(encoding="utf-8")
+    #: ⛔⛔ 字面量必须先落到变量里再进 f-string。3.9/3.10/3.11 的 f-string 不允许
+    #:    表达式部分出现反斜杠（PEP 701 到 3.12 才放开），写成
+    #:    `f"{'get(\"commits\")' in src}"` 在 3.9 上是 **SyntaxError** —— 而且
+    #:    `ast.parse(feature_version=(3, 9))` 抓不到它（feature_version 只管
+    #:    语法特性清单，覆盖不了 f-string 解析器的差异）⇒ 唯一可靠的判据是
+    #:    用真实的最低版本解释器编译（见 contract_pycompat_test.py）。
+    _d_key = 'get("commits")'
+    _d_old = "- 是否进化"
+    _demo_has_k = _d_key in demo_src
+    _e2e_has_k = _d_key in e2e_src
+    _demo_has_old = _d_old in demo_src
     ck("D3 ⛔ 两个脚本读拆开后的数；「- 是否进化」这一行必须消失"
        "（它把 scoped 提交说成进化）",
-       'get("commits")' in demo_src and 'get("commits")' in e2e_src
-       and "- 是否进化" not in demo_src,
-       f"demo读commits={'get(\"commits\")' in demo_src} "
-       f"e2e读commits={'get(\"commits\")' in e2e_src} "
-       f"demo仍有该行={'- 是否进化' in demo_src}")
+       _demo_has_k and _e2e_has_k and not _demo_has_old,
+       f"demo读commits={_demo_has_k} e2e读commits={_e2e_has_k} "
+       f"demo仍有该行={_demo_has_old}")
 
     print("\n" + "=" * 62)
     print("E 组 · 生产读数：账本里的提交裁决只有三种形状")

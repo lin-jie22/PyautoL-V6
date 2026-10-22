@@ -414,12 +414,30 @@ try:
         ex_old = E.run_in_sandbox(_COLD_SRC, _TESTS, timeout=10)
     finally:
         E._audit_allowed_paths = _sav_allow
-    _tail = (ex_old.stderr or "").strip().splitlines()[-1:]
+    #: ⛔⛔ 判「被拒了」不能硬编码"异常冒在 stderr 上"。实测同一份代码：
+    #:      · 3.13：`PermissionError: V6_SANDBOX_DENY:open` 直接冒到 stderr；
+    #:      · 3.9 ：runner 把它捕获成结构化字段
+    #:              `stdout.import_error` 的 traceback，stderr 是**空**的
+    #:              ⇒ 原来那条 `any("V6_SANDBOX_DENY" in ln for ln in _tail)`
+    #:                在 3.9 上恒假、`tail=[]`，I3 红得毫无信息。
+    #:      两个通道都是"可指认的证据落点"，判据应该问**证据在不在**，
+    #:      而不是问它走哪个文件描述符出来的。
+    #: ⛔ 同时**不许**退化成"只要 n_passed==0 就算被拒"：任务失败的原因
+    #:    有很多种（语法错、断言错、模块真不存在），必须点名 DENY 这个身份。
+    _ev = ((ex_old.stdout or "") + "\n" + (ex_old.stderr or ""))
+    _deny = "V6_SANDBOX_DENY" in _ev
     ck("I3 ⛔ 反证：退回只放行 prefix ⇒ 冷 import 被拒"
        "（证明 I2 不是恒真，这条闸有牙）",
-       ex_old.rc != 0 and ex_old.n_passed == 0
-       and any("V6_SANDBOX_DENY" in ln for ln in _tail),
-       f"rc={ex_old.rc} passed={ex_old.n_passed} tail={_tail}")
+       ex_old.n_passed == 0 and _deny,
+       f"passed={ex_old.n_passed} deny={_deny} "
+       f"stderr={(ex_old.stderr or '').strip().splitlines()[-1:]}")
+    #: ⛔ 反证的另一半：同一任务在**正确**白名单（I2）下必须**没有** DENY 字样。
+    #:    否则 I3 只是"任何跑动都会印 DENY"，等于恒真。
+    _ev_ok = ((ex_v.stdout or "") + "\n" + (ex_v.stderr or ""))
+    ck("I3b 对照：正确白名单下那次（I2）输出里**不许**出现 DENY"
+       "（否则 I3 是恒真）",
+       "V6_SANDBOX_DENY" not in _ev_ok and ex_v.n_passed == 1,
+       f"passed={ex_v.n_passed} deny={'V6_SANDBOX_DENY' in _ev_ok}")
 finally:
     sys.prefix, sys.exec_prefix = _real_pre, _real_epre
     import shutil as _sh

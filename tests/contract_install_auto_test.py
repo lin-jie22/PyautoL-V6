@@ -42,11 +42,20 @@ FAILS = []
 #:    ⇒ 注入恒真的 which（与 `probe_fn` / `run` 同一边界，CLI 一律不传）。
 _WHICH = lambda _exe: "/fake/bin/" + str(_exe)              # noqa: E731
 
+#: 显式跳过台账。⛔ 与 `ck` 分开记：SKIP **不算通过**，也不能因为跳过就让
+#: 整份契约绿着收场 —— 收尾要把跳过了什么印出来（第 142 条同族）。
+SKIPPED = []
+
 
 def ck(name, cond, detail=""):
     print(f"  {'PASS' if cond else 'FAIL'} {name} {detail if not cond else ''}")
     if not cond:
         FAILS.append(name)
+
+
+def sk(name, why):
+    print(f"  SKIP {name} —— {why}")
+    SKIPPED.append(f"{name}：{why}")
 
 
 class Script:
@@ -335,11 +344,29 @@ def main():
                 timeout=120)
 
         #: ⛔ 只跑 `--dry-run`：契约**不许**在这台机器上真装一次东西。
+        #:
+        #: ⛔⛔ E1/E3 走的是**真子进程 CLI**，所以 `which` 注入不进去
+        #:    （C/D 组是函数级，能注入 `_WHICH`）。而这台机器上有没有 `brew`
+        #:    是**环境状态**：没有它，`machine_install` 走到 ③ 之后那步就
+        #:    落 `unverified` ⇒ CLI 返 1 ⇒ E1 红。失败原因是"这台机器没装荷包
+        #:    管理器"，不是"演练逻辑错了"（第 145 条同族）。
+        #:    ⇒ 显式跳过并记账。下面的 E1b（演练后档案不变）、E2（不认识 ⇒ rc=2）
+        #:      都与装具无关，**照跑** —— 跳过只吃掉真正依赖它的那两条。
+        _BREW = __import__("shutil").which("brew")
         p = cli("--tool", cand.tool, "--dry-run")
         out = (p.stdout or "") + (p.stderr or "")
-        ck("E1 演练 rc=0，且输出里**没有**「执行：」行（命令没跑）",
-           p.returncode == 0 and "执行：" not in out,
-           f"rc={p.returncode} {out[-200:]}")
+        if not _BREW:
+            sk("E1 演练 rc=0，且输出里**没有**「执行：」行（命令没跑）",
+               "本机没有 brew（Linux CI 常态）⇒ CLI 落 unverified、rc=1，"
+               "判的是环境不是逻辑")
+            ck("E1' ⛔ 装具不在时演练必须**可归因**（rc=1 且点名缺什么，"
+               "不许静默当成功）",
+               p.returncode == 1 and "无法裁决" in out,
+               f"rc={p.returncode} {out[-200:]}")
+        else:
+            ck("E1 演练 rc=0，且输出里**没有**「执行：」行（命令没跑）",
+               p.returncode == 0 and "执行：" not in out,
+               f"rc={p.returncode} {out[-200:]}")
         after = json.loads((tmp / "data" / "candidates.json").read_text("utf-8"))
         st = {c["tool"]: c["state"] for c in after["candidates"]}
         ck("E1b 演练后档案状态不变（没裁决就不许改状态、不许写 approved_by）",
@@ -354,15 +381,26 @@ def main():
 
         #: ⛔ 记账可复核：账本里要有 `cap.install_auto`，且带着**完整结论**
         #:    （命令原文 / 探针前后读数）—— 只记"状态变了"等于事后无从归因。
+        #: ⛔ 与 E1 同一个前提：没有装具时算法**根本没走到探针那一步**，
+        #:    账本里不会出现 `probe_before` —— 那不是"记账缺字段"，是没发生。
         from aether.ledger import Ledger
         from aether.paths import paths as _paths
         evs = [e for e in Ledger(_paths(tmp)["ledger"]).events()
                if e.kind == "cap.install_auto"]
         pay = evs[-1].payload if evs else {}
-        ck("E3 账本记了 cap.install_auto，且带命令原文与探针读数",
-           bool(evs) and pay.get("evidence", {}).get("install_argv")
-           and "probe_before" in pay.get("evidence", {}),
-           f"n={len(evs)} keys={sorted(pay)[:6]}")
+        _ev2 = pay.get("evidence", {})
+        if not _BREW:
+            sk("E3 账本记了 cap.install_auto，且带命令原文与探针读数",
+               "没有 brew ⇒ 没走到探针那一步（账本里无 probe_before 是没发生，"
+               "不是漏记）")
+            ck("E3' ⛔ 但账本**仍要记**这次无法裁决（不许因为没装成就不落账）",
+               bool(evs) and "install_argv" in _ev2,
+               f"n={len(evs)} evidence_keys={sorted(_ev2)[:6]}")
+        else:
+            ck("E3 账本记了 cap.install_auto，且带命令原文与探针读数",
+               bool(evs) and _ev2.get("install_argv")
+               and "probe_before" in _ev2,
+               f"n={len(evs)} keys={sorted(pay)[:6]}")
 
         #: ⛔ 形自证：CLI **不许**传 `probe_fn` / `run` —— 从外部喂一个
         #:    假探针等于给系统一个"伪造装成功"的入口。
@@ -392,11 +430,19 @@ def main():
        .read_text(encoding="utf-8"))
 
     print("\n" + "=" * 60)
+    if SKIPPED:
+        #: ⛔ 跳过必须**可见**：只在收尾印一次，别让"绿"掩盖"这几条没验"。
+        print(f"⏭ {len(SKIPPED)} 项因环境不适用而跳过（不算通过）：")
+        for s in SKIPPED:
+            print(f"   - {s}")
     if FAILS:
         print(f"❌ {len(FAILS)} 项未通过：")
         for f in FAILS:
             print(f"   - {f}")
         return 1
+    if SKIPPED:
+        print(f"✅ 已验项全通过（另有 {len(SKIPPED)} 项跳过，见上）")
+        return 0
     print("✅ 全部通过：机器能自己装，但装什么由清单定、装错能退回去")
     return 0
 
