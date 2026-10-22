@@ -68,15 +68,12 @@ def main() -> int:
             if V.CODE_VERSION in line.split("#", 1)[0]:
                 lit.append(f"{p.name}:{i}")
     ck("A2 源码里没有第二份版本号字面量", not lit, str(lit))
-    #: pyproject 也不许写第二份（必须 dynamic）
-    import tomllib
-    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    ck("A3 pyproject 的版本走 dynamic 指向 _version",
-       data["project"].get("version") is None
-       and "version" in (data["project"].get("dynamic") or [])
-       and data["tool"]["setuptools"]["dynamic"]["version"]["attr"]
-       == "aether._version.CODE_VERSION",
-       str(data["project"].get("version")))
+    #: ⛔ 「pyproject 里也不许有第二份」这一条**已经搬到**
+    #:    `contract_release_toml_test.py`（2026-10-22）：它要真解析 TOML，
+    #:    而 `tomllib` 到 3.11 才有 ⇒ 住在这里时，3.9 上 `import tomllib`
+    #:    会把**下面 A 组之后所有判据**一起打断（实测：整份 10 条一条没跑完，
+    #:    报告只显示"退出码 1"）。缺口应当是**最小必要**的 —— 需要高版本的
+    #:    那一条自己声明 `MIN_PYTHON`，其余 9 条在 3.9 上照跑。
 
     # ── B 组：CHANGELOG 留痕 ─────────────────────────────────────
     print("B 组：变更记录与版本号对得上")
