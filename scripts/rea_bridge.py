@@ -301,6 +301,32 @@ def _ensure_ps_shim() -> Optional[str]:
 DEFAULT_TIMEOUT_MS = 300_000
 MAX_TIMEOUT_MS = 3_600_000
 
+#: ⛔⛔ 两类失败必须是**两个**退出码（r67 实测，不是洁癖）：
+#:    · `RC_BAD_INPUT=2`：参数/输入错（未知 command、相对路径、非法枚举、
+#:      stdin 不是 JSON）⇒ **调用方写错了**，该改代码，重试没用；
+#:    · `RC_MISSING_DEP=3`：依赖缺失（node / REA 没装）⇒ **这台机器没装**，
+#:      该去装，重试同一个请求是对的。
+#:    压成一个码的代价实测：REA 未安装时**合法**命令也返回 2，于是契约
+#:    I3「合法 argv 不被误伤」转红 —— 而且红得没法判：到底是参数写错了、
+#:    还是没装？调用方只能去正则匹配 stderr 里的中文（把判据建在人话上）。
+RC_BAD_INPUT = 2
+RC_MISSING_DEP = 3
+
+
+def _missing_dep(code: str, reason: str) -> int:
+    """依赖缺失：stderr 给人看，**stdout 给机器看**（可归因本身就是判据）。
+
+    ⛔ 只往 stderr 打一行中文等于逼消费方去解析人话。
+    ⛔ 也不能只返回一个空 `ok=false`：G11 / J13 两条判据就是专门拦
+       "空泛失败"的 —— 它们会读 `degraded.code` / `degraded.reason`，
+       所以这两个字段必须在**依赖缺失**这条路上也有值。
+    """
+    print(f"rea_bridge: {reason}", file=sys.stderr)
+    print(json.dumps({"ok": False, "bridge": "rea_bridge/1",
+                      "degraded": {"code": code, "reason": reason}},
+                     ensure_ascii=False))
+    return RC_MISSING_DEP
+
 
 class BridgeError(Exception):
     """输入不合法或环境不齐。**退出码 2**，stderr 带回原因。"""
@@ -678,22 +704,22 @@ def main() -> int:
         req = json.loads(raw) if raw.strip() else {}
     except Exception as ex:                                # noqa: BLE001
         print(f"rea_bridge: stdin 不是合法 JSON：{ex}", file=sys.stderr)
-        return 2
+        return RC_BAD_INPUT
 
     try:
         argv, cmd, target = build_argv(req)
     except BridgeError as ex:
         print(f"rea_bridge: {ex}", file=sys.stderr)
-        return 2
+        return RC_BAD_INPUT
 
     if not os.path.isfile(REA):
-        print(f"rea_bridge: 找不到 REA 入口 {REA or '(未发现)'} —— "
-              f"装 rea-agents 或设 V6_REA_MJS", file=sys.stderr)
-        return 2
+        return _missing_dep(
+            "rea_missing",
+            f"找不到 REA 入口 {REA or '(未发现)'} —— 装 rea-agents 或设 V6_REA_MJS")
     if not os.path.isfile(NODE):
-        print(f"rea_bridge: 找不到 node {NODE or '(未发现)'} —— "
-              f"装 node 或设 V6_NODE", file=sys.stderr)
-        return 2
+        return _missing_dep(
+            "node_missing",
+            f"找不到 node {NODE or '(未发现)'} —— 装 node 或设 V6_NODE")
 
     tms = req.get("timeout_ms", DEFAULT_TIMEOUT_MS)
     try:

@@ -95,6 +95,56 @@ class Run:
                 "reason": self.reason, "tail": self.tail}
 
 
+#: 失败输出的"信号行"：契约的判据都在这些形态上留痕。
+#: ⛔ 不能只认 `❌`：断言失败会先印 `AssertionError` 和 `!` 比较，
+#:    traceback 里也可能只有 `Error:` 一行是真正的原因。
+_BAD_LINE_RE = re.compile(
+    r"❌|\bFAIL\b|\bERROR\b|Traceback|AssertionError|"
+    r"\bError:|异常|失败|断言|\bassert\b|!=",
+    re.IGNORECASE)
+
+
+def _summarize_out(out: str, ok: bool, *,
+                   max_lines: int = 30, max_chars: int = 1800) -> str:
+    """把子进程输出压成**有界但带信号**的诊断尾巴。
+
+    ⛔⛔ 失败时**不能只取末 4 行** —— 本仓契约的结尾几乎都是名字清单或
+       汇总行（`✅ 全部通过` / `❌ 3 项失败`），真正的断言细节在更靠上的
+       位置。实测代价：CI 首跑 9 份红，报告里全部只留下名字清单，
+       看不到是哪条断言断的、断了什么 ⇒ 远端排查等于瞎猜。
+    ⛔ 所以失败时保留三类行：**信号行**（含 `❌`/`AssertionError`/`!=`…）、
+       信号行**上下各一行**（否则只剩一句孤零零的报错）、以及首尾各若干行
+       （traceback 的文件行在头、退出信息在尾）。中间无信号的纯清单行省略，
+       并**明确写出省略了多少行** —— 省略本身要可见。
+    ⛔ 成功时保持原样（末 4 行）：成功不需要细节，日志要干净。
+       "成功时也给一大坨"会让真正的红淹没在绿里。
+    """
+    lines = out.strip().splitlines()
+    if ok:
+        return "\n".join(lines[-4:])[:400]
+    if not lines:
+        return ""
+
+    keep = set(range(max(0, len(lines) - 12), len(lines)))   # 尾部：汇总/退出
+    keep |= set(range(0, min(6, len(lines))))                # 头部：traceback
+    hit = [i for i, ln in enumerate(lines) if _BAD_LINE_RE.search(ln)]
+    for i in hit:
+        keep.update((i - 1, i, i + 1))                       # 信号行 + 上下文
+
+    idx = sorted(i for i in keep if 0 <= i < len(lines))
+    if len(idx) > max_lines:
+        # 头尾都保：只留尾巴会丢掉 traceback 的入口行
+        head_n = max(2, max_lines // 5)
+        idx = idx[:head_n] + idx[-(max_lines - head_n):]
+    body = "\n".join(lines[i] for i in idx)
+    if len(body) > max_chars:
+        body = body[:max_chars] + " …（超长截断）"
+    hidden = len(lines) - len(idx)
+    if hidden > 0:
+        body = f"（共 {len(lines)} 行，省略 {hidden} 行无信号内容）\n" + body
+    return body
+
+
 def find_node() -> Optional[str]:
     """找 node 可执行文件（**口径只有一份**：`discover.which`）。
 
@@ -143,7 +193,7 @@ def cross_language(root: Path, timeout_s: float = 300.0) -> Run:
                    time.time() - t0, reason=f"{type(e).__name__}: {e}")
     secs = time.time() - t0
     out = (p.stdout or b"").decode("utf-8", "replace")
-    tail = "\n".join(out.strip().splitlines()[-4:])[:400]
+    tail = _summarize_out(out, p.returncode == 0)
     if p.returncode == 0:
         return Run("supervisor/selfcheck.ts", "cross-language", PASS, 0, secs,
                    tail=tail)
@@ -231,7 +281,7 @@ def _one(script: Path, mode: str, root: Path,
                    reason=f"{type(e).__name__}: {e}")
     secs = time.time() - t0
     out = (p.stdout or b"").decode("utf-8", "replace")
-    tail = "\n".join(out.strip().splitlines()[-4:])[:400]
+    tail = _summarize_out(out, p.returncode == 0)
     if p.returncode == 0:
         return Run(script.name, mode, PASS, 0, secs, tail=tail)
     return Run(script.name, mode, FAIL, p.returncode, secs,

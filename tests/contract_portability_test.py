@@ -206,7 +206,13 @@ def main() -> None:
         "import json, importlib.util, os, sys\n"
         "spec = importlib.util.spec_from_file_location('rb', %r)\n"
         "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
+        #: ⛔ 把**子进程看到的 env** 也报出来：C5 在 CI 上红过一次而本地
+        #:    （3.9 / 3.13）都绿，只报 `node` 的话看不出是
+        #:    ① env 没传进子进程、② 传了但 `isfile` 为假、③ 发现逻辑没读 env。
         "print(json.dumps({'node': m.NODE, 'rea': m.REA,\n"
+        "                  'env_node': os.environ.get('V6_NODE', ''),\n"
+        "                  'env_isfile': os.path.isfile(\n"
+        "                      os.environ.get('V6_NODE', '') or '/nonexistent'),\n"
         "                  'engines': m._engine_env()}))\n"
     ) % str(ROOT / "scripts" / "rea_bridge.py")
 
@@ -251,8 +257,13 @@ def main() -> None:
         fake = Path(td) / "fake_node"
         fake.write_text("#!/bin/sh\n", encoding="utf-8")
         got = run_probe({"V6_NODE": str(fake)})
+        #: ⛔ 诊断必须带**原始读数**：这条在 CI（Linux）上红过一次，而当时
+        #:    报告里只留了断言名、看不到 `got` 到底是"PATH 里的 node"
+        #:    还是 probe 自己崩了（`_err`）—— 两种情况的修法完全不同。
+        #:    ⇒ detail 里同时给 `got!r`（含 `_err`）与 `isfile`（证明夹具在）。
         ck("C5 `V6_NODE` 显式覆盖生效（不许被 PATH 抢走）",
-           got.get("node") == str(fake), str(got.get("node")))
+           got.get("node") == str(fake),
+           f"got={got!r} isfile={fake.is_file()} want={str(fake)!r}")
         gone = run_probe({"V6_NODE": str(ROOT / "__no_such_node__")})
         ck("C6 ⛔ 显式给了不存在的路径 ⇒ 返回空并报错，不许静默 fallback",
            gone.get("node") == "", f"得到 {gone.get('node')!r}")

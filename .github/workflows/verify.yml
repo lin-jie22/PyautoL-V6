@@ -28,6 +28,15 @@ jobs:
         python: ["3.9", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          #: ⛔⛔ `fetch-depth: 0` 不是"顺手加的保险"，是 `release` D1 的**取数前提**：
+          #:    D1 判的是「存在能锚定当前版本号的 tag」。默认 checkout 只拉
+          #:    单个 commit、**不拉 tag** ⇒ `git tag --list` 恒空 ⇒ D1 恒红，
+          #:    而红的原因与仓库状态无关（本地明明有 `v0.2.0`）。
+          #:    实测：本地全绿、CI 8 红里就有一份是这个。
+          #:    ⛔ 也别改成"CI 上跳过 D1"—— 那等于把"发布动作"这条判据
+          #:      在唯一真正需要它的地方关掉。
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}

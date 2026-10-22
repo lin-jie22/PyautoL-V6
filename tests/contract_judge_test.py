@@ -43,11 +43,20 @@ SUPPORTED_MODES = ("default",)
 
 FAILS = []
 
+#: ⛔ 本机历史资产（生产账本）缺失 ⇒ 读不到「真实裁决」，但这不是判据坏了，
+#:    是**没有对象可判**。SKIP 单独记账（未覆盖 ≠ 通过）。
+SKIPPED = []
+
 
 def ck(name, cond, detail=""):
     print(f"  {'PASS' if cond else 'FAIL'} {name} {detail if not cond else ''}")
     if not cond:
         FAILS.append(name)
+
+
+def sk(name, reason):
+    print(f"  SKIP {name} —— {reason}")
+    SKIPPED.append(f"{name} —— {reason}")
 
 
 def main() -> int:
@@ -286,9 +295,17 @@ def main() -> int:
     if cmpx["state"] == J.INCOMPARABLE:
         ck("D5b ⛔ 多版本时**必须**把身份都列出来（否则没法诊断）",
            len(cmpx["versions"]) == n_ver, str(cmpx["versions"]))
-    ck("D6 而且账本里确实已经有带身份的裁决（接线真被走到）",
-       any(x["judge_version"] for x in reps),
-       f"带身份 {sum(1 for x in reps if x['judge_version'])} / {len(reps)}")
+    if not reps:
+        #: ⛔⛔ 这条原本直接断言 `any(judge_version)` ⇒ 空账本上恒红
+        #:    （CI 克隆下来没有生产账本，实测 D6 一红）。
+        #:    ⛔ 但也不能改成恒绿：账本**有**裁决却全都不带身份，那才是
+        #:       真的"接线没走到"—— 那种情况必须红。⇒ 只对"没有对象"跳过。
+        sk("D6 账本里确实已经有带身份的裁决（接线真被走到）",
+           "本机账本里没有 eval.verdict 事件（生产数据不进仓库）⇒ 无从判别")
+    else:
+        ck("D6 而且账本里确实已经有带身份的裁决（接线真被走到）",
+           any(x["judge_version"] for x in reps),
+           f"带身份 {sum(1 for x in reps if x['judge_version'])} / {len(reps)}")
     #: ⛔ 反证：`judge.py` 被改过 ⇒ 账本必然出现多版本 ⇒ doctor 必须报 fail。
     #:    这条把"改判据要留痕"从口号变成可观测的后果。
     if cmpx["state"] == J.INCOMPARABLE:
@@ -354,6 +371,13 @@ def main() -> int:
         for f in FAILS:
             print(f"   - {f}")
         return 1
+    if SKIPPED:
+        print(f"⚠️  {len(SKIPPED)} 条判据被跳过（**未覆盖 ≠ 通过**）：")
+        for s in SKIPPED:
+            print(f"   - {s}")
+        print(f"✅ 其余全部通过：尺子身份 {jv1[:16]}，变异够不到它，"
+              f"跨尺子比较会被拒绝")
+        return 0
     print(f"✅ 全部通过：尺子身份 {jv1[:16]}，变异够不到它，"
           f"跨尺子比较会被拒绝")
     return 0

@@ -75,11 +75,23 @@ sys.path.insert(0, str(ROOT))
 
 FAILS = []
 
+#: ⛔⛔ 生产账本是**本机资产**（在 `.gitignore` 里，不进仓库）。CI 克隆下来
+#:    没有它 ⇒ T6 那条「历史交叉表」**无从判别**。
+#:    ⛔ 判红会把"这台机器没有历史"报成"契约坏了"：实测 CI 上 T6 一红。
+#:    ⛔ 判绿更糟：账本哪天被删了 / 格式变了，也会静默变绿。
+#:    ⇒ SKIP 单独记账（**未覆盖 ≠ 通过**），与 rea_bridge 的 SKIPPED 同纪律。
+SKIPPED = []
+
 
 def ck(name, cond, detail=""):
     print(f"  {'PASS' if cond else 'FAIL'} {name} {detail if not cond else ''}")
     if not cond:
         FAILS.append(name)
+
+
+def sk(name, reason):
+    print(f"  SKIP {name} —— {reason}")
+    SKIPPED.append(f"{name} —— {reason}")
 
 
 class _Ev:
@@ -204,7 +216,11 @@ def main() -> int:
         ck("T6.2b ⛔ 反证：同一批数据在「现在」的边界下数出 ≥2 条 ⇒ T6.2 不是恒真",
            n_post >= 2, f"改动后 inconclusive={n_post}")
     else:
-        ck("T6 生产账本存在", False, f"{led} 不存在")
+        #: ⛔ 这条原本写的是 `ck(..., False)` ⇒ CI（没有账本）恒红。
+        #:    红的是**环境**不是判据：判据要问的是"改动落地前生产上有没有
+        #:    翻转"，没有生产就答不了 —— 答不了要说"答不了"，不能说"错"。
+        sk("T6 生产账本交叉表（落地前零决策翻转）",
+           f"{led} 不存在（本机历史资产，不进仓库）⇒ 无从判别")
 
     print("\n== T7 组：`all_thin` 判据本身一个字没改 ==")
     gsrc = (ROOT / "aether" / "generalization.py").read_text(encoding="utf-8")
@@ -791,6 +807,14 @@ def main() -> int:
         for f in FAILS:
             print(f"   - {f}")
         return 1
+    if SKIPPED:
+        #: ⛔ 有跳过时**不许**印「全部通过」：那句话会让下一个人以为
+        #:    「账本交叉表也验过了」。跳过要说清、要留在报告里。
+        print(f"⚠️  {len(SKIPPED)} 条判据被跳过（**未覆盖 ≠ 通过**）：")
+        for s in SKIPPED:
+            print(f"   - {s}")
+        print("✅ 其余判据全部通过")
+        return 0
     print("✅ 全部通过")
     return 0
 

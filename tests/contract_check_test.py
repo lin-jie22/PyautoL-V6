@@ -173,13 +173,30 @@ def main() -> int:
 
     # ── D 组：子集必须自我标注 ───────────────────────────────────
     print("D 组：子集不许与全量同形")
-    rep_sub = C.run_checks(ROOT, only="contract_check", timeout_s=60.0)
+    #: ⛔⛔ 这里原来写的是 `run_checks(ROOT, only="contract_check")` ——
+    #:    `contract_check` 正好匹配**本契约自己** ⇒ 它会跑一份自己的副本，
+    #:    而那份副本的 D1 又跑自己 ⇒ 递归链只能靠 `timeout_s=60` 断掉。
+    #:    后果实测：整份契约 **136s**，而且真实耗时 = 超时值 × 链长，
+    #:    改一次 timeout 就换一个读数（同族：拿超时当终止条件）。
+    #:    ⇒ 子集语义根本不需要拿真契约演示，临时目录里放两份假契约、
+    #:      只筛其中一份，语义完全等价且毫秒级。
+    tmp4 = Path(tempfile.mkdtemp(prefix="v6_check_subset_"))
+    (tmp4 / "tests").mkdir()
+    (tmp4 / "tests" / "contract_good_test.py").write_text(GOOD, encoding="utf-8")
+    (tmp4 / "tests" / "contract_bad_test.py").write_text(BAD, encoding="utf-8")
+    rep_sub = C.run_checks(tmp4, only="good", timeout_s=10.0)
+    ck("D0 ⛔ 筛子真的只放行一份（子集 ≠ 全量跑一遍再标记）",
+       rep_sub["n_scripts"] == 1, f"n_scripts={rep_sub['n_scripts']}")
     ck("D1 子集报告标了 subset=True", rep_sub["subset"] is True)
     text = C.summarize(rep_sub)
     ck("D2 摘要里**明说**这是子集（不能只靠 --only 参数自己记得）",
        "子集" in text, text[:80])
     ck("D3 全量报告不标子集",
        C.run_checks(tmp2, timeout_s=10.0)["subset"] is False)
+    _full4 = C.run_checks(tmp4, timeout_s=10.0)
+    ck("D4 ⛔ 子集必须真的少于全量（此前 D1 跑向自己 ⇒ 整份契约 136s）",
+       rep_sub["n_scripts"] < _full4["n_scripts"] and _full4["ok"] is False,
+       f"subset={rep_sub['n_scripts']} full={_full4['n_scripts']}")
 
     # ── E 组：CLI 真接上了（有模块 ≠ 有入口）─────────────────────
     print("E 组：CLI 入口真的接了")
@@ -236,6 +253,78 @@ def main() -> int:
            _red == 2, f"转红 {_red}/2")
     finally:
         C.is_exclusive = _orig
+
+    # ── G 组：失败诊断尾巴必须带**信号**，不能只剩名字清单 ──────────
+    #: ⛔⛔ 事故形态（真实发生过，不是假设）：CI 首跑 9 份红，报告里每份
+    #:    只留下最后 4 行 —— 而本仓契约的结尾恰好都是「❌ N 项未通过：」
+    #:    加名字清单。于是远端看到的是"哪几条断言名叫什么"，
+    #:    看不到"实测读数是多少"⇒ 排查只能靠猜、或者把整个 CI 拉下来重跑。
+    #:    ⇒ 判据必须是：**detail 要活着到报告里**，且省略要可见。
+    print("G 组：失败尾巴必须带信号（旧口径只留末 4 行 ⇒ 只剩名字清单）")
+
+    #: 夹具刻意二分：`FAIL` 那行带 detail（`rc=0 j=4`），
+    #: 而结尾的名字清单**只印断言名**（不带 detail）。
+    #: 这样"留末 4 行"与"留信号行"才能被区分开 —— 若两处都带 detail，
+    #: 这个夹具就是恒真的（拿同一份信息当两个判据）。
+    _DETAIL = "rc=0 j=4"
+    _FAKE = "\n".join(
+        [f"  PASS R{i} 普通断言 {i}" for i in range(1, 21)]
+        + [f"  FAIL C2 并发墙钟必须收敛 · detail: {_DETAIL}"]
+        + [f"  PASS S{i} 收尾断言 {i}" for i in range(1, 21)]
+        + ["=" * 60, "❌ 1 项未通过：", "   - C2 并发墙钟必须收敛"])
+    _OLD = "\n".join(_FAKE.strip().splitlines()[-4:])[:400]
+
+    #: ⛔ 走 `_one` 而不是直接调 `_summarize_out`：**零件绿 ≠ 装配绿**。
+    #:    直接调函数只能证明"这个函数会挑信号行"，证明不了 `_one` 真的
+    #:    接了它（接线漏掉时函数照样绿，报告照样只剩名字清单）。
+    _FIXTURE = '''#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+import sys
+SUPPORTED_MODES = ("default",)
+for i in range(1, 21):
+    print(f"  PASS R{i} 普通断言 {i}")
+print("  FAIL C2 并发墙钟必须收敛 · detail: rc=0 j=4")
+for i in range(1, 21):
+    print(f"  PASS S{i} 收尾断言 {i}")
+print("=" * 60)
+print("\u274c 1 项未通过：")
+print("   - C2 并发墙钟必须收敛")
+sys.exit(1)
+'''
+    _OK_FIXTURE = _FIXTURE.replace("sys.exit(1)", "sys.exit(0)").replace(
+        "  FAIL C2", "  PASS C2")
+    with tempfile.TemporaryDirectory() as _td:
+        _bad = Path(_td) / "contract_detail_tail_test.py"
+        _bad.write_text(_FIXTURE, encoding="utf-8")
+        _good = Path(_td) / "contract_detail_ok_test.py"
+        _good.write_text(_OK_FIXTURE, encoding="utf-8")
+
+        _r = C._one(_bad, "default", ROOT, 120)
+        ck("G1 ⛔ 端到端：失败契约的报告尾巴**必须**带断言 detail"
+           "（旧口径只剩名字清单）",
+           _r.status == C.FAIL and _DETAIL in _r.tail,
+           f"status={_r.status} tail={_r.tail[-200:]!r}")
+        ck("G2 ⛔ 夹具自证：同一份输出按**旧口径**取末 4 行 ⇒ detail 必丢"
+           "（否则 G1 是恒真断言）",
+           _DETAIL not in _OLD, f"old={_OLD[-120:]!r}")
+        ck("G3 省略必须可见（写清省略多少行，不许静默丢）",
+           "省略" in _r.tail, _r.tail[:120])
+
+        _ro = C._one(_good, "default", ROOT, 120)
+        ck("G4 成功时保持短尾巴（≤4 行、≤400 字）⇒ 真红不会被绿淹没",
+           _ro.status == C.PASS and len(_ro.tail.splitlines()) <= 4
+           and len(_ro.tail) <= 400, f"{len(_ro.tail.splitlines())} 行")
+
+        _orig_s = C._summarize_out
+        try:
+            C._summarize_out = lambda out, ok, **k: (
+                "\n".join(out.strip().splitlines()[-4:])[:400])
+            _rb = C._one(_bad, "default", ROOT, 120)
+            ck("G5 ⛔⛔ 反证：把汇总换回「末 4 行」⇒ G1 的判据必须转红"
+               "（证明 G1 测的是这条接线，不是巧合）",
+               _DETAIL not in _rb.tail, f"tail={_rb.tail[-120:]!r}")
+        finally:
+            C._summarize_out = _orig_s
 
     print("\n" + "=" * 60)
     if FAILS:

@@ -189,7 +189,8 @@ def machine_install(cand: Any, tool: Any, *,
                     dry_run: bool = False,
                     timeout_s: float = 1800.0,
                     probe_fn: Optional[Callable[[Any], Any]] = None,
-                    run: Optional[Callable[..., Tuple[int, str, str, bool]]] = None
+                    run: Optional[Callable[..., Tuple[int, str, str, bool]]] = None,
+                    which_fn: Optional[Callable[[str], Optional[str]]] = None
                     ) -> InstallVerdict:
     """对一条候选做**机器自审安装**。返回三态结论（不抛异常）。
 
@@ -201,9 +202,17 @@ def machine_install(cand: Any, tool: Any, *,
     ⛔ 判据顺序固定，逐项记因（只报第一个失败项会让人修完一个又冒一个）：
        ① 有没有安装命令  ② 与清单是否逐字相同  ③ 是不是可自动执行的形态
        ④ 有没有回滚路径  ⑤ 四道闸当场重跑  ⑥ 执行 → 装后复验 → 失败回滚
+
+    ⛔⛔ `which_fn` 是**依赖注入**，不是给外部开后门：③ 之后那一步要问
+       "这台机器上有没有 brew"，而"有没有"是**本机状态**。
+       契约拿它当判据时不许依赖本机装没装 —— 实测代价：CI（Linux）上
+       没有 brew ⇒ C6/D2/E1/E3 四条全落到 `unverified`，而它们验的是
+       "演练零执行 / 一致时能走到执行"，与环境无关。
+       ⇒ 与 `probe_fn`/`run` 同一边界：只给契约用，CLI 一律不传。
     """
     probe_fn = probe_fn or D.probe
     run = run or _run
+    which = which_fn or shutil.which
     cand_state0 = str(getattr(cand, "state", ""))
     ev: Dict[str, Any] = {"tool": str(getattr(tool, "name", "")),
                           "state_before": cand_state0}
@@ -238,7 +247,7 @@ def machine_install(cand: Any, tool: Any, *,
             "注意：`caps_candidate.ALLOWED_LAUNCHERS` 更宽，那份是给**人**看的；"
             "机器执行会跑第三方代码，两份名单管的不是同一件事"],
             ev, cand_state=cand_state0)
-    if not shutil.which(pair[0]):
+    if not which(pair[0]):
         return InstallVerdict(UNVERIFIED, [
             f"{pair[0]} 不在这台机器上 ⇒ 跑不起来（这不是「该不该装」，"
             f"是「用什么东西装」）"], ev, cand_state=cand_state0)

@@ -116,7 +116,27 @@ def main() -> int:
            True, "（跳过：没有 git，非失败）")
     else:
         names = [t.strip() for t in tags.stdout.splitlines() if t.strip()]
-        hit = [t for t in names if V.CODE_VERSION in t]
+        #: ⛔⛔ **浅克隆下"没有 tag"是假读数**：`actions/checkout@v4` 默认
+        #:    只拉单个 commit、不拉 tag ⇒ `git tag --list` 恒空 ⇒ 这条判据
+        #:    在 CI 上必然红，而仓库里明明有 `v0.2.0`（本地一直绿）。
+        #:    ⇒ 先问一句"我是不是浅克隆"，是就**说清未验证**，不许把
+        #:      "没拉下来"读成"没打过 tag"（本仓第 142 条的同族形态）。
+        #:    ⛔ 配套：workflow 里 checkout 已改成 `fetch-depth: 0`；
+        #:       这里保留分支是因为别的 CI / tarball 环境也可能浅克隆。
+        shallow = False
+        try:
+            sr = subprocess.run(["git", "rev-parse", "--is-shallow-repository"],
+                                cwd=str(ROOT), capture_output=True,
+                                text=True, timeout=30)
+            shallow = sr.returncode == 0 and sr.stdout.strip() == "true"
+        except (OSError, subprocess.SubprocessError):
+            shallow = False
+        if shallow and not names:
+            ck("D1 git tag 检查（浅克隆 ⇒ 未验证，非失败）", True,
+               "⚠️ 浅克隆且无 tag 读数 ⇒ 这条**没有**被执行；"
+               "把 checkout 换成 fetch-depth: 0 才能真验")
+            names = None
+        hit = [] if names is None else [t for t in names if V.CODE_VERSION in t]
         #: ⛔ **判失败而不是只警告**（2026-10-15 改）：一条"只报告不拦"的
         #:    检查，在这个仓库里已经被证明会长期是红的而无人理会
         #:    （`git tag` 一直为空，版本号与提交历史没有任何锚定关系 ——

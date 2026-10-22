@@ -602,10 +602,18 @@ def main() -> int:
     #:    一个"已装且已探到 capability"的假工具，让那条分支真被执行。
     ih = Path(tempfile.mkdtemp(prefix="v6_cand_i_"))
     try:
+        #: ⛔⛔ 假工具的 `exe` 必须用**夹具名**（`ghost2_fixture`，恒在
+        #:    `fb_wrapped` 这个 PATH 目录里），不能用 `r2`：
+        #:    第一版写的是 `exe='r2'` ⇒ 本机装了真 radare2 所以探针 found、
+        #:    I10 绿；CI（Linux）没装 ⇒ 探针 missing ⇒ 生成候选 ⇒
+        #:    "空候选"分支根本没走到 ⇒ I10/I11 双红。
+        #:    ⇒ 又一次"把本机装了什么当成世界状态"（同 files 头 60–70 行的
+        #:      那条纪律，这里是漏网的第二处）。
         code = (
             "import sys\n"
             "from aether import discover as D\n"
-            "D.KNOWN_TOOLS = (D.Tool(name='fake', exe='r2',"
+            "D.KNOWN_TOOLS = (D.Tool(name='fake', exe='ghost2_fixture',"
+            " probe_args=(('-v',),),"
             " capability={'id': 'tool.fake', 'kind': 'tool'},"
             " about='假工具（只为走到那条分支）'),)\n"
             "from aether import cli\n"

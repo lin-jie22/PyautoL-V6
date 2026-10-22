@@ -33,6 +33,15 @@ sys.path.insert(0, str(ROOT))
 
 FAILS = []
 
+#: ⛔⛔ **"这台机器有没有 brew" 是本机状态，不是判据**。
+#:    ③ 之后那一步问的是"拿什么去装"（`shutil.which(argv[0])`），
+#:    而本档要验的是「演练零执行 / 一致时能走到执行 / 账本记了原文」——
+#:    这些都与环境无关。实测代价：CI 是 Linux、没有 brew ⇒
+#:    C6 / D2 / E1 / E3 四条一起落到 `unverified`、全红；
+#:    而本机（macOS 装了 brew）恒绿 ⇒ **契约把自己这台机器当成了世界**。
+#:    ⇒ 注入恒真的 which（与 `probe_fn` / `run` 同一边界，CLI 一律不传）。
+_WHICH = lambda _exe: "/fake/bin/" + str(_exe)              # noqa: E731
+
 
 def ck(name, cond, detail=""):
     print(f"  {'PASS' if cond else 'FAIL'} {name} {detail if not cond else ''}")
@@ -122,7 +131,7 @@ def main():
     print("B 组：五道判据 —— 逐条独立触发，每条都必须能单独拒绝")
     s = Script(["missing"])
     v = IA.machine_install(mk_cand(install_argv=[]), T_R2,
-                           run=s.run, probe_fn=s.probe)
+                           run=s.run, probe_fn=s.probe, which_fn=_WHICH)
     ck("B1 没有 install_argv ⇒ unverified（不是 rejected：没东西可执行）",
        v.state == IA.UNVERIFIED and not s.calls, f"{v.state} calls={s.calls}")
 
@@ -130,7 +139,7 @@ def main():
     #:    执行档案里的 argv = 谁改了文件谁决定系统跑什么。
     bad = mk_cand(install_argv=["brew", "install", "radare2", "--HEAD"])
     s = Script(["missing"])
-    v = IA.machine_install(bad, T_R2, run=s.run, probe_fn=s.probe)
+    v = IA.machine_install(bad, T_R2, run=s.run, probe_fn=s.probe, which_fn=_WHICH)
     ck("B2 与清单声明不一致 ⇒ rejected，且两份命令都写进理由",
        v.state == IA.REJECTED
        and any("不一致" in r for r in v.reasons)
@@ -142,7 +151,7 @@ def main():
                       install_argv=("pip", "install", "radare2"))
     s = Script(["missing"])
     v = IA.machine_install(mk_cand(install_argv=["pip", "install", "radare2"]),
-                           pip_tool, run=s.run, probe_fn=s.probe)
+                           pip_tool, run=s.run, probe_fn=s.probe, which_fn=_WHICH)
     ck("B3 `pip install` 在提示白名单里，但**不在自动执行名单** ⇒ rejected",
        v.state == IA.REJECTED
        and any("自动执行" in r for r in v.reasons), f"{v.state} {v.reasons[:1]}")
@@ -156,19 +165,19 @@ def main():
        f"heads={heads}")
 
     s = Script([("error", "", "权限不足")])
-    v = IA.machine_install(mk_cand(), T_R2, run=s.run, probe_fn=s.probe)
+    v = IA.machine_install(mk_cand(), T_R2, run=s.run, probe_fn=s.probe, which_fn=_WHICH)
     ck("B5 探针 error ⇒ unverified（那是「去修」不是「去装」）",
        v.state == IA.UNVERIFIED and not s.calls, f"{v.state}")
 
     s = Script([("found", "/opt/homebrew/bin/r2", "")])
-    v = IA.machine_install(mk_cand(), T_R2, run=s.run, probe_fn=s.probe)
+    v = IA.machine_install(mk_cand(), T_R2, run=s.run, probe_fn=s.probe, which_fn=_WHICH)
     ck("B6 本来就在 ⇒ ok + noop，且**零执行**",
        v.state == IA.OK and v.noop and not s.calls, f"{v.state} noop={v.noop}")
     ck("B6b 「无事可做」与「刚装上」可分辨（noop 单独记）", v.noop is True)
 
     s = Script(["missing"])
     v = IA.machine_install(mk_cand(verify_hint=""), T_R2,
-                           run=s.run, probe_fn=s.probe)
+                           run=s.run, probe_fn=s.probe, which_fn=_WHICH)
     ck("B7 四道闸未过 ⇒ rejected 且零执行（闸不是摆设）",
        v.state == IA.REJECTED and not s.calls
        and any("未通过" in r for r in v.reasons), f"{v.state} {v.reasons[:1]}")
@@ -178,7 +187,7 @@ def main():
     s = Script(["missing", ("found", "/opt/homebrew/bin/r2", "")],
                [(0, "==> Pouring radare2", "", False)])
     cand = mk_cand()
-    v = IA.machine_install(cand, T_R2, run=s.run, probe_fn=s.probe)
+    v = IA.machine_install(cand, T_R2, run=s.run, probe_fn=s.probe, which_fn=_WHICH)
     ck("C1 装成 + 复验探到 ⇒ ok，状态 installed，approved_by=auto",
        v.state == IA.OK and cand.state == CC.INSTALLED
        and cand.approved_by == IA.AUTO_BY,
@@ -191,7 +200,7 @@ def main():
     s = Script(["missing", "missing", "missing"],
                [(0, "", "", False), (0, "Uninstalling", "", False)])
     cand = mk_cand()
-    v = IA.machine_install(cand, T_R2, run=s.run, probe_fn=s.probe)
+    v = IA.machine_install(cand, T_R2, run=s.run, probe_fn=s.probe, which_fn=_WHICH)
     ck("C2 rc=0 但探不到 ⇒ rejected（rc 不是判据）且已自动卸载",
        v.state == IA.REJECTED and v.rolled_back
        and s.calls[-1] == ["brew", "uninstall", "radare2"],
@@ -208,7 +217,7 @@ def main():
 
     s = Script(["missing", "missing", "missing"],
                [(1, "", "Error: failed", False), (0, "", "", False)])
-    v = IA.machine_install(mk_cand(), T_R2, run=s.run, probe_fn=s.probe)
+    v = IA.machine_install(mk_cand(), T_R2, run=s.run, probe_fn=s.probe, which_fn=_WHICH)
     ck("C3 装失败也清一遍（防留半截），并记 stderr 尾部",
        v.state == IA.REJECTED and len(s.calls) == 2
        and "failed" in (v.evidence["exec"]["stderr_tail"] or ""),
@@ -230,7 +239,7 @@ def main():
 
     s = Script(["missing", "missing", ("found", "/x/r2", "")],
                [(0, "", "", False), (1, "", "No such keg", False)])
-    v = IA.machine_install(mk_cand(), T_R2, run=s.run, probe_fn=s.probe)
+    v = IA.machine_install(mk_cand(), T_R2, run=s.run, probe_fn=s.probe, which_fn=_WHICH)
     ck("C4 卸载后仍探得到 ⇒ rolled_back=False 且明说「可能已被改动」",
        v.state == IA.REJECTED and not v.rolled_back
        and any("可能已被改动" in r for r in v.reasons),
@@ -238,7 +247,7 @@ def main():
 
     s = Script(["missing", "missing", "missing"],
                [(124, "", "", True), (0, "", "", False)])
-    v = IA.machine_install(mk_cand(), T_R2, run=s.run, probe_fn=s.probe)
+    v = IA.machine_install(mk_cand(), T_R2, run=s.run, probe_fn=s.probe, which_fn=_WHICH)
     ck("C5 超时 ⇒ 仍走复验+回滚，timed_out 进证据",
        v.state == IA.REJECTED and v.rolled_back
        and v.evidence["exec"]["timed_out"] is True,
@@ -249,9 +258,19 @@ def main():
 
     s = Script(["missing"])
     v = IA.machine_install(mk_cand(), T_R2, dry_run=True,
-                           run=s.run, probe_fn=s.probe)
+                           run=s.run, probe_fn=s.probe, which_fn=_WHICH)
     ck("C6 演练 ⇒ ok + dry_run，**零执行**（环境零改动）",
        v.state == IA.OK and v.dry_run and not s.calls,
+       f"{v.state} calls={s.calls}")
+    #: ⛔ 反证：把"装具在不在"注入成 None ⇒ 必须落 `unverified`。
+    #:    没有这条，上面那两行 `which_fn=_WHICH` 就成了"恒真装备"：
+    #:    谁把 `which` 那一步删了，C6/D2 照样绿（它们只看到 OK），
+    #:    而"用什么东西装"这道判据就静默消失了。
+    s = Script(["missing"])
+    v = IA.machine_install(mk_cand(), T_R2, run=s.run,
+                           probe_fn=s.probe, which_fn=lambda _x: None)
+    ck("C6b ⛔ 反证：装具不在（which→None）⇒ unverified 且零执行",
+       v.state == IA.UNVERIFIED and not s.calls,
        f"{v.state} calls={s.calls}")
 
     # ── D 组：档案被改（地基）──────────────────────────────────────
@@ -265,7 +284,7 @@ def main():
     #:    而且 ③④ 都会放它过去。
     evil = mk_cand(install_argv=["brew", "install", "evilformula"])
     s = Script(["missing"])
-    v = IA.machine_install(evil, T_R2, run=s.run, probe_fn=s.probe)
+    v = IA.machine_install(evil, T_R2, run=s.run, probe_fn=s.probe, which_fn=_WHICH)
     ck("D1 档案被改成装另一个包 ⇒ rejected（只有 ② 能拦住它）",
        v.state == IA.REJECTED and not s.calls
        and any("evilformula" in r for r in v.reasons),
@@ -273,7 +292,7 @@ def main():
 
     s = Script(["missing", ("found", "/opt/homebrew/bin/r2", "")],
                [(0, "", "", False)])
-    v = IA.machine_install(mk_cand(), T_R2, run=s.run, probe_fn=s.probe)
+    v = IA.machine_install(mk_cand(), T_R2, run=s.run, probe_fn=s.probe, which_fn=_WHICH)
     ck("D2 一致时能走到执行（正向对照：不是「一律拒绝」）",
        v.state == IA.OK and len(s.calls) == 1, f"{v.state} calls={len(s.calls)}")
 
@@ -285,7 +304,7 @@ def main():
     s = Script(["missing"])
     v = IA.machine_install(mk_cand(tool=t_nogr,
                                    install_argv=["brew", "install", "binutils"]),
-                           t_nogr, run=s.run, probe_fn=s.probe)
+                           t_nogr, run=s.run, probe_fn=s.probe, which_fn=_WHICH)
     ck("D3 清单没声明 argv 而档案有 ⇒ rejected（回填路径被这道闸堵住）",
        v.state == IA.REJECTED and not s.calls
        and any("不一致" in r for r in v.reasons),
@@ -350,8 +369,10 @@ def main():
         src = (ROOT / "aether" / "cli.py").read_text(encoding="utf-8")
         i = src.find("machine_install(c, tool")
         seg = src[max(0, i - 200):i + 300] if i >= 0 else ""
-        ck("E4 CLI 调用 machine_install 时不传 probe_fn / run（形自证）",
-           bool(seg) and "probe_fn" not in seg and " run=" not in seg,
+        ck("E4 CLI 调用 machine_install 时不传 probe_fn / run / which_fn"
+           "（形自证：三个都是只给契约的后门）",
+           bool(seg) and "probe_fn" not in seg and " run=" not in seg
+           and "which_fn" not in seg,
            seg[-120:])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

@@ -42,6 +42,15 @@ sys.path.insert(0, str(ROOT))
 
 FAILS = []
 
+#: ⛔ 生产账本是**本机资产**（不进仓库）。CI 上没有它 ⇒ E 组的跨语言对拍
+#:    没有对象可判。SKIP 单独记账（未覆盖 ≠ 通过），不判红也不冒充绿。
+SKIPPED = []
+
+
+def sk(name, reason):
+    print(f"  SKIP {name} —— {reason}")
+    SKIPPED.append(f"{name} —— {reason}")
+
 
 def _find_node():
     """找 node 可执行文件：PATH → 项目约定路径 → 常见前缀 → 打包运行时。
@@ -267,57 +276,66 @@ def main():
            bool((unavail[0].payload or {}).get("error")),
            str((unavail[0].payload or {}).get("error")))
 
-    # ── E 组：监督器与真实数据同源（跨语言）────────────────────
-    print("E 组：监督器规则与真实账本")
-    import subprocess
-    node = _find_node()
-    if node is None:
-        #: ⛔ 本机 `node` 不在 PATH 上（项目约定用 workbuddy 二进制，
-        #:    见 scripts/demo_evolve.py）⇒ 原来这句直接 `FileNotFoundError`
-        #:    把整份契约打死，E2/E3 的守护**一条都没跑**，而输出看起来像
-        #:    "契约崩了"而不是"跨语言对拍没跑"。
-        #:    `_find_node` 已按 PATH → 项目约定路径 → 常见前缀查找；
-        #:    真找不到就**明确报红**（"跑不了" ≠ "跑过了没问题"）。
-        raise RuntimeError(
-            "找不到 node：跨语言对拍无法执行。把 node 放进 PATH，"
-            "或设 V6_NODE，或确认 ~/.workbuddy/binaries/node/versions/*/"
-            "bin/node 存在")
-    r = subprocess.run(
-        [node, "src/index.ts", "--ledger", "../data/ledger.jsonl"],
-        cwd=str(ROOT / "supervisor"), capture_output=True, text=True,
-        timeout=180)
-    out_txt = (r.stdout or "") + (r.stderr or "")
-    ck("E1 监督器可跑真实账本", r.returncode in (0, 1, 2), out_txt[:200])
-    #: ⛔ 判据：真实账本上的 critical 应当为 0（13 条假警报已修）
-    n_crit = out_txt.count("[GENERALIZATION_GATE_BYPASSED]")
-    ck("E2 真实账本上不再判出'绕过闸'的 critical（原 13 条全是误报）",
-       n_crit == 0, f"仍有 {n_crit} 条")
-    #: 严重度统计必须真的被打印出来，且 critical 计数与逐条一致
-    import re as _re
-    m = _re.search(r'\{"info":\d+,"warn":\d+,"critical":(\d+)\}', out_txt)
-    ck("E3 监督器给出严重度统计（读数存在，不是只打印几条文字）", bool(m),
-       out_txt[-160:])
-    if m:
-        #: ⛔⛔ E4 曾经是**用错闸**（2026-10-17 实测）：它拿 `n_crit`
-        #:    （只数 `GENERALIZATION_GATE_BYPASSED`）去比统计里的
-        #:    **全部** critical ⇒ 只要账本里出现**任何别类型**的 critical
-        #:    （实测 `REGRESSION_DETECTED`：修法在 `kw_defaults=[None]` 上
-        #:    抛异常 ⇒ 冻结任务 1→0）它就红 —— 而它红**不代表**绕过闸。
-        #:    ⛔ 用错闸和闸太严看起来一模一样（第 9 条）。
-        #:    ⇒ 改成逐条数**所有** critical 行（输出里 critical 以 ❌ 标记）。
-        _n_all = len(_re.findall(r"❌ \[", out_txt))
-        ck("E4 统计里的 critical 数与逐条报出的 critical 条数一致",
-           int(m.group(1)) == _n_all, f'{m.group(1)} vs {_n_all}')
-        #: ⛔ 但"账本里出现过真回归"**不许因此消失**：账本 append-only，
-        #:    历史事件删不掉 ⇒ 它恒在那里。这里只把它**打印出来**而不是
-        #:    写成断言 —— 写成断言要么是恒真（无牙），要么会让"已修的历史
-        #:    回归"永久顶着红灯，二者都是假仪表（第 8 条）。
-        _n_reg = out_txt.count("[REGRESSION_DETECTED]")
-        if _n_reg:
-            print(f"     ℹ️ 账本历史上有 {_n_reg} 条 REGRESSION_DETECTED"
-                  f"（已修复，但事件不可删 ⇒ 它是历史事实，不是当前状态）")
-    ck("E5 历史遗留的不可判定**如实可见**（不静默吞掉）",
-       ("GATE_BYPASS_UNVERIFIABLE" in out_txt) or n_crit == 0)
+    #: ⛔⛔ 生产账本不存在 ⇒ **整段 E 组**没有对象可判（CI 上就是这样）。
+    #:    原来它照样往下跑：supervisor 拿不到账本 ⇒ 不打印严重度统计
+    #:    ⇒ E3 正则匹配失败 ⇒ 红。而红的原因是"这台机器没历史数据"，
+    #:    与"监督器不报统计"这个真缺陷**长得一模一样**（第 9 条）。
+    _led = ROOT / "data" / "ledger.jsonl"
+    if not _led.is_file():
+        sk("E1–E5 监督器与真实账本同源（跨语言）",
+           f"{_led} 不存在（生产账本不进仓库）⇒ 无从判别")
+    else:
+        # ── E 组：监督器与真实数据同源（跨语言）────────────────────
+        print("E 组：监督器规则与真实账本")
+        import subprocess
+        node = _find_node()
+        if node is None:
+            #: ⛔ 本机 `node` 不在 PATH 上（项目约定用 workbuddy 二进制，
+            #:    见 scripts/demo_evolve.py）⇒ 原来这句直接 `FileNotFoundError`
+            #:    把整份契约打死，E2/E3 的守护**一条都没跑**，而输出看起来像
+            #:    "契约崩了"而不是"跨语言对拍没跑"。
+            #:    `_find_node` 已按 PATH → 项目约定路径 → 常见前缀查找；
+            #:    真找不到就**明确报红**（"跑不了" ≠ "跑过了没问题"）。
+            raise RuntimeError(
+                "找不到 node：跨语言对拍无法执行。把 node 放进 PATH，"
+                "或设 V6_NODE，或确认 ~/.workbuddy/binaries/node/versions/*/"
+                "bin/node 存在")
+        r = subprocess.run(
+            [node, "src/index.ts", "--ledger", "../data/ledger.jsonl"],
+            cwd=str(ROOT / "supervisor"), capture_output=True, text=True,
+            timeout=180)
+        out_txt = (r.stdout or "") + (r.stderr or "")
+        ck("E1 监督器可跑真实账本", r.returncode in (0, 1, 2), out_txt[:200])
+        #: ⛔ 判据：真实账本上的 critical 应当为 0（13 条假警报已修）
+        n_crit = out_txt.count("[GENERALIZATION_GATE_BYPASSED]")
+        ck("E2 真实账本上不再判出'绕过闸'的 critical（原 13 条全是误报）",
+           n_crit == 0, f"仍有 {n_crit} 条")
+        #: 严重度统计必须真的被打印出来，且 critical 计数与逐条一致
+        import re as _re
+        m = _re.search(r'\{"info":\d+,"warn":\d+,"critical":(\d+)\}', out_txt)
+        ck("E3 监督器给出严重度统计（读数存在，不是只打印几条文字）", bool(m),
+           out_txt[-160:])
+        if m:
+            #: ⛔⛔ E4 曾经是**用错闸**（2026-10-17 实测）：它拿 `n_crit`
+            #:    （只数 `GENERALIZATION_GATE_BYPASSED`）去比统计里的
+            #:    **全部** critical ⇒ 只要账本里出现**任何别类型**的 critical
+            #:    （实测 `REGRESSION_DETECTED`：修法在 `kw_defaults=[None]` 上
+            #:    抛异常 ⇒ 冻结任务 1→0）它就红 —— 而它红**不代表**绕过闸。
+            #:    ⛔ 用错闸和闸太严看起来一模一样（第 9 条）。
+            #:    ⇒ 改成逐条数**所有** critical 行（输出里 critical 以 ❌ 标记）。
+            _n_all = len(_re.findall(r"❌ \[", out_txt))
+            ck("E4 统计里的 critical 数与逐条报出的 critical 条数一致",
+               int(m.group(1)) == _n_all, f'{m.group(1)} vs {_n_all}')
+            #: ⛔ 但"账本里出现过真回归"**不许因此消失**：账本 append-only，
+            #:    历史事件删不掉 ⇒ 它恒在那里。这里只把它**打印出来**而不是
+            #:    写成断言 —— 写成断言要么是恒真（无牙），要么会让"已修的历史
+            #:    回归"永久顶着红灯，二者都是假仪表（第 8 条）。
+            _n_reg = out_txt.count("[REGRESSION_DETECTED]")
+            if _n_reg:
+                print(f"     ℹ️ 账本历史上有 {_n_reg} 条 REGRESSION_DETECTED"
+                      f"（已修复，但事件不可删 ⇒ 它是历史事实，不是当前状态）")
+        ck("E5 历史遗留的不可判定**如实可见**（不静默吞掉）",
+           ("GATE_BYPASS_UNVERIFIABLE" in out_txt) or n_crit == 0)
 
     # ── F 组：反证（判据必须可能失败）──────────────────────────
     print("F 组：反证组")
@@ -426,6 +444,12 @@ def main():
         for f in FAILS:
             print("   -", f)
         return 1
+    if SKIPPED:
+        print(f"⚠️  {len(SKIPPED)} 组断言被跳过（**未覆盖 ≠ 通过**）：")
+        for s in SKIPPED:
+            print("   -", s)
+        print("✅ 其余全部通过")
+        return 0
     print("✅ 全部通过")
     return 0
 

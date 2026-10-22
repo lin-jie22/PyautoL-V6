@@ -53,12 +53,33 @@ FAILS = []
 #:    同纪律：跑不起来 ≠ 测不过）。⇒ 记账 + 提示，不判失败。
 SKIPPED = []
 
+#: ⛔⛔ 桥的**两类失败**是两个退出码（桥侧 `RC_BAD_INPUT=2` /
+#:    `RC_MISSING_DEP=3`）。契约必须复述这个口径，否则「依赖没装」
+#:    会被当成「契约坏了」：实测在**没装 REA 的机器**（CI）上，
+#:    6 条判据转红，其中 4 条（B1/B7/G2/J1）红的是**环境**、
+#:    只有 2 条（G11/J13「失败必须可归因」）红的是**真缺陷**。
+#:    ⇒ 环境类的走 SKIP 记账（未覆盖 ≠ 通过），真缺陷类的必须留着牙。
+RC_BAD_INPUT = 2
+RC_MISSING_DEP = 3
+
 
 def ck(name, cond, detail=""):
     print(f"  {'PASS' if cond else 'FAIL'} {name} {detail if not cond else ''}")
     if not cond:
         FAILS.append(name)
     return bool(cond)
+
+
+def sk(name, reason):
+    """跳过某一组断言：**单独记账**，既不判红也不冒充通过。
+
+    ⛔ 为什么不判红：红会把"这台机器没装 REA"报成"契约坏了"，
+       于是真正的回归淹没在环境噪音里（实测 6 红里 4 条是这种）。
+    ⛔ 为什么不判绿：绿会让"工具哪天彻底跑不动了"恒绿且零覆盖 ——
+       与「空冻结套件不得恒绿」是同一个病。
+    """
+    print(f"  SKIP {name} —— {reason}")
+    SKIPPED.append(f"{name} —— {reason}")
 
 
 #: ⛔⛔ 桥的**证据根**必须指向临时目录（r64 实测踩到）。
@@ -194,7 +215,11 @@ def main() -> int:
         sample = make_sample(td)
         rc, out, err = run_bridge(
             ["--command", "analyze_javascript_application"], {"path": sample})
-        ck("B1 桥退出 0（拿到结果）", rc == 0, f"rc={rc} err={err[:200]}")
+        if rc == RC_MISSING_DEP:
+            sk("B1 桥退出 0（拿到结果）",
+               f"REA/node 未安装 ⇒ 端到端 JS 通道未覆盖（{(out or {}).get('degraded', {})}）")
+        else:
+            ck("B1 桥退出 0（拿到结果）", rc == 0, f"rc={rc} err={err[:200]}")
         if rc == 0 and isinstance(out, dict):
             ck("B2 ok=true 且 evidence_id 存在",
                out.get("ok") is True and bool(out.get("evidence_id")),
@@ -249,7 +274,13 @@ def main() -> int:
     #:    ⇒ 桥的 `ok=true` 只代表"拿到结果了"。若没有 `rea_self_check`，
     #:       调用方会把 `ok=true` 读成"引擎都在"（假仪表）。
     rc_d, out_d, err_d = run_bridge(["--command", "doctor"], {})
-    ck("B7 doctor 拿得到结果", rc_d == 0, f"rc={rc_d} err={err_d[:200]}")
+    if rc_d == RC_MISSING_DEP:
+        #: ⛔ 但「依赖缺失」本身**必须可归因**（这条不许跟着 SKIP，
+        #:    否则恰好把"未装时静默失败"的缺陷放过去了 —— G11/J13 同族）。
+        sk("B7 doctor 拿得到结果",
+           f"REA/node 未安装（已自带 degraded 归因：{(out_d or {}).get('degraded', {})}）")
+    else:
+        ck("B7 doctor 拿得到结果", rc_d == 0, f"rc={rc_d} err={err_d[:200]}")
     if isinstance(out_d, dict) and out_d.get("ok"):
         sc = out_d.get("rea_self_check")
         ck("B8 ⛔ ok=true 时仍原样暴露 REA 自己的 healthy（布尔，不是推断）",
@@ -533,7 +564,11 @@ def main() -> int:
         if apk.is_file():
             rc, out, err = run_bridge(
                 ["--command", "inspect_android_package"], {"path": str(apk)})
-            ck("G2 桥退出 0（拿到结果）", rc == 0, f"rc={rc} err={err[:200]}")
+            if rc == RC_MISSING_DEP:
+                sk("G2 桥退出 0（拿到结果）",
+                   "REA/node 未安装 ⇒ jadx 通道未覆盖")
+            else:
+                ck("G2 桥退出 0（拿到结果）", rc == 0, f"rc={rc} err={err[:200]}")
 
             env: dict = {}
             if isinstance(out, dict):
@@ -608,9 +643,20 @@ def main() -> int:
     ck("I2 错误信息里点名那个参数", "--params" in err_u, err_u[:160])
     #: 反证：证明 I1 拦的是真东西 —— 合法形态必须**照常通过**、不被误伤。
     rc_ok, out_ok, err_ok = run_bridge(["--command", "capabilities"], {})
-    ck("I3 反证：合法 argv（--command capabilities）不被误伤",
-       rc_ok == 0 and bool((out_ok or {}).get("ok")),
-       f"rc={rc_ok} err={err_ok[:160]}")
+    #: ⛔⛔ 判据这里必须说清"误伤"指什么：`rc=2` 在本仓语义是**参数错**，
+    #:    所以"合法 argv 被误伤"的准确形态是 `rc == 2`。依赖缺失是 `rc=3`
+    #:    —— 那是另一类（该去装东西），**不许**被算成误伤。
+    #:    旧写法 `rc == 0 and ok` 把两者压在一起，实测在没装 REA 的机器上
+    #:    红得没法判：到底是校验器把人误伤了，还是这台机器没装。
+    ck("I3 反证：合法 argv（--command capabilities）不被**误判成参数错**",
+       rc_ok != RC_BAD_INPUT, f"rc={rc_ok} err={err_ok[:160]}")
+    if rc_ok == RC_MISSING_DEP:
+        sk("I4 合法 argv 端到端真的产出结果",
+           "REA/node 未安装 ⇒ 只验到「没被误伤」，没验到「跑得通」")
+    else:
+        ck("I4 合法 argv 端到端真的产出结果",
+           rc_ok == 0 and bool((out_ok or {}).get("ok")),
+           f"rc={rc_ok} err={err_ok[:160]}")
 
     # ── J 组：原生二进制通道（Ghidra）端到端，与先验真值对拍 ──────────
     #: ⛔ 判据怎么选才既不橡皮图章又不脆：
@@ -637,11 +683,23 @@ def main() -> int:
         csrc = Path(td6) / "probe.c"
         cbin = Path(td6) / "probe_bin"
         csrc.write_text(SRC, encoding="utf-8")
-        ccp = subprocess.run(["/usr/bin/cc", "-arch", "arm64", "-o", str(cbin),
-                              str(csrc)], stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, timeout=180)
-        ck("J1 能自建原生二进制样本",
-           cbin.is_file(), f"rc={ccp.returncode} err={ccp.stderr[:160]}")
+        #: ⛔⛔ `-arch arm64` 是 **Darwin 的 clang** 才认的开关。Linux 上
+        #:    cc 会直接 `unknown argument` ⇒ J1 红；而 J2–J12 断的是
+        #:    mach-o / arm64 / `image_base=0x100000000`（macOS 链接器约定）
+        #:    ⇒ 在 Linux 上**整组本来就无从验证**。
+        #:    ⛔ 也不许"改成编个 x86 ELF 交差"：那样 J3 恒假、J5 永远错，
+        #:      等于把判据换成永远不成立的东西（比跳过更糟）。
+        if sys.platform != "darwin":
+            sk("J1–J12 原生二进制通道（Mach-O 结构对拍）",
+               f"非 Darwin（{sys.platform}）⇒ 造不出 mach-o/arm64 样本，"
+               "J2–J12 的真值无从对拍")
+        else:
+            ccp = subprocess.run(["/usr/bin/cc", "-arch", "arm64",
+                                  "-o", str(cbin), str(csrc)],
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, timeout=180)
+            ck("J1 能自建原生二进制样本",
+               cbin.is_file(), f"rc={ccp.returncode} err={ccp.stderr[:160]}")
 
         if cbin.is_file():
             #: 独立真值：`otool` 的段命令数 + 节数（不数 segname 行，见 J7 注释）
