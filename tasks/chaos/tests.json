@@ -1,10 +1,10 @@
 {
   "env_id": "chaos",
-  "note": "由 aether/chaos.py 切片自动生成：15 条经 F2P 验证的判据（另有 0 条对变异免疫，已剔除）。expect 为生成时刻的实现行为（characterization），非规格。",
+  "note": "由 stdlib/turtledemo/chaos.py 切片自动生成：15 条经 F2P 验证的判据（另有 0 条对变异免疫，已剔除）。expect 为生成时刻的实现行为（characterization），非规格。",
   "oracle": "characterization",
   "generated_by": "scripts/worldgen.py",
   "generated_at": "2026-10-17T16:27:44",
-  "source_origin": "stdlib/chaos.py",
+  "source_origin": "stdlib/turtledemo/chaos.py",
   "tests": [
     {
       "name": "h_5",

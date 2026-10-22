@@ -1,10 +1,10 @@
 {
   "env_id": "_inspect",
-  "note": "由 aether/_inspect.py 切片自动生成：10 条经 F2P 验证的判据（另有 0 条对变异免疫，已剔除）。expect 为生成时刻的实现行为（characterization），非规格。",
+  "note": "由 pip/_vendor/rich/_inspect.py 切片自动生成：10 条经 F2P 验证的判据（另有 0 条对变异免疫，已剔除）。expect 为生成时刻的实现行为（characterization），非规格。",
   "oracle": "characterization",
   "generated_by": "scripts/worldgen.py",
   "generated_at": "2026-10-17T16:26:32",
-  "source_origin": "stdlib/_inspect.py",
+  "source_origin": "pip/_vendor/rich/_inspect.py",
   "tests": [
     {
       "name": "get_object_types_mro_as_strings_4",

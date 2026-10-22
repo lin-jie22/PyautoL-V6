@@ -4266,6 +4266,66 @@ F2 是 F1 的另一半：只证明"会红"不证明"红的是基线这条路"，
 
 ---
 
+### 151. ⛔⛔ **溯源字段是「渲染」出来的，不是「记录」下来的**（2026-10-22）
+
+r67 把 44 处本机绝对路径换成了"可读标签"（`stdlib/<x>.py`）。当时只验了
+"不是绝对路径"，**没验标签是不是真的**。往下查一层，10 条生成环境里 **7 条
+标签指向不存在的文件**：
+
+| 环境 | 旧标签 | 真相 |
+|---|---|---|
+| `chaos` | `stdlib/chaos.py` | `stdlib/turtledemo/chaos.py` |
+| `encoder` | `stdlib/encoder.py` | `stdlib/json/encoder.py` |
+| `core` | `stdlib/core.py` | `pip/_vendor/idna/core.py` |
+| `utils` | `stdlib/utils.py` | `pip/_vendor/requests/utils.py` |
+| `_inspect` / `_writer` / `_parser` | 同样 | `pip/_vendor/rich|tomli_w|tomli/…` |
+
+两层错，第二层比第一层坏：
+
+1. **子路径被压平**：`_origin_label(mod)` 收的是 stem，用 `src_root/f"{mod}.py"`
+   **重建**一个路径 —— 而主循环 `for mod, tree in trees.items()` 只按 stem 索引，
+   真实路径早就丢了。
+2. **vendor 被冒充成 stdlib**：`site-packages` 在 stdlib **里面**，所以
+   `stdlib/` 前缀也能套到 pip 的 vendor 代码上。字段值"真"到能通过
+   "不是绝对路径"的闸，但读的人第一眼看到的是"标准库"。
+
+⛔ 还有一层同源病：`note` 写死 `由 aether/{mod}.py 切片自动生成…` ⇒
+**10/10 与 `source_origin` 不同源**（一个说 `aether/utils.py`、一个说
+`stdlib/utils.py`，两个文件都不存在）。同一件事渲染两遍就会漂，
+而且两边都不知道自己错（第 46 条的老形状，换了个字段）。
+
+**怎么证明哪条标签是错的**（可复用）：函数名不够（`utils` 全仓到处都是），
+要拿**函数体的规范化 AST** 去反查：
+
+```python
+ast.dump(node, annotate_fields=False)     # 去掉位置信息
+# 索引：全 stdlib 1034 个 .py 的每个 FunctionDef → {名字: [dump…]}
+# 判据：task.py 里**所有**函数的 dump 都落在同一个文件里 ⇒ 唯一命中
+```
+
+`encoder` 三个函数全落 `json/encoder.py`、`core` 五个全落 `idna/core.py` ——
+这种"全体一致"才是证据；单个函数撞上不说明任何事。
+
+**修法与判据**：
+
+- `origin_label(真实路径)` 四支：仓库内 / `site-packages` / 其余 stdlib / 其它。
+  ⛔ 顺序不能反：先判 stdlib 就会产出 `stdlib/site-packages/pip/_vendor/…`
+  （字段虽真，但读起来还是"标准库"，与要修的错法同形）。
+- `note` 与 `source_origin` 用**同一个** label；扫描时 `paths_by_stem[p.stem] = p`
+  把真实路径当场记下来。
+- 契约旧 D2（「≥5 条以 `stdlib/` 开头」）和旧 D3（「worldgen 用了
+  `_origin_label`」）**把错法写成了标准** —— 判据要跟着真相改，不能留着
+  维持已实现的行为。新增 D4（note⊃source_origin）/ D5（`stdlib/` 里不许含
+  `site-packages`、`_vendor`）/ D6a–e（合成树单测：子目录不许压平、同名不同
+  目录必须给出**三个不同**标签）/ D7（反证：旧写法在顶层与子目录给出同一个
+  标签 ⇒ 所以 D6c 有牙）。
+
+⛔ 一条写法教训：别写「源码里不许出现 `f"{mod}.py"`」—— 修复说明的
+docstring 里正引用着旧写法，这种断言会**逼人删掉解释**。判**接线**
+（两处都走 `origin_label(paths_by_stem[mod]`），不判字面量。
+
+---
+
 ## 108. ⛔⛔ 「代码在哪」与「数据在哪」是两件事 —— 仓库里它们恰好相等，于是没人发现
 
 `paths.ROOT = Path(__file__).resolve().parent.parent`。在仓库里它等于仓库根，

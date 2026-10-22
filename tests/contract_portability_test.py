@@ -344,13 +344,104 @@ def main() -> None:
             origins[p.parent.name] = "<读不了>"
     ck("D1 ⛔ 没有一个是绝对路径", not [k for k, v in origins.items()
                                     if v.startswith("/")], str(origins)[:200])
-    ck("D2 仍是**可读标签**（`stdlib/…`），不是把字段清空",
-       sum(1 for v in origins.values() if v.startswith("stdlib/")) >= 5,
-       str(origins)[:200])
+    #: ⛔ D2 原来的写法是"≥5 条以 `stdlib/` 开头"。它把**错法**写成了标准 ——
+    #:    实测那 5 条里有 4 条是 pip 的 vendor 代码被标成标准库（见 D5）。
+    #:    改成"非空且不是绝对路径"，前缀归属交给 D5/D6 单独判。
+    labeled = {k: v for k, v in origins.items() if v}
+    ck("D2 仍是有内容的标签（不是把字段清空）；`null` 只留给手工环境",
+       len(labeled) >= 5 and all("/" in v or v.endswith(".py")
+                                 for v in labeled.values()),
+       str(labeled)[:200])
     wg = (ROOT / "scripts" / "worldgen.py").read_text(encoding="utf-8")
-    ck("D3 生成侧也换了口径（worldgen 用 `_origin_label`，旧写法已删）",
-       "_origin_label(" in wg and 'str(src_root / f"{mod}.py")' not in wg,
-       "worldgen 仍会把绝对路径写进溯源字段")
+    #: ⛔ 旧断言是"worldgen 用了 `_origin_label`" —— 而那个函数正是缺陷本身
+    #:    （按 stem 重建路径）。⛔ 也不能写成"源码里不许出现 `{mod}.py`"：
+    #:    修复说明的 docstring 里就引用着旧写法，那种断言只会逼人删掉解释。
+    #:    判**接线**：标签必须取自从真实路径索引里捞出来的那份。
+    ck("D3 生成侧按**真实路径**取标签（两处都走 `origin_label(paths_by_stem[mod]`，"
+       "且扫描时真的把路径记下来了）",
+       wg.count("origin_label(paths_by_stem[mod]") >= 2
+       and "paths_by_stem[p.stem] = p" in wg,
+       "worldgen 仍可能按 stem 重建路径（子目录会被压平）")
+
+    #: ⛔⛔ D4：`note` 与 `source_origin` 必须**同源**。
+    #:    修前实测 10/10 全都不同源：note 是写死的 `aether/<mod>.py`，
+    #:    source_origin 是按 stem 重建的 `stdlib/<mod>.py`，两个文件都不存在。
+    #:    同一件事渲染两遍就会漂，而且两边都不知道自己错（第 46 条的老形状）。
+    notes = {}
+    for p in prov:
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:                                        # noqa: BLE001
+            continue
+        if d.get("source_origin"):
+            notes[p.parent.name] = (str(d["source_origin"]), str(d.get("note") or ""))
+    ck("D4 ⛔ `note` 里写着与 `source_origin` 同一个出处（两个字段不许各渲染一遍）",
+       all(o in n for o, n in notes.values()),
+       str({k: (o, n[:40]) for k, (o, n) in notes.items() if o not in n})[:300])
+
+    #: ⛔ D5：`stdlib/` 前缀不许覆盖第三方。pip 的 vendor 目录就在 stdlib 里面
+    #:    （`<stdlib>/site-packages/pip/_vendor/…`）⇒ 先判 stdlib 就会产出
+    #:    `stdlib/site-packages/pip/_vendor/idna/core.py`：字段虽真，但读的人
+    #:    第一眼看到的还是"标准库"。
+    fake = {k: v for k, v in labeled.items()
+            if v.startswith("stdlib/") and ("site-packages" in v or "_vendor" in v)}
+    ck("D5 ⛔ 没有把第三方（site-packages / _vendor）冒充成 `stdlib/…`",
+       not fake, str(fake)[:200])
+
+    #: ── D6：标签函数本身的合成树单测（不依赖本机装了什么）────────────
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from worldgen import origin_label                          # noqa: E402
+
+    with tempfile.TemporaryDirectory() as td:
+        t = Path(td)
+        (t / "repo" / "pkg").mkdir(parents=True)
+        (t / "stdlib" / "sub").mkdir(parents=True)
+        (t / "stdlib" / "site-packages" / "vendorpkg").mkdir(parents=True)
+        for f in ("repo/pkg/mod.py", "stdlib/mod.py", "stdlib/sub/mod.py",
+                  "stdlib/site-packages/vendorpkg/mod.py"):
+            (t / f).write_text("x = 1\n", encoding="utf-8")
+        root_, std_ = t / "repo", t / "stdlib"
+        got = {
+            "仓库内": origin_label(root_ / "pkg" / "mod.py", root_, std_),
+            "顶层": origin_label(std_ / "mod.py", root_, std_),
+            "子目录": origin_label(std_ / "sub" / "mod.py", root_, std_),
+            "vendor": origin_label(std_ / "site-packages" / "vendorpkg" / "mod.py",
+                                  root_, std_),
+        }
+    ck("D6a 仓库内 ⇒ 仓库相对路径", got["仓库内"] == "pkg/mod.py", got["仓库内"])
+    ck("D6b stdlib 顶层 ⇒ `stdlib/<x>.py`", got["顶层"] == "stdlib/mod.py", got["顶层"])
+    ck("D6c ⛔ stdlib 子目录 ⇒ 子路径**不许被压平**",
+       got["子目录"] == "stdlib/sub/mod.py", got["子目录"])
+    ck("D6d ⛔ site-packages 里的第三方 ⇒ 不带 `stdlib/` 前缀",
+       got["vendor"] == "vendorpkg/mod.py", got["vendor"])
+    #: ⛔ D6e 是这一组的**靶心**：同名不同目录三条必须互不相同。
+    #:    旧实现（按 stem 重建）在这里会给出三个一样的字符串，所以这条
+    #:    能在"换回旧写法"时立刻红 —— 下面 D7 用反证证明它有牙。
+    ck("D6e ⛔ 同名不同目录 ⇒ 三个**不同**标签（压平就等于丢信息）",
+       len({got["顶层"], got["子目录"], got["vendor"]}) == 3, str(got))
+
+    #: D7：把旧写法就地重放一遍 —— 它**必须**过不了 D6e 的判据。
+    #:    ⛔ 不做这一步，"D6 有牙"就只是我的说法：一个恒等函数也能让
+    #:    D6a/D6b 绿（它们本来就等于 `stdlib/<x>.py`）。
+    def _old_label(stem: str, src_root: Path, root_: Path, std_: Path) -> str:
+        p = (src_root / f"{stem}.py").resolve()
+        try:
+            return str(p.relative_to(root_.resolve()))
+        except ValueError:
+            pass
+        try:
+            return "stdlib/" + str(p.relative_to(std_.resolve()))
+        except ValueError:
+            return f"{src_root.name}/{stem}.py"
+
+    with tempfile.TemporaryDirectory() as td:
+        t = Path(td)
+        (t / "stdlib" / "sub").mkdir(parents=True)
+        for f in ("stdlib/mod.py", "stdlib/sub/mod.py"):
+            (t / f).write_text("x = 1\n", encoding="utf-8")
+        old = {_old_label("mod", t / "stdlib", t / "repo", t / "stdlib")}
+    ck("D7 ⛔ 反证：按 stem 重建 ⇒ 顶层与子目录给出**同一个**标签（所以 D6c 有牙）",
+       len(old) == 1, str(old))
 
     print("== E 组：写死路径的**三个出口**都堵住了 ==")
     for rel in ("scripts/rea_bridge.py", "scripts/demo_evolve.py",

@@ -1,10 +1,10 @@
 {
   "env_id": "_parser",
-  "note": "由 aether/_parser.py 切片自动生成：6 条经 F2P 验证的判据（另有 0 条对变异免疫，已剔除）。expect 为生成时刻的实现行为（characterization），非规格。",
+  "note": "由 stdlib/tomllib/_parser.py 切片自动生成：6 条经 F2P 验证的判据（另有 0 条对变异免疫，已剔除）。expect 为生成时刻的实现行为（characterization），非规格。 ⚠️ 出处有第二候选：两个候选的函数 AST 逐字相同（tomllib 是 vendored 的 tomli），按 worldgen 的「同名 stem 后者覆盖」规则取排序靠后的 tomllib。",
   "oracle": "characterization",
   "generated_by": "scripts/worldgen.py",
   "generated_at": "2026-10-17T16:23:43",
-  "source_origin": "stdlib/_parser.py",
+  "source_origin": "stdlib/tomllib/_parser.py",
   "tests": [
     {
       "name": "is_unicode_scalar_value_6",
@@ -54,5 +54,8 @@
       ],
       "expect": true
     }
+  ],
+  "source_origin_alternatives": [
+    "pip/_vendor/tomli/_parser.py"
   ]
 }

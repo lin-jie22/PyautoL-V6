@@ -748,6 +748,56 @@ def pick_tests(cases: List[Dict[str, Any]],
                    "kill_rate": (len(covered) / len(all_mut)) if all_mut else 0.0}
 
 
+def origin_label(p: Path, root: Path, stdlib: Path) -> str:
+    """把**真实源文件路径**变成一个可读、不含用户名的溯源标签。
+
+    ⛔⛔ 这个函数原来只收 `mod`（stem），用 `src_root/f"{mod}.py"` **重建**一个
+       路径再套前缀。重建把子目录全丢了，于是 2026-10-22 实测 10 条生成环境里
+       **7 条标签指向不存在的文件**：
+
+           chaos   → stdlib/chaos.py     实际 stdlib/turtledemo/chaos.py
+           core    → stdlib/core.py      实际 pip/_vendor/idna/core.py
+           encoder → stdlib/encoder.py   实际 stdlib/json/encoder.py
+           utils   → stdlib/utils.py     实际 pip/_vendor/requests/utils.py
+           _inspect / _writer / _parser  同样是 vendor 包里的实现
+
+       ⛔ 更坏的是 `stdlib/` 这个前缀：上面 4 条里有 3 条是**第三方**代码
+       （pip 的 vendor 目录），却被标成标准库 ⇒ 标签不只是丢信息，是在撒谎。
+       ⇒ 一律按**真实路径**取：子路径不许被压平，vendor 不许被冒充成 stdlib。
+
+    ⛔ 分支顺序不能调：`site-packages` 在 stdlib **里面**，先判 stdlib 就会
+       产出 `stdlib/site-packages/pip/_vendor/...`（字段虽真，但一眼看过去
+       还是"标准库"，与本次要修的错法同形）。
+
+    四支（都不含用户名，都能反推）：
+      仓库内        ⇒ 仓库相对路径
+      site-packages ⇒ `<site-packages 之后的那一段>`（`idna/core.py`…）
+      其余 stdlib   ⇒ `stdlib/<相对>`（`stdlib/json/encoder.py`…）
+      其它          ⇒ `<目录名>/<文件名>`
+    """
+    try:
+        rp = Path(p).resolve()
+    except OSError:                                   # 路径都取不到 ⇒ 原样给
+        return str(p)
+
+    try:
+        return str(rp.relative_to(Path(root).resolve()))
+    except ValueError:
+        pass
+
+    parts = rp.parts
+    if "site-packages" in parts:
+        #: 取**最后一个** `site-packages` 之后的整段（嵌套 venv 只认内层）
+        idx = len(parts) - 1 - parts[::-1].index("site-packages")
+        rest = Path(*parts[idx + 1:])
+        return str(rest) if rest.parts else rp.name
+
+    try:
+        return "stdlib/" + str(rp.relative_to(Path(stdlib).resolve()))
+    except (ValueError, KeyError, OSError):
+        return f"{rp.parent.name}/{rp.name}"
+
+
 def make_env(name: str, source: str, tests: List[Dict[str, Any]],
              out_dir: Path, meta: Dict[str, Any]) -> bool:
     d = out_dir / name
@@ -819,21 +869,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     #: ⛔ `source_origin` **不许写绝对路径**（r67）：它是溯源标签，不是运行
     #:    依赖。写成绝对路径的后果是仓库里躺着 10 行"某人的家目录"，别人
-    #:    clone 下来第一眼以为这库带着私人路径，而它其实一个消费者都没有
-    #:    （`grep source_origin` 全仓只有这一个写入点）。
-    #:    规范：源在仓库内 ⇒ 仓库相对路径；源是 stdlib ⇒ `stdlib/<相对>`；
-    #:    其它 ⇒ `<目录名>/<模块>.py`。三种都**不含用户名**，且都能反推。
-    def _origin_label(mod: str) -> str:
-        p = (src_root / f"{mod}.py").resolve()
-        try:
-            return str(p.relative_to(root.resolve()))
-        except ValueError:
-            pass
-        try:
-            stdlib = Path(sysconfig.get_paths()["stdlib"]).resolve()
-            return "stdlib/" + str(p.relative_to(stdlib))
-        except (ValueError, KeyError, OSError):
-            return f"{Path(src_root).name}/{mod}.py"
+    #:    clone 下来第一眼以为这库带着私人路径。
+    #: ⛔⛔ 而"不许绝对路径"这条修完之后，标签又变成了**按 stem 重建**的假标签
+    #:    （2026-10-22 审计：10 条里 7 条指向不存在的文件，3 条把 pip 的 vendor
+    #:    代码标成 `stdlib/`）⇒ 取值一律走模块级 `origin_label(真实路径)`，
+    #:    `note` 与 `source_origin` 用**同一个** label（两个字段各渲染一遍就会漂，
+    #:    实测修前 10/10 全都不同源）。
+    try:
+        _stdlib = Path(sysconfig.get_paths()["stdlib"]).resolve()
+    except (KeyError, OSError):
+        _stdlib = Path(sys.prefix)
     out_dir = Path(args.out) if Path(args.out).is_absolute() \
         else root / args.out
     max_envs = int(args.max_envs)
@@ -848,6 +893,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         #: 会让每次迭代都等几十秒。
         files = [p for p in files if p.stem in only]
     trees: Dict[str, ast.Module] = {}
+    paths_by_stem: Dict[str, Path] = {}
     for p in files:
         if p.stem == "__init__":
             continue
@@ -861,6 +907,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             continue
         trees[p.stem] = tree
         all_syms[p.stem] = _module_symbols(tree)
+        #: ⛔ 真实路径必须**当场记下来**：后面所有循环都只按 stem 索引
+        #:    （`for mod, tree in trees.items()`），路径一丢就只剩"重建"这条路，
+        #:    而重建会把子目录压平（本次缺陷的根因）。
+        paths_by_stem[p.stem] = p
 
     #: 「哪些名字属于别的模块」—— 用于排除跨模块依赖（切片会断）
     foreign: Dict[str, str] = {}
@@ -941,7 +991,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         #: ── F2P 硬门槛：变异必须能把它打穿 ──────────────────────
         tmp = Path(tempfile.mkdtemp(prefix="wg_env_"))
-        make_env(mod, source, tests, tmp, {"origin": _origin_label(mod)})
+        make_env(mod, source, tests, tmp,
+                 {"origin": origin_label(paths_by_stem[mod], root, _stdlib)})
         try:
             env = Environment.from_dir(tmp / mod)
             base = verify_source(env, timeout=float(args.timeout))
@@ -988,7 +1039,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"  · {mod}: 可被击穿的判据只有 {len(strong)} 条 ⇒ 弃")
             continue
         weak = len(tests) - len(strong)
-        note = (f"由 aether/{mod}.py 切片自动生成：{len(strong)} 条经 F2P 验证"
+        #: ⛔⛔ 两个字段用**同一个** label：`note` 原先写死 `aether/{mod}.py`，
+        #:    于是 2026-10-22 实测 10/10 的 note 与 source_origin **互不一致**
+        #:    （note 说 aether/utils.py，source_origin 说 stdlib/utils.py，
+        #:     两个文件都不存在）—— 同一件事渲染两遍，就会漂，而且两边
+        #:    都不知道自己错（第 46 条的老形状，换了个字段）。
+        origin = origin_label(paths_by_stem[mod], root, _stdlib)
+        note = (f"由 {origin} 切片自动生成：{len(strong)} 条经 F2P 验证"
                 f"的判据（另有 {weak} 条对变异免疫，已剔除）。"
                 f"expect 为生成时刻的实现行为（characterization），非规格。")
         print(f"  ✓ {mod}:  {len(strong):3d} 条有效判据 / {len(keep)} 个函数 /"
@@ -1010,7 +1067,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                        "pick": pick_info})
         if not args.check:
             make_env(mod, source, strong, out_dir,
-                     {"origin": _origin_label(mod), "note": note})
+                     {"origin": origin, "note": note})
         made += 1
 
     print(f"\n产出 {made} 个环境 / 用时 {time.time() - t0:.1f}s")
