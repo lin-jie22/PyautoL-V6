@@ -56,16 +56,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 import uuid
 import warnings
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from .ledger import Ledger, canonical_json, content_hash
-from .paths import resolve_root
+from .paths import ROOT as CODE_ROOT, resolve_root
 from .verifier import (Check, Verdict, assert_verdict_sane, env_fingerprint,
                        error_verdict)
 
@@ -878,6 +879,47 @@ def _spec_from(d: Dict[str, Any]) -> CapabilitySpec:
         raise CapabilityError("rejected", f"{cid}: {ex}")
 
 
+#: 清单 `impl.argv` 里允许的**占位符**（`{python}` / `{repo}`）。
+#:
+#: ⛔⛔ 存在的理由（r67，上传 GitHub 时暴露）：此前 `capabilities.rea.json`
+#:     把 argv 写成 `<本机>/.workbuddy/.../python3` + `<本机>/V6/scripts/rea_bridge.py`
+#:     ⇒ 换个账号/换台机器 clone 下来，**每一条 cli 能力都指向不存在的可执行文件**，
+#:     而报错是 `unavailable: 可执行文件不存在`（看起来像"这个能力没装"，
+#:     不是"清单不可移植"）。44 行绝对路径里有 10 行是这一处。
+#:
+#: ⛔ 只有两个，别扩：`{python}` = 当前解释器；`{repo}` = **代码根**（`paths.ROOT`）。
+#:    数据根**不在这里** —— 那是 `resolve_root()` 的事（Y109：代码根 ≠ 数据根，
+#:    写成 `{repo}/data` 的路径在装成 wheel 后指向 `site-packages/data`）。
+#: ⛔ 未知占位符 **fail-closed**（`rejected`）：留成字面量会让"清单写错了"
+#:    表现成"能力坏了"，排查方向全反（第 107 条：输入不合法归 rejected）。
+_ARGV_PLACEHOLDERS = ("python", "repo")
+_ARGV_PH_RE = re.compile(r"\{([a-z_][a-z0-9_]*)\}")
+
+
+def expand_argv(argv: Sequence[Any], cid: str = "") -> List[str]:
+    """把 `impl.argv` 里的 `{python}` / `{repo}` 展开成**绝对路径**。
+
+    ⛔ 纯函数、只认 `_ARGV_PLACEHOLDERS`；没有占位符时**逐字返回**原字符串
+    （不许顺手 `expanduser` / `normpath` —— 那会悄悄改掉清单声明的东西）。
+    """
+    table = {"python": sys.executable, "repo": str(CODE_ROOT)}
+    out: List[str] = []
+    for raw in argv:
+        s = str(raw)
+
+        def _sub(m: "re.Match[str]") -> str:
+            name = m.group(1)
+            if name not in _ARGV_PLACEHOLDERS:
+                raise CapabilityError(
+                    "rejected",
+                    f"{cid}: argv 占位符 {{{name}}} 不认识"
+                    f"（只允许 {', '.join('{' + p + '}' for p in _ARGV_PLACEHOLDERS)}）")
+            return table[name]
+
+        out.append(_ARGV_PH_RE.sub(_sub, s))
+    return out
+
+
 def _adapter_from(d: Dict[str, Any]) -> BaseAdapter:
     """按 impl.transport 造适配器。
 
@@ -891,7 +933,7 @@ def _adapter_from(d: Dict[str, Any]) -> BaseAdapter:
         argv = impl.get("argv")
         if not argv:
             raise CapabilityError("rejected", f"{d.get('id')}: cli 缺 argv")
-        a = CliAdapter(argv=[str(x) for x in argv])
+        a = CliAdapter(argv=expand_argv(argv, str(d.get("id", ""))))
         if impl.get("env_allow"):
             a.env_allow = tuple(str(x) for x in impl["env_allow"])
         return a

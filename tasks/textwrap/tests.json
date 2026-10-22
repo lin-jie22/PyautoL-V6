@@ -4,7 +4,7 @@
   "oracle": "characterization",
   "generated_by": "scripts/worldgen.py",
   "generated_at": "2026-10-17T16:27:29",
-  "source_origin": "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/lib/python3.13/textwrap.py",
+  "source_origin": "stdlib/textwrap.py",
   "tests": [
     {
       "name": "dedent_6",

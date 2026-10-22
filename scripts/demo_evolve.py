@@ -15,7 +15,10 @@
 from __future__ import annotations
 
 import argparse
+import glob as _glob
 import json
+import os
+import shutil
 import subprocess
 import sys
 import time
@@ -25,6 +28,17 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 PY = sys.executable
+
+
+def _glob_node() -> str:
+    """受管 node 的候选位置（都是 **家目录相对** 的通配，不含用户名）。"""
+    for pat in ("~/.workbuddy/binaries/node/versions/*/bin/node",
+                "/opt/homebrew/bin/node", "/usr/local/bin/node"):
+        hits = sorted(h for h in _glob.glob(os.path.expanduser(pat))
+                      if os.path.isfile(h))
+        if hits:
+            return hits[-1]
+    return ""
 
 
 def run_cli(*args: str) -> dict:
@@ -73,7 +87,13 @@ def main() -> int:
     chain_ok = p.returncode == 0
 
     print("③ 跨语言监督器复核（TypeScript 侧独立校验同一份账本）…")
-    node = "/Users/linshaojie/.workbuddy/binaries/node/versions/22.22.2-6/bin/node"
+    #: ⛔ 不写死 node 路径（r67）：换台机器/换账号就指向不存在的可执行文件，
+    #:    而症状是"监督器那一步失败"，看起来像跨语言校验坏了。
+    #:    顺序：V6_NODE → PATH → 受管家目录 → 常见安装位置。
+    node = (os.environ.get("V6_NODE")
+            or shutil.which("node")
+            or _glob_node()
+            or "node")
     sup = subprocess.run([node, "src/index.ts", "--ledger",
                           str(ROOT / "data" / "ledger.jsonl"), "--json"],
                          capture_output=True, text=True,

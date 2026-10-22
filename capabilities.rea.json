@@ -51,8 +51,8 @@
       "impl": {
         "transport": "cli",
         "argv": [
-          "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/bin/python3",
-          "/Users/linshaojie/V6/scripts/rea_bridge.py",
+          "{python}",
+          "{repo}/scripts/rea_bridge.py",
           "--command", "analyze_javascript_application"
         ]
       }
@@ -80,8 +80,8 @@
       "impl": {
         "transport": "cli",
         "argv": [
-          "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/bin/python3",
-          "/Users/linshaojie/V6/scripts/rea_bridge.py",
+          "{python}",
+          "{repo}/scripts/rea_bridge.py",
           "--command", "inspect_android_package"
         ]
       }
@@ -108,8 +108,8 @@
       "impl": {
         "transport": "cli",
         "argv": [
-          "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/bin/python3",
-          "/Users/linshaojie/V6/scripts/rea_bridge.py",
+          "{python}",
+          "{repo}/scripts/rea_bridge.py",
           "--command", "analyze"
         ]
       }
@@ -131,8 +131,8 @@
       "impl": {
         "transport": "cli",
         "argv": [
-          "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/bin/python3",
-          "/Users/linshaojie/V6/scripts/rea_bridge.py",
+          "{python}",
+          "{repo}/scripts/rea_bridge.py",
           "--command", "capabilities"
         ]
       }
@@ -156,8 +156,8 @@
       "impl": {
         "transport": "cli",
         "argv": [
-          "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/bin/python3",
-          "/Users/linshaojie/V6/scripts/rea_bridge.py",
+          "{python}",
+          "{repo}/scripts/rea_bridge.py",
           "--command", "doctor"
         ]
       }

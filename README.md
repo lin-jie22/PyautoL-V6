@@ -33,8 +33,8 @@ V6 做的事是把这些纪律**下沉成系统的结构**：
 ## 2. 30 秒上手（离线，零依赖）
 
 ```bash
-cd /Users/linshaojie/V6
-PY=/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/bin/python3
+cd <你的仓库>                       # 本仓库根（clone 下来的那个目录）
+PY=python3                          # 3.11+ 即可；也可写 venv 里的绝对路径
 
 # ⛔ 只用 stdlib：**不需要 pip install**（`pyproject.toml` 只为"可安装"而存在，
 #    运行期依赖是空的，且这一点由 `contract_packaging_test.py` 静态守着）。
@@ -97,9 +97,9 @@ $PY scripts/probe_memory_audit.py   # 一次 _collect 的内存峰值花在哪�
 $PY scripts/probe_self_reference.py # 自指负载：多少产出在给自己造机器（只读）
 
 # TypeScript 监督器（Node ≥22 原生跑 TS，无需 npm install）
-# ⛔ 本机 `node` 不在 PATH 上；项目约定用 workbuddy 的二进制（契约测试的
-#    `_find_node()` 会按同一顺序查找，找不到就明确报红而不是静默跳过）
-NODE=/Users/linshaojie/.workbuddy/binaries/node/versions/22.22.2-6/bin/node
+# ⛔ node 不一定在 PATH 上：脚本与契约都按「V6_NODE → PATH → 受管家目录」
+#    同一顺序查找，找不到就明确报红而不是静默跳过。
+NODE=${V6_NODE:-$(command -v node || ls -d ~/.workbuddy/binaries/node/versions/*/bin/node 2>/dev/null | tail -1)}
 cd supervisor && $NODE src/selfcheck.ts                    # 含跨语言一致性验证
 $NODE src/index.ts --ledger ../data/ledger.jsonl --watch 30
 
@@ -1298,7 +1298,7 @@ segname __TEXT            ← ⛔ 这是**节的所属段名**，不是新的一
 ```
 worktree @537dda9 全量契约：33 绿 / 1 红
 扫 tests/contract_*_test.py 的 ROOT 解析方式：
-  27 个写死 ROOT = Path("/Users/linshaojie/V6")   ← 导入主仓库、读主仓库 data/
+  27 个写死 ROOT = Path("/Users/…/V6")   ← 导入主仓库、读主仓库 data/
    5 个用 Path(__file__).resolve().parents[1]     ← 真正测检出
    2 个无 ROOT
 ```
@@ -3857,7 +3857,7 @@ r60 A/B/D 三例共同的形态（都是"有机制，但那条路没被守住"�
 
 ### 131. ⛔⛔ **契约的根必须从 `__file__` 推导，不许写死绝对路径**（2026-10-20）
 
-13 份契约写着 `ROOT = Path("/Users/linshaojie/V6")`。在生产根上跑毫无问题，
+13 份契约写着 `ROOT = Path("/Users/…/V6")`。在生产根上跑毫无问题，
 但 `srcmut.probe` 的对拍方式是**在副本根上跑同一批契约**：写死路径 ⇒ 契约
 永远 import 生产那份 ⇒ 删前删后跑的是**同一份代码** ⇒ 对拍恒绿。
 
@@ -4044,6 +4044,49 @@ r65 第一次让**真模型提议器**（`--proposer llm`，本机 `Qwen3.5-4B`�
 2. 它在模板提议器下八十多轮都不可见 —— 模板的第二名 advantage 恒为负，
    会被准入闸淘汰并写明理由 ⇒ **换一个提议器，会把一直都在的那类缺陷
    变成第一次看得见的缺陷**。判你觉得没问题的时候，先问是不是没人走过那条路。
+
+---
+
+### 143. ⛔⛔ **路径写死 = 把能力锁在一台机器上**（2026-10-22）
+
+仓库第一次推到 GitHub，第一眼看过去是**别人的家目录**：44 行绝对路径散在
+23 个跟踪文件里。⛔ 但"清掉 44 行"不是目标 —— 它们分三类，性质完全不同，
+混为一谈就会改错地方：
+
+| 类别 | 例子 | 写死的后果 |
+|---|---|---|
+| **运行时必需** | `capabilities.rea.json` 的 `argv`、桥的 node/REA/ghidra | 换台机器 ⇒ 每条 cli 能力都指向不存在的可执行文件，报错是 `unavailable: 可执行文件不存在` ⇒ **看起来像"这个能力没装"** |
+| **溯源元数据** | `tasks/*/tests.json` 的 `source_origin` | 全仓 `grep` 只有 1 个写入点、**0 个消费者** ⇒ 不影响运行，但让人以为这库带着私人路径 |
+| **文档示例** | `cd /Users/<某人>/V6` | 对任何人都没用 |
+
+第一类最贵：REA 桥的契约 A–J 全绿，能力是**真验证过**的，但它只在一个人的
+机器上成立。⇒ 判据要换问法：不是"有没有绝对路径"，而是**"换台机器解析得出吗"**。
+
+**三个出口，三种修法：**
+
+1. **清单 → 占位符**：`impl.argv` 认 `{python}`（当前解释器）与 `{repo}`
+   （**代码根**，不是数据根 —— Y109）。未知占位符 **fail-closed**（`rejected`）：
+   留成字面量会让"清单写错了"表现成"能力坏了"。展开后**每个 argv 指向的
+   文件都要真的存在**，这条才是可移植性判据。
+2. **脚本 → 发现**：node / REA / ghidra 按「显式 env → PATH → 受管目录 →
+   常见前缀」查找，**且不许猜** —— 显式给了不存在的路径就返回空串、由调用方
+   报错，不许 fallback 到别的路径凑合用。
+3. **溯源 → 标签**：`stdlib/core.py` 这种可反推的标签，而不是删字段。
+
+⛔ 三个当场踩到的坑：
+
+- `~/tools/ghidra_*` 同时命中 `ghidra_12.1.4_PUBLIC` 与 `…PUBLIC.zip`，而
+  **`.zip` 在字典序上更大** ⇒ 不按类型过滤就把压缩包当安装目录 ⇒ `isdir`
+  失败 ⇒ 引擎**静默消失**（表现成"这台机器没装 ghidra"）。
+- 契约第一版断言"REA 一定能被发现" ⇒ 在 Linux CI 上恒红：**把自己的机器
+  当成世界**。改成"发现了就必须真的存在，没装就返回空串"。
+- 把 `--command analyze` 的值当路径去查 ⇒ 5 条**假红**：判据写宽了，
+  和写窄一样糟。
+
+**契约** `contract_portability_test.py`（30 项：静态闸 / 占位符 / 发现 / 溯源 /
+出口各一组）。核心断言是"零命中"，而零命中可能是扫描器坏了（第 133 条）
+⇒ 每条闸都配一条**必须命中**的注入项；四条修复各撤一次，**4/4 转红**，
+源码 sha 逐字还原。
 
 ---
 
@@ -4244,7 +4287,7 @@ r60 G 把装工具的人审换成机器自审之后，它**真的装上了 radar
 $ pip install -e .            # 装的就是仓库本身
 $ cd ~/my-project && aether init && aether evolve
 $ aether status
-   "path": "/Users/linshaojie/V6/data/ledger.jsonl"     ← 仓库的库，7506 条
+   "path": "/Users/…/V6/data/ledger.jsonl"     ← 仓库的库，7506 条
 ```
 
 `~/my-project/data/` 空着，事件全追加到仓库账本上。它和修前的

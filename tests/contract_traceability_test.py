@@ -49,7 +49,7 @@ def _find_node():
     ⛔ 为什么不能直接写 `node`：本机 `node` **不在 PATH 上**（实测
        `FileNotFoundError`，而 README 里的 `cd supervisor && node ...`
        因此是跑不通的）。项目自己的约定在 `scripts/demo_evolve.py`：
-       `/Users/linshaojie/.workbuddy/binaries/node/versions/<ver>/bin/node`。
+       `~/.workbuddy/binaries/node/versions/<ver>/bin/node`（家目录相对）。
        ⛔ 这里**只查找、不安装、不降级**：找到才跑，找不到就明确报红 ——
        "跑不了"与"跑过了没问题"是两件事。
     """
@@ -280,7 +280,7 @@ def main():
         #:    真找不到就**明确报红**（"跑不了" ≠ "跑过了没问题"）。
         raise RuntimeError(
             "找不到 node：跨语言对拍无法执行。把 node 放进 PATH，"
-            "或确认 /Users/linshaojie/.workbuddy/binaries/node/versions/*/"
+            "或设 V6_NODE，或确认 ~/.workbuddy/binaries/node/versions/*/"
             "bin/node 存在")
     r = subprocess.run(
         [node, "src/index.ts", "--ledger", "../data/ledger.jsonl"],

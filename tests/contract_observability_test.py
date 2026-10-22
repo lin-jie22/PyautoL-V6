@@ -294,14 +294,29 @@ print("== G 组：held-out 判别力必须**进观测侧**（不是只在 JSON �
 #    闸侧已修（`_downgrade_if_flat`），但**观测侧不显示**的话，
 #    "这次放行靠的是不是一套有判别力的 held-out"仍然只有读 JSON 才知道。
 import re  # noqa: E402
+import shutil  # noqa: E402
 import subprocess  # noqa: E402
+import glob  # noqa: E402
 
 #: ⛔ 声明这份契约支持哪些模式（`aether check` 静态读这一行）：
 #:    未声明 ≠ 只有一种模式 —— 前者是"还没接线"，报告里会被点名。
 SUPPORTED_MODES = ("default",)
 
-NODE = os.environ.get("V6_NODE", "/Users/linshaojie/.workbuddy/binaries/node"
-                                "/versions/22.22.2-6/bin/node")
+#: ⛔ 不写死某台机器的 node 路径（r67）：写死 ⇒ 换台机器这份契约恒红，
+#:    而红的原因看起来像"控制台判据坏了"。⇒ 显式 env → PATH → 受管目录。
+def _find_node() -> str:
+    env = os.environ.get("V6_NODE", "")
+    if env and Path(env).exists():
+        return env
+    got = shutil.which("node")
+    if got:
+        return got
+    hits = sorted(glob.glob(os.path.expanduser(
+        "~/.workbuddy/binaries/node/versions/*/bin/node")))
+    return hits[-1] if hits else "node"
+
+
+NODE = _find_node()
 CONSOLE = ROOT / "console" / "index.html"
 html = CONSOLE.read_text(encoding="utf-8")
 

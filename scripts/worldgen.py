@@ -51,6 +51,7 @@ import itertools
 import json
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 from pathlib import Path
@@ -815,6 +816,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     src_root = (root / args.src) if not Path(args.src).is_absolute() \
         else Path(args.src)
+
+    #: ⛔ `source_origin` **不许写绝对路径**（r67）：它是溯源标签，不是运行
+    #:    依赖。写成绝对路径的后果是仓库里躺着 10 行"某人的家目录"，别人
+    #:    clone 下来第一眼以为这库带着私人路径，而它其实一个消费者都没有
+    #:    （`grep source_origin` 全仓只有这一个写入点）。
+    #:    规范：源在仓库内 ⇒ 仓库相对路径；源是 stdlib ⇒ `stdlib/<相对>`；
+    #:    其它 ⇒ `<目录名>/<模块>.py`。三种都**不含用户名**，且都能反推。
+    def _origin_label(mod: str) -> str:
+        p = (src_root / f"{mod}.py").resolve()
+        try:
+            return str(p.relative_to(root.resolve()))
+        except ValueError:
+            pass
+        try:
+            stdlib = Path(sysconfig.get_paths()["stdlib"]).resolve()
+            return "stdlib/" + str(p.relative_to(stdlib))
+        except (ValueError, KeyError, OSError):
+            return f"{Path(src_root).name}/{mod}.py"
     out_dir = Path(args.out) if Path(args.out).is_absolute() \
         else root / args.out
     max_envs = int(args.max_envs)
@@ -922,7 +941,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         #: ── F2P 硬门槛：变异必须能把它打穿 ──────────────────────
         tmp = Path(tempfile.mkdtemp(prefix="wg_env_"))
-        make_env(mod, source, tests, tmp, {"origin": str(src_root / f"{mod}.py")})
+        make_env(mod, source, tests, tmp, {"origin": _origin_label(mod)})
         try:
             env = Environment.from_dir(tmp / mod)
             base = verify_source(env, timeout=float(args.timeout))
@@ -991,7 +1010,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                        "pick": pick_info})
         if not args.check:
             make_env(mod, source, strong, out_dir,
-                     {"origin": str(src_root / f"{mod}.py"), "note": note})
+                     {"origin": _origin_label(mod), "note": note})
         made += 1
 
     print(f"\n产出 {made} 个环境 / 用时 {time.time() - t0:.1f}s")

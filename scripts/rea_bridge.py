@@ -90,21 +90,88 @@ def _rel_to_root(p: Path) -> str:
         return str(p)
 
 
-#: ⛔ 绝对路径，不依赖 PATH：`CliAdapter` 会净化环境变量，而 WorkBuddy /
-#:    定时任务等宿主环境的 PATH 里**不一定**有受管 node（实测过：
-#:    `#!/usr/bin/env node` 那套在 MCP 启动时会失败）。
-NODE = "/Users/linshaojie/.workbuddy/binaries/node/versions/22.22.2-6/bin/node"
-REA = ("/Users/linshaojie/.workbuddy/binaries/node/workspace"
-       "/node_modules/rea-agents/scripts/rea.mjs")
+#: 受管 node 的**发现**顺序（⛔ 不写死用户名/版本号，见 r67）。
+#:
+#: 历史：这里原本是三条写死的绝对路径。它们在**本机**是对的，但仓库上传
+#: GitHub 后 ⇒ 别人 clone 下来跑 `caps invoke rea.doctor`，得到的是
+#: `unavailable: 可执行文件不存在：<别人的家目录>/...`，看起来像"REA 没装"，
+#: 实际是"这份代码只在这台机器上成立"。⛔ 而 `rea_bridge` 是**验证过**的能力
+#: （契约 A–J 全绿）⇒ 这种不可移植最贵：能力是真的，但只在一个人手里是真的。
+#:
+#: 顺序：显式 env → PATH（`shutil.which`）→ 受管家目录 → brew/usr 常见位置。
+#: ⛔ 每一条都要求 `isfile` 命中，不做"猜一个路径凑合用" —— 拼错一个字符的
+#:    绝对路径会表现成"node 不存在"，比空着更难查。
+def _first_file(*cands: str) -> str:
+    for c in cands:
+        if c and os.path.isfile(c):
+            return c
+    return ""
 
-#: REA 的引擎变量。⛔ **存在才加** —— 写死一个不存在的路径 = 声明了
-#:    却没有（假仪表）。引擎没装时这里静默留空，由 REA 自己报 missing。
-ENGINE_ENV_CANDIDATES: Dict[str, str] = {
-    "GHIDRA_INSTALL_DIR": "/Users/linshaojie/tools/ghidra_12.1.4_PUBLIC",
-    "REA_JADX_MCP_JAR":
-        "/Users/linshaojie/.local/share/rea/android/"
-        "jadx-headless-mcp-0.7.1-all.jar",
-}
+
+def _glob_latest(*patterns: str, want: str = "file") -> str:
+    """取字典序最大（= 版本最高）的**类型正确**的命中，无命中返回空串。
+
+    ⛔ `want` 不是可选项（r67 实测）：`~/tools/ghidra_*` 同时命中
+       `ghidra_12.1.4_PUBLIC` 与 `ghidra_12.1.4_PUBLIC.zip`，而排序时
+       **`.zip` 更大** ⇒ 不按类型过滤就会把压缩包当成 ghidra 目录，
+       然后 `isdir` 失败 ⇒ 引擎静默消失（表现成"这台机器没装 ghidra"）。
+    """
+    import glob as _glob
+
+    ok = os.path.isdir if want == "dir" else os.path.isfile
+    for pat in patterns:
+        hits = sorted(h for h in _glob.glob(os.path.expanduser(pat)) if ok(h))
+        if hits:
+            return hits[-1]
+    return ""
+
+
+def _discover_node() -> str:
+    """受管 node 的绝对路径；找不到返回空串（由调用方显式报错）。"""
+    env = os.environ.get("V6_NODE", "").strip()
+    if env:
+        return env if os.path.isfile(env) else ""
+    return _first_file(
+        shutil.which("node") or "",
+        _glob_latest("~/.workbuddy/binaries/node/versions/*/bin/node"),
+        "/opt/homebrew/bin/node",
+        "/usr/local/bin/node",
+        "/usr/bin/node",
+    )
+
+
+def _discover_rea(node: str) -> str:
+    """REA CLI（`rea.mjs`）的绝对路径：先 env，再受管 workspace，再 node 同级。"""
+    env = os.environ.get("V6_REA_MJS", "").strip()
+    if env:
+        return env if os.path.isfile(env) else ""
+    cands = ["~/.workbuddy/binaries/node/workspace/node_modules/rea-agents/scripts/rea.mjs"]
+    if node:
+        #: 受管布局：<versions>/<ver>/bin/node ←→ <workspace>/node_modules/...
+        cands.append(str(Path(node).resolve().parents[3]
+                          / "workspace" / "node_modules" / "rea-agents"
+                          / "scripts" / "rea.mjs"))
+    cands.append("~/.npm-global/lib/node_modules/rea-agents/scripts/rea.mjs")
+    return _first_file(*[os.path.expanduser(c) for c in cands])
+
+
+NODE = _discover_node()
+REA = _discover_rea(NODE)
+
+
+def _discover_engine_env() -> Dict[str, str]:
+    """REA 的引擎变量。⛔ **存在才加** —— 写死一个不存在的路径 = 声明了
+    却没有（假仪表）。引擎没装时这里静默留空，由 REA 自己报 missing。"""
+    out: Dict[str, str] = {}
+    ghidra = os.environ.get("GHIDRA_INSTALL_DIR", "").strip() or _glob_latest(
+        "~/tools/ghidra_*", "/opt/ghidra_*", "/usr/local/ghidra_*", want="dir")
+    if ghidra and os.path.isdir(ghidra):
+        out["GHIDRA_INSTALL_DIR"] = ghidra
+    jadx = os.environ.get("REA_JADX_MCP_JAR", "").strip() or _glob_latest(
+        "~/.local/share/rea/android/*.jar", "/opt/rea/android/*.jar")
+    if jadx:
+        out["REA_JADX_MCP_JAR"] = jadx
+    return out
 
 #: 命令白名单：bridge 名 → (REA CLI 命令名, 位置参数名 or None, 可选开关)
 #: 开关：(CLI flag, 允许的枚举 or None(自由字符串))
@@ -264,7 +331,7 @@ def _engine_env() -> Dict[str, str]:
        说明已经过了 root 发现，进入读输入阶段）。
     """
     out: Dict[str, str] = {}
-    for k, v in ENGINE_ENV_CANDIDATES.items():
+    for k, v in _discover_engine_env().items():
         if os.path.exists(v):
             out[k] = v
     if "GHIDRA_INSTALL_DIR" in out:
@@ -620,10 +687,12 @@ def main() -> int:
         return 2
 
     if not os.path.isfile(REA):
-        print(f"rea_bridge: 找不到 REA 入口 {REA}", file=sys.stderr)
+        print(f"rea_bridge: 找不到 REA 入口 {REA or '(未发现)'} —— "
+              f"装 rea-agents 或设 V6_REA_MJS", file=sys.stderr)
         return 2
     if not os.path.isfile(NODE):
-        print(f"rea_bridge: 找不到 node {NODE}", file=sys.stderr)
+        print(f"rea_bridge: 找不到 node {NODE or '(未发现)'} —— "
+              f"装 node 或设 V6_NODE", file=sys.stderr)
         return 2
 
     tms = req.get("timeout_ms", DEFAULT_TIMEOUT_MS)

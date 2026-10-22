@@ -4,7 +4,7 @@
   "oracle": "characterization",
   "generated_by": "scripts/worldgen.py",
   "generated_at": "2026-10-17T16:27:44",
-  "source_origin": "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/lib/python3.13/chaos.py",
+  "source_origin": "stdlib/chaos.py",
   "tests": [
     {
       "name": "h_5",

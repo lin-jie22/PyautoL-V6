@@ -4,7 +4,7 @@
   "oracle": "characterization",
   "generated_by": "scripts/worldgen.py",
   "generated_at": "2026-10-17T16:26:32",
-  "source_origin": "/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/lib/python3.13/_inspect.py",
+  "source_origin": "stdlib/_inspect.py",
   "tests": [
     {
       "name": "get_object_types_mro_as_strings_4",

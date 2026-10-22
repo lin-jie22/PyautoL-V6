@@ -14,7 +14,7 @@
 当成"这东西就这样"。所以 `init` 要顺带把包内那份**示例**物化到工作区。
 
 ⛔ 那次真装的读数（不是推的）：
-    pip install /Users/linshaojie/V6  ⇒ aether_v6-0.2.0-py3-none-any.whl
+    pip install <repo>  ⇒ aether_v6-0.2.0-py3-none-any.whl
     wheel 里只有 46 个 .py；`tasks/`（14 个环境 / 28 个文件）一个都没进去。
 
 ═══ 六组 ═══

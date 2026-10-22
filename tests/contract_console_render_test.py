@@ -34,6 +34,7 @@ HTML、占位符是 "…"，页面看起来完全正常，而 9 个数据面板*
 """
 from __future__ import annotations
 
+import glob
 import json
 import os
 import re
@@ -249,10 +250,12 @@ def find_node() -> str | None:
     for c in (os.environ.get("AETHER_CONSOLE_NODE"), shutil.which("node")):
         if c and Path(c).exists():
             return c
-    for c in ("/Users/linshaojie/.workbuddy/binaries/node/versions/22.22.2-6/bin/node",
-              "/usr/local/bin/node", "/opt/homebrew/bin/node"):
-        if Path(c).exists():
-            return c
+    #: ⛔ 兜底也**不写用户名**（r67）：受管目录是 `~/` 相对的通配。
+    for pat in ("~/.workbuddy/binaries/node/versions/*/bin/node",
+                "/usr/local/bin/node", "/opt/homebrew/bin/node"):
+        for c in sorted(glob.glob(os.path.expanduser(pat))):
+            if Path(c).exists():
+                return c
     return None
 
 

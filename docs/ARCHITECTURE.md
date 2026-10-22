@@ -3227,7 +3227,7 @@ worktree @537dda9（本次提交）全量契约：33 绿 / 1 红（191.8s）
 
 | 写法 | 个数 | 在干净检出里意味着什么 |
 |---|---|---|
-| `ROOT = Path("/Users/linshaojie/V6")` | **27** | 把**主仓库**的路径钉死 ⇒ 导入的是主仓库的 `aether/`、读的是主仓库的 `data/` ⇒ **检出里的代码一行没跑** |
+| `ROOT = Path("/Users/…/V6")` | **27** | 把**主仓库**的路径钉死 ⇒ 导入的是主仓库的 `aether/`、读的是主仓库的 `data/` ⇒ **检出里的代码一行没跑** |
 | `ROOT = Path(__file__).resolve().parents[1]` | 5 | 真正测检出（含 `contract_boundary_test.py`） |
 | 无 `ROOT`（自己拼） | 2 | 同理，需逐个看 |
 

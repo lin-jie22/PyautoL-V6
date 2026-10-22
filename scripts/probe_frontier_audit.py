@@ -31,8 +31,8 @@
 判据没有判别力的"全绿"是最危险的假象。
 
 跑法（离线，秒级）：
-    /Users/linshaojie/V6/.venv/bin/python scripts/probe_frontier_audit.py
-    或 python scripts/probe_frontier_audit.py
+    python scripts/probe_frontier_audit.py
+    或 <你的 venv>/bin/python scripts/probe_frontier_audit.py
 """
 from __future__ import annotations
 

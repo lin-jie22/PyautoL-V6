@@ -24,7 +24,19 @@
 
 set -eu
 
-INSTALL_DIR="${GHIDRA_INSTALL_DIR:-/Users/linshaojie/tools/ghidra_12.1.4_PUBLIC}"
+#: ⛔ 不写死安装路径（r67）：写死 ⇒ 别人 clone 下来跑这个脚本，得到的是
+#:    "找不到 Ghidra/Features/..."，看起来像脚本坏了。
+#:    顺序：环境变量 → 家目录下的 ghidra_* 目录（**只认目录**，`ghidra_*.zip`
+#:    在字典序上更大，不过滤就会把压缩包当安装目录）。
+INSTALL_DIR="${GHIDRA_INSTALL_DIR:-}"
+if [ -z "$INSTALL_DIR" ]; then
+  INSTALL_DIR=$(ls -d "$HOME"/tools/ghidra_*/ 2>/dev/null | head -1 || true)
+  INSTALL_DIR="${INSTALL_DIR%/}"
+fi
+if [ ! -d "$INSTALL_DIR" ]; then
+  echo "build_rea_engines: 找不到 Ghidra 安装目录 —— 设 GHIDRA_INSTALL_DIR" >&2
+  exit 2
+fi
 CPP_DIR="$INSTALL_DIR/Ghidra/Features/Decompiler/src/decompile/cpp"
 NATIVE_DIR="mac_arm_64"
 BUILT="$CPP_DIR/ghidra_opt"

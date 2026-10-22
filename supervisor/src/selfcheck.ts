@@ -24,7 +24,11 @@ function ck(name: string, cond: boolean, detail = ""): void {
 }
 
 const PY = process.env.V6_PY || "python3";
-const ROOT = "/Users/linshaojie/V6";
+//: ⛔ 仓库根由**本文件位置**推导，不写死绝对路径（r67：写死 ⇒ 别人 clone
+//:    下来跑自检，A 组注入的 `sys.path` 指向一个不存在的目录 ⇒ 跨语言
+//:    一致性那一组变成"import 失败"，看起来像校验器坏了）。
+//:    `V6_ROOT` 仍可覆盖（调试用），但默认值必须跟着代码走。
+const ROOT = process.env.V6_ROOT || join(import.meta.dirname, "..", "..");
 
 function main(): number {
   const dir = mkdtempSync(join(tmpdir(), "v6_sup_"));

@@ -229,6 +229,33 @@ aether caps list / show / invoke      # 用已注册的能力
 ⛔ 两份白名单**不通用**：给人看的那份（`ALLOWED_LAUNCHERS`，23 个词，含 curl/pip）
 和给机器执行的那份（`AUTO_LAUNCHERS`，只有 `brew install`）是两个东西。
 
+#### 3.5.1 清单里的路径：用占位符，别写死
+
+`impl.argv` 里可以写两个占位符，加载时展开成**绝对路径**：
+
+| 占位符 | 展开成 |
+|---|---|
+| `{python}` | 当前解释器（`sys.executable`） |
+| `{repo}` | 代码根（仓库根；⛔ **不是**数据根） |
+
+```json
+"argv": ["{python}", "{repo}/scripts/rea_bridge.py", "--command", "doctor"]
+```
+
+⛔ 写死绝对路径的后果不是"报错"，是 `unavailable: 可执行文件不存在` ——
+看起来像**这个能力没装**，排查方向全反。未知占位符会被拒（`rejected`），
+不会留成字面量。
+
+外部脚本找 node / REA / 引擎时也按同一套纪律：**env → PATH → 受管目录 →
+常见前缀**，找不到就明确报错，不猜。可用这些变量覆盖：
+
+| 变量 | 作用 |
+|---|---|
+| `V6_NODE` | node 可执行文件（优先级最高） |
+| `V6_REA_MJS` | REA 的 `rea.mjs` 入口 |
+| `GHIDRA_INSTALL_DIR` / `REA_JADX_MCP_JAR` | REA 的两个引擎 |
+| `V6_PY` / `V6_ROOT` | 监督器自检用的解释器 / 仓库根 |
+
 ### 3.6 界面
 
 ```bash
@@ -383,7 +410,7 @@ aether verify-chain      # 账本被动过没有
 你仓库里的 `.py`**。想让机器改源码，那是另一回事（V5 自己的 `evolution_loop`
 在做）—— 两条闭环同时写同一个仓库会互相打架。
 
-### 9.2 实测读数（V5 `/Users/linshaojie/V5`）
+### 9.2 实测读数（V5 `/Users/…/V5`）
 
 用 `worldgen` 三个目录各扫一遍，看**过闸率**：
 
@@ -419,13 +446,13 @@ aether evolve --rounds 1 --max-tasks 12
 
 ```bash
 # 1. 装到**独立** venv（零运行期依赖，不会碰 V5 的 .venv）
-python3 -m venv /tmp/aether-venv && /tmp/aether-venv/bin/pip install /Users/linshaojie/V6
+python3 -m venv /tmp/aether-venv && /tmp/aether-venv/bin/pip install <你的仓库>
 
 # 2. 工作区放**别处** —— ⛔ 绝不在 V5 根目录跑 init
 /tmp/aether-venv/bin/aether init --dir ~/v5lab
 
 # 3. 生成题源（指向 V5 的具体目录，别指仓库根）
-/Users/linshaojie/V6/scripts/worldgen.py \
+<你的仓库>/scripts/worldgen.py \
     --src ~/V5/evolution --out ~/v5lab/tasks --max-envs 6
 
 # 4. 跑
