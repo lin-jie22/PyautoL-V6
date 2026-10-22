@@ -43,12 +43,24 @@ from aether.memory import MemoryOS  # noqa: E402
 from aether.serve import memory_report  # noqa: E402
 
 FAILS = []
+SKIPPED = []
 
 
 def ck(name, cond, detail=""):
     print(f"  {'PASS' if cond else 'FAIL'} {name} {detail if not cond else ''}")
     if not cond:
         FAILS.append(name)
+
+
+def sk(name, why):
+    """⛔ 缺的是**本机资产**（node）而不是判据坏了 ⇒ 点名跳过。
+
+    与 `ck` 分开是因为两者语义相反：`ck` 说"我看了，是坏的"；`sk` 说
+    "我没看"。混在一起就会出现最坏的那种绿 —— 把"没跑"记成"通过"
+    （`use_node` 缺失时，第一版正是让 G3/G4 报 FAIL，看起来像控制台判据坏了）。
+    """
+    print(f"  SKIP {name} ⇒ {why}")
+    SKIPPED.append(f"{name}（{why}）")
 
 
 #: ⛔ 污染样本必须**足够长**，否则命中的是"内容过短"而不是"未验证标记"
@@ -317,6 +329,24 @@ def _find_node() -> str:
 
 
 NODE = _find_node()
+
+
+def _node_runs(p: str) -> str:
+    """`node` 能不能跑：返空串=能跑，否则返回原因。
+
+    ⛔ 必须**真跑一次**而不是 `shutil.which`：`_find_node` 找不到时返回的是
+      字面量 `"node"`（留给 PATH 再试一次），`which` 与"能执行"是两件事。
+    ⛔ 也不能只看 `Path(NODE).is_file()`：镜像里 node 存在但缺共享库是常见形态。
+    """
+    try:
+        r = subprocess.run([p, "-e", "0"], capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError) as e:
+        return f"{type(e).__name__}: {e}".strip()
+    return "" if r.returncode == 0 else f"rc={r.returncode} {(r.stderr or '')[:60]}".strip()
+
+
+NODE_ERR = _node_runs(NODE)
+
 CONSOLE = ROOT / "console" / "index.html"
 html = CONSOLE.read_text(encoding="utf-8")
 
@@ -342,20 +372,28 @@ for (const [d, want] of cases) {
 }
 console.log(JSON.stringify(out));
 """)
-    with tempfile.TemporaryDirectory() as td:
-        p = Path(td) / "disc.mjs"
-        p.write_text(js, encoding="utf-8")
-        try:
-            r = subprocess.run([NODE, str(p)], capture_output=True,
-                               text=True, timeout=30)
-            got = json.loads((r.stdout or "[]").strip().splitlines()[-1])
-        except Exception as e:  # noqa: BLE001
-            got = []
-            print(f"      （node 未跑起来：{type(e).__name__}: {e}）")
-    ck("G3 三态渲染各不相同：false=无跨度 / true=有跨度 / 未标注",
-       len(got) == 4 and all(g["ok"] for g in got), str(got))
-    ck("G4 ⛔ 只有 `false` 才标红（bad）；`null` 是「没测过」不许标红",
-       [g["bad"] for g in got] == [True, False, False, False], str(got))
+    got = []
+    if NODE_ERR:
+        #: ⛔ 缺 node = 缺本机资产，不是判据坏了。原先照样 ck ⇒ 干净镜像/CI
+        #:    上一次报两条红，红的原因看着像"控制台三态渲染错了"。
+        #:    ⇒ 点名跳过（未覆盖 ≠ 通过），并由结尾的 ⏭ 计数出现在报告里。
+        sk("G3 三态渲染各不相同（需要 node）", f"node 不可用：{NODE_ERR}")
+        sk("G4 ⛔ 只有 false 才标红（需要 node）", f"node 不可用：{NODE_ERR}")
+    else:
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "disc.mjs"
+            p.write_text(js, encoding="utf-8")
+            try:
+                r = subprocess.run([NODE, str(p)], capture_output=True,
+                                   text=True, timeout=30)
+                got = json.loads((r.stdout or "[]").strip().splitlines()[-1])
+            except Exception as e:  # noqa: BLE001
+                got = []
+                print(f"      （node 跑起来了但判据脚本失败：{type(e).__name__}: {e}）")
+        ck("G3 三态渲染各不相同：false=无跨度 / true=有跨度 / 未标注",
+           len(got) == 4 and all(g["ok"] for g in got), str(got))
+        ck("G4 ⛔ 只有 `false` 才标红（bad）；`null` 是「没测过」不许标红",
+           [g["bad"] for g in got] == [True, False, False, False], str(got))
 
 ck("G5 自相矛盾（无判别力却放行）在控制台有可见告警",
    "闸失效" in html and "discriminative === false" in html, "缺告警")
@@ -368,6 +406,14 @@ if FAILS:
     print(f"❌ {len(FAILS)} 项未通过：")
     for f in FAILS:
         print("  ✗", f)
-else:
-    print("✅ 观测侧契约全部通过：没有恒亮绿灯，拒载有出口")
-sys.exit(1 if FAILS else 0)
+    sys.exit(1)
+if SKIPPED:
+    #: ⛔ 有跳过时**不许**印「全部通过」：那句话会让下一个人以为
+    #:    "控制台三态也验过了"，而实际一次都没跑。
+    print(f"⚠️  {len(SKIPPED)} 条判据被跳过（**未覆盖 ≠ 通过**）：")
+    for s in SKIPPED:
+        print(f"   - {s}")
+    print("✅ 其余判据全部通过：没有恒亮绿灯，拒载有出口")
+    sys.exit(0)
+print("✅ 观测侧契约全部通过：没有恒亮绿灯，拒载有出口")
+sys.exit(0)

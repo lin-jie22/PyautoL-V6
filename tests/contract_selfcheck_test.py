@@ -307,6 +307,76 @@ def main() -> int:
                     for r2 in _r_nt["results"]
                     if r2["status"] == SC.BROKEN)[:400] or "无坏项"))
 
+    #: ══════════════════════════════════════════════════════════════
+    #: F 组：`deps.zero` 判的是「**谁**拉进来的」，不是「此刻内存里有没有」
+    #: ══════════════════════════════════════════════════════════════
+    #: 实测边界（同一条判据、四种环境）：setuptools 的
+    #: `distutils-precedence.pth` 在**解释器启动阶段**就注入 `_distutils_hack`
+    #: ⇒ python:3.10-slim / 3.11-slim 启动即带（旧判据恒红），
+    #: 3.12-slim / 3.13-slim 干净（旧判据恒绿），macOS 3.9.6 也干净。
+    #: 分界线正是「3.12 起 ensurepip 不再带 setuptools」—— 红绿反映的是
+    #: **镜像里有没有 setuptools**，与本包一个字节的关系都没有。
+    import sysconfig
+    import types
+
+    import aether
+
+    purelib = Path(sysconfig.get_paths()["purelib"]).resolve()
+    fake_name = "_zz_contract_thirdparty"
+    fake_dir = purelib / fake_name
+    fake_mod = types.ModuleType(fake_name)
+    fake_mod.__file__ = str(fake_dir / "__init__.py")
+
+    st, det = SC._c_deps_zero(None)
+    ck("F0 当前解释器上 deps.zero 判 OK（正对照：没有它，下面两条反证没有基线）",
+       st == SC.OK, f"{st} / {det}")
+
+    #: 反证 ①：基线**之后**出现的第三方模块 ⇒ 必须 BROKEN
+    #: （注入的是 `sys.modules` 里的假模块而不是真装一个包：判据只看
+    #:  `__file__` 落不落在 purelib 下，真装包会把读者引到"要不要装依赖"上）
+    sys.modules[fake_name] = fake_mod
+    try:
+        st1, det1 = SC._c_deps_zero(None)
+    finally:
+        sys.modules.pop(fake_name, None)
+    ck("F1 ⛔ 基线之后出现的第三方模块 ⇒ BROKEN（注入反证，名字必须被点名）",
+       st1 == SC.BROKEN and fake_name in det1, f"{st1} / {det1}")
+
+    #: 反证 ②：同一个注入，只把它挪进「启动即存在」的基线 ⇒ 必须 OK 且**点名**。
+    #: ⛔ 这条是 F1 的另一半：只证明"会红"不证明"红的是基线这条路"，
+    #:    换个人把判据写成恒 BROKEN 也能过 F1。
+    with _Patch(aether, "_BOOT_MODULES", aether._boot_modules() | {fake_name}):
+        sys.modules[fake_name] = fake_mod
+        try:
+            st2, det2 = SC._c_deps_zero(None)
+        finally:
+            sys.modules.pop(fake_name, None)
+    ck("F2 ⛔ 同一次注入、只改成「启动即存在」⇒ OK 且点名（豁免的是时机，不是名字）",
+       st2 == SC.OK and "环境自带" in det2, f"{st2} / {det2}")
+
+    #: F3：本机若真有启动自带样本（容器 3.10/3.11 镜像、装过 setuptools 的
+    #: 环境），真样本也要走同一条路。没有样本就**明说没有**，不算通过。
+    boot_leak = []
+    for _n, _m in list(sys.modules.items()):
+        if _n not in aether._boot_modules():
+            continue
+        _f = getattr(_m, "__file__", None)
+        if not _f:
+            continue
+        try:
+            _p = Path(_f).resolve()
+        except OSError:
+            continue
+        if purelib in _p.parents:
+            boot_leak.append(_n)
+    if boot_leak:
+        st3, det3 = SC._c_deps_zero(None)
+        ck("F3 真样本（启动自带）判 OK 且点名", st3 == SC.OK and "环境自带" in det3,
+           f"{boot_leak} / {st3} / {det3}")
+    else:
+        print("  SKIP F3 本机解释器启动时没有第三方模块 ⇒ 这条在这里没有样本"
+              "（python:3.10-slim / 3.11-slim 上有；**未覆盖 ≠ 通过**）")
+
     print("\n" + "=" * 60)
     if FAILS:
         print(f"❌ {len(FAILS)} 项未通过：")

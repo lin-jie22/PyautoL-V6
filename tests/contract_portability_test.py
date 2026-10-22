@@ -41,9 +41,11 @@
 """
 from __future__ import annotations
 
+import glob
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -55,6 +57,7 @@ sys.path.insert(0, str(ROOT))
 from aether.interop import CapabilityError, expand_argv  # noqa: E402
 
 FAILED: list[str] = []
+SKIPPED: list[str] = []
 
 #: ⛔ 声明这份契约支持哪些模式（`aether check` 静态读这一行）。
 SUPPORTED_MODES = ("default",)
@@ -64,6 +67,16 @@ def ck(name: str, cond: bool, detail: str = "") -> None:
     print(f"  {'PASS' if cond else 'FAIL'} {name} {detail if not cond else ''}")
     if not cond:
         FAILED.append(name)
+
+
+def sk(name: str, why: str) -> None:
+    """缺的是**本机资产**（这台机器没装 node）⇒ 点名跳过，不判红。
+
+    ⛔ 与 `ck` 分开：`ck` 是"我看了，是坏的"，`sk` 是"我没看"。
+       把两者混为一谈，报告里就分不出"闸有牙"和"闸没材料可咬"。
+    """
+    print(f"  SKIP {name} ⇒ {why}")
+    SKIPPED.append(f"{name}（{why}）")
 
 
 #: ⛔ 三条前缀**拼**出来，不写字面量：本文件自己也被扫描，
@@ -229,9 +242,23 @@ def main() -> None:
             return {"_err": (r.stderr or r.stdout)[-400:]}
 
     base = run_probe({})
-    ck("C1 无 env 时 node 仍能发现（env → PATH → 受管目录）",
-       bool(base.get("node")) and Path(str(base.get("node"))).is_file(),
-       str(base.get("node") or base.get("_err")))
+    #: ⛔ C1 判的是**发现逻辑**（env → PATH → 受管目录），不是"这台机器装了 node"。
+    #:    干净镜像 / 容器里根本没有 node ⇒ 只证明"找不到"，证明不了"找错了"。
+    #:    第一版把它写成无条件 `ck` ⇒ 容器与无 node 的 CI 上一次红两条，
+    #:    红的措辞看起来像"发现逻辑坏了"（同类：`install_auto` 的 brew）。
+    #:    ⇒ 先独立探一次这台机器上有没有 node；没有就点名跳过，不判红。
+    _have_node = shutil.which("node") or ""
+    if not _have_node:
+        _managed = sorted(glob.glob(os.path.expanduser(
+            "~/.workbuddy/binaries/node/versions/*/bin/node")))
+        _have_node = _managed[-1] if _managed else ""
+    if not _have_node:
+        sk("C1 无 env 时 node 仍能发现（env → PATH → 受管目录）",
+           "这台机器上没有 node ⇒ 只能证明'找不到'，证明不了'找错了'")
+    else:
+        ck("C1 无 env 时 node 仍能发现（env → PATH → 受管目录）",
+           bool(base.get("node")) and Path(str(base.get("node"))).is_file(),
+           f"本机有 node={_have_node!r}，桥却发现 {base.get('node')!r}")
     #: ⛔ REA 是**可选**外部能力：CI 的干净机器上没装它。
     #:    所以断言不是"一定能发现"，而是"**发现的若存在就真的存在**" ——
     #:    发现逻辑不许返回一个不存在的路径（那才会把"没装"伪装成"能跑"）。
@@ -345,4 +372,12 @@ if __name__ == "__main__":
     if FAILED:
         print(f"❌ {len(FAILED)} 项失败：{FAILED}")
         sys.exit(1)
+    if SKIPPED:
+        #: ⛔ 有跳过时**不许**只印「全部通过」：那句话会让下一个人以为
+        #:    "node 发现也验过了"，而实际一次都没跑。
+        print(f"⚠️  {len(SKIPPED)} 条判据被跳过（**未覆盖 ≠ 通过**）：")
+        for s in SKIPPED:
+            print(f"   - {s}")
+        print("✅ 其余判据全部通过")
+        sys.exit(0)
     print("✅ 全部通过")

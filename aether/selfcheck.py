@@ -438,11 +438,25 @@ def _c_seed_tasks(c: Ctx) -> Tuple[str, str]:
 
 
 def _c_deps_zero(c: Ctx) -> Tuple[str, str]:
-    """**零运行期依赖**：除 `aether` 自己之外，没有第三方包被拉进来。
+    """**零运行期依赖**：除 `aether` 自己之外，没有第三方包**被我们这个包**拉进来。
 
     ⛔ 这条不是洁癖（`pyproject.toml` 里写过理由）：自进化系统的判据必须
        离线可回归 —— 一旦依赖网络或模型，"零新红""非回归"就会随供给
        波动而失效。
+
+    ⛔⛔ 判的是「谁拉进来的」，不是「此刻内存里有没有」。第一版数的是
+       「`sys.modules` 里有多少模块的文件落在 site-packages 下」，于是把
+       **解释器启动时自带的东西**当成了本包的依赖：setuptools 的
+       `distutils-precedence.pth` 会在启动阶段注入 `_distutils_hack`。
+       实测四种环境（同一条判据）：python:3.10-slim / 3.11-slim 启动即带
+       `_distutils_hack`（⇒ 恒红），3.12-slim / 3.13-slim 干净，macOS 3.9.6
+       也干净。⇒ 红不红取决于镜像里有没有 setuptools，与本包毫无关系。
+       （3.12 起 `ensurepip` 不再带 setuptools，这正是分界线。）
+
+    ⇒ 用 `aether.__init__` 里 **导入任何子模块之前**捕的快照 `_boot_modules()`
+      当基线：只有**基线之后**新出现的第三方模块才算「被拉进来」。
+      ⛔ 不要改成"白名单豁免 setuptools"—— 那会把运行期真的
+      `import setuptools` 一起放过；按**时机**分与按**名字**分不是一回事。
     """
     try:
         import sysconfig
@@ -450,7 +464,11 @@ def _c_deps_zero(c: Ctx) -> Tuple[str, str]:
     except (KeyError, OSError):
         return SKIP, "取不到 site-packages 路径（虚拟环境异常）⇒ 未验证"
 
+    from . import _boot_modules
+    boot = _boot_modules()
+
     leaked: List[str] = []
+    granted: List[str] = []   #: 环境自带（启动前就在）—— 列出来供复核，但不判失败
     for name, mod in list(sys.modules.items()):
         if name.split(".")[0] == "aether":
             continue
@@ -462,9 +480,14 @@ def _c_deps_zero(c: Ctx) -> Tuple[str, str]:
         except OSError:
             continue
         if purelib in p.parents:
-            leaked.append(name)
+            (granted if name in boot else leaked).append(name)
     if leaked:
-        return BROKEN, f"这些第三方包被拉进来了：{sorted(leaked)[:6]}"
+        return BROKEN, f"这些第三方包被 aether 拉进来了：{sorted(leaked)[:6]}"
+    if granted:
+        #: ⛔ 必须**点名**而不是静默放过：下一个人要能看出"这条判据
+        #:    在当前机器上少看了几个模块"，以及少看的原因（启动即存在）。
+        return OK, (f"{purelib.name} 下无第三方模块被 aether 拉进来"
+                    f"（环境自带 {len(granted)} 个，启动前已在：{sorted(granted)[:4]}）")
     return OK, f"除 aether 自己外，{purelib.name} 下无第三方模块被加载"
 
 

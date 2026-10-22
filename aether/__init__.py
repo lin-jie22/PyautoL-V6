@@ -24,6 +24,34 @@ V6 把这些从**工程师的纪律**变成**系统的结构**：
 """
 from __future__ import annotations
 
+#: ⛔⛔ **解释器启动时就已在 `sys.modules` 里的模块 = 环境自带，不是本包拉进来的。**
+#:    这条快照必须留在 `__init__` **最前面**（任何子模块 import 之前），否则
+#:    "aether 拉进来的" 与 "解释器自带进来的" 就分不开了。
+#:
+#:    为什么要分：`selfcheck` 的 `deps.zero`（零第三方依赖）原先数的是
+#:    「此刻 `sys.modules` 里有多少模块的文件落在 site-packages 下」。而
+#:    setuptools 的 `distutils-precedence.pth` 会在**解释器启动时**就注入
+#:    `_distutils_hack` ⇒ 判据读到的是**镜像自带的 setuptools**，与本包无关。
+#:    实测（同一条判据、四种环境）：python:3.10/3.11-slim 启动即带
+#:    `_distutils_hack`，3.12/3.13-slim 干净；macOS 3.9.6 干净。⇒ 判据在
+#:    "3.11 及更早的官方镜像"上恒红，在一台本机上恒绿 —— 测的是镜像，不是依赖。
+#:    ⛔ 不许改成"白名单豁免 setuptools"：那会把"运行期真的 `import setuptools`"
+#:      一起放过。基线快照按**时机**分，白名单按**名字**分，后者会瞎。
+import sys as _sys
+
+_BOOT_MODULES = frozenset(_sys.modules)
+
+
+def _boot_modules():
+    """解释器启动时已在 `sys.modules` 里的模块名（只读快照，供 `selfcheck` 用）。
+
+    ⛔ 单独包一层函数而不是直接让调用方读 `_BOOT_MODULES`：契约要能
+      **临时替换**它来做"豁免是这条路，不是碰巧"的反证（直接读模块属性
+      也能替换，但函数出口让这件事显式且只在这一处）。
+    """
+    return _BOOT_MODULES
+
+
 #: ⛔ 版本的**唯一事实源**是 `_version.py`（不是这里）。
 #:    这里只把名字再导出一次，保持 `aether.__version__` 这个惯例读法。
 #:    依赖方向是单向的：`_version` → `provenance` → `ledger` → 这里，
