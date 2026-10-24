@@ -24,6 +24,7 @@ held-out 也可能是**偏的**：如果 held-out 全是 easy 题，一个"只�
 from __future__ import annotations
 
 import ast
+import re
 from collections.abc import Mapping
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -31,6 +32,291 @@ from .environment import (Environment, numeric_literals, string_literals,
                           verify_source)
 
 Repair = Callable[[str, str], str]      # (broken_source, base_source) -> fixed
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 渲染层：把「改过的 AST」变回**源码文本**
+#
+# ⛔⛔ 为什么不能 `ast.unparse(整棵树)`（2026-10-25 实测取证）
+#
+#   真实 bug `93185b2`（boltons #302）上，`revert_control_flow` 把逻辑改对了
+#   （`start < stop` → `start <= stop`），但产出与人类作者的真实修复**逐字
+#   不一致**：581 行 → 468 行，文件头 license 注释 32 行被删、所有空行与
+#   行内注释被删、字符串引号与括号被重写。⇒ 这个补丁在真实代码库里
+#   **不可提交**。而判据只看行为 ⇒ 7/7 全绿 ⇒ 缺陷完全隐形；更糟的是 V6
+#   自己的题源也是 `mutate_source` 用 AST 往返造的 ⇒ 题的源码本身就是
+#   unparse 过的 ⇒ 格式一致，噪声无从显现（第 24 / 133 条的形状）。
+#
+#   ⇒ 渲染必须是**最小编辑**：只替换真正变了的那一小段，其余保留原文本。
+#
+# ⛔⛔ 自检为什么必须内建
+#
+#   「找最小改动」写错 ⇒ 静默产出一个**语义不同**的补丁 —— 这比格式噪声
+#   坏得多。所以每渲染一次都要**重新解析并与整份 unparse 的 AST 对拍**：
+#   不一致 ⇒ 立刻回退到旧行为（`ast.unparse` 整树）。宁可丢格式，不可丢语义。
+# ═══════════════════════════════════════════════════════════════════════════
+
+#: 渲染模式：`unchanged`=没改动（原样返回）/ `splice`=最小编辑成功 /
+#: `fallback`=自检没过或无法定位，退回整份 unparse。
+RenderMode = str
+
+
+def _sig(n: ast.AST) -> tuple:
+    """节点的**浅层**签名：自身类型 + 自身字段值 + **直接子节点的身份**。
+
+    ⛔ 关键性质：后代内部的改动**不会**改变本节点的签名（只记 id）⇒
+    签名变了 ⟺ 「这个节点自己变了」（自己字段变了，或它的直接孩子被换了个
+    对象）。这正是"最小改动集合"的定义，且只需 O(n) 而不是整棵子树 dump。
+    """
+    out: List[Any] = [type(n).__name__]
+    for f in getattr(n, "_fields", ()):
+        v = getattr(n, f, None)
+        if isinstance(v, ast.AST):
+            out.append(("n", id(v)))
+        elif isinstance(v, list):
+            out.append(("l", tuple(id(x) if isinstance(x, ast.AST) else repr(x)
+                                   for x in v)))
+        else:
+            out.append(repr(v))
+    return tuple(out)
+
+
+def _segments(src: str, tree: ast.AST) -> Dict[int, Tuple[int, int, int]]:
+    """id(node) -> (起始字符偏移, 结束字符偏移, 列号)。只对**原文本**建一次。"""
+    offs = [0]
+    for ln in src.splitlines(keepends=True):
+        offs.append(offs[-1] + len(ln))
+    n_lines = len(offs) - 1
+    segs: Dict[int, Tuple[int, int, int]] = {}
+    for n in ast.walk(tree):
+        ln = getattr(n, "lineno", None)
+        el = getattr(n, "end_lineno", None)
+        co = getattr(n, "col_offset", None)
+        ec = getattr(n, "end_col_offset", None)
+        if None in (ln, el, co, ec) or ln < 1 or el > n_lines:
+            continue
+        segs[id(n)] = (offs[ln - 1] + co, offs[el - 1] + ec, co)
+    return segs
+
+
+def _minimal_changed(tree: ast.AST, snap: Dict[int, tuple]) -> List[ast.AST]:
+    """返回**最深的**一批"变了的节点"（祖先不再重复列出）。
+
+    ⛔⛔ 只看 `expr` / `stmt`（2026-10-25 实测）：`ast.walk` 会走到 `cmpop` /
+    `operator` / `boolop` / `unaryop` 这类**算子包装节点**——它们也是 `ast.AST`，
+    但**没有 lineno/col_offset**，且每次改 op 都是**新建**的对象 ⇒ 会被当成
+    "新增节点"⇒ 成了"最小改动" ⇒ 定位不到 ⇒ 整份重写（fallback）。
+    实测第一版就是这样：真实 bug 上的 5 处改动全部 fallback，等于没修。
+    ⇒ 可渲染单元必须是 `expr`/`stmt`：它们 parse 出来**一定有位置**。
+    """
+    marked = {id(n) for n in ast.walk(tree)
+              if isinstance(n, (ast.expr, ast.stmt))
+              and (snap.get(id(n)) is None or _sig(n) != snap[id(n)])}
+
+    def rec(n: ast.AST) -> List[ast.AST]:
+        got: List[ast.AST] = []
+        for c in ast.iter_child_nodes(n):
+            got.extend(rec(c))
+        if got:
+            return got
+        return [n] if id(n) in marked else []
+
+    return rec(tree)
+
+
+def _requote(txt: str, seg_text: str) -> str:
+    """字符串常量的**引号风格**要跟着原文本走。
+
+    `ast.unparse` 一律用单引号 ⇒ 原文 `"prod"` 会被写成 `'prod'` ⇒
+    补丁仍然正确，但真实代码库里这种改动会被 review 打回（且与周边风格不一致）。
+    ⛔ 只在**安全**时改写：原文引号字符出现在内容里（会牵扯转义）就不动，
+    宁可留 unparse 的写法 —— 格式是次要的，正确性不是。
+    """
+    m = re.match(r"^[a-zA-Z]*", seg_text)
+    prefix = m.group(0) if m else ""
+    if len(seg_text) <= len(prefix) or seg_text[len(prefix)] not in "\"'":
+        return txt
+    q = seg_text[len(prefix):len(prefix) + 3]
+    if len(txt) < 2 or txt[0] not in "\"'" or txt[-1] != txt[0]:
+        return txt
+    inner = txt[1:-1]
+    #: 三引号（docstring 常见）⇒ 保住三引号形态，否则一行 docstring 会被压扁
+    if q in ('"""', "'''"):
+        return prefix + q + inner + q
+    quote = seg_text[len(prefix)]
+    if quote in inner:
+        return txt
+    return prefix + quote + inner + quote
+
+
+#: 算子 token 文本表。⛔ 只列**二元/比较/布尔**与**一元**两类：
+#: 五个变异维度改的东西全在这里面；表外的一律退回 `ast.unparse`。
+_BINOP_TEXT = {
+    "Add": "+", "Sub": "-", "Mult": "*", "Div": "/", "FloorDiv": "//",
+    "Mod": "%", "Pow": "**", "LShift": "<<", "RShift": ">>",
+    "BitOr": "|", "BitXor": "^", "BitAnd": "&", "MatMult": "@",
+    "Eq": "==", "NotEq": "!=", "Lt": "<", "LtE": "<=", "Gt": ">",
+    "GtE": ">=", "Is": "is", "IsNot": "is not", "In": "in",
+    "NotIn": "not in", "And": "and", "Or": "or",
+}
+_UNARY_TEXT = {"Not": "not ", "USub": "-", "UAdd": "+", "Invert": "~"}
+
+
+def _render_node(n: ast.AST, segs: Dict[int, Tuple[int, int, int]],
+                 snap: Dict[int, tuple], src: str) -> Optional[str]:
+    """渲染**一个变了的节点**：不变的子节点一律用**原文本**，只重写算子 token。
+
+    ⛔ 为什么不能一律 `ast.unparse(n)`：实测换 `and`→`or` 时，它会把整段
+    `start == stop and MODE == "prod"` 重新打印 ⇒ 内层字符串的双引号被改成
+    单引号。算子只改一个 token，补丁就该只有一个 token 的差别。
+    ⛔ 返回 `None` = 认不出来 ⇒ 调用方退回 `ast.unparse`（丢一点格式，不丢语义）。
+    ⛔ 拼错的风险由 `render_patch` 末尾的 AST 自检兜住：拼错 ⇒ 回退。
+    """
+    #: 没变的节点 ⇒ **原文本**（这一步是保住引号/注释/换行的关键）
+    if id(n) in snap and _sig(n) == snap[id(n)] and id(n) in segs:
+        s, e, _ = segs[id(n)]
+        return src[s:e]
+
+    def sub(x: ast.AST) -> Optional[str]:
+        """渲染子节点。⛔ 子节点**自带的分组括号**要一起带上：
+
+        节点的 `col_offset` 指向括号**里面**（`(not x)` 的 UnaryOp 从 `not` 起）
+        ⇒ 只按节点区间取原文本 ⇒ `A and (not x)` 会变成 `A and not x`，
+        括号被吃掉。这里能丢、那里就可能丢出语义差别（`A and (B or C)` ⇒
+        `A and B or C`）。⛔ 只会发生在**中缀/前缀算子的子节点**上：那种位置
+        紧邻的括号一定是分组括号，不会是父节点的语法括号（不像 `f(x)`）。
+        """
+        if id(x) in segs and id(x) in snap and _sig(x) == snap[id(x)]:
+            s, e, _ = segs[id(x)]
+            while s - 1 >= 0 and e < len(src) \
+                    and src[s - 1] == "(" and src[e] == ")":
+                s -= 1
+                e += 1
+            return src[s:e]
+        return _render_node(x, segs, snap, src)
+
+    if isinstance(n, ast.Compare):
+        left = sub(n.left)
+        if left is None:
+            return None
+        out = [left]
+        for op, comp in zip(n.ops, n.comparators):
+            t = _BINOP_TEXT.get(type(op).__name__)
+            right = sub(comp) if t else None
+            if t is None or right is None:
+                return None
+            out.append(" " + t + " " + right)
+        return "".join(out)
+    if isinstance(n, ast.BinOp):
+        t = _BINOP_TEXT.get(type(n.op).__name__)
+        a, b = sub(n.left), sub(n.right)
+        if t is None or a is None or b is None:
+            return None
+        return f"{a} {t} {b}"
+    if isinstance(n, ast.BoolOp):
+        t = _BINOP_TEXT.get(type(n.op).__name__)
+        vals = [sub(v) for v in n.values]
+        if t is None or any(v is None for v in vals):
+            return None
+        return (" " + t + " ").join(vals)
+    if isinstance(n, ast.UnaryOp):
+        t = _UNARY_TEXT.get(type(n.op).__name__)
+        v = sub(n.operand)
+        if t is None or v is None:
+            return None
+        return t + v
+    if isinstance(n, ast.Constant):
+        try:
+            txt = ast.unparse(n)
+        except Exception:                                     # noqa: BLE001
+            return None
+        seg = segs.get(id(n))
+        return _requote(txt, src[seg[0]:seg[1]]) if seg else txt
+    return None
+
+
+def _full_unparse(tree: ast.AST, original: str) -> str:
+    """旧行为（整份重写）。只在自检不过 / 无法定位时兜底。"""
+    try:
+        ast.fix_missing_locations(tree)
+        return ast.unparse(tree)
+    except Exception:                                          # noqa: BLE001
+        return original
+
+
+def render_patch(broken_src: str, base_src: str,
+                 mutate: Callable[[ast.AST, ast.AST], Optional[ast.AST]],
+                 ) -> Tuple[str, RenderMode]:
+    """跑一次变异并把它渲染回源码 —— **最小编辑**，改不动的格式一个字节都不动。
+
+    `mutate(b, g)` 就地修改 `b`（或返回新树）；返回 `None` ⟹ 该修法**拒绝**
+    动手（fail-closed，与各个 `revert_*` 里"长度不等就不对齐"同一条防线）。
+
+    ⛔⛔ 返回前必做自检：`ast.dump(parse(结果))` 必须等于 `ast.dump(m)`。
+    不等 ⇒ 最小编辑弄错了 ⇒ **退回整份 unparse**（宁可丢格式，不可丢语义）。
+    """
+    try:
+        b = ast.parse(broken_src)
+        g = ast.parse(base_src)
+    except SyntaxError:                                        # noqa: BLE001
+        return broken_src, "unchanged"
+    #: ⛔ 快照必须在**变异之前**取：之后节点被就地改掉，就没有"原来是什么"了。
+    snap = {id(n): _sig(n) for n in ast.walk(b)}
+    segs = _segments(broken_src, b)
+    try:
+        m = mutate(b, g)
+    except Exception:                                         # noqa: BLE001
+        return broken_src, "unchanged"
+    if m is None:
+        return broken_src, "unchanged"
+    mins = _minimal_changed(m, snap)
+    if not mins:
+        #: ⛔ 没定位到改动，不等于没改动：`expr`/`stmt` 之外的地方若真变了
+        #:   （例如新增一个 `arg`），原样返回就是**静默丢改动**。
+        #:   ⇒ 先对拍整棵树，真变了就走整份 unparse（丢格式，不丢语义）。
+        try:
+            if ast.dump(m) != ast.dump(ast.parse(broken_src)):
+                return _full_unparse(m, broken_src), "fallback"
+        except Exception:                                     # noqa: BLE001
+            pass
+        return broken_src, "unchanged"
+
+    edits: List[Tuple[int, int, str, int]] = []
+    for n in mins:
+        seg = segs.get(id(n))
+        if seg is None:
+            #: 新增节点（例如 `not x` 包回来）没有自己的位置 ⇒ 用最近的、
+            #: **在原文本里存在**的后代的位置（替换 `x` → `not x`）。
+            for d in ast.walk(n):
+                if id(d) in segs:
+                    seg = segs[id(d)]
+                    break
+        if seg is None:
+            return _full_unparse(m, broken_src), "fallback"
+        txt = _render_node(n, segs, snap, broken_src)
+        if txt is None:
+            #: 认不出来的节点类型 ⇒ 退回 unparse 这一个节点（不再整份重写）
+            try:
+                txt = ast.unparse(n)
+            except Exception:                                 # noqa: BLE001
+                return _full_unparse(m, broken_src), "fallback"
+            txt = _requote(txt, broken_src[seg[0]:seg[1]])
+        edits.append((seg[0], seg[1], txt, seg[2]))
+
+    out = broken_src
+    #: ⛔ 从后往前替换，前面的偏移才不会被自己改出来的长度带偏。
+    for s, e, txt, col in sorted(edits, key=lambda x: x[0], reverse=True):
+        if "\n" in txt:
+            #: 多行替换（替换到的是语句块）⇒ 续行补上原本的缩进
+            txt = txt.replace("\n", "\n" + " " * col)
+        out = out[:s] + txt + out[e:]
+
+    try:
+        if ast.dump(ast.parse(out)) != ast.dump(m):
+            return _full_unparse(m, broken_src), "fallback"
+    except Exception:                                         # noqa: BLE001
+        return _full_unparse(m, broken_src), "fallback"
+    return out, "splice"
 
 
 def revert_control_flow(broken_src: str, base_src: str) -> str:
@@ -43,9 +329,6 @@ def revert_control_flow(broken_src: str, base_src: str) -> str:
     这不是为了演示而造的缺陷，而是 reward hacking 之所以发生的真实土壤：
     **讨好判据的修法在发展集上确实更好**，所以它会赢，所以必须靠 held-out 拦。
     """
-    b = ast.parse(broken_src)
-    g = ast.parse(base_src)
-
     def ops(tree):
         """按同一遍历序收集控制流节点（**存节点本身**，不是它的 op）。"""
         out: List[Tuple[str, Any]] = []
@@ -56,22 +339,24 @@ def revert_control_flow(broken_src: str, base_src: str) -> str:
                 out.append(("bin", n))
         return out
 
-    bo, go = ops(b), ops(g)
-    if len(bo) != len(go):
-        #: ⛔ 与 `revert_literals` 同一条防线：树形不同 ⇒ 遍历序不可信
-        #:    ⇒ 宁可不动。这里没有"部分对齐"这种折中：错位一次就污染一片。
-        return broken_src
-    for i in range(min(len(bo), len(go))):
-        kind, node = bo[i]
-        ref = go[i][1]
-        # 只有两棵树**同一位置是同类节点**才恢复：结构对不上就跳过，
-        # 不硬套（硬套会静默改坏没被变异的地方）。
-        if kind == "cmp" and isinstance(ref, ast.Compare):
-            node.ops = list(ref.ops)
-        elif kind == "bin" and isinstance(ref, ast.BinOp):
-            node.op = ref.op
-    ast.fix_missing_locations(b)
-    return ast.unparse(b)
+    def mutate(b: ast.AST, g: ast.AST) -> Optional[ast.AST]:
+        bo, go = ops(b), ops(g)
+        if len(bo) != len(go):
+            #: ⛔ 与 `revert_literals` 同一条防线：树形不同 ⇒ 遍历序不可信
+            #:    ⇒ 宁可不动。这里没有"部分对齐"这种折中：错位一次就污染一片。
+            return None
+        for i in range(min(len(bo), len(go))):
+            kind, node = bo[i]
+            ref = go[i][1]
+            # 只有两棵树**同一位置是同类节点**才恢复：结构对不上就跳过，
+            # 不硬套（硬套会静默改坏没被变异的地方）。
+            if kind == "cmp" and isinstance(ref, ast.Compare):
+                node.ops = list(ref.ops)
+            elif kind == "bin" and isinstance(ref, ast.BinOp):
+                node.op = ref.op
+        return b
+
+    return render_patch(broken_src, base_src, mutate)[0]
 
 
 def revert_literals(broken_src: str, base_src: str) -> str:
@@ -91,21 +376,21 @@ def revert_literals(broken_src: str, base_src: str) -> str:
     ⛔ 与 `restore_baseline` 的区别：它**只动数值常量**，字符串、结构、
        比较符、运算符一律保留 broken 的形态。
     """
-    b = ast.parse(broken_src)
-    g = ast.parse(base_src)
-    #: ⛔⛔ 口径必须与变异器同源（`environment.numeric_literals`）。
-    #:    以前这里**排除 bool** 而变异器不排除 ⇒ 两边序列长度不同
-    #:    ⇒ 下面的对齐会整体错位 ⇒ 把没坏的常量改坏（实测 4 条残差）。
-    #: ⛔ 传**树**不是字符串：必须拿到与 `b`/`g` 同一批节点对象。
-    bo, go = numeric_literals(b), numeric_literals(g)
-    if len(bo) != len(go):
-        #: ⛔ fail-closed：长度不等说明树形已不同，遍历序无法保证对应
-        #:    ⇒ 宁可一条都不改，也不许"错位污染"。
-        return broken_src
-    for i in range(len(bo)):
-        bo[i].value = go[i].value
-    ast.fix_missing_locations(b)
-    return ast.unparse(b)
+    def mutate(b: ast.AST, g: ast.AST) -> Optional[ast.AST]:
+        #: ⛔⛔ 口径必须与变异器同源（`environment.numeric_literals`）。
+        #:    以前这里**排除 bool** 而变异器不排除 ⇒ 两边序列长度不同
+        #:    ⇒ 下面的对齐会整体错位 ⇒ 把没坏的常量改坏（实测 4 条残差）。
+        #: ⛔ 传**树**不是字符串：必须拿到与 `b`/`g` 同一批节点对象。
+        bo, go = numeric_literals(b), numeric_literals(g)
+        if len(bo) != len(go):
+            #: ⛔ fail-closed：长度不等说明树形已不同，遍历序无法保证对应
+            #:    ⇒ 宁可一条都不改，也不许"错位污染"。
+            return None
+        for i in range(len(bo)):
+            bo[i].value = go[i].value
+        return b
+
+    return render_patch(broken_src, base_src, mutate)[0]
 
 
 def revert_boolops(broken_src: str, base_src: str) -> str:
@@ -126,20 +411,19 @@ def revert_boolops(broken_src: str, base_src: str) -> str:
         把它加进那个集合 ⇒ boolop 题从 hard 变 easy ⇒ 难度跨度消失。
         它只作为**技能**进 proposer 池，泛不泛化交给 held-out 闸判。
     """
-    b = ast.parse(broken_src)
-    g = ast.parse(base_src)
-
     def boolops(tree):
         return [n for n in ast.walk(tree) if isinstance(n, ast.BoolOp)]
 
-    bo, go = boolops(b), boolops(g)
-    if len(bo) != len(go):
-        #: ⛔ 与另两个修法同一条防线：树形不同 ⇒ 遍历序不可信 ⇒ 不动。
-        return broken_src
-    for i in range(len(bo)):
-        bo[i].op = type(go[i].op)()
-    ast.fix_missing_locations(b)
-    return ast.unparse(b)
+    def mutate(b: ast.AST, g: ast.AST) -> Optional[ast.AST]:
+        bo, go = boolops(b), boolops(g)
+        if len(bo) != len(go):
+            #: ⛔ 与另两个修法同一条防线：树形不同 ⇒ 遍历序不可信 ⇒ 不动。
+            return None
+        for i in range(len(bo)):
+            bo[i].op = type(go[i].op)()
+        return b
+
+    return render_patch(broken_src, base_src, mutate)[0]
 
 
 def revert_strings(broken_src: str, base_src: str) -> str:
@@ -165,15 +449,15 @@ def revert_strings(broken_src: str, base_src: str) -> str:
         它进那个集合 ⇒ 字符串题从 hard 变 easy ⇒ 发展集与 held-out 的
         难度跨度消失 ⇒ 泛化闸退化。它只作为**技能**进 proposer 池。
     """
-    b = ast.parse(broken_src)
-    g = ast.parse(base_src)
-    bo, go = string_literals(b), string_literals(g)
-    if len(bo) != len(go):
-        return broken_src        #: fail-closed：树形已变 ⇒ 不许错位对齐
-    for i in range(len(bo)):
-        bo[i].value = go[i].value
-    ast.fix_missing_locations(b)
-    return ast.unparse(b)
+    def mutate(b: ast.AST, g: ast.AST) -> Optional[ast.AST]:
+        bo, go = string_literals(b), string_literals(g)
+        if len(bo) != len(go):
+            return None          #: fail-closed：树形已变 ⇒ 不许错位对齐
+        for i in range(len(bo)):
+            bo[i].value = go[i].value
+        return b
+
+    return render_patch(broken_src, base_src, mutate)[0]
 
 
 def revert_unaryops(broken_src: str, base_src: str) -> str:
@@ -207,9 +491,6 @@ def revert_unaryops(broken_src: str, base_src: str) -> str:
         进那个集合 ⇒ unaryop 题从 hard 变 easy ⇒ 难度跨度消失
         ⇒ 泛化闸退化。它只作为**技能**进 proposer 池。
     """
-    b = ast.parse(broken_src)
-    g = ast.parse(base_src)
-
     def align(bn: ast.AST, gn: ast.AST) -> ast.AST:
         #: ⛔⛔ **None 守卫**（2026-10-17 回归实测）：AST 的**列表字段**里
         #:    合法地含 `None` —— 实测 `ast.arguments.kw_defaults == [None]`
@@ -248,12 +529,10 @@ def revert_unaryops(broken_src: str, base_src: str) -> str:
                 setattr(bn, field, [align(x, y) for x, y in zip(bv, gv)])
         return bn
 
-    new_root = align(b, g)
-    ast.fix_missing_locations(b)
-    try:
-        return ast.unparse(new_root)
-    except Exception:                                          # noqa: BLE001
-        return broken_src
+    def mutate(b: ast.AST, g: ast.AST) -> Optional[ast.AST]:
+        return align(b, g)
+
+    return render_patch(broken_src, base_src, mutate)[0]
 
 
 def restore_baseline(broken_src: str, base_src: str) -> str:
