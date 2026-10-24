@@ -2877,7 +2877,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "**之前**，用内容地址（`harness_id`）判断这个状态是不是"
                         "已经存在；已存在就不花闸/评估预算，也不再记一次假提交。\n"
                         "存在理由（实测 `data/ledger.jsonl`）：120 条 "
-                        "`harness.commit` 里 **105 条（87.5%）**是在重复提交一个"
+                        #: ⛔ `%` 在 argparse 的 help 里是**格式符**（它会跑
+                        #:    help % dict(vars())）。`87.5%）`这种写法 ⇒
+                        #:    ValueError: unsupported format character '?'，
+                        #:    而且炸在 `--help` 上 —— 用户第一眼看到的是 traceback。
+                        #:    要字面 `%` 就写 `%%`。
+                        "`harness.commit` 里 **105 条（87.5%%）**是在重复提交一个"
                         "已存在的状态，去重后只有 18 个真实状态 —— 同一父节点 + "
                         "同一胶囊被提交过 **57** 遍。\n"
                         "关掉它 ⇒ 回到「每轮都从同一个基线重爬、把同一份结果"
