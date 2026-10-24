@@ -168,6 +168,13 @@ def main() -> int:
     ap.add_argument("--module", required=True, help="被修的源文件（相对仓库根）")
     ap.add_argument("--env-id", default="")
     ap.add_argument("--out-root", required=True)
+    #: ⛔ **手写探针注入口**。它解决的是"自动提取器抽不到有鉴别力的断言"
+    #:    这个**工具局限**，不是放宽判据：expect 仍然由 `fixed` 源码**真跑**
+    #:    取（第 1 条纪律没破），变的是"探针从哪来"。
+    #:    ⛔⛔ 代价必须写在脸上：探针是**人**选的，等于人替系统指了"看哪里"
+    #:    ⇒ 用它的实验必须在报告里标注，结论不许与自动提取的混在一起报。
+    ap.add_argument("--probe", action="append", default=[],
+                    help="手写探针表达式（可重复）。expect 仍由参照实现真跑取")
     args = ap.parse_args()
 
     repo = Path(args.repo).resolve()
@@ -189,8 +196,16 @@ def main() -> int:
 
     # ── 1. 真实断言 ────────────────────────────────────────────────
     rows = probe_exprs(repo, args.commit)
+    if args.probe:
+        for e in args.probe:
+            rows.append(((e, ""), {"test_file": "<handwritten>",
+                                    "added_by_fix": True, "handwritten": True}))
+        print(f"⛔ 注入手写探针 {len(args.probe)} 条"
+              f"（判据不是自动提取的 ⇒ 结论必须单独标注，不许混报）：")
+        for e in args.probe:
+            print(f"      + {e}")
     if not rows:
-        print("✗ 没能从测试里抽到任何 `chk(实际, 期望)` 断言")
+        print("✗ 没能从测试里抽到任何 `chk(实际, 期望)` 断言，也没注入手写探针")
         return 1
     print(f"抽到真实断言 {len(rows)} 条，其中本次修复新增 "
           f"{sum(1 for _, m in rows if m['added_by_fix'])} 条")
