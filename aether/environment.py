@@ -1314,14 +1314,43 @@ def mutate_source(source: str, which: int = 0,
 
     ⛔ 语法错误 ⇒ 抛异常（不静默返回原文）—— 静默返回原文会造出
     "看起来合成成功但什么都没变"的假任务。
+
+    ⛔⛔ 渲染走**最小编辑**（`repair.render_patch`），不是 `ast.unparse(整棵树)`
+        （2026-10-25）：整份 unparse 会把 license 头 / 注释 / 空行 / 引号全抹掉
+        ⇒ 合成题的源码是**规范化**的 ⇒ 题面不像真实代码 ⇒ 连带把"补丁噪声"
+        这类缺陷挡在判据视野之外（第 24 / 133 条的形状）。变异只改一个点，
+        题面就该只差那一个点。
+
+    ⛔⛔ `source` 也接受 **AST 对象**（`ast.Module`）—— 向下兼容，不是新功能
+        （2026-10-26 全量验收抓到）：旧实现的 `ast.parse(source)` 底层是
+        `compile()`，而 `compile()` **接受 AST** ⇒ 传 Module 一直能用；
+        `contract_aging_test.py:159` 等 3 处契约就是这么调的。新实现要走
+        `source.splitlines()` ⇒ 传 Module 直接 `AttributeError`。
+        ⇒ 入口处统一归一化成 str。⛔ 不要为了迁就新实现去改那 3 处判据 ——
+        它们依赖的是既有行为，改判据等于把回归藏起来。
     """
-    tree = ast.parse(source)
+    #: ⛔ 只能**函数内**导入：`repair` 依赖本模块，模块级导入会成环。
+    from .repair import render_patch
+
+    if not isinstance(source, str):
+        #: AST ⇒ 先打印成源码。⛔ 这里不是"渲染"，只是把 AST 变回可解析的文本：
+        #:    AST 里本来就没有注释/空行/引号信息，不存在"丢格式"这回事。
+        source = ast.unparse(source)
+
     m = _Mutator(which, kinds)
-    new_tree = m.visit(tree)
-    ast.fix_missing_locations(new_tree)
+
+    def _mutate(tree: ast.AST, _base: ast.AST) -> ast.AST:
+        #: ⛔ 变异会新建节点（`ast.Not()` / 新的 `cmpop`）⇒ 它们没有位置。
+        #:    原实现在这里补位置，保留它以维持行为一致（渲染层只认有位置的
+        #:    `expr`/`stmt`，补位置不影响它，但少这一步就与原行为不同了）。
+        new_tree = m.visit(tree)
+        ast.fix_missing_locations(new_tree)
+        return new_tree
+
+    out, _mode = render_patch(source, source, _mutate)
     if not m.done:
         raise ValueError(f"没有可变异点（which={which}）")
-    return ast.unparse(new_tree), m.desc
+    return out, m.desc
 
 
 @dataclass
