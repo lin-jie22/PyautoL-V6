@@ -87,7 +87,7 @@ def main() -> int:
     #:    修不好，才可以说"V6 没有不依赖基线的修复能力"，而不是
     #:    "模板提议器不行"。⛔ 端点不可达**必须**显式打印并让结论作废，
     #:    不许静默回退成模板（r62 教训：留 `fallback=""` 会造出假绿）。
-    ap.add_argument("--proposer", choices=("template", "llm"),
+    ap.add_argument("--proposer", choices=("template", "llm", "synth"),
                     default="template")
     #: ⛔ 必须带 tag：本机 `ollama list` 里是 `qwen2.5:7b`，只写 `qwen2.5`
     #:    ⇒ ollama 返回 **404 `model not found`**（不是端点挂了，是名字没对上）
@@ -198,6 +198,14 @@ def main() -> int:
     #:    提不出修法"，其实是脚本自己写错（cli.py:1089 用的就是关键字）。
     proposer = TemplateProposer(skills=pool, route_key=TASK_CLASS)
     proposer_desc = "template"
+    if args.proposer == "synth":
+        #: ⛔ 只提 `synth_operators`，且**同时**把基线换成缺陷版才有意义：
+        #:    否则它跟 `revert_*` 一样能"修好"，无法区分"搜出来的"与"抄来的"。
+        pool = {"synth_operators": "判据驱动生成：不看基线，只用判据反馈搜补丁"}
+        proposer = TemplateProposer(skills=pool, route_key=TASK_CLASS)
+        proposer_desc = "synth（不看基线）"
+        print("  提议器：synth_operators —— ⛔ 参数里没有 env.source，"
+              "只看判据反馈")
     if args.proposer == "llm":
         #: ⛔ 与 `aether/cli.py:1135` 同构（route_keys / skill_vocab / env_ids
         #:    全部**由调用方注入**，否则模型会猜接口）

@@ -78,6 +78,13 @@ KNOWN_STRATEGIES: Tuple[str, ...] = (
     "fix_control_flow", "fix_literals", "fix_boolops", "fix_strings",
     "fix_unaryops",
     "memory_hint",
+    #: ⛔ `synth_operators` 是**另一类**修法：它不看 `env.source`，只用判据
+    #: 反馈在缺陷源码上搜补丁（`aether/synthesize.py`）。
+    #: ⛔⛔ 它**默认没有调用点**：`KNOWN_STRATEGIES` 只决定「名字认不认」，
+    #: 提不提名由各处的技能池决定，而生产 `cli.py` 的池里**没有**它
+    #: ⇒ 机制就绪、默认不上场（与 REA 同形：有牙、没用武之地，待拍板）。
+    #: ⛔ 别在它"还没被提名过"的时候就断言它有效 —— 第 72 条。
+    "synth_operators",
 )
 
 #: 前缀型策略（`uci:<cid>` / `patch:<env_id>`）。
@@ -490,6 +497,28 @@ class HarnessAgent:
             #:    —— 没有它，`string` 造出来的题**没有任何技能修得回来**
             #:    ⇒ delta 恒 0 ⇒ 那是注水题源，不是任务世界（r48 实测）。
             return revert_strings(src, env.source), True
+        if strategy == "synth_operators":
+            #: ⛔⛔ **唯一不看基线的修法**：`synthesize_patch(src, env.tests)`
+            #:    的参数里没有 `env.source` ⇒ 想抄答案也抄不到。
+            #:    ⛔ 它内部要跑**很多次沙箱**（每个候选一遍判据）—— 这是真
+            #:    代价，所以默认不在任何生产技能池里（见 KNOWN_STRATEGIES 注）。
+            #:    ⛔ 筛选用的是**发展集判据** ⇒ 出来的补丁必然发展集更绿
+            #:    ⇒ overfit 的形状，held-out 闸照常裁决，本层不声称泛化。
+            try:
+                from aether.synthesize import synthesize_patch
+                r = synthesize_patch(src, list(getattr(env, "tests", ()) or ()))
+            except Exception:                                  # noqa: BLE001
+                return src, False
+            if not r.found:
+                return src, False
+            #: ⛔ 记账必须落到 trajectory 上，否则「搜了 60 个候选只中 1 个」
+            #:    这类代价在账本里完全不可见（第 71 条：量代价）。
+            steps.append(AgentStep(
+                "L3", strategy, True,
+                f"synth {r.desc}: {r.base_ok}→{r.new_ok}/{r.n_tests}"
+                f"（候选 {r.n_cands}、实跑 {r.n_ran}、跑挂 {r.n_blew}"
+                f"、定位 {','.join(r.focus) or '失败'}）"))
+            return r.patch, True
         if strategy == "fix_unaryops":
             #: 第五维：**`not` 的增删**。⛔ 它是 `unaryop` 算子的对称修法。
             #:    ⛔⛔ 这个算子在 Python 3.13 上曾**安静失效**：`UnaryOp`
