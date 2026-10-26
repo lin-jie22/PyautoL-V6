@@ -73,6 +73,26 @@ def main() -> int:
     #:    没有这个对照，"0 条修好"无法区分「这套修法迁移不到真实 bug」与
     #:    「我这个脚本把装置搭错了」——两者表现一模一样。
     ap.add_argument("--mode", choices=("real", "synthetic"), default="real")
+    #: ⛔⛔ **基线来源**（r80 取证）—— 本实验此前唯一没被质疑过的前提。
+    #:    `fixed`（默认，现状）：`env.source` = **修复后**的源码。
+    #:       五个通用修法的语义全是"把 broken 对齐基线"，而基线就是人类
+    #:       修复 ⇒ 它们有权**读到答案**，只要定位对就能改对。
+    #:    `buggy`：`env.source` = **缺陷版本身** ⇒ 基线里没有答案可对齐
+    #:       ⇒ 用于回答："第 1 轮修好真实 bug"里，有多少是**照答案抄的**。
+    #:    ⛔ 三种结果都要如实记，不许只报对自己有利的那个：
+    #:       · buggy 基线下依然修好 ⇒ 真有修复能力；
+    #:       · buggy 基线下修不好 ⇒ 现状的成就是"定位 + 抄"，不是"修复"。
+    ap.add_argument("--baseline", choices=("fixed", "buggy"), default="fixed")
+    #: ⛔ **提议器**：`llm` 是"不看答案"实验里唯一可能的退路 —— 若连它也
+    #:    修不好，才可以说"V6 没有不依赖基线的修复能力"，而不是
+    #:    "模板提议器不行"。⛔ 端点不可达**必须**显式打印并让结论作废，
+    #:    不许静默回退成模板（r62 教训：留 `fallback=""` 会造出假绿）。
+    ap.add_argument("--proposer", choices=("template", "llm"),
+                    default="template")
+    #: ⛔ 必须带 tag：本机 `ollama list` 里是 `qwen2.5:7b`，只写 `qwen2.5`
+    #:    ⇒ ollama 返回 **404 `model not found`**（不是端点挂了，是名字没对上）
+    #:    ⇒ 表现成"模型没输出"，实际一次都没调用（第 25 条：一个异常两种含义）。
+    ap.add_argument("--model", default="qwen2.5:7b")
     args = ap.parse_args()
 
     work = Path(args.root).resolve()
@@ -113,8 +133,18 @@ def main() -> int:
         buggy = t0.broken_source
         origin = f"V6 自造变异（synthesize_tasks F2P 筛出：{t0.task_id}）"
 
+    if args.baseline == "buggy":
+        #: ⛔ 换基线**必须在 buggy 定下来之后**：合成模式的 buggy 由出题器
+        #:    现造，早于此处替换会拿 fixed 当基线 ⇒ 实验组与对照组变成一回事。
+        env = Environment(env_id=env.env_id, source=buggy, tests=env.tests,
+                          note=(env.note or "") + " ｜基线=缺陷版（不许读答案）")
+        envs = {args.env: env}
+
     print("=" * 70)
     print(f"环境：{args.env}   ⛔ 题源：{origin}")
+    print(f"  ⛔ 基线来源：{args.baseline}"
+          + ("（**修复后源码** ⇒ 修法能读到答案）" if args.baseline == "fixed"
+             else "（**缺陷版自身** ⇒ 答案不在基线里）"))
     print(f"  判据 {len(env.tests)} 条（真实 pytest 断言，expect 由真实源码校准）")
     print(f"  bug 源码 {len(buggy.splitlines())} 行 / 基线 {len(env.source.splitlines())} 行")
     print(f"  工作区 {work}（生产 data/ 不受影响）")
@@ -167,6 +197,23 @@ def main() -> int:
     #:    名字吃掉，`skills` 为空 ⇒ 提议器只能提 `noop` ⇒ 表现得像"系统
     #:    提不出修法"，其实是脚本自己写错（cli.py:1089 用的就是关键字）。
     proposer = TemplateProposer(skills=pool, route_key=TASK_CLASS)
+    proposer_desc = "template"
+    if args.proposer == "llm":
+        #: ⛔ 与 `aether/cli.py:1135` 同构（route_keys / skill_vocab / env_ids
+        #:    全部**由调用方注入**，否则模型会猜接口）
+        from aether.providers import LLMProposer, OllamaProvider
+        try:
+            _probe = OllamaProvider(model=args.model, think=False)
+            proposer = LLMProposer(_probe, route_keys=(TASK_CLASS,),
+                                   skill_vocab=tuple(sorted(pool)),
+                                   env_ids=(args.env,))
+            proposer_desc = f"llm({args.model})"
+        except Exception as e:  # noqa: BLE001
+            print(f"⛔ 真模型不可用（{type(e).__name__}: {e}）⇒ **本次实验作废**"
+                  f"（不许静默回退成模板，否则读数会被当成 llm 的成绩）")
+            return 1
+        #: ⛔ 跑完之后必须回看 `last_error`：构造成功 ≠ 真的调通了。
+        print(f"  提议器：真模型 {args.model}（跑完会回看 last_error / 重试数）")
 
     #: ⛔ `rounds` 在 `loop.run()` 上，不在 config（两者别混）
     loop = EvolutionLoop(led, gate, dev, runner, proposer, store=store,
@@ -185,6 +232,16 @@ def main() -> int:
         print("        ⛔ 起点就有 0 条失败 ⇒ 这个题不构成任务，别往下跑")
 
     h_best, reps = loop.run(h0, rounds=int(args.rounds))
+
+    if args.proposer == "llm":
+        #: ⛔ 回看记账是**必须的**：r62 实测过"端点不可达但构造成功" ⇒
+        #:    last_error 空着、候选全空 ⇒ 看起来像"模型认为无需修改"。
+        le = getattr(proposer, "last_error", "")
+        print(f"\n⛔ 模型记账：last_error={le or '(空)'}  重试="
+              f"{getattr(proposer, 'n_retries_used', '?')}  原始输出长度="
+              f"{getattr(proposer, 'last_raw_len', '?')}")
+        if le:
+            print("  ⇒ 模型没真跑起来 ⇒ 这一组的 llm 读数**不成立**")
 
     # ── 结论：提交后的源码在**全部真实断言**上的表现 ────────────
     print("\n" + "=" * 70)
