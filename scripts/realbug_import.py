@@ -98,6 +98,41 @@ def assertions_of(test_src: str, test_fn: str | None = None):
     return pairs
 
 
+def raise_probes(test_src: str):
+    """抽 `with raises(X): <expr>` / `with pytest.raises(X): <expr>` 形态。
+
+    返回 `[(表达式, 异常类型名)]`。
+
+    ⛔ 这是真实 bug F2P 的**主力形态之一**，不是边角：边界条件类修复常常
+    用"必须抛异常"来表达（boltons `c1c25da` / `93185b2` 都是）。原来只抽
+    返回值断言（`chk(a, b)` / `assert a == b`）⇒ 这类 bug **进不了判据**
+    ⇒ 表现成"这个 bug 不可解"，其实是抽取器漏 —— README 153 记的三道门
+    里的**判据门**，本函数 + runner 的 `raises` 槽位一起把它打开。
+    """
+    tree = ast.parse(test_src)
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.With):
+            continue
+        for item in node.items:
+            ctx = item.context_expr
+            if not isinstance(ctx, ast.Call):
+                continue
+            fn = ctx.func
+            nm = getattr(fn, "id", None) or getattr(fn, "attr", None)
+            if nm != "raises" or not ctx.args:
+                continue
+            #: 异常类型可能是 `Name(ValueError)` 或 `Attribute(pytest.ValueError)`
+            a0 = ctx.args[0]
+            exc = getattr(a0, "id", None) or getattr(a0, "attr", None)
+            if not exc:
+                continue
+            for stmt in node.body:
+                if isinstance(stmt, ast.Expr):
+                    out.append((ast.unparse(stmt.value), exc))
+    return out
+
+
 def probe_exprs(repo: Path, commit: str):
     """从该 commit 的 test patch 里取 talked-about 断言。
 
@@ -115,14 +150,21 @@ def probe_exprs(repo: Path, commit: str):
         src = show_file(repo, commit, tf)
         for act, exp in assertions_of(src):
             pairs.append((act, exp))
-            meta.append({"test_file": tf,
+            meta.append({"test_file": tf, "kind": "expect",
                          "added_by_fix": act in " ".join(added)})
-    # 去重保序
+        #: ⛔ 期望异常形态（`with raises(X): ...`）—— 与返回值断言**分开记账**，
+        #:    因为它们的校准方式根本不同（比返回值 vs 比是否抛异常）。
+        for act, exc in raise_probes(src):
+            pairs.append((act, exc))
+            meta.append({"test_file": tf, "kind": "raises", "exc": exc,
+                         "added_by_fix": act in " ".join(added)})
+    # 去重保序（⛔ 去重键要含 kind：同一个表达式可能两种形态都出现）
     seen, uniq = set(), []
     for (p, m) in zip(pairs, meta):
-        if p[0] in seen:
+        key = (p[0], m.get("kind"))
+        if key in seen:
             continue
-        seen.add(p[0])
+        seen.add(key)
         uniq.append((p, m))
     return uniq
 
@@ -159,6 +201,43 @@ def calibrate(source: str, exprs, timeout: float = 15.0):
     for e in exprs:
         (stable if a.get(e) == b.get(e) else unstable)[e] = a.get(e)
     return stable, unstable
+
+
+def calibrate_raises(fixed: str, buggy: str, probes, timeout: float = 15.0):
+    """【期望异常】类探针的校准 + 鉴别力判定。
+
+    ⛔ 纪律与 `calibrate`（返回值类）**同严**，只是比的东西不同：
+
+      · 异常类型取自**测试文件本身**（`with raises(ValueError)`）—— 是真实
+        断言，不是我编的，也不是"放宽判据"；
+      · "fixed 版真的抛它"必须由**参照实现真跑**验证，且**跑两遍**（稳定性，
+        与 `calibrate` 同源：不可复现的判据 ≡ 随机判据）；
+      · 鉴别力 = buggy 版**必须不通过**（该抛没抛，或抛了别的类型）。
+
+    返回 (采纳的判据列表, 被丢弃的 [(expr, exc, 原因)], 状态)。
+    """
+    tests = [{"name": f"r{i}", "call": e, "raises": x}
+             for i, (e, x) in enumerate(probes)]
+
+    def run(src: str):
+        ex = run_in_sandbox(src, tests, timeout=timeout)
+        return [bool(r.get("passed")) for r in ex.results]
+
+    a, b = run(fixed), run(fixed)
+    if a != b:
+        return [], [(e, x, "两次同源运行结果不同 ⇒ 判据随机")
+                    for (e, x), ok in zip(probes, a)], "unstable"
+    buggy_res = run(buggy)
+    keep, weak = [], []
+    for (e, x), ok_f, ok_b in zip(probes, a, buggy_res):
+        if not ok_f:
+            weak.append((e, x, "fixed 版没抛期望的异常 ⇒ 探针本身不成立"))
+            continue
+        if ok_b:
+            weak.append((e, x, "buggy 版也通过 ⇒ 无鉴别力"))
+            continue
+        keep.append({"name": f"real::{e}"[:60], "call": e, "raises": x})
+    return keep, weak, "ok"
 
 
 def main() -> int:
@@ -198,7 +277,7 @@ def main() -> int:
     rows = probe_exprs(repo, args.commit)
     if args.probe:
         for e in args.probe:
-            rows.append(((e, ""), {"test_file": "<handwritten>",
+            rows.append(((e, ""), {"test_file": "<handwritten>", "kind": "expect",
                                     "added_by_fix": True, "handwritten": True}))
         print(f"⛔ 注入手写探针 {len(args.probe)} 条"
               f"（判据不是自动提取的 ⇒ 结论必须单独标注，不许混报）：")
@@ -210,7 +289,17 @@ def main() -> int:
     print(f"抽到真实断言 {len(rows)} 条，其中本次修复新增 "
           f"{sum(1 for _, m in rows if m['added_by_fix'])} 条")
 
-    exprs = [e for (e, _), _ in rows]
+    #: ⛔ 两类探针**分开走**：校准方式根本不同（比返回值 vs 比是否抛异常）
+    raise_rows = [r for r in rows if r[1].get("kind") == "raises"]
+    expect_rows = [r for r in rows if r[1].get("kind") != "raises"]
+    if raise_rows:
+        print(f"  其中【期望异常】形态 {len(raise_rows)} 条（走 raises 槽位）：")
+        for (e, exc), m in raise_rows[:6]:
+            print(f"      · {e[:52]:52} → raises {exc}")
+        if len(raise_rows) > 6:
+            print(f"      … 另有 {len(raise_rows) - 6} 条")
+
+    exprs = [e for (e, _), _ in expect_rows]
 
     # ── 2. expect 由 fixed 源码校准，且**必须可复现**（不许手写）────
     print("\n== 校准：expect 取自 fixed 源码的真实返回值，并跑两遍验稳定性 ==")
@@ -222,8 +311,8 @@ def main() -> int:
             print(f"      ✗ {e}  →  {str(unstable[e])[:60]}")
         if len(unstable) > 6:
             print(f"      … 另有 {len(unstable) - 6} 条")
-    if not stable:
-        print("\n✗ 没有任何一条可复现，不物化")
+    if not stable and not raise_rows:
+        print("\n✗ 没有任何一条可复现（也没有期望异常类探针），不物化")
         return 1
 
     keep = [e for e in exprs if e in stable]
@@ -239,7 +328,7 @@ def main() -> int:
     JS_MAX_SAFE = 9007199254740992
 
     tests, disc, nonliteral, unusable, outsized = [], [], [], [], []
-    for (expr, _), meta in rows:
+    for (expr, _), meta in expect_rows:
         if expr not in stable:
             continue
         gf = vals_fixed[expr]
@@ -277,6 +366,24 @@ def main() -> int:
         tests.append({"name": f"real::{expr}"[:60], "call": expr, "expect": lit})
         if gf != gb:
             disc.append(expr)
+    # ── 2b. 【期望异常】类探针：单独校准（比"是否抛异常"，不是比返回值）──
+    if raise_rows:
+        print("\n== 校准（期望异常）：异常类型取自测试文件，"
+              "\"fixed 真的抛\"由参照实现跑两遍验证 ==")
+        r_probes = [(e, x) for (e, x), m in raise_rows]
+        r_keep, r_weak, r_state = calibrate_raises(fixed, buggy, r_probes)
+        if r_state == "unstable":
+            print(f"  ⛔ {len(r_weak)} 条**不可复现**，全部丢弃")
+        for e, x, why in r_weak[:5]:
+            print(f"      ✗ {e[:44]:44} raises {x:12} → {why}")
+        if len(r_weak) > 5:
+            print(f"      … 另有 {len(r_weak) - 5} 条")
+        print(f"  采纳 {len(r_keep)} 条（有鉴别力的 {len(r_keep)}）")
+        for t in r_keep[:6]:
+            print(f"      · {t['call'][:52]:52} → raises {t['raises']}")
+        tests.extend(r_keep)
+        disc.extend(t["call"] for t in r_keep)
+
     if nonliteral:
         print(f"  ℹ️ {len(nonliteral)} 条返回值是对象 ⇒ **降级为 repr 包装**"
               f"（比较落在 repr 字符串上，已验 repr 与 __eq__ 同判）：")
@@ -299,10 +406,15 @@ def main() -> int:
     if any(t.get("via_repr") for t in tests):
         #: ⛔ 降级之后必须**回头验一遍**：fixed 版要在全部判据上通过，
         #:    否则"保住了更多判据"其实是引入了新的假失败。
+        #: ⛔ 只验**返回值类**判据：raises 类没有 `expect` 键（它在
+        #:    `calibrate_raises` 里已经按"fixed 跑两遍都抛"验过了），
+        #:    混在一起会 KeyError —— 更糟的是如果硬补一个 expect 进去，
+        #:    等于用返回值口径去验一个异常口径的判据。
         _re = {}
         for t in tests:
-            _re[t["call"]] = t["expect"]
-        _got = _got_values(fixed, [t["call"] for t in tests])
+            if "expect" in t:
+                _re[t["call"]] = t["expect"]
+        _got = _got_values(fixed, list(_re))
         bad = [k for k, v in _got.items() if _literal(v)[0] != _re[k]]
         print(f"  ⛔ 降级后回头验 fixed 版："
               f"{'✅ 全部通过' if not bad else '❌ 有 ' + str(len(bad)) + ' 条仍失败'}")
@@ -316,8 +428,14 @@ def main() -> int:
     if not disc:
         print("\n✗ 没有任何一条能区分两版 ⇒ 这个任务不可解（或已经解了），不物化")
         return 1
+    #: ⛔ 两类分开打印：raises 类的"值"是**是否抛异常**，不在 vals_fixed 里
     for e in disc:
-        print(f"      ✓ {e}   fixed={vals_fixed[e]}  buggy={vals_buggy.get(e)}")
+        if e in vals_fixed:
+            print(f"      ✓ {e}   fixed={vals_fixed[e]}  buggy={vals_buggy.get(e)}")
+        else:
+            _r = next((t for t in tests if t.get("call") == e and "raises" in t), None)
+            _x = _r["raises"] if _r else "?"
+            print(f"      ✓ {e}   【期望异常】fixed=raises {_x}  buggy=不抛（或不抛这一种）")
 
     # ── 3. 物化到临时根 ───────────────────────────────────────────
     out = Path(args.out_root) / "tasks" / env_id

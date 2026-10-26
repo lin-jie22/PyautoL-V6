@@ -165,6 +165,12 @@ payload = json.loads(open(sys.argv[1], encoding="utf-8").read())
 tests = payload["tests"]
 ns = {"__name__": "task"}
 err = None
+#: ⛔ `raises` 的取值是**受控词表**（内建异常名），绝不用 eval 把它解析成
+#:    类型 —— 那是把不可信数据当代码执行。表外的值一律判失败，
+#:    ⛔ 不许静默降级成 truthy 检查（那会把它变成另一种判据）。
+import builtins as _bi
+_EXC_TABLE = {n: v for n, v in vars(_bi).items()
+              if isinstance(v, type) and issubclass(v, BaseException)}
 try:
     exec(compile(src, "task.py", "exec"), ns)
 except Exception:
@@ -180,18 +186,55 @@ for t in tests:
         fn = ns.get(t["call"])
         args = t.get("args", [])
         kwargs = t.get("kwargs", {})
-        got = fn(*args, **kwargs) if callable(fn) else eval(t["call"], ns)
-        if "expect" in t:
-            ok = (got == t["expect"])
-            ev = f"got={got!r} expect={t['expect']!r}"
+        _go = ((lambda: fn(*args, **kwargs)) if callable(fn)
+               else (lambda: eval(t["call"], ns)))
+        if "raises" in t:
+            #: ⛔ 判据形态第三支：**期望抛出指定异常**（2026-10-26）。
+            #:    边界条件类 bug 大量用异常表达 F2P（`pytest.raises` /
+            #:    `with raises(...)`），而原来只有 `expect`（返回值相等）
+            #:    与 truthy 两支 ⇒ 这类真实 bug **进不了判据**（README 153
+            #:    记的三道门里的"判据门"）。
+            #:
+            #: ⛔⛔ `why` 的归属决定这道题是**强题还是弱题**（见
+            #:    `classify_failure`：behavior=真 bug / crash=会吹胖读数）：
+            #:       抛对了         ⇒ behavior
+            #:       **该抛没抛**   ⇒ mismatch ⇒ 归 behavior ⇒ **强题**
+            #:                        （函数跑完了，只是"该抛没抛"，
+            #:                        不是崩溃 —— 这才是我们要的题）
+            #:       抛了别种类型   ⇒ raise    ⇒ 归 crash（弱题）
+            #:    ⛔ 不新增第四类 why：三类口径是**尺子**，为迁就新功能改
+            #:    尺子会让既有读数不可比（第 83 条）。
+            _want = t["raises"]
+            _cls = _EXC_TABLE.get(_want) if isinstance(_want, str) else None
+            if _cls is None:
+                out.append({"name": name, "passed": False, "why": "mismatch",
+                            "evidence": f"bad raises spec: {_want!r}"})
+                continue
+            try:
+                _go()
+            except _cls:
+                ok, why = True, "behavior"
+                ev = f"raised={_want}"
+            except BaseException as _e:
+                ok, why = False, "raise"
+                ev = f"raised={type(_e).__name__} expect={_want}"
+            else:
+                ok, why = False, "mismatch"
+                ev = f"no raise expect={_want}"
         else:
-            ok = bool(got)
-            ev = f"got={got!r} (truthy check)"
+            got = _go()
+            if "expect" in t:
+                ok = (got == t["expect"])
+                ev = f"got={got!r} expect={t['expect']!r}"
+            else:
+                ok = bool(got)
+                ev = f"got={got!r} (truthy check)"
+            why = "behavior" if ok else "mismatch"
         #: ⛔ `why` 由**产出方**写死，下游不许靠解析 evidence 文案去猜
         #:    （那是两套逻辑：文案一改，分类就静默错位 —— 与 BFS/DFS
         #:    错位同一个病）。见 `classify_failure`。
         out.append({"name": name, "passed": bool(ok), "evidence": ev,
-                    "why": ("behavior" if ok else "mismatch")})
+                    "why": why})
     except Exception:
         out.append({"name": name, "passed": False, "why": "raise",
                     "evidence": traceback.format_exc().splitlines()[-1][:200]})
