@@ -251,6 +251,71 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001
             skip("H1-H3 自动抽取 `766b554`", f"跑不起来：{type(e).__name__}: {e}")
 
+    print("\n== I 组：⛔ 端到端的「成功」必须是**判据驱动**的（三对照）==")
+    #: ⛔⛔ 存在的理由：163 把「全自动端到端修好」从 1 提到 2，但**读数本身不能自证**。
+    #:   `synthesize_patch` 是可以恒返回正确答案的（比如内部泄漏了基线），那样
+    #:   "修好了"和"判据"之间就没有因果关系。三组对照把这条因果钉住：
+    #:     A 真           ⇒ 有解
+    #:     B 抽掉 F2P     ⇒ **必须无解**（没有失败在驱动 ≠ 有东西可搜）
+    #:     C 篡改判据     ⇒ **必须无解/换解**（真在盲从判据的话，期望改了它就会
+    #:                       跟着改；若原样给回同一个答案，说明那答案不是搜出来的）
+    #:   ⛔ 第一版 C 组**只变异了 expect**，遇到 raises 类的 F2P 一个字节都没改到
+    #:     ⇒ 对照组恒真、什么都测不出来（第 131 条：一种变异测不出「够用」）。
+    _src = "\n\ndef f(x):\n    if x > 3:\n        return True\n    return False\n"
+    _tests = [{"name": "t0", "call": "f(5)", "expect": True},
+              {"name": "t1", "call": "f(3)", "expect": True},
+              {"name": "t2", "call": "f(2)", "expect": False}]
+    try:
+        from aether.synthesize import synthesize_patch
+        ra = synthesize_patch(_src, _tests, timeout=15.0)
+        ck("I1 A 组：有 F2P ⇒ 搜得出来且全绿",
+           ra.found and ra.full_pass, f"found={ra.found} full={ra.full_pass}")
+        ck("I2 A 组：产物确实是那一行 cmp 翻转",
+           "x >= 3" in (ra.patch or ""), repr(ra.patch)[:60])
+        rb = synthesize_patch(_src, [_tests[0], _tests[2]], timeout=15.0)
+        ck("I3 B 组：抽掉唯一的 F2P ⇒ **必须无解**",
+           rb.found is False, f"found={rb.found} new_ok={rb.new_ok}")
+        bad = [dict(t) for t in _tests]
+        bad[1]["expect"] = False
+        rc = synthesize_patch(_src, bad, timeout=15.0)
+        ck("I4 C 组：篡改 F2P 期望 ⇒ 不许还给原答案",
+           (rc.patch or "") != (ra.patch or ""),
+           f"篡改后 patch={repr(rc.patch)[:60]}")
+    except Exception as e:  # noqa: BLE001
+        skip("I 组 端到端三对照", f"跑不起来：{type(e).__name__}: {e}")
+
+    print("\n== J 组：⛔ 沙箱返回结果**没有 `got`**（别按它读）==")
+    #: ⛔ 实踩：`run_in_sandbox(...).results` 的元素只有
+    #:   {name, passed, evidence, why} —— **没有 got**。
+    #:   而 `run_all()` 是另造的壳，它**有** got（从 evidence 字符串里 split 出来）。
+    #:   ⇒ 同一个概念两套键名，按错的那套读恒得到 None（第 59 条读漏键名）。
+    #:   这里把两边的事实都钉住，谁改了任何一侧的形状都会在这里被抓住。
+    try:
+        from aether.environment import run_in_sandbox
+        r = run_in_sandbox("def g():\n    return 7\n",
+                           [{"name": "q", "call": "g()"}])
+        row = r.results[0]
+        ck("J1 `results` 里确实没有 got 键（事实）",
+           "got" not in row, f"keys={sorted(row)}")
+        ck("J2 但一定有 passed / evidence / why",
+           {"passed", "evidence", "why"} <= set(row), sorted(row))
+        import importlib.util
+        _sp = importlib.util.spec_from_file_location(
+            "pcg", ROOT / "scripts" / "probe_context_gate.py")
+        _pcg = importlib.util.module_from_spec(_sp)
+        _sp.loader.exec_module(_pcg)
+        g = _pcg.run_all("def g():\n    return 7\n", [("k", "g()", None)])
+        ck("J3 `run_all` 那层必须补齐 got（从 evidence 解析）",
+           g.get("k", {}).get("got") is not None,
+           str(g.get("k")))
+        bad_raises = _pcg.run_all("def g():\n    return 7\n",
+                                  [("j", "g()", "ValueError")])
+        ck("J4 raises 类拿不到 got 是**预期的**（evidence 不以 got= 开头）",
+           bad_raises.get("j", {}).get("got") is None,
+           str(bad_raises.get("j")))
+    except Exception as e:  # noqa: BLE001
+        skip("J 组 沙箱返回结构", f"跑不起来：{type(e).__name__}: {e}")
+
     print("\n" + "=" * 74)
     if FAILS:
         print(f"❌ 失败 {len(FAILS)} 项：{FAILS}")

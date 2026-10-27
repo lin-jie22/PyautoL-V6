@@ -133,7 +133,21 @@ def main() -> int:
     ap.add_argument("--limit", default="40")
     ap.add_argument("--only", default="")
     ap.add_argument("--timeout", default="20")
+    #: ⛔ 读数必须**落盘**、且由**仓库里的脚本**产出。
+    #:   162 那版分布表是在 /tmp 的一次性脚本上取的（当时的提交也没有这份代码）
+    #:   ⇒ 后来口径一变，那张表就**不可复现**了，只能整节作废重记（第 49-52 条）。
+    ap.add_argument("--out", default="")
+    #: `--reach` 附带**形态档**（L1/L2/L3/X + extend），让这张表自洽 ——
+    #: 163 的合取结论（形态 ∧ 密度）必须能在一次运行里同时读到两端。
+    ap.add_argument("--reach", action="store_true")
     args = ap.parse_args()
+
+    ruler = None
+    if args.reach:
+        _rp = ROOT / "scripts" / "probe_shape_ruler.py"
+        _rs = importlib.util.spec_from_file_location("psr", _rp)
+        ruler = importlib.util.module_from_spec(_rs)
+        _rs.loader.exec_module(ruler)
     repo = Path(args.repo).resolve()
 
     cands = select_commits(repo, int(args.limit))
@@ -206,20 +220,42 @@ def main() -> int:
         rows.append({"sha": sha, "k": len(tests), "f2p": n_f2p,
                      "stage": verdict, "base_ok": res.base_ok,
                      "new_ok": res.new_ok, "found": res.found,
-                     "full_pass": res.full_pass})
+                     "full_pass": res.full_pass,
+                     "n_unjson": stx.get("n_unjsonable", 0),
+                     "desc": res.desc, "focus": str(res.focus)})
         print()
+
+    if ruler:
+        for r in rows:
+            src_i = next((c[1] for c in cands if c[0] == r["sha"]), None)
+            if not src_i:
+                continue
+            b = _git(repo, "show", f"{r['sha']}^:{src_i}")
+            f = _git(repo, "show", f"{r['sha']}:{src_i}")
+            try:
+                info = ruler.analyze(b, f)
+                r["reach"] = info["reach"]
+                r["extend"] = info["extend"]
+            except Exception as e:                            # noqa: BLE001
+                r["reach"] = f"err:{type(e).__name__}"
 
     print(f"{'=' * 74}\n总账（stage 的口径：全绿且在同一行才算**修好**）\n{'=' * 74}")
     for r in rows:
         fp = r.get("full_pass")
         print(f"  {r['sha']:<9} {r['stage']:<16} k={r.get('k', '-'):<4} "
               f"f2p={r.get('f2p', '-'):<4} "
+              f"{str(r.get('reach', '-')):<4} "
               f"{r.get('base_ok', '-')}→{r.get('new_ok', '-')}  "
               f"full_pass={'-' if fp is None else fp}")
     okrow = [r for r in rows if r["stage"] in ("exact_file", "same_core_fix")
              and r.get("full_pass")]
     print(f"\n  ⇒ **全自动端到端修好**（全绿 + 改动落在人类那一行）："
           f"{len(okrow)}/{len(rows)}  {[r['sha'] for r in okrow]}")
+
+    if args.out:
+        Path(args.out).write_text(
+            json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"\n  读数已落盘：{args.out}")
     return 0
 
 
