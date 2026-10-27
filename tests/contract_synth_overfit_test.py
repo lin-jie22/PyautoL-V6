@@ -46,6 +46,17 @@
   O6 探针脚本在（真实 bug 上的稀疏度曲线要能复现）
   O7 ⛔ 模块头的 overfit 警示不许被删（文档即契约）
 
+═══ P 组：⛔⛔ `found` 有两个含义，只看它会读错 ═══
+
+真实 bug `64e6430` 那一例（README 161）：只有 2 条 F2P、且其中一条我写成
+了 SyntaxError ⇒ **「全绿」根本不可能达到** ⇒ 正确答案（`+` → `-`，L155）
+与一个改在不相干位置的凑数解（`len(ded) > 384` → `<`，L122）**并列 6/7**
+⇒ 本层按「通过数最多、先到先得」选中了凑数解。`found=True`、`gain>0`，
+可它跟那个 bug 毫无关系。
+
+⇒ 加了 `SynthResult.full_pass`：全绿是天然的分水岭，**必须显式可查**。
+⛔ 但它只是必要非充分（P3 证明存在"另一种改法也能全绿"）。
+
 跑法（离线、秒级）：
     python tests/contract_synth_overfit_test.py
 """
@@ -85,6 +96,49 @@ HUMAN = BUGGY.replace("x > 11", "x > 10")
 A = {"name": "A", "call": "f(10.5)", "expect": "bad"}
 #: C：区分"真正的修复 `> 10`"与"凑数的 `<= 11`" —— 它是**未见判据**
 C = {"name": "C", "call": "f(0)", "expect": "ok"}
+
+
+def group_p() -> None:
+    """⛔⛔ `found` 有两个含义 —— 只看它会读错。"""
+    print("\n== P 组：⛔⛔ found ≠ 修好了（真实 bug 64e6430 实录）==")
+    #: 同形的最小场景：缺陷是 `>` 应为 `>=`（correct），另有一条**恒失败**
+    #: 的判据 ⇒ 「全绿」不可能达到 ⇒ 并列 ⇒ 取材历史子集Thompson
+    buggy = "def target(x):\n    if x > 10:\n        return 'BIG'\n    return 'small'\n"
+    human = buggy.replace("x > 10", "x >= 10")
+    ok3 = [{"name": "F2P", "call": "target(10)", "expect": "BIG"},
+           {"name": "p1", "call": "target(5)", "expect": "small"},
+           {"name": "p2", "call": "target(20)", "expect": "BIG"}]
+    #: ⛔ 这条判据的期望不可能被满足（任何源码都不行）⇒ 全绿不可达
+    impossible = {"name": "BROKEN", "call": "target(0)", "expect": "NEVER_MATCH"}
+
+    h_ok, _, h_blew = score_source(human, ok3)
+    ck("P1-1 对照：人类修复在 3 条正常判据上全过", (not h_blew) and h_ok == 3,
+       f"{h_ok}/3")
+    r_ok = synthesize_patch(buggy, ok3)
+    ck("P1-2 判据干净 ⇒ 全绿（full_pass=True）", r_ok.found and r_ok.full_pass,
+       f"{r_ok.base_ok}→{r_ok.new_ok}/{r_ok.n_tests}")
+
+    r_bad = synthesize_patch(buggy, ok3 + [impossible])
+    ck("P2-1 ⛔ 掺一条恒失败判据 ⇒ **found 仍为 True**", r_bad.found,
+       f"desc={r_bad.desc}")
+    ck("P2-2 ⛔⛔ 但 full_pass=False（不可能全绿）", not r_bad.full_pass,
+       f"{r_bad.base_ok}→{r_bad.new_ok}/{r_bad.n_tests}")
+    ck("P2-3 ⇒ 只看 found 就会把「部分通过」当作「修好了」"
+       "（64e6430 实录：改在 `len(ded) > 384`，人类修复在另一处）",
+       r_bad.found and not r_bad.full_pass and r_bad.gain > 0)
+
+    #: ⛔ P3：全绿也**不是**充分条件 —— 存在另一种改法，在这套判据上等价
+    alt = buggy.replace("x > 10", "x > 9")     # 另一种全绿改法
+    alt_ok, _, alt_blew = score_source(alt, ok3)
+    ck("P3-1 ⛔ 存在另一种改法也在这套判据上全绿",
+       (not alt_blew) and alt_ok == 3 and alt != human, f"{alt_ok}/3")
+    ck("P3-2 ⇒ full_pass 只是**必要**条件：全绿后仍要过 held-out 闸"
+       "（这套整数判据区分不了 `>= 10` 与 `> 9`）",
+       alt_ok == 3 and alt != human)
+
+    from aether.synthesize import SynthResult
+    ck("P4 `full_pass` 在实现里（不是文档承诺）",
+       hasattr(SynthResult, "full_pass"))
 
 
 def main() -> int:
@@ -141,6 +195,8 @@ def main() -> int:
     ck("O7-2 ⛔ 含实测阈值（k=1 ⇒ 全错）",
        "k=1" in txt and "0.25" in txt,
        "（删掉警示 = 删掉这条风险的唯一入口，见 159 残留）")
+
+    group_p()
 
     print("=" * 74)
     if FAILS:

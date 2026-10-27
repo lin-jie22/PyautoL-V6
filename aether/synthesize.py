@@ -110,6 +110,27 @@ class SynthResult:
     def found(self) -> bool:
         return self.patch is not None
 
+    @property
+    def full_pass(self) -> bool:
+        """⛔⛔ 找到的补丁让**全部**判据通过了吗（而不只是「比基线好」）。
+
+        ⛔ `found` 有两个含义，只看它会读错：
+            真的找到了    vs    找到个**凑数的**。
+
+        README 161 的 `64e6430` 那一例：只有 2 条 F2P、且其中一条恒失败
+        （我探针写成了 SyntaxError）⇒ 「全绿」根本不可能达到 ⇒ 正确答案
+        与一个改在不相干位置（`len(ded) > 384` → `<`，L122 vs 人类 L155）
+        的凑数解并列 6/7 ⇒ 本层按「通过数最多、先到先得」选中了凑数解。
+        `found=True`、`gain>0`，可它跟那个 bug 毫无关系。
+
+        ⇒ **全绿是天然的分水岭**，必须显式可查，不该让调用方自己算。
+
+        ⛔ 但它只是**必要**条件，不是充分条件：存在「另一种改法也能全绿」
+        的情形（见契约 P3）⇒ 全绿之后仍要过 held-out 闸。
+        """
+        return self.patch is not None and self.n_tests > 0 \
+            and self.new_ok >= self.n_tests
+
 
 # ── 判据跑分 ────────────────────────────────────────────────────────
 def score_source(source: str, tests: List[Dict[str, Any]],
