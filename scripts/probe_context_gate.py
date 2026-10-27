@@ -62,168 +62,14 @@ sys.path.insert(0, str(ROOT))
 
 from aether.environment import run_in_sandbox  # noqa: E402
 
-#: ⛔ 时间/随机依赖：内联出这种表达式一律拒收（第 3 条自限）。
-_UNSTABLE_CALLS = {"today", "now", "random", "randint", "randrange", "uuid",
-                   "uuid4", "time", "monotonic", "perf_counter", "choice",
-                   "shuffle", "uniform", "getrandbits"}
 
-
-# ─────────────────────────── 断言抽取（带作用域）─────────────────────────
-def scoped_assertions(test_src: str):
-    """抽 `(实际表达式, 期望文本, 所在函数名)`。
-
-    ⛔ 与 `realbug_import.assertions_of` 的差别只有一处：**多返回所属函数**。
-    这是内联器的第 1 条自限所必需的 —— 没有它，`x` 在 A 函数里是 3、在 B
-    函数里是 'a' 会被当成同一个 x ⇒ 内联出语义错误的探针。
-    """
-    tree = ast.parse(test_src)
-    out = []
-
-    def walk(node, fn: str):
-        for ch in ast.iter_child_nodes(node):
-            if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                walk(ch, ch.name)
-                continue
-            if isinstance(ch, ast.Call):
-                f = ch.func
-                nm = getattr(f, "id", None) or getattr(f, "attr", None)
-                if nm == "chk" and len(ch.args) == 2:
-                    out.append((ast.unparse(ch.args[0]),
-                                ast.unparse(ch.args[1]), fn))
-            if isinstance(ch, ast.Assert):
-                t = ch.test
-                if (isinstance(t, ast.Compare) and len(t.ops) == 1
-                        and isinstance(t.ops[0], ast.Eq)):
-                    out.append((ast.unparse(t.left),
-                                ast.unparse(t.comparators[0]), fn))
-            walk(ch, fn)
-
-    walk(tree, "<module>")
-    return out
-
-
-def scoped_raise_probes(test_src: str):
-    """⛔ **期望异常**探针也带作用域 —— 与 `scoped_assertions` 同一个理由。
-
-    第一版普查只抽了返回值断言 ⇒ `c1c25da`（Bits off-by-one，靠 2 条
-    raises 判据在 README 156 里修好的那个 bug）在普查里显示「0 条鉴别力」
-    ⇒ 差点据此写下「内联增益全落在形态门外」的结论。
-    ⛔ 一个「0」有两种含义（第 25 条）：**真的没有** vs **抽漏了**。
-    """
-    tree = ast.parse(test_src)
-    out = []
-
-    def walk(node, fn: str):
-        for ch in ast.iter_child_nodes(node):
-            if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                walk(ch, ch.name)
-                continue
-            if isinstance(ch, ast.With):
-                for it in ch.items:
-                    ctx = it.context_expr
-                    if not isinstance(ctx, ast.Call) or not ctx.args:
-                        continue
-                    f = ctx.func
-                    nm = getattr(f, "id", None) or getattr(f, "attr", None)
-                    if nm != "raises":
-                        continue
-                    a0 = ctx.args[0]
-                    exc = getattr(a0, "id", None) or getattr(a0, "attr", None)
-                    if not exc:
-                        continue
-                    for st in ch.body:
-                        if isinstance(st, ast.Expr):
-                            out.append((ast.unparse(st.value), exc, fn))
-            walk(ch, fn)
-
-    walk(tree, "<module>")
-    return out
-
-
-def collect_bindings(test_src: str):
-    """收集 **分作用域** 的 `name = <rhs>` 绑定。
-
-    返回 `{作用域: {name: rhs_ast}}`。⛔ 第 2 条自限：同一作用域内同名有
-    两个不同 rhs ⇒ 整条剔除（循环里重复赋值的变量，语义不确定）。
-    """
-    tree = ast.parse(test_src)
-    envs: dict = {"<module>": {}}
-
-    def scan(body, scope: str):
-        bucket: dict = {}
-        for st in body:
-            if isinstance(st, (ast.Assign, ast.AnnAssign)):
-                tgts = st.targets if isinstance(st, ast.Assign) else [st.target]
-                val = st.value
-                if val is None or len(tgts) != 1:
-                    continue
-                t = tgts[0]
-                if isinstance(t, ast.Name):
-                    bucket.setdefault(t.id, []).append(val)
-            elif isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                scan(st.body, st.name)
-            elif isinstance(st, ast.ClassDef):
-                scan(st.body, scope)
-            elif hasattr(st, "body"):
-                scan(st.body, scope)
-        envs[scope] = envs.get(scope, {})
-        envs[scope].update(bucket)
-
-    scan(tree.body, "<module>")
-    # 同名多 rhs ⇒ 剔除
-    for sc in list(envs):
-        envs[sc] = {k: v[0] for k, v in envs[sc].items()
-                    if len(set(ast.dump(x) for x in v)) == 1}
-    return envs
-
-
-class _Inliner(ast.NodeTransformer):
-    def __init__(self, binds):
-        self.binds = binds
-        self.changed = False
-        self.depth = 0
-
-    def visit_Name(self, node):  # noqa: N802
-        if (isinstance(node.ctx, ast.Load) and node.id in self.binds
-                and node.id not in ("self", "cls")):
-            self.changed = True
-            return copy.deepcopy(self.binds[node.id])
-        return node
-
-
-_UNSTABLE_CACHE: dict = {}
-
-
-def has_unstable_call(text: str) -> bool:
-    try:
-        t = ast.parse(text, mode="eval")
-    except SyntaxError:
-        return False
-    for n in ast.walk(t):
-        if isinstance(n, ast.Call):
-            f = n.func
-            nm = getattr(f, "id", None) or getattr(f, "attr", None)
-            if nm in _UNSTABLE_CALLS:
-                return True
-    return False
-
-
-def inline_expr(expr: str, binds: dict, maxdepth: int = 6) -> str | None:
-    """把 expr 里的自由变量按 binds 展开。没得可展 ⇒ 返回 None。"""
-    try:
-        tree = ast.parse(expr, mode="eval")
-    except SyntaxError:
-        return None
-    total = False
-    for _ in range(maxdepth):
-        tr = _Inliner(binds)
-        new = tr.visit(tree)
-        if not tr.changed:
-            break
-        total = True
-        ast.fix_missing_locations(new)
-        tree = new
-    return ast.unparse(tree) if total else None
+# ── ⛔ 规则**只有一份**：这些函数的本体在 2026-10-28（README 162）迁到了产品
+#    模块 `aether/extract.py`。本脚本只保留**量**的部分（run_all / 判档 / 报告）。
+#    ⇒ 抄第二份的后果已见过一次：两把尺子漂移，读数无法对拍。
+from aether.extract import (  # noqa: E402
+    _UNSTABLE_CALLS, collect_bindings, gold_of, has_unstable_call,
+    inline_expr, lit, scoped_assertions, scoped_raise_probes,
+)
 
 
 # ─────────────────────────── 求值 / 判档 ─────────────────────────────────
@@ -254,21 +100,8 @@ def run_all(source: str, items, timeout: float = 15.0):
     return out
 
 
-def lit(text: str | None):
-    if text is None:
-        return None, False
-    try:
-        return ast.literal_eval(text), True
-    except (ValueError, SyntaxError, MemoryError, RecursionError):
-        return text, False
 
 
-def gold_of(exp_text: str):
-    """测试自己写死的期望值。只能 literal 的才算金标准。"""
-    try:
-        return ast.literal_eval(exp_text)
-    except (ValueError, SyntaxError):
-        return None
 
 
 def classify_probe(expr: str, exp_text: str, got: str | None) -> str:
