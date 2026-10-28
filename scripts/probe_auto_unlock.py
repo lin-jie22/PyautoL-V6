@@ -104,7 +104,10 @@ def auto_extract(repo: Path, sha: str, src: str, testfs: list,
     """
     fixed = _git(repo, "show", f"{sha}:{src}")
     target = target_module(src)
-    stx: dict = {"n_raw": 0, "n_unstable": 0, "n_unjsonable": 0}
+    #: ⛔ 期望侧两道**分开**（README 167）：166 合并成一个数，把"没解出值"
+    #:    （可修）误记成"不可序列化"（结构性），从而被永久放弃。
+    stx: dict = {"n_raw": 0, "n_unstable": 0,
+                 "n_gold_unresolved": 0, "n_gold_unjsonable": 0}
     cands: list = []
     for tf in testfs:
         tsrc = _git(repo, "show", f"{sha}:{tf}")
@@ -178,7 +181,9 @@ def auto_extract(repo: Path, sha: str, src: str, testfs: list,
         detail["tests_keys"] = tests_keys
     return tests, {"n_probe": stx.get("n_raw", 0), "n_cand": len(cands),
                    "n_unstable": stx.get("n_unstable", 0),
-                   "n_unserializable": stx.get("n_unjsonable", 0),
+                   "n_unserializable": stx.get("n_gold_unjsonable", 0),
+                   "n_gold_unresolved": stx.get("n_gold_unresolved", 0),
+                   "n_gold_swapped": stx.get("n_gold_swapped", 0),
                    "n_unpassed_on_fixed": n_unpassed,
                    "n_semantics_ok": n_stable, "n_tests": len(tests)}
 
@@ -231,9 +236,11 @@ def main() -> int:
         print(f"   抽取：断言 {stx.get('n_probe', 0)} → 候选"
               f" {stx.get('n_cand', 0)}"
               f" → 过三验 {stx.get('n_semantics_ok', 0)}"
-              f"（{stx.get('n_unserializable', 0)} 条期望值不可序列化 + "
+              f"（{stx.get('n_gold_unresolved', 0)} 条期望侧没解出值 + "
+              f"{stx.get('n_unserializable', 0)} 条真不可序列化 + "
               f"{stx.get('n_unpassed_on_fixed', 0)} 条在参照实现上就没过"
-              f" ⇒ 显式丢弃）→ **可用判据 {stx.get('n_tests', 0)}**")
+              f" ⇒ 显式丢弃）→ **可用判据 {stx.get('n_tests', 0)}**"
+              f"（其中 {stx.get('n_gold_swapped', 0)} 条探针/期望写反已换回）")
         if not tests:
             rows.append({"sha": sha, "stage": "no_criteria"})
             continue
@@ -287,8 +294,15 @@ def main() -> int:
                      "stage": verdict, "base_ok": res.base_ok,
                      "new_ok": res.new_ok, "found": res.found,
                      "full_pass": res.full_pass,
-                     "n_unjson": stx.get("n_unjsonable", 0),
-                     "desc": res.desc, "focus": str(res.focus)})
+                     "n_unjson": stx.get("n_gold_unjsonable", 0),
+                     "n_gold_unresolved": stx.get("n_gold_unresolved", 0),
+                     "n_gold_swapped": stx.get("n_gold_swapped", 0),
+                     "desc": res.desc, "focus": str(res.focus),
+                     #: ⛔ 合成层停在**哪一格**（README 167）。没有它，
+                     #: `found=False` 只是一个数，看不出该往哪使劲。
+                     "gate": res.gate, "n_cands": res.n_cands,
+                     "n_ran": res.n_ran, "n_blew": res.n_blew,
+                     "render_modes": dict(res.render_modes)})
         print()
 
     if ruler:
@@ -312,11 +326,43 @@ def main() -> int:
               f"f2p={r.get('f2p', '-'):<4} "
               f"{str(r.get('reach', '-')):<4} "
               f"{r.get('base_ok', '-')}→{r.get('new_ok', '-')}  "
-              f"full_pass={'-' if fp is None else fp}")
+              f"full_pass={'-' if fp is None else fp}  "
+              f"{r.get('gate', '-')}")
     okrow = [r for r in rows if r["stage"] in ("exact_file", "same_core_fix")
              and r.get("full_pass")]
     print(f"\n  ⇒ **全自动端到端修好**（全绿 + 改动落在人类那一行）："
           f"{len(okrow)}/{len(rows)}  {[r['sha'] for r in okrow]}")
+
+    #: ⛔⛔ 整条链条的门分布（README 167）：判据侧三道 + 合成层五格，
+    #: 每条 commit **恰好一格**（守恒）。没有它，「修好 2/40」只是一个数。
+    from collections import Counter
+    chain = Counter()
+    for r in rows:
+        if r["stage"] == "no_criteria":
+            chain["判据：抽不到（含全被门拦）"] += 1
+        elif r["stage"] == "no_f2p":
+            chain["判据：无鉴别力"] += 1
+        else:
+            g = r.get("gate", "?")
+            chain[f"合成：{g}"] += 1
+    n = len(rows)
+    print(f"\n{'─' * 74}\n整条链条的门分布（{n} 个 commit，恰好一格）\n{'─' * 74}")
+    for g, c in sorted(chain.items(), key=lambda x: -x[1]):
+        print(f"  {g:<28} {c:>3}  ({c / n * 100:.0f}%)")
+
+    #: ⛔ 交叉表：S3（搜不出增益）到底是因为「形态上根本够不到」还是
+    #: 「形态够得到但没搜到」——这两者的下一步**完全不同**，必须分开。
+    if ruler:
+        cross = Counter()
+        for r in rows:
+            if r["stage"] in ("no_criteria", "no_f2p"):
+                continue
+            cross[(r.get("reach", "-"), r.get("gate", "-"))] += 1
+        if cross:
+            print(f"\n{'─' * 74}\nreach（形态档，事后 oracle） × 合成层停靠点\n"
+                  f"{'─' * 74}")
+            for (rc, g), c in sorted(cross.items()):
+                print(f"  reach={str(rc):<4} {g:<14} {c}")
 
     if args.out:
         Path(args.out).write_text(

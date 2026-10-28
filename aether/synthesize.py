@@ -70,6 +70,17 @@ __all__ = [
     "synthesize_patch",
 ]
 
+#: ⛔⛔ 合成层这道门的**停靠点**，按串联顺序。命名即口径，不许另起一套。
+#: 判据侧已经量过三道（装载/判据/形态），但「判据有鉴别力之后为什么还
+#: 修不好」从没被归过因 —— 没有这张表，`found=False` 只是一个数，看不出
+#: 该往哪使劲（第 24 条：一个维度恒 0 先怀疑量具，而不是继续加大搜索）。
+GATE_BLEW = "S0_blew"          #: 缺陷版自己在沙箱里就跑挂 ⇒ 本层无从判断
+GATE_NO_FOCUS = "S1_no_focus"  #: 定位器没定位到任何顶层 def/class
+GATE_NO_CANDS = "S2_no_cands"  #: 定位到了，但该处没有任何可枚举的变异
+GATE_NO_GAIN = "S3_no_gain"    #: 候选都跑了，没有一个严格优于基线
+GATE_PARTIAL = "S4_partial"    #: 找到了，但没全绿 ⇒ 凑数解（161 的 64e6430）
+GATE_FULL = "S5_full"          #: 找到了且全绿（⛔ 只是必要，仍要过 held-out）
+
 
 #: 比较算子的候选替换集。⛔ 刻意**不含** `is`/`in` 之外的语义跳跃 ——
 #: 每多一类候选，搜索空间与 overfit 风险同步放大（第 71 条：量代价）。
@@ -130,6 +141,34 @@ class SynthResult:
         """
         return self.patch is not None and self.n_tests > 0 \
             and self.new_ok >= self.n_tests
+
+    @property
+    def gate(self) -> str:
+        """⛔ 停在合成层的**哪一格**（串联，先到的赢）。
+
+        ⛔⛔ 判据顺序就是**诊断顺序**，不许重排：`n_blew` 得先看 —— 基线
+        跑挂时 `focus` 必然是空的，先判 focus 会把「量具炸了」误记成
+        「定位不到」（第 25 条：一个 0 有两种含义，这里必须分开）。
+
+        ⛔ 只依赖**本层的字段**，不看 `base`、不看人类修复 ⇒ 可离线回归。
+        「候选集里究竟有没有正解」是另一件事（事后 oracle），由调用方
+        单独记账，不混进这张表。
+
+        ⛔ `S0` 收两种同形情形：**基线跑挂** 与 **候选全跑挂**。它们不是
+        同一处代码，但**诊断动作相同**（都是"尺子没量"，得先修量具/环境，
+        不是"世界没有解"）⇒ 合并。分开记会让「修不好」看起来像「搜不到」。
+        """
+        if self.base_ok < 0:
+            return GATE_BLEW
+        if not self.focus:
+            return GATE_NO_FOCUS
+        if self.n_cands == 0:
+            return GATE_NO_CANDS
+        if self.n_ran == 0:            #: 候选一条都没跑成 ⇒ 同 S0
+            return GATE_BLEW
+        if not self.found:
+            return GATE_NO_GAIN
+        return GATE_FULL if self.full_pass else GATE_PARTIAL
 
 
 # ── 判据跑分 ────────────────────────────────────────────────────────

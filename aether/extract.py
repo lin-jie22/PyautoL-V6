@@ -806,15 +806,22 @@ def extract_criteria(test_src: str, target: str,
     ⛔ 这里**不碰**被测模块的任何版本 ⇒ 结构上拿不到"修复后源码"。
 
     返回 `[{call, expect|raises, gold, fn, kind}]`（`kind` ∈ expect/raises）。
-    `stats` 若传入，会被填上 `n_raw / n_unstable / n_unjsonable / n_out`
+    `stats` 若传入，会被填上 `n_raw / n_unstable / n_out / n_gold_resolved
+    / n_gold_unresolved / n_gold_unjsonable / n_gold_swapped / n_pkg_demote`
     —— 每一步丢了多少都记账，调用方不能只看最终条数。
+    ⛔ 期望侧的两道**分开**记：`n_gold_unresolved`（没解出值，可修）与
+    `n_gold_unjsonable`（解出了但不可 JSON，结构性）。166 把它们合并，
+    导致"能修的"被记成"不可修"（README 167 第四节）。
 
     `dropped`（README 166）若传入，会把**每条被丢掉的**探针 `{gate, attr,
     stmt, fn, kind}` 追加进去 ⇒ 调用方可以回答"这条断言被哪道门拦了"，
     而不是只看到总数变少。⛔ 不传 ⇒ 行为与 165 完全一致（向后兼容）。
     """
-    st = {"n_raw": 0, "n_unstable": 0, "n_unjsonable": 0, "n_out": 0,
-          "n_gold_resolved": 0}
+    #: ⛔ `n_unjsonable` **已拆**（README 167）：它一个数装着两种成因
+    #:    （抽不出值 vs 真不可序列化），下一步完全不同 ⇒ 不许再合并。
+    st = {"n_raw": 0, "n_unstable": 0, "n_out": 0,
+          "n_gold_resolved": 0, "n_gold_unresolved": 0,
+          "n_gold_unjsonable": 0, "n_gold_swapped": 0}
     tree = ast.parse(test_src)
     aliases = module_aliases(tree)
     binds_by_scope = collect_bindings(test_src)
@@ -846,6 +853,17 @@ def extract_criteria(test_src: str, target: str,
         st["n_raw"] += 1
         binds = dict(binds_by_scope.get("<module>", {}))
         binds.update(binds_by_scope.get(fn, {}))
+        #: ⛔⛔ **探针与期望写反了**（README 167）：`assert 1 == C().value`
+        #:    把常量写在**左边**是合法的等价写法，但抽取层按「左探针、
+        #:    右期望」的约定 ⇒ 抽成 `call=1`、`gold=C().value` ⇒ 探针**恒真**
+        #:    且期望抽不出值 ⇒ 这条断言**彻底失效**，还被记成"不可序列化"。
+        #:    ⛔ 只在**期望侧真的解不出值**时才交换（两边都能解 ⇒ 不动，
+        #:    `assert 1 == 2` 交换与否等价，但动了会破坏跨轮可比性）。
+        if kind == "expect" and gold_of(gold) is None \
+                and gold_of(expr) is not None:
+            expr, gold = gold, expr
+            st["n_gold_swapped"] = st.get("n_gold_swapped", 0) + 1
+            p = dict(p, expr=expr, gold=gold)
         #: ⛔ **两条都跑**，不是为了兜底而是为了**记账**：`pkg` 降级是
         #:    试探性的（README 165），必须单独知道它救了多少条。
         #:    ⛔ 第一版写成"strict 失败才试 pkg" ⇒ 全漏：`resolve_probe`
@@ -883,8 +901,18 @@ def extract_criteria(test_src: str, target: str,
                     if g2 is not None:
                         g, st["n_gold_resolved"] = g2, \
                             st["n_gold_resolved"] + 1
-            if jsonable_only and (g is None or not _jsonable(g)):
-                st["n_unjsonable"] += 1
+            #: ⛔⛔ 拆成**两个**数（README 167）：166 把它们记成同一格
+            #:    「不可序列化」，并据此断言"这是结构性限制（沙箱走 JSON）、
+            #:    要改就得扩张"。实测三仓库 39 条里**真不可 JSON 的是 0 条**，
+            #:    全是 `g is None`（期望侧没解出值）⇒ 那句是**错的**归因：
+            #:    (b) 是抽取侧的病（可修），(a) 才是结构性限制。
+            #:    ⛔ 混在一起的后果：把"能修的"记成"不可修"，从而永久放弃。
+            if jsonable_only and g is None:
+                st["n_gold_unresolved"] = st.get("n_gold_unresolved", 0) + 1
+                _drop(dropped, GATE_UNSERIALIZABLE, p, call)
+                continue
+            if jsonable_only and not _jsonable(g):
+                st["n_gold_unjsonable"] = st.get("n_gold_unjsonable", 0) + 1
                 _drop(dropped, GATE_UNSERIALIZABLE, p, call)
                 continue
             if jsonable_only and _has_tuple(g):

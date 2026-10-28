@@ -252,9 +252,11 @@ def test_lambda_with_args():
        st.get("n_pkg_demote", 0) >= 1, str(st.get("n_pkg_demote")))
 
     print("\n== G 组：记账不静默 ==")
-    ck("G1 stats 四个计数都在",
-       all(k in st for k in ("n_raw", "n_unjsonable", "n_unmapped",
-                             "n_pkg_demote")), str(sorted(st)))
+    ck("G1 stats 计数都在（⛔ 166 的 `n_unjsonable` 已拆成两个 —— "
+       "一个数装两种成因 ⇒ 把可修的记成不可修）",
+       all(k in st for k in ("n_raw", "n_unmapped", "n_pkg_demote",
+                             "n_gold_unresolved", "n_gold_unjsonable")),
+       str(sorted(st)))
     ck("G2 unmapped 分布按名字给出",
        isinstance(um, dict) and um.get("assertTrue") == 1, str(um))
     ck("G3 `unmapped_unittest_calls` 单独可用（调用方可自查）",
@@ -327,6 +329,68 @@ def test_lambda_with_args():
             print(f"      拒收分布 top5：{top5}")
         except Exception as e:  # noqa: BLE001
             skip("I 组 真实仓库读数", f"跑不起来：{type(e).__name__}: {e}")
+
+    #: ⛔⛔ README 167 第四节：166 把「期望侧没解出值」与「真不可序列化」
+    #: 记成同一格，并据此断言"结构性限制、属扩张"。实测三仓库 39 条里
+    #: **真不可 JSON 的是 0 条** ⇒ 那句归错了因。本组把两者钉死分开。
+    print("\n== K 组：⛔⛔ 期望侧的两道病**不许**再合并记账（README 167）==")
+    #: (b) 期望侧解不出值：`assert x == obj.attr` —— `obj` 无从求值
+    K_B = """
+def test_b():
+    assert x == obj.attr
+"""
+    #: (a) 期望值解得出但不可 JSON：`set()` 不是 JSON 类型
+    K_A = """
+def test_a():
+    assert set(f()) == {1, 2}
+"""
+    stb: dict = {}
+    rb = extract_criteria(K_B, TARGET, stats=stb)
+    sta: dict = {}
+    ra = extract_criteria(K_A, TARGET, stats=sta)
+    ck("K1 (b) 期望侧没解出值 ⇒ **单独**记 n_gold_unresolved",
+       stb.get("n_gold_unresolved", 0) >= 1, str(stb))
+    ck("K2 ⛔ (b) **不**被记成真不可序列化（否则会被当成结构性限制放弃）",
+       stb.get("n_gold_unjsonable", 0) == 0, str(stb.get("n_gold_unjsonable")))
+    ck("K3 (a) 期望真不可 JSON ⇒ 记 n_gold_unjsonable",
+       sta.get("n_gold_unjsonable", 0) >= 1, str(sta))
+    ck("K4 ⛔ 反证：两格不是同一个数（否则拆分是假的）",
+       stb.get("n_gold_unresolved", 0) >= 1
+       and sta.get("n_gold_unjsonable", 0) >= 1
+       and stb.get("n_gold_unjsonable", 0) == 0
+       and sta.get("n_gold_unresolved", 0) == 0,
+       f"b={stb} a={sta}")
+    ck("K5 ⛔ 166 的 `n_unjsonable` 已不存在（不许再有人读那个合并数）",
+       "n_unjsonable" not in stb and "n_unjsonable" not in sta,
+       str(sorted(set(stb) | set(sta))))
+
+    print("\n== L 组：⛔ 探针/期望**写反**要换回来（README 167 第四节）==")
+    #: `assert 1 == C().value`：常量在**左**，是合法等价写法。按「左探针、
+    #: 右期望」的约定 ⇒ 抽成 call=1（恒真）、gold=C().value（解不出）
+    #: ⇒ 这条断言彻底失效。attrs 的 21 条里至少 3 条长这样。
+    L_SRC = """
+def test_swapped():
+    assert 1 == obj.value
+"""
+    stl: dict = {}
+    rl = extract_criteria(L_SRC, TARGET, stats=stl)
+    ck("L1 常量在左 ⇒ 交换后探针是 `obj.value`、期望是 1",
+       any(r["call"] == "obj.value" and r["gold_value"] == 1 for r in rl),
+       str(rl))
+    ck("L2 交换被**记账**（不许静默改语义）",
+       stl.get("n_gold_swapped", 0) >= 1, str(stl.get("n_gold_swapped")))
+    #: ⛔ 反证：两边都能解出值时不许动（`assert 1 == 2` 交换与否等价，
+    #:    但动了会破坏跨轮可比性 ⇒ 必须证明"只在解不出时才换"）
+    L_BOTH = """
+def test_both():
+    assert 1 == 2
+"""
+    stl2: dict = {}
+    rl2 = extract_criteria(L_BOTH, TARGET, stats=stl2)
+    ck("L3 ⛔ 反证：两边都是常量 ⇒ **不**交换（换了就破坏可比性）",
+       stl2.get("n_gold_swapped", 0) == 0, str(stl2.get("n_gold_swapped")))
+    ck("L4 反证：正常写法（探针在左）也不交换",
+       st.get("n_gold_swapped", 0) == 0, str(st.get("n_gold_swapped")))
 
     print("\n" + "=" * 74)
     if FAILS:
