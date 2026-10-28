@@ -6715,3 +6715,153 @@ more-itertools 装载 100% 了，却抽到 **0 条**判据。量出来的原因�
   · `reach`（形态档）依旧是**事后 oracle**（163 第六节），别当 predictor 用。
   · 依赖裁剪用的是 **AST 静态依赖**：`importlib.import_module` 那种动态导入、
     条件导入（`if sys.version_info`）都看不见 ⇒ 装载失败会**如实**报，不静默。
+
+### 165. ⛔⛔ **unittest 抽取层落地：判据 0 → 544；以及一个被当场抓住的「假 F2P」——那 69 条有鉴别力的判据全是量具造的**（2026-10-29）
+
+═══ 一、起点：164 留下的一道 100% 的墙 ═══
+
+| 仓库 | 裸 `assert` | `self.assertX` | 抽取层能读 | 端到端判据 |
+|---|---|---|---|---|
+| boltons | 549 | 7 | ✅ | 59 / 16 条 |
+| **more-itertools** | 20 | **10013** | ❌ | **0 条** |
+| attrs | 1638 | 0 | ✅ | 58 条（F2P 0） |
+
+⇒ 抽取层只认裸 `assert` 与 `pytest.raises`，`unittest.TestCase` 那套不认。
+more-itertools 是 **100% unittest** ⇒ 装得起来（164 已开到 100%），但一条判据
+都拿不到。这是当时排序后**最大的一道门**：判据表达力。
+
+═══ 二、落地：只做**同形映射**，一步都不扩张 ═══
+
+判据层只有两种形状：`expect`（探针 == 一个可 JSON 的值）与 `raises`。
+所以只收**写法不同、形状相同**的：
+
+    assertEqual(a, b)      ≡ assert a == b      ⇒ expect  ✅
+    assertTupleEqual(a,b)  ≡ assert a == b      ⇒ expect  ✅（但见第五节）
+    assertRaises(E)        ≡ with raises(E)     ⇒ raises  ✅（with 式 + 直接调用式）
+
+⛔⛔ **需要新比较语义的一律不收**（`_UNITTEST_SAME` 上方的长注释是裁决依据）：
+
+    assertNotEqual ⇒ ≠     assertTrue/False ⇒ truthy    assertIn ⇒ ∈
+    assertIs ⇒ 身份        assertAlmostEqual ⇒ 容差      assertRaisesRegex ⇒ 匹配
+
+把它们塞进 `expect` 是**造假判据**：形状一样、语义不同。契约 D 组用**注入反证**
+证明这条拦得住（放开 `assertNotEqual` 立刻产出 `first([1]) == 2`，而原意是 ≠ 2）。
+⇒ 要不要扩张是**形态决策**，需用户拍板（第 126 条），本轮不做。
+
+配套三件（都在 `aether/extract.py`）：
+
+  1. **期望侧也要内联**：`assertEqual(a, expected)` 里 `expected` 是局部变量
+     ⇒ 第一版 `literal_eval` 拿不到值 ⇒ **整条丢弃**。more-itertools 的 921 条
+     assertEqual 里 **293 条**长这样。新增 `gold_value`（值）与 `gold`（原文）
+     两个字段 —— ⛔ 只留原文的话调用方会静默拿到 0 条。
+  2. **父包降级（试探性）**：测试用 `mi.first(...)`（包的公开 API），而沙箱装的是
+     `more.py` **本体**（里面没有 `mi`）⇒ 628 条一条都跑不起来。现在把它降成
+     `first(...)`。⛔ 它与"按被测模块降级"**不是一个可信度**：后者静态可证，
+     前者只证明"这名字是从包上取的" ⇒ **只能靠三验兜底**（名字不存在 ⇒
+     NameError ⇒ 剔除），并且**单独记账**（`n_pkg_demote=729`）。
+  3. **记账不静默**：`n_unmapped` + `unmapped_kinds` 分布、`n_tuple_gold`、
+     `n_gold_resolved`、`n_pkg_demote` —— 每一条被丢的都有名字和理由。
+
+═══ 三、读数（`tests/contract_unittest_extract_test.py` I 组，可复现）═══
+
+    more-itertools/tests/test_more.py（870 条断言）
+      n_out = 544       （改前：0）
+      n_unjsonable 242  （期望值不可序列化，结构性的 —— 162 第六节那条）
+      n_tuple_gold  84  （第五节：全是假判据）
+      n_gold_resolved 208（期望侧内联救回）
+      n_pkg_demote  729（父包降级救回，待三验收割）
+      n_unmapped    128（拒收：assertTrue 39 / assertFalse 35 / assertIn 9 /
+                         assertRaisesRegex 8 / assertNotIn 8 / …）
+
+boltons **不退化**（A 组回归）：`c1c25da` k=16→18 f2p=2 `exact_file`、
+`766b554` k=59→65 f2p=7 `same_core_fix`，两个都仍 `full_pass=True`。
+
+═══ 四、⛔⛔ 端到端：修好仍然 0/6，而且第一次的读数是**假的** ═══
+
+`probe_auto_unlock.py --repo more-itertools --subdir more_itertools/ --limit 6`：
+
+| | 修前（第一版） | 修后（拦掉假判据） |
+|---|---|---|
+| 可用判据 | 383–393 | **250–255** |
+| **F2P** | **68–70** | **0** |
+| 修好 | 0/6 | **0/6** |
+
+═══ 五、⛔⛔ **那 69 条"有鉴别力的判据"是量具自己造的** ═══
+
+第一版跑出 F2P≈69 时，最自然的解读是"判据够密了、卡在合成层"。**错了**：
+
+    minmax(2, 3, 1) || got=(1, 3) expect=[1, 3]
+
+沙箱用 **JSON** 传 `expect` ⇒ **tuple 被降级成 list**，而 `got` 是真 tuple ⇒
+`got == expect` **恒为 False** ⇒ 这类判据在**任何**版本上都失败 ⇒ 全被算成 F2P。
+
+⛔⛔ 为什么三验没拦住（这是最该记住的一条）：
+
+    三验比对的是  got 的 literal_eval  vs  gold        （两边都是 tuple ⇒ 相等 ✅）
+    判据执行比的是 JSON 往返后的 expect vs got         （list vs tuple ⇒ False ❌）
+
+**同一件事有两套比较口径** ⇒ 三验放行了它自己执行时会失败的东西。
+修法是**两处都动**：抽取层 `_has_tuple` 显式丢弃并记账（`n_tuple_gold`），
+`probe_auto_unlock` 的三验第 1 步**补上 `passed`**（`n_unpassed_on_fixed`）。
+契约 J 组两头都盯（J5 是源码级检查：脚本里必须有 `a.get("passed")`）。
+
+⇒ 如果只修一处，另一处会让它**以另一种形状回来**。
+
+═══ 六、⛔ F2P=0 是**真的**，不是第二个量具 bug（n=1 证物）═══
+
+按第 25 条，一个新出现的 0 必须先自证。取 `67fcf64`（"honour a falsey validator
+in bucket"），人类新增的测试**恰好三条**，一条都进不来：
+
+```python
+class AllowedKeys(set):            # ← 测试函数**内部**定义的辅助类
+    def __call__(self, key): return key in self
+allowed = AllowedKeys()
+self.assertFalse(allowed)                                  # ① truthy 形态 ⇒ 拒收
+D = mi.bucket(iter([10, 20, 11, 21]), key=lambda x: x, validator=allowed)
+self.assertEqual(list(D[10]), [])                          # ② 辅助类在沙箱里不存在 ⇒ 上下文门
+self.assertNotIn(10, D)                                    # ③ 需要 ∈ 判据 ⇒ 拒收
+self.assertEqual(set(D), set())                            # ④ set 不可序列化 ⇒ 丢
+```
+
+人类修的是 `validator or (...)` ⇒ `validator is None`。四条断言分别卡在
+**truthy 形态 / 上下文（辅助类）/ ∈ 形态 / 不可序列化** —— 与 163 的三道门
+完全同形，只是这次是**判据那一侧**的门。
+
+⛔ n=1，且是手工归因。**下一步**要做成可复现的普查（按 commit 归因"PR 新增断言
+各被哪道门拦掉"），现在不能说"more-itertools 的 F2P 恒为 0"。
+
+═══ 七、契约：`tests/contract_unittest_extract_test.py`（A–J）═══
+
+  · **C/D 组（最要紧）**：非同形断言不产出，且 D 组注入反证证明"0 条"是**拦的**
+    不是没扫到。⛔ 第一版用 `assertTrue` 做反证是**恒假**的（它是单参断言，放进
+    表也产不出）⇒ 改用双参的 `assertNotEqual`，顺带演示"放开就造出语义相反的判据"。
+  · **F 组**：父包降级默认不开、多段属性（`mi.recipes.f`）不许降。
+  · **J 组**：tuple 期望不产出 + 反证（list 期望**不**被误拦）。
+
+═══ 八、实踩的四个 bug（都在读数之前被契约/自检抓住）═══
+
+  1. **父包降级的兜底写法全漏**：第一版写成"strict 失败才试 pkg"，而
+     `resolve_probe` 只要**动过**就返回非 None（内联一个变量也算）⇒
+     `mi.last(iterable)` 早就在 strict 里"成功"了 ⇒ pkg 分支永不进入
+     ⇒ 628 条只救回 159 条，剩下的全带着 `mi.` 进沙箱（那里没有 `mi`）。
+     ⇒ 改成**两条都跑**，差额即为 `n_pkg_demote`。
+  2. **属性链中段被误降**：`mi.recipes.f` 的内层 `mi.recipes` 会被自底向上的
+     `generic_visit` 单独判一次（tail 恰好单段）⇒ 整条链变成 `recipes.f(1)`
+     —— 一个被测模块里根本不存在的名字。⇒ `_Demote` 引入 `_in_chain`。
+  3. **假 F2P**（第五节）：两套比较口径。
+  4. **契约 A3 随第五节变了口径**：`assertTupleEqual` 形状同形但期望**必然是
+     tuple** ⇒ 结构性不可达。⛔ 不放进映射表又会留下"表里能抽、实际抽不到"的
+     假象 ⇒ 保留在表内，归因记在 `n_tuple_gold`。
+
+═══ 九、残留（⛔ 全是削弱结论的方向）═══
+
+  · **端到端修好仍是 0/6**。判据 0→544 是实测，但它**没有**换来任何一个修好的 bug
+    —— 与 164「开门的收益是 0」是同一句，只是这次门开在判据侧。
+  · F2P=0 的归因目前是 **n=1 手工**（第六节），未做普查。
+  · 163 那张表里的 boltons 判据条数**已变**（16→18、59→65，因期望侧内联）；
+    结论（修好 2/2）未变，但**数字不能与旧表混用**。
+  · `truthy` / `∈` / `≠` 三种形态仍未做（第二节），more-itertools 有 128 条
+    （单文件）被这道形态门挡在外面 ⇒ 这是**扩张**，需用户拍板。
+  · attrs 的 64% 不可序列化、本次的 242 条，同为**结构性**限制（沙箱走 JSON），
+    要动就得改判据传参方式 ⇒ 属扩张，未做。
+  · `reach` 依旧是事后 oracle；held-out 闸仍未跑过（`no_gate` 口径）。

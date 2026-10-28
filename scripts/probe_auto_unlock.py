@@ -114,6 +114,7 @@ def auto_extract(repo: Path, sha: str, src: str, testfs: list,
         stx["import_error"] = True
         return [], stx
     tests, n_stable = [], 0
+    n_unpassed = 0
     for j, c in enumerate(cands):
         a, b = r1.get(f"x{j}"), r2.get(f"x{j}")
         if not a:
@@ -127,8 +128,22 @@ def auto_extract(repo: Path, sha: str, src: str, testfs: list,
             continue
         if a.get("got") is None or (b and b.get("got") != a.get("got")):
             continue
+        #: ⛔⛔ 三验第 1 步现在**必须含 `passed`**（README 165 第五节）。
+        #:    只验"能求值 + 两次一致 + 与写死期望一致"是不够的：判据真正
+        #:    执行时比的是 **JSON 往返后**的值，而三验比的是 `literal_eval`
+        #:    的值 ⇒ 两套口径不一致。实测后果：`expect` 是 tuple 的判据
+        #:    （JSON 会把它降级成 list）三验全过，进了判据集后在**任何**
+        #:    版本上都失败 ⇒ 被当成 F2P ⇒ more-itertools 那 69 条"F2P"
+        #:    几乎全是这个 ⇒ 合成层对着一堆永假目标烧光预算。
+        if not (a.get("passed") and b and b.get("passed")):
+            n_unpassed += 1
+            continue
         #: 三验第 3 步：与测试**自己写死**的 expected 对拍
-        g = gold_of(c["gold"]) if c.get("gold") is not None else None
+        #: ⛔ 用 `gold_value`（可能经内联解出），不是 `gold`（原文）——
+        #:    期望侧写成变量的判据（more-itertools 293 条）用原文会全丢。
+        g = c.get("gold_value")
+        if g is None and c.get("gold") is not None:
+            g = gold_of(c["gold"])
         if g is None or not lit(a["got"])[1] or lit(a["got"])[0] != g:
             continue
         n_stable += 1
@@ -136,6 +151,7 @@ def auto_extract(repo: Path, sha: str, src: str, testfs: list,
     return tests, {"n_probe": stx.get("n_raw", 0), "n_cand": len(cands),
                    "n_unstable": stx.get("n_unstable", 0),
                    "n_unserializable": stx.get("n_unjsonable", 0),
+                   "n_unpassed_on_fixed": n_unpassed,
                    "n_semantics_ok": n_stable, "n_tests": len(tests)}
 
 
@@ -184,10 +200,12 @@ def main() -> int:
             else None
         tests, stx = auto_extract(repo, sha, src, testfs, pkg=pkg)
         print(f"── {sha}  {subj[:44]}")
-        print(f"   抽取：断言 {stx.get('n_probe', 0)} → 候选 {stx.get('n_cand', 0)}"
+        print(f"   抽取：断言 {stx.get('n_probe', 0)} → 候选"
+              f" {stx.get('n_cand', 0)}"
               f" → 过三验 {stx.get('n_semantics_ok', 0)}"
-              f"（其中 {stx.get('n_unserializable', 0)} 条期望值不可序列化"
-              f" ⇒ 进不了沙箱，显式丢弃）→ **可用判据 {stx.get('n_tests', 0)}**")
+              f"（{stx.get('n_unserializable', 0)} 条期望值不可序列化 + "
+              f"{stx.get('n_unpassed_on_fixed', 0)} 条在参照实现上就没过"
+              f" ⇒ 显式丢弃）→ **可用判据 {stx.get('n_tests', 0)}**")
         if not tests:
             rows.append({"sha": sha, "stage": "no_criteria"})
             continue

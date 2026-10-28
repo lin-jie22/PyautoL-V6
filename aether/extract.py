@@ -58,6 +58,34 @@ _UNSTABLE_CALLS = {"today", "now", "random", "randint", "randrange", "uuid",
                    "uuid4", "time", "monotonic", "perf_counter", "choice",
                    "shuffle", "uniform", "getrandbits"}
 
+#: ⛔⛔ unittest 断言映射表 —— **只收「同形」映射**（README 165）。
+#:
+#: 判据层**只有两种形态**：`expect`（探针 == 一个可 JSON 的值）与 `raises`
+#: （探针抛指定异常）。所以能进这张表的 unittest 断言，必须 **不改变这个
+#: 形状** —— 只是同一种判断的另一种写法：
+#:
+#:     assertEqual(a, b)        ≡ assert a == b       ⇒ expect   ✅
+#:     assertTupleEqual(a, b)   ≡ assert a == b       ⇒ expect   ✅
+#:     assertListEqual(a, b)    ≡ assert a == b       ⇒ expect   ✅
+#:     assertRaises(E): ...     ≡ with raises(E)      ⇒ raises   ✅
+#:
+#: ⛔⛔ 下面这些**一律不许进表**（它们需要新的比较语义 = 扩张判据形态）：
+#:
+#:     assertNotEqual  ⇒ 需要"≠"判据      assertTrue/False ⇒ 需要 truthy 判据
+#:     assertIn        ⇒ 需要"∈"判据      assertIs         ⇒ 需要身份判据
+#:     assertAlmostEqual ⇒ 需要容差判据   assertRaisesRegex ⇒ 需要匹配判据
+#:
+#: 把它们塞进 `expect` 是**造假判据** —— 语义不同却长得一样。本层选择
+#: **记账拒收**（`n_unmapped` + 分布），要不要扩张由人拍板（第 126 条）。
+_UNITTEST_SAME = {
+    "assertEqual": "expect",
+    "assertTupleEqual": "expect",
+    "assertListEqual": "expect",
+}
+
+#: `assertRaises` 也只收**同形**的两种写法（with 上下文 / 直接调用）。
+_RAISE_NAMES = ("raises", "assertRaises")
+
 
 # ─────────────────────────── 断言抽取（带作用域）─────────────────────────
 def scoped_assertions(test_src: str):
@@ -114,7 +142,10 @@ def scoped_raise_probes(test_src: str):
                         continue
                     f = ctx.func
                     nm = getattr(f, "id", None) or getattr(f, "attr", None)
-                    if nm != "raises":
+                    #: ⛔ `assertRaises`（unittest）与 `raises`（pytest）同形，
+                    #:    第一版只认后者 ⇒ more-itertools 的 134 条 with 形态
+                    #:    整个漏掉（"0 条判据"里有一半是这个，不是没鉴别力）。
+                    if nm not in _RAISE_NAMES:
                         continue
                     a0 = ctx.args[0]
                     exc = getattr(a0, "id", None) or getattr(a0, "attr", None)
@@ -126,6 +157,81 @@ def scoped_raise_probes(test_src: str):
             walk(ch, fn)
 
     walk(tree, "<module>")
+    return out
+
+
+def scoped_unittest_probes(test_src: str):
+    """⛔ README 165：**unittest 风格**的断言（`self.assertEqual(...)`）。
+
+    只产出**同形**映射（见 `_UNITTEST_SAME` 上的长注释）。返回
+    `[(探针, 期望文本|异常名, 函数名, kind)]`，与 `scoped_assertions`
+    的元组形状一致，可直接拼进同一条流水线。
+
+    ⛔ 覆盖 `assertRaises` 的**两种**写法：
+
+        with self.assertRaises(ValueError):      ⇒ (探针, 'ValueError')
+            mi.take(3, x)
+        self.assertRaises(ValueError, mi.take, 3, x)   ⇒ 同上（直接调用式）
+
+    第二版只做了 with 形态 ⇒ more-itertools 的 50 条直接调用式全漏。
+    直接调用式映射成 `callee(args...)`，只接受 Name/Attribute 作 callee
+    （lambda / 下标等 ⇒ 拒收，不做文本拼接，免得造出语法正确的假探针）。
+    """
+    tree = ast.parse(test_src)
+    out: List[Tuple[str, str, str, str]] = []
+
+    def callee_name(call: ast.Call):
+        f = call.func
+        if isinstance(f, ast.Name):
+            return f.id
+        if isinstance(f, ast.Attribute):
+            return getattr(f, "attr", None)
+        return None
+
+    def walk(node, fn: str):
+        for ch in ast.iter_child_nodes(node):
+            if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                walk(ch, ch.name)
+                continue
+            if isinstance(ch, ast.Call):
+                nm = callee_name(ch)
+                if nm in _UNITTEST_SAME and len(ch.args) == 2:
+                    out.append((ast.unparse(ch.args[0]),
+                                ast.unparse(ch.args[1]), fn, "expect"))
+                elif nm == "assertRaises" and len(ch.args) >= 2:
+                    a0 = ch.args[0]
+                    exc = getattr(a0, "id", None) or getattr(a0, "attr", None)
+                    callee = ch.args[1]
+                    if exc and isinstance(callee, (ast.Name, ast.Attribute)):
+                        probe = ast.Call(func=callee, args=ch.args[2:],
+                                         keywords=[])
+                        ast.fix_missing_locations(probe)
+                        out.append((ast.unparse(probe), exc, fn, "raises"))
+            walk(ch, fn)
+
+    walk(tree, "<module>")
+    return out
+
+
+def unmapped_unittest_calls(test_src: str) -> Dict[str, int]:
+    """⛔ **被拒收**的 unittest 断言分布（`{名字: 条数}`）。
+
+    记账而非静默丢弃（第 149 条：跳过 ≠ 通过）。⛔ 这张表是"要不要扩张
+    判据形态"的**唯一依据** —— 如果 `assertTrue` 有 800 条而 `assertEqual`
+    只有 20 条，那么"覆盖率低"的原因就不是抽取没做，而是形态太窄。
+    """
+    tree = ast.parse(test_src)
+    out: Dict[str, int] = {}
+    for n in ast.walk(tree):
+        if not isinstance(n, ast.Call):
+            continue
+        f = n.func
+        nm = getattr(f, "attr", None) or getattr(f, "id", None)
+        if not nm or not nm.startswith("assert"):
+            continue
+        if nm in _UNITTEST_SAME or nm == "assertRaises":
+            continue
+        out[nm] = out.get(nm, 0) + 1
     return out
 
 
@@ -267,26 +373,82 @@ def _qual_of(node: ast.AST, aliases: Dict[str, str]):
 
 
 class _Demote(ast.NodeTransformer):
-    """把「指向被测模块的 alias.名字」替换成**模块内裸名**（方向不可逆）。"""
+    """把「指向被测模块的 alias.名字」替换成**模块内裸名**（方向不可逆）。
 
-    def __init__(self, target: str, aliases: Dict[str, str]):
+    ⛔⛔ `pkg` —— **父包**的完全限定名（README 165）。开了它才会把
+    `mi.first(x)`（`import more_itertools as mi`）降成 `first(x)`：
+
+        被测模块是 more_itertools/more.py，而测试用的是**包的公开 API**
+        （`__init__` 里 re-export 的那批名字）。没有这条 ⇒ more-itertools
+        的 628 条判据**一条都跑不起来**（沙箱只装 more.py 本体，里面没有
+        `mi` 这个名字）⇒ 又是一个"0 条"的假读数（第 25 条）。
+
+    ⛔ 它是**试探性**的，与 `target` 那条**不是**一个可信度级别：
+       · `target` 降级：限定名**精确等于**被测模块 ⇒ 静态可证。
+       · `pkg` 降级：只证明"这名字是从包上取的"，**不证明它来自被测
+         模块**（包里 re-export 的可能来自别的子模块）。
+      ⇒ 它**只能**在三验（能求值 + 两次一致 + 与写死期望一致）之后成立：
+       名字在被测模块里不存在 ⇒ NameError ⇒ 被三验剔除（fail-closed）。
+      ⛔ 因此调用方必须**记账**它救了多少条，不许当成白捡的收益。
+    """
+
+    def __init__(self, target: str, aliases: Dict[str, str],
+                 pkg: Optional[str] = None):
         self.target = target
         self.aliases = aliases
+        self.pkg = pkg
         self.changed = False
+        #: ⛔ **链内标记**：`mi.recipes.f` 里的 `mi.recipes` 是**链中段**，
+        #:    不许它自己"降一下"。第一版没这个标记 ⇒ 自底向上的
+        #:    `generic_visit` 先把内层 `mi.recipes` 降成 `recipes`，整条链
+        #:    变成 `recipes.f(1)` —— 一个被测模块里根本不存在的名字。
+        self._in_chain = False
 
-    def visit_Attribute(self, node):  # noqa: N802
-        self.generic_visit(node)
+    def _try(self, node, prefix: str):
         q = _qual_of(node, self.aliases)
-        if q and q.startswith(self.target + "."):
-            tail = q[len(self.target) + 1:]
+        if q and q.startswith(prefix + "."):
+            tail = q[len(prefix) + 1:]
+            #: ⛔ 只降**单段**标识符：`mi.recipes.foo` 不许降成 `recipes.foo`
+            #:    （那会凭空造出"被测模块里有 recipes"的假象）。
             if "." not in tail and tail.isidentifier():
                 self.changed = True
                 return ast.copy_location(ast.Name(id=tail, ctx=node.ctx), node)
+        return None
+
+    def visit_Attribute(self, node):  # noqa: N802
+        if self._in_chain:
+            #: 我是链中段：继续往下（保持链内），但自己**不降**
+            self._descend(node)
+            return node
+        new = self._try(node, self.target)
+        if new is None and self.pkg:
+            new = self._try(node, self.pkg)
+        if new is not None:
+            return new
+        self._descend(node)
         return node
+
+    def _descend(self, node):
+        """往下走：属性链内部保持 `_in_chain`，**非链**子节点正常处理。
+
+        ⛔ 为什么不直接 `generic_visit`：那会把 `mi.recipes`（`mi.recipes.f`
+        的内层）当成**独立**访问再判一次 ⇒ 它的 tail 恰好是单段 ⇒ 被降。
+        """
+        if isinstance(node.value, ast.Attribute):
+            saved, self._in_chain = self._in_chain, True
+            self.visit(node.value)
+            self._in_chain = saved
+        else:
+            #: ⛔ 进这里时 `_in_chain` **必须**复位：下面可能藏着该降的
+            #:    `mi.first(x)`（例如 `mi.first(x).attr` 的 value 是 Call）。
+            saved, self._in_chain = self._in_chain, False
+            self.generic_visit(node)
+            self._in_chain = saved
 
 
 def demote_binds(binds: Dict[str, Any], target: str,
-                 aliases: Dict[str, str], maxdepth: int = 4):
+                 aliases: Dict[str, str], maxdepth: int = 4,
+                 pkg: Optional[str] = None):
     """把一批绑定的 rhs 做自指模块降级。
 
     ⛔ **链式**（`h = b2h`）不在这里做 —— 那是 `_Inliner` 的递归展开负责的。
@@ -297,7 +459,7 @@ def demote_binds(binds: Dict[str, Any], target: str,
         changed = False
         nxt: Dict[str, Any] = {}
         for k, v in cur.items():
-            tr = _Demote(target, aliases)
+            tr = _Demote(target, aliases, pkg)
             newv = tr.visit(copy.deepcopy(v))
             ast.fix_missing_locations(newv)
             if tr.changed:
@@ -309,7 +471,8 @@ def demote_binds(binds: Dict[str, Any], target: str,
     return cur
 
 
-def demote_expr(expr: str, target: str, aliases: Dict[str, str]):
+def demote_expr(expr: str, target: str, aliases: Dict[str, str],
+                pkg: Optional[str] = None):
     """⛔ **A 形态**：断言里**直接**写了模块名前缀（`strutils.f(x)` ⇒ `f(x)`）。
 
     它比 B 形态（局部别名）普遍得多：`test_strutils.py` 里绝大多数断言是这种
@@ -321,7 +484,7 @@ def demote_expr(expr: str, target: str, aliases: Dict[str, str]):
         tree = ast.parse(expr, mode="eval")
     except SyntaxError:
         return None
-    tr = _Demote(target, aliases)
+    tr = _Demote(target, aliases, pkg)
     new = tr.visit(tree)
     if not tr.changed:
         return None
@@ -330,18 +493,22 @@ def demote_expr(expr: str, target: str, aliases: Dict[str, str]):
 
 
 def resolve_probe(expr: str, binds: Dict[str, Any], target: str,
-                  aliases: Dict[str, str], rounds: int = 3):
+                  aliases: Dict[str, str], rounds: int = 3,
+                  pkg: Optional[str] = None):
     """把一条探针的上下文依赖降到沙箱里有解为止。
 
     ⛔ 两种形态**交替**下刀，缺一个就漏一大片；且 A 做完可能暴露出新的 B
     （反之亦然）⇒ 必须迭代到不动点。
+
+    `pkg`：父包降级（README 165），默认**不开** —— 它是试探性的，只有
+    `extract_criteria` 那条路径开，并记账。
     """
-    dbinds = demote_binds(binds, target, aliases)
+    dbinds = demote_binds(binds, target, aliases, pkg=pkg)
     cur = expr
     moved = False
     for _ in range(rounds):
         before = cur
-        d = demote_expr(cur, target, aliases)
+        d = demote_expr(cur, target, aliases, pkg=pkg)
         if d:
             cur, moved = d, True
         i = inline_expr(cur, dbinds)
@@ -476,6 +643,31 @@ def _jsonable(v) -> bool:
         return False
 
 
+def _has_tuple(v) -> bool:
+    """⛔⛔ **tuple 期望是假判据**（README 165 第五节）。
+
+    沙箱用 JSON 传 `expect` ⇒ **tuple 会被降级成 list**，而 `got` 是真实的
+    tuple ⇒ `got == expect` **恒为 False** ⇒ 这类判据在任何版本上都"失败"。
+
+    ⛔ 最坏的地方在于它**看起来像 F2P**：在缺陷版上失败 ⇒ 被当成有鉴别力
+    ⇒ 合成层拿它当目标去搜 ⇒ 永远搜不到（改哪儿都不可能让 tuple == list）
+    ⇒ 白白烧掉整个候选预算（实测 more-itertools 的 69 条"F2P"里，
+    **绝大多数**是这一条造成的）。
+
+    ⛔ 为什么三验没拦住：三验比对的是 `got` 的 `literal_eval` 与 gold
+    （那里两边都是 tuple，相等），而判据真正执行时比的是 **JSON 往返后**
+    的值（一边 tuple 一边 list）⇒ 两套比较口径不一致。修法是**两处都动**：
+    这里显式丢弃并记账，调用方再加一道 `passed` 验（见 `probe_auto_unlock`）。
+    """
+    if isinstance(v, tuple):
+        return True
+    if isinstance(v, (list, set, frozenset)):
+        return any(_has_tuple(x) for x in v)
+    if isinstance(v, dict):
+        return any(_has_tuple(k) or _has_tuple(x) for k, x in v.items())
+    return False
+
+
 def extract_criteria(test_src: str, target: str,
                      jsonable_only: bool = True,
                      stats: Optional[Dict[str, int]] = None,
@@ -489,18 +681,38 @@ def extract_criteria(test_src: str, target: str,
     `stats` 若传入，会被填上 `n_raw / n_unstable / n_unjsonable / n_out`
     —— 每一步丢了多少都记账，调用方不能只看最终条数。
     """
-    st = {"n_raw": 0, "n_unstable": 0, "n_unjsonable": 0, "n_out": 0}
+    st = {"n_raw": 0, "n_unstable": 0, "n_unjsonable": 0, "n_out": 0,
+          "n_gold_resolved": 0}
     tree = ast.parse(test_src)
     aliases = module_aliases(tree)
     binds_by_scope = collect_bindings(test_src)
+    unmapped: Dict[str, int] = {}
     out: List[Dict[str, Any]] = []
+    #: ⛔ 父包降级（README 165）只在**测试确实导入了这个包**时才开：
+    #:    否则 `mi` 这种别名根本不存在，开了也白开；而开了却没别名 ⇒
+    #:    不会误伤任何东西（记账为 0，读数自证）。
+    pkg = target.rsplit(".", 1)[0] if "." in target else None
+    if pkg and pkg not in set(aliases.values()):
+        pkg = None
     raw = ([(a, e, f, "expect") for a, e, f in scoped_assertions(test_src)]
-           + [(a, e, f, "raises") for a, e, f in scoped_raise_probes(test_src)])
+           + [(a, e, f, "raises") for a, e, f in scoped_raise_probes(test_src)]
+           + list(scoped_unittest_probes(test_src)))
     for expr, gold, fn, kind in raw:
         st["n_raw"] += 1
         binds = dict(binds_by_scope.get("<module>", {}))
         binds.update(binds_by_scope.get(fn, {}))
-        new = resolve_probe(expr, binds, target, aliases)
+        #: ⛔ **两条都跑**，不是为了兜底而是为了**记账**：`pkg` 降级是
+        #:    试探性的（README 165），必须单独知道它救了多少条。
+        #:    ⛔ 第一版写成"strict 失败才试 pkg" ⇒ 全漏：`resolve_probe`
+        #:    只需**动过**就返回非 None（内联 `iterable` 也算动过）⇒
+        #:    `mi.last(iterable)` 早就在 strict 里"成功"了，pkg 分支永远
+        #:    不进 ⇒ 628 条里只救回 159 条，剩下的全带着 `mi.` 前缀
+        #:    原样进沙箱（那里没有 `mi`）⇒ 又是一个"0 条"（第 24 条）。
+        strict = resolve_probe(expr, binds, target, aliases)
+        new = (resolve_probe(expr, binds, target, aliases, pkg=pkg)
+               if pkg else strict)
+        if pkg and new is not None and new != (strict or expr):
+            st["n_pkg_demote"] = st.get("n_pkg_demote", 0) + 1
         call = new or expr
         if has_unstable_call(call):
             st["n_unstable"] += 1
@@ -510,14 +722,43 @@ def extract_criteria(test_src: str, target: str,
             row["raises"] = gold
         else:
             g = gold_of(gold)
+            if g is None:
+                #: ⛔ **期望侧也要降级+内联**（README 165）。`assertEqual(a,
+                #:    expected)` 里 `expected` 是个局部变量 ⇒ `literal_eval`
+                #:    拿不到值 ⇒ 第一版整条丢弃。more-itertools 的 921 条
+                #:    assertEqual 里 **293 条**的期望侧就长这样。
+                #:    ⛔ 只有内联成 **literal** 才收：若展开后仍不是常量
+                #:    （`expected = f(x)`），说明期望值本身依赖被测模块
+                #:    ⇒ 那是循环论证，不收。
+                gi = resolve_probe(gold, binds, target, aliases)
+                if gi:
+                    g2 = gold_of(gi)
+                    if g2 is not None:
+                        g, st["n_gold_resolved"] = g2, \
+                            st["n_gold_resolved"] + 1
             if jsonable_only and (g is None or not _jsonable(g)):
                 st["n_unjsonable"] += 1
                 continue
+            if jsonable_only and _has_tuple(g):
+                st["n_tuple_gold"] = st.get("n_tuple_gold", 0) + 1
+                continue
+            #: ⛔ `gold` 保留**原文**（契约按原文对拍），`gold_value` 是
+            #:    解出来的**值**（可能来自内联）。调用方必须用后者 ——
+            #:    只用前者 ⇒ 期望侧是变量的判据会静默变成"0 条"
+            #:    （第一版就是这样，293 条里一条没进）。
             row["gold"] = gold
+            row["gold_value"] = g
         out.append(row)
+    for k, v in unmapped_unittest_calls(test_src).items():
+        unmapped[k] = unmapped.get(k, 0) + v
     st["n_out"] = len(out)
+    st["n_unmapped"] = sum(unmapped.values())
     if stats is not None:
         stats.update(st)
+        stats.setdefault("unmapped_kinds", {})
+        for k, v in unmapped.items():
+            stats["unmapped_kinds"][k] = \
+                stats["unmapped_kinds"].get(k, 0) + v
     return out
 
 
