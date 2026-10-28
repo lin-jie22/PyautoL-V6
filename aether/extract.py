@@ -519,3 +519,98 @@ def extract_criteria(test_src: str, target: str,
     if stats is not None:
         stats.update(st)
     return out
+
+
+# ─────────────────────── ④ 装载上下文（README 164）───────────────────────
+def pkg_deps(src: str, pkgname: str) -> Set[str]:
+    """抽源码里指向**同包**的模块依赖（相对导入 + 绝对包内导入）。
+
+    ⛔ 只认**第一段**：`from .a.b import c` ⇒ 依赖 `a`；`import boltons.x.y`
+    ⇒ 依赖 `x`。同包依赖的粒度就是模块，更细的没有意义。
+
+    ⛔ 语法错误的源码返回空集（不 raise）：调用方拿它做裁剪，一个装不起来的
+    模块不该让整个装载崩在这里 —— 它的失败会在沙箱里**如实**报出来。
+    """
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return set()
+    out: Set[str] = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom):
+            if n.level and n.module:
+                out.add(n.module.split(".")[0])
+            elif n.level:
+                #: ⛔ `from . import a, b` —— **module 是 None，依赖藏在
+                #:    `names` 里**。第一版只在 `n.module` 存在时才加依赖
+                #:    ⇒ 这一形态整个漏掉 ⇒ attrs 25 个里 23 个装不起来
+                #:    （症状 `cannot import name '_config' from 'attr'`）。
+                #:    实测 attrs 的 `_make.py` 就写 `from . import _compat,
+                #:    _config, setters`。
+                for a in n.names:
+                    out.add(a.name.split(".")[0])
+            elif n.module:
+                parts = n.module.split(".")
+                if parts[0] == pkgname:
+                    if len(parts) > 1:
+                        out.add(parts[1])
+                    else:
+                        #: `from <pkg> import a`：a 可能是子模块也可能是属性
+                        for a in n.names:
+                            out.add(a.name.split(".")[0])
+        elif isinstance(n, ast.Import):
+            for a in n.names:
+                parts = a.name.split(".")
+                if len(parts) > 1 and parts[0] == pkgname:
+                    out.add(parts[1])
+    return out
+
+
+def needed_modules(main_src: str, pkgname: str, pool: Dict[str, str],
+                   include_init: bool = False) -> List[Tuple[str, str]]:
+    """按**依赖闭包**裁剪 `pool`，返回 `[(相对名, 源码)]`（依赖在前）。
+
+    ⛔⛔ 为什么要裁剪：第一版把**整个包**都塞进沙箱 ⇒ boltons 从 100% 掉到
+    0%。原因是无关模块连坐 —— `ecoutils.py` 会 `import getpass → termios`，
+    而 `termios` 在沙箱的 deny-modules 里 ⇒ 一个八竿子打不着的模块让整批
+    装载失败。**被测模块只依赖它真正 import 的那几个**。
+
+    ⛔ 循环依赖不追求严格拓扑：runner 侧是**先注册到 `sys.modules` 再 exec**，
+    所以 A↔B 互相 import 不会死递归（只是属性可能未定义 —— 那是源码自己的
+    性质，不该由装载层掩盖）。这里只保证「依赖尽量在前」，并用预算上限兜底
+    防止迭代不终止。
+
+    ⛔ `__init__` 默认**不带**：它常写 `from .<被测> import *`，而实测证明
+    runner 已能处理；但带它会引入整包的副作用（同上，连坐风险）。
+    """
+    have = dict(pool)
+    init = have.pop("", None)
+    order: List[str] = []
+    done: Set[str] = set()
+    #: ⛔⛔ `onpath` 是**当前 DFS 路径**，不是"还在栈里的节点"。
+    #:    第一版用 `pend = set(stack)` 判循环 ⇒ **误伤**：同层兄弟节点
+    #:    （主干也直接依赖 `_config`）也被当成"已满足" ⇒ 依赖被排到
+    #:    被依赖者**后面**。实测 attrs `validators.py` 因此得到顺序
+    #:    `[_compat, setters, _make, _config, ...]` —— `setters` 排第 2，
+    #:    而它依赖的 `_config`/`exceptions` 排在后面 ⇒ 装载直接炸。
+    #:    循环检测必须按**路径**判（`onpath`），不能按"在不在栈里"。
+    onpath: Set[str] = set()
+
+    def visit(rel: str) -> None:
+        if rel in done or rel not in have:
+            return
+        if rel in onpath:            #: 真循环 ⇒ 就地放下，不等待
+            return
+        onpath.add(rel)
+        for d in sorted(pkg_deps(have[rel], pkgname)):
+            visit(d)
+        onpath.discard(rel)
+        done.add(rel)
+        order.append(rel)            #: 后序 ⇒ 依赖一定排在被依赖者前面
+
+    for d in sorted(pkg_deps(main_src, pkgname)):
+        visit(d)
+    out = [(r, have[r]) for r in order]
+    if include_init and init is not None:
+        out.append(("", init))
+    return out

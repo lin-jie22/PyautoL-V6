@@ -163,16 +163,85 @@ if "--selftest" in sys.argv:
 src = sys.stdin.read()
 payload = json.loads(open(sys.argv[1], encoding="utf-8").read())
 tests = payload["tests"]
-ns = {"__name__": "task"}
+_pkg = payload.get("pkg")
 err = None
 #: ⛔ `raises` 的取值是**受控词表**（内建异常名），绝不用 eval 把它解析成
 #:    类型 —— 那是把不可信数据当代码执行。表外的值一律判失败，
 #:    ⛔ 不许静默降级成 truthy 检查（那会把它变成另一种判据）。
 import builtins as _bi
+import types as _ty
 _EXC_TABLE = {n: v for n, v in vars(_bi).items()
               if isinstance(v, type) and issubclass(v, BaseException)}
+
+_PNAME = ""                          #: 整包装载时的包名（`_pkg_getattr` 用）
+
+def _mkmod(full, pname):
+    m = _ty.ModuleType(full)
+    m.__package__ = pname
+    m.__path__ = []                  #: 让 `from . import x` 有父包可查
+    return m
+
+def _pkg_getattr(_n):
+    """⛔ 父包属性兜底（PEP 562）。
+
+    真实的 import 系统在加载子模块后会把它**设成父包的属性**，而我们手工
+    `sys.modules[full] = m` **不会** ⇒ `from . import _config` / `from attr
+    import _config` 会报 `cannot import name '_config'`（实测 attrs 25 个
+    里 23 个卡在这里）。这里按名从 `sys.modules` 回捞，找不到就照常抛
+    AttributeError（⛔ 不许返回 None 之类的假对象 —— 那会把"缺模块"变成
+    "属性是空"，更难查）。
+    """
+    _m = sys.modules.get(_PNAME + "." + _n)
+    if _m is None:
+        raise AttributeError(f"module {_PNAME!r} has no attribute {_n!r}")
+    return _m
+
 try:
-    exec(compile(src, "task.py", "exec"), ns)
+    if _pkg:
+        #: ── 整包装载（README 164）────────────────────────────────────
+        #: 默认路径把源码当 `task.py` **单独 exec** ⇒ 没有父包 ⇒ 任何
+        #: 包内相对导入（`from .recipes import ...`）都炸
+        #: `ImportError: attempted relative import with no known parent
+        #: package`。实测正常的 Python 包仓库 92% 卡在这一步（连门都进
+        #: 不去），而 boltons 恰好不用相对导入 ⇒ 才有了那个 5%。
+        #:
+        #: ⛔ 边界**没变**：这里的每个字节都来自 payload 里调用方给的
+        #:    dict，runner 一行文件系统都不读、不联网、不 import 仓库外
+        #:    的东西。装载面变大的是"同一批不可信源码内部能否互相引用"。
+        _pname, _mod = _pkg["name"], _pkg["module"]
+        _PNAME = _pname
+        _parent = sys.modules.get(_pname) or _mkmod(_pname, _pname)
+        sys.modules[_pname] = _parent
+        _parent.__getattr__ = _pkg_getattr   #: `from . import x` 的属性回捞
+        _mods = dict(_pkg.get("modules") or {})
+        _init = _mods.pop("", None)          #: `__init__` **最后**装
+
+        #: ⓵ 同包模块（不含 `__init__`）：被测模块可能 `from .x import y`
+        for _rel, _msrc in _mods.items():
+            if _rel == _mod:
+                continue                     #: 被测模块自己由 stdin 给
+            _full = f"{_pname}.{_rel}"
+            _m = sys.modules.get(_full) or _mkmod(_full, _pname)
+            sys.modules[_full] = _m
+            #: ⛔ 绑成父包属性：手工注册进 `sys.modules` 不会自动绑，
+            #:    而 `from . import x` 走的是 getattr。
+            setattr(_parent, _rel.split(".")[0], _m)
+            exec(compile(_msrc, _full.replace(".", "/") + ".py", "exec"),
+                 _m.__dict__)
+        #: ⓶ 被测模块：**先注册再 exec** —— 注册在前是为了让 `__init__`
+        #:    里的 `from .<被测> import *` 能找到它（实测包都这么写）。
+        _self = _mkmod(f"{_pname}.{_mod}", _pname)
+        sys.modules[f"{_pname}.{_mod}"] = _self
+        setattr(_parent, _mod, _self)
+        ns = _self.__dict__
+        exec(compile(src, f"{_pname}/{_mod}.py", "exec"), ns)
+        #: ⓷ `__init__`：放最后，因为它通常要 import 包内其它成员
+        if _init is not None:
+            exec(compile(_init, f"{_pname}/__init__.py", "exec"),
+                 _parent.__dict__)
+    else:
+        ns = {"__name__": "task"}
+        exec(compile(src, "task.py", "exec"), ns)
 except Exception:
     err = traceback.format_exc()
 out = []
@@ -768,10 +837,21 @@ def _mem_watchdog(proc: Any, cap_bytes: int, stop: Dict[str, bool],
 
 
 def run_in_sandbox(source: str, tests: List[Dict[str, Any]],
-                   timeout: float = 10.0) -> ExecResult:
+                   timeout: float = 10.0,
+                   pkg: Optional[Dict[str, Any]] = None) -> ExecResult:
     """跑一次测试。**不做判断**，只报事实。
 
     ⛔ 崩溃/超时都被如实记账（rc / stderr），绝不返回"通过"。
+
+    `pkg`（可选，README 164）—— 让被测模块以**包成员**身份装载，从而
+    支持包内相对导入。形态 `{"name": 包名, "module": 模块名,
+    "modules": {相对名: 源码}}`，`modules` 里 `""` 键 = 包 `__init__`。
+
+    ⛔ **默认 None ⇒ 与加这个参数之前一字不差**（单文件 `task.py` 路径）。
+    ⛔ 隔离边界**不因传了 pkg 而削弱**：源码仍全部来自调用方传入的
+       dict，runner 不读文件系统、不联网；变的只是"这批源码内部能否
+       互相 import"。传了 pkg 也一样跑在同一层沙箱里（`sandbox` 字段
+       照常逐级记账）。
 
     ⛔ 隔离分两层，**两层都要如实记账**（`ExecResult.sandbox`）：
 
@@ -792,7 +872,11 @@ def run_in_sandbox(source: str, tests: List[Dict[str, Any]],
     with tempfile.TemporaryDirectory(prefix="v6env_") as td:
         spec = Path(td) / "tests.json"
         runner = Path(td) / "runner.py"
-        spec.write_text(json.dumps({"tests": tests}), encoding="utf-8")
+        #: ⛔ `pkg` **只在传了的时候**写进 payload ⇒ 老路径的 spec 字节不变。
+        _pl: Dict[str, Any] = {"tests": tests}
+        if pkg:
+            _pl["pkg"] = pkg
+        spec.write_text(json.dumps(_pl), encoding="utf-8")
         runner.write_text(_RUNNER, encoding="utf-8")
 
         osb = _os_sandbox_cmd(td)
@@ -934,14 +1018,15 @@ def run_in_sandbox(source: str, tests: List[Dict[str, Any]],
 
 
 def verify_source(env: Environment, source: Optional[str] = None,
-                  timeout: float = 10.0) -> Verdict:
+                  timeout: float = 10.0,
+                  pkg: Optional[Dict[str, Any]] = None) -> Verdict:
     """对某个源码版本做**可执行判定** —— 这就是 reward 的来源。
 
     ⛔ evidence 是真实断言结果（got/expect），不是"跑过了"。
     """
     src = source if source is not None else env.source
     try:
-        ex = run_in_sandbox(src, list(env.tests), timeout=timeout)
+        ex = run_in_sandbox(src, list(env.tests), timeout=timeout, pkg=pkg)
     except Exception as e:  # noqa: BLE001
         return error_verdict(f"env/{env.env_id}", e)
 

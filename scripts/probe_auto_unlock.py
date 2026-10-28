@@ -57,6 +57,13 @@ run_all = _pad.run_all
 select_commits = _pad.select_commits
 _git = _pad._git
 
+#: 整包装载上下文（README 164）—— 只此一份实现，本脚本不自带
+_pp = ROOT / "scripts" / "probe_package_load.py"
+_spp = importlib.util.spec_from_file_location("ppl", _pp)
+_ppl = importlib.util.module_from_spec(_spp)
+_spp.loader.exec_module(_ppl)
+pkg_context = _ppl.pkg_context
+
 
 def changed_lines(a: str, b: str):
     """⛔ 比**改动的行**，不是整份文件（161 的教训：作者顺手改了 docstring）。"""
@@ -73,13 +80,18 @@ def changed_lines(a: str, b: str):
     return out
 
 
-def auto_extract(repo: Path, sha: str, src: str, testfs: list):
+def auto_extract(repo: Path, sha: str, src: str, testfs: list,
+                 pkg: dict | None = None):
     """① 自动抽断言 → ② 降级 → ③ 在参照实现上验 semantics。
 
     返回 `(tests, stats)`。前两步**完全由产品层的 `extract_criteria` 做**
     （脚本不自带第二份规则），本函数只负责"跑一遍验语义"。
     ⛔ 每条入选判据都过了三验：能求值 + 跑两遍一致 + 与测试写死的 expected
     一致（或抛对异常）。
+
+    `pkg`（README 164）：整包装载上下文。⛔ 不传 ⇒ 与 162/163 的 boltons
+    读数**完全一致**（boltons 不需要它）；换到 attrs / more-itertools 这类
+    用包内相对导入的仓库则**必须**传，否则参照实现根本装不起来 ⇒ 抽到 0 条。
     """
     fixed = _git(repo, "show", f"{sha}:{src}")
     target = target_module(src)
@@ -96,8 +108,8 @@ def auto_extract(repo: Path, sha: str, src: str, testfs: list):
 
     #: 三验第 1、2 步：能求值 + 两次一致
     it = [(f"x{j}", c["call"], c.get("raises")) for j, c in enumerate(cands)]
-    r1 = run_all(fixed, it)
-    r2 = run_all(fixed, it)
+    r1 = run_all(fixed, it, pkg=pkg)
+    r2 = run_all(fixed, it, pkg=pkg)
     if "__import_error__" in r1:
         stx["import_error"] = True
         return [], stx
@@ -130,6 +142,9 @@ def auto_extract(repo: Path, sha: str, src: str, testfs: list):
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default="/tmp/realrepo/boltons")
+    #: ⛔ 换仓库**只改这两个**，筛选词表与"同 commit 必须动 tests/"不许跟着变
+    #:    （改了 ⇒ 跨仓库的覆盖率数字不可比）。
+    ap.add_argument("--subdir", default="boltons/")
     ap.add_argument("--limit", default="40")
     ap.add_argument("--only", default="")
     ap.add_argument("--timeout", default="20")
@@ -150,7 +165,7 @@ def main() -> int:
         _rs.loader.exec_module(ruler)
     repo = Path(args.repo).resolve()
 
-    cands = select_commits(repo, int(args.limit))
+    cands = select_commits(repo, int(args.limit), args.subdir)
     if args.only:
         want = set(args.only.split(","))
         cands = [c for c in cands if c[0] in want]
@@ -163,7 +178,11 @@ def main() -> int:
         if not buggy or not fixed or buggy == fixed:
             continue
 
-        tests, stx = auto_extract(repo, sha, src, testfs)
+        #: ⛔ 整包装载上下文（README 164）：boltons 不需要，attrs 这类
+        #:    用包内相对导入的仓库**必须**有它，否则参照实现装不起来。
+        pkg = pkg_context(repo, sha, src, fixed) if args.subdir != "boltons/" \
+            else None
+        tests, stx = auto_extract(repo, sha, src, testfs, pkg=pkg)
         print(f"── {sha}  {subj[:44]}")
         print(f"   抽取：断言 {stx.get('n_probe', 0)} → 候选 {stx.get('n_cand', 0)}"
               f" → 过三验 {stx.get('n_semantics_ok', 0)}"
@@ -173,7 +192,7 @@ def main() -> int:
             rows.append({"sha": sha, "stage": "no_criteria"})
             continue
 
-        base_ok = run_in_sandbox(buggy, tests).results
+        base_ok = run_in_sandbox(buggy, tests, pkg=pkg).results
         n_f2p = sum(1 for r in base_ok if not r.get("passed"))
         print(f"   ⛔ 判据密度 k={len(tests)}（其中在缺陷版上失败、即 F2P：{n_f2p}）")
         if n_f2p == 0:
@@ -181,7 +200,8 @@ def main() -> int:
             rows.append({"sha": sha, "stage": "no_f2p", "k": len(tests)})
             continue
 
-        res = synthesize_patch(buggy, tests, timeout=float(args.timeout))
+        res = synthesize_patch(buggy, tests, timeout=float(args.timeout),
+                               pkg=pkg)
         print(f"   合成：base_ok={res.base_ok}/{len(tests)}  "
               f"found={res.found}  new_ok={res.new_ok}  "
               f"full_pass={res.full_pass}  focus={res.focus}  "

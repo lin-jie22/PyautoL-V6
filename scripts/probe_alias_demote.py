@@ -160,17 +160,29 @@ def _git(repo: Path, *args: str) -> str:
     return p.stdout if p.returncode == 0 else ""
 
 
-def select_commits(repo: Path, limit: int):
+#: ⛔ 候选筛选词表只此一份（跨仓库可比性的前提）：162/163 是 boltons，
+#:    164 起要在 attrs / more-itertools 上跑同一套装置 ⇒ 换仓库时**只改
+#:    `subdir`**，词表与"同 commit 必须动测试"这两条不许跟着变。
+FIX_WORDS = ("fix", "resolve", "handle", "correct", "bug", "repair",
+             "regression")
+
+
+def select_commits(repo: Path, limit: int, subdir: str = "boltons/"):
+    """挑「修了 `subdir` 下某个 .py、且同 commit 动了 `tests/`」的 commit。
+
+    ⛔ `subdir` 默认 `boltons/` ⇒ 162/163 的读数**一字不变**。
+    ⛔ 换仓库时只传 `subdir`，不许为了挑到更多候选去改词表 —— 那会让
+       跨仓库的覆盖率读起来像变好了，实际是选取口径变松了。
+    """
     out = []
     for sha in _git(repo, "log", "--format=%H").split():
         subj = _git(repo, "log", "-1", "--format=%s", sha).strip().lower()
-        if not any(w in subj for w in ("fix", "resolve", "handle", "correct",
-                                       "bug", "repair", "regression")):
+        if not any(w in subj for w in FIX_WORDS):
             continue
         files = [l.strip() for l in
                  _git(repo, "show", "--name-only", "--format=", sha).splitlines()
                  if l.strip()]
-        srcs = [f for f in files if f.startswith("boltons/")
+        srcs = [f for f in files if f.startswith(subdir)
                 and f.endswith(".py") and "__init__" not in f]
         tests = [f for f in files if f.startswith("tests/")
                  and f.endswith(".py")]

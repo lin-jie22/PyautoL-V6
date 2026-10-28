@@ -73,12 +73,15 @@ from aether.extract import (  # noqa: E402
 
 
 # ─────────────────────────── 求值 / 判档 ─────────────────────────────────
-def run_all(source: str, items, timeout: float = 15.0):
+def run_all(source: str, items, timeout: float = 15.0, pkg=None):
     """统一跑一批探针（返回值类 + 期望异常类混跑）。
 
     `items`: [(key, call, raises|None)]。返回 `{key: {"passed":bool,"got":str|None}}`。
     ⛔⛔ **key 必须含序号**：两条不同的探针可能有相同的 call 文本（不同
     作用域同名变量），用 call 当 key 会互相覆盖 ⇒ 读数凭空少一半。
+
+    `pkg`（README 164）：整包装载上下文，原样透传给沙箱；默认 None ⇒ 与
+    加这个参数之前完全一致。
     """
     if not items:
         return {}
@@ -88,7 +91,7 @@ def run_all(source: str, items, timeout: float = 15.0):
         if raises:
             t["raises"] = raises
         tests.append(t)
-    ex = run_in_sandbox(source, tests, timeout=timeout)
+    ex = run_in_sandbox(source, tests, timeout=timeout, pkg=pkg)
     if ex.import_error:
         return {"__import_error__": ex.import_error[:200]}
     out = {}

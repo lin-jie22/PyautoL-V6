@@ -134,7 +134,9 @@ class SynthResult:
 
 # ── 判据跑分 ────────────────────────────────────────────────────────
 def score_source(source: str, tests: List[Dict[str, Any]],
-                 timeout: float = 20.0) -> Tuple[int, List[str], bool]:
+                 timeout: float = 20.0,
+                 pkg: Optional[Dict[str, Any]] = None
+                 ) -> Tuple[int, List[str], bool]:
     """返回 (通过条数, 失败判据名, **是否炸掉**)。
 
     ⛔ 第三位 True = 这条读数**不成立**（跑了但没跑成）。调用方必须单独记账，
@@ -143,7 +145,7 @@ def score_source(source: str, tests: List[Dict[str, Any]],
     if not isinstance(source, str):
         return -1, [f"source 不是 str：{type(source).__name__}"], True
     try:
-        v = run_in_sandbox(source, tests, timeout=timeout)
+        v = run_in_sandbox(source, tests, timeout=timeout, pkg=pkg)
     except Exception as e:                                     # noqa: BLE001
         return -1, [f"runner error: {type(e).__name__}: {e}"], True
     if getattr(v, "import_error", None):
@@ -291,6 +293,7 @@ def synthesize_patch(broken_src: str,
                      max_runs: int = 200,
                      timeout: float = 20.0,
                      min_gain: int = 1,
+                     pkg: Optional[Dict[str, Any]] = None,
                      ) -> SynthResult:
     """**不看 base**，只用判据反馈，在缺陷源码上搜一个更绿的补丁。
 
@@ -299,9 +302,14 @@ def synthesize_patch(broken_src: str,
 
     `min_gain=1` ⇒ 只接受**严格优于基线**的候选（绝不劣化）。
     `max_runs` ⇒ 沙箱跑分预算上限（每一次跑分都是真代价，第 71 条）。
+
+    `pkg`（可选，README 164）：整包装载描述，**原样透传给沙箱**。
+    ⛔ 它不是答案、不含修复后源码 —— 只是让包内相对导入能成立的
+    装载上下文（与 `base` 是两回事，别混）。
     """
     res = SynthResult(n_tests=len(tests))
-    base_ok, bad, blew = score_source(broken_src, tests, timeout=timeout)
+    base_ok, bad, blew = score_source(broken_src, tests, timeout=timeout,
+                                      pkg=pkg)
     res.base_ok = base_ok if not blew else -1
     if blew:
         res.n_blew = 1
@@ -323,7 +331,7 @@ def synthesize_patch(broken_src: str,
 
     best: Optional[Tuple[int, str, str]] = None
     for desc, cand, _mode in cands[:max_runs]:
-        ok, _bad, blew2 = score_source(cand, tests, timeout=timeout)
+        ok, _bad, blew2 = score_source(cand, tests, timeout=timeout, pkg=pkg)
         if blew2:
             res.n_blew += 1
             continue
