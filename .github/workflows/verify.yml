@@ -52,8 +52,14 @@ jobs:
         run: python -m aether --version
 
       #: 全量验收：40+ 份契约 × 两种模式 + 跨语言一致性
+      #: ⛔ 输出必须同时落盘（`tee`）：下一步要在失败时把摘要翻成 annotation。
+      #:    `pipefail` 不能省 —— 否则 `tee` 的退出码（恒 0）会顶掉 python 的，
+      #:    整步变成永远绿（假绿里最难查的一种：步骤绿、结论红）。
       - name: 全量验收（一条命令、一个退出码）
-        run: python -m aether check -j 2
+        id: check
+        run: |
+          set -o pipefail
+          python -m aether check -j 2 2>&1 | tee /tmp/check.log
 
       #: 体检：链 / 出处 / 投影对账 / 记忆完整性 / 备份 / 数据可写
       #: ⛔ 新克隆的仓库没有 data/（运行产物不进版本库）⇒ 直接体检会报
@@ -67,3 +73,34 @@ jobs:
         run: |
           python -m aether --root data/seed verify-chain
           python -m aether --root data/seed status > /dev/null
+
+      #: ⛔⛔ 存在的理由是一条实测过的边界：**Actions 的完整日志要认证才能下载**。
+      #:    于是"CI 红了"在无凭据的一侧只有一个红叉，看不到是哪份契约、为什么 ——
+      #:    红项不可读 ⇒ 只能靠猜 ⇒ 猜出来的结论会写进下一轮（第 133 条的形状：
+      #:    零命中先要证明量具能命中，读不到读数时更糟，会直接把猜测当读数）。
+      #:    check-run 的 **annotations 是公开可读的**（`/check-runs/{id}/annotations`），
+      #:    所以把失败契约逐条用 `::error::` 打出来，等于给 CI 装了个可远程取的读数。
+      #:    ⛔ `::error::` 只标 annotation、**不改退出码**：本步已由 `if: failure()`
+      #:      进入，退出 0 即可；把它写成"再判一次失败"会让红项数翻倍。
+      #:    ⛔ 上限 20 条是刻意的：annotation 有条数上限，列满反而被截断；
+      #:      超出的部分由上一行的 `fail=N` 计数承载，不会静默丢失。
+      - name: 失败摘要 → check-run annotation
+        if: failure()
+        run: |
+          python - <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          log = pathlib.Path("/tmp/check.log")
+          if not log.is_file():
+              print("::error::这一步之前就红了（全量验收没产生日志）")
+              sys.exit(0)
+          lines = log.read_text(errors="replace").splitlines()
+          head = next((l for l in lines if l.startswith(("❌", "✅"))), "")
+          print("::error::CI 未通过 | " + (head or "日志里没有摘要头 ⇒ 红在 check 之前"))
+          fails = [l for l in lines if re.match(r"^\s+❌ \[", l)]
+          for l in fails[:20]:
+              print("::error::" + l.strip()[:1000])
+          print(f"::notice::失败契约 {len(fails)} 条（上面最多列 20 条）")
+          PY
