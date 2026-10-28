@@ -156,6 +156,31 @@ def main() -> int:
        >= 2, str([(r["call"], r["raises"]) for r in rz]))
     ck("B4 异常名取自第一个实参",
        all(r["raises"] == "ValueError" for r in rz), str(rz))
+    #: ⛔⛔ README 166 第三节：`assertRaises(E, lambda: X)` 是 **with 形态的
+    #:    同形写法**（都是"执行 X 应抛 E"），165 的实现只认 Name/Attribute
+    #:    作 calle ⇒ 把它拒了。普查实测：more-itertools 10 个 commit 里
+    #:    **form 门最大的一格就是它**（10/20）。⛔ 只收**无参** lambda：
+    #:    带参的 lambda 参数无从求值 ⇒ 那是扩张，不收。
+    LAM_SRC = """
+import more_itertools as mi
+
+def test_lambda():
+    self.assertRaises(ValueError, lambda: mi.first([]))
+    self.assertRaises(TypeError, lambda: mi.one([1, 2]))
+
+def test_lambda_with_args():
+    self.assertRaises(ValueError, lambda x: mi.first(x))
+"""
+    lz = extract_criteria(LAM_SRC, TARGET, stats={})
+    lc = sorted(r["call"] for r in lz if r["kind"] == "raises")
+    ck("B5 ⛔ `assertRaises(E, lambda: X)` ⇒ 探针 X（同形，不是扩张）",
+       lc == ["first([])", "one([1, 2])"], str(lc))
+    ck("B6 异常名仍取自第一个实参",
+       sorted(r["raises"] for r in lz) == ["TypeError", "ValueError"],
+       str(lz))
+    ck("B7 ⛔ **带参** lambda 不收（参数无从求值 ⇒ 那才是扩张）",
+       not any("x" in r["call"] and "lambda" in r["call"] for r in lz),
+       str(lc))
 
     print("\n== C 组：⛔⛔ 不扩张（需要新语义的一律不产出）==")
     bad = ("assertTrue", "assertFalse", "assertIn", "assertNotEqual",

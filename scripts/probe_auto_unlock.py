@@ -81,7 +81,7 @@ def changed_lines(a: str, b: str):
 
 
 def auto_extract(repo: Path, sha: str, src: str, testfs: list,
-                 pkg: dict | None = None):
+                 pkg: dict | None = None, detail: dict | None = None):
     """① 自动抽断言 → ② 降级 → ③ 在参照实现上验 semantics。
 
     返回 `(tests, stats)`。前两步**完全由产品层的 `extract_criteria` 做**
@@ -92,6 +92,15 @@ def auto_extract(repo: Path, sha: str, src: str, testfs: list,
     `pkg`（README 164）：整包装载上下文。⛔ 不传 ⇒ 与 162/163 的 boltons
     读数**完全一致**（boltons 不需要它）；换到 attrs / more-itertools 这类
     用包内相对导入的仓库则**必须**传，否则参照实现根本装不起来 ⇒ 抽到 0 条。
+
+    `detail`（README 166）若传入，会被填上**逐条**的三验裁决
+    `{"rows": [{key, verdict}], "tests_keys": [...]}`：
+
+        key     = (函数名, 原语句, 探针) —— 供归因脚本把判据对回测试源码
+        verdict = ok | no_result | unstable | unpassed_on_fixed | gold_mismatch
+
+    ⛔⛔ 归因脚本**必须**用它，不许自带第二份三验 —— 165 的假 F2P 就是这么
+    来的：一处比 `literal_eval`、一处比 JSON 往返值，两套口径各说各话。
     """
     fixed = _git(repo, "show", f"{sha}:{src}")
     target = target_module(src)
@@ -115,18 +124,30 @@ def auto_extract(repo: Path, sha: str, src: str, testfs: list,
         return [], stx
     tests, n_stable = [], 0
     n_unpassed = 0
+    rows: list = []
+    tests_keys: list = []
+
+    def note(c, verdict: str):
+        rows.append({"key": (c.get("fn"), c.get("stmt"), c["call"]),
+                     "verdict": verdict})
+
     for j, c in enumerate(cands):
         a, b = r1.get(f"x{j}"), r2.get(f"x{j}")
         if not a:
+            note(c, "no_result")
             continue
         if c["kind"] == "raises":
             if not (a["passed"] and b and b["passed"]):
+                note(c, "unpassed_on_fixed")
                 continue
             n_stable += 1
+            note(c, "ok")
             tests.append({"name": f"auto{j}", "call": c["call"],
                           "raises": c["raises"]})
+            tests_keys.append((c.get("fn"), c.get("stmt"), c["call"]))
             continue
         if a.get("got") is None or (b and b.get("got") != a.get("got")):
+            note(c, "unstable" if a.get("got") is not None else "no_result")
             continue
         #: ⛔⛔ 三验第 1 步现在**必须含 `passed`**（README 165 第五节）。
         #:    只验"能求值 + 两次一致 + 与写死期望一致"是不够的：判据真正
@@ -137,6 +158,7 @@ def auto_extract(repo: Path, sha: str, src: str, testfs: list,
         #:    几乎全是这个 ⇒ 合成层对着一堆永假目标烧光预算。
         if not (a.get("passed") and b and b.get("passed")):
             n_unpassed += 1
+            note(c, "unpassed_on_fixed")
             continue
         #: 三验第 3 步：与测试**自己写死**的 expected 对拍
         #: ⛔ 用 `gold_value`（可能经内联解出），不是 `gold`（原文）——
@@ -145,9 +167,15 @@ def auto_extract(repo: Path, sha: str, src: str, testfs: list,
         if g is None and c.get("gold") is not None:
             g = gold_of(c["gold"])
         if g is None or not lit(a["got"])[1] or lit(a["got"])[0] != g:
+            note(c, "gold_mismatch")
             continue
         n_stable += 1
+        note(c, "ok")
         tests.append({"name": f"auto{j}", "call": c["call"], "expect": g})
+        tests_keys.append((c.get("fn"), c.get("stmt"), c["call"]))
+    if detail is not None:
+        detail["rows"] = rows
+        detail["tests_keys"] = tests_keys
     return tests, {"n_probe": stx.get("n_raw", 0), "n_cand": len(cands),
                    "n_unstable": stx.get("n_unstable", 0),
                    "n_unserializable": stx.get("n_unjsonable", 0),

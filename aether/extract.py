@@ -86,38 +86,183 @@ _UNITTEST_SAME = {
 #: `assertRaises` 也只收**同形**的两种写法（with 上下文 / 直接调用）。
 _RAISE_NAMES = ("raises", "assertRaises")
 
+#: ⛔⛔ **门标签**（README 166 的普查口径）：测试文件里**每一条**探针必须
+#: 落到**恰好一格**。⛔ 这是诊断层：它只给已有拒收**逐条命名**，不改变任何
+#: 一条判据能不能进来（扩张判据形态仍需人拍板，第 126 条）。
+#:
+#:   criterion      产出为候选判据（**还没跑过**，仍可能倒在下面的沙箱三验）
+#:   form           判据形态不支持（assertTrue / assertIn / assert a != b …）
+#:   unserializable 期望值不可 JSON（沙箱走 JSON，结构性限制）
+#:   tuple          期望是 tuple（JSON 会把它降级成 list ⇒ 恒失败，README 165）
+#:   unstable       时间/随机依赖 ⇒ 不可复现
+#:
+#: ⛔ `criterion` 之后还有**沙箱一侧**的三道（README 166 加在脚本里，不在
+#:    本层）：`ctx`（参照实现上就跑不过/跑不稳/与写死期望不符）、`P2P`
+#:    （buggy 上仍通过 ⇒ 无鉴别力）、`F2P`（buggy 上失败 ⇒ 真有鉴别力）。
+GATE_CRITERION = "criterion"
+GATE_FORM = "form"
+GATE_UNSERIALIZABLE = "unserializable"
+GATE_TUPLE = "tuple"
+GATE_UNSTABLE = "unstable"
+#: 顺序 = 报告里的展示顺序（先"成了"，再按拦的量降序的常见形态）。
+GATE_ORDER = (GATE_CRITERION, GATE_FORM, GATE_UNSERIALIZABLE,
+              GATE_TUPLE, GATE_UNSTABLE)
+
 
 # ─────────────────────────── 断言抽取（带作用域）─────────────────────────
-def scoped_assertions(test_src: str):
-    """抽 `(实际表达式, 期望文本, 所在函数名)`。
+def _bare_assert_parts(test: ast.AST):
+    """⛔ **单一来源**：裸 `assert` 的**同形**部分 ⇒ `(实际, 期望)`。
 
-    ⛔ 多返回**所属函数**是必需的：`x` 在 A 函数里是 3、在 B 函数里是 'a'，
-    没有作用域就会被当成同一个 x ⇒ 内联出语义错误的探针。
+    只认 `a == b` 这一种比较。`!=` / `in` / `not` / `is` / 链式比较 ⇒ `None`
+    （形态不支持，拒收并记账）。⛔ 判据形态只在这里定义一次 —— 裸 assert
+    的扫描器与门归因层都调它 ⇒ 不会出现"扫描说能抽、归因说形态不支持"。
+    """
+    if (isinstance(test, ast.Compare) and len(test.ops) == 1
+            and isinstance(test.ops[0], ast.Eq)):
+        return ast.unparse(test.left), ast.unparse(test.comparators[0])
+    return None
+
+
+def _lambda_args(node: ast.Lambda):
+    """该 lambda 有没有参数（有 ⇒ 探针无从求值，不许当同形写法收）。"""
+    a = node.args
+    return (list(a.posonlyargs) + list(a.args) + list(a.kwonlyargs)
+            + ([a.vararg] if a.vararg else [])
+            + ([a.kwarg] if a.kwarg else []))
+
+
+def _iter_all_probes(test_src: str) -> List[Dict[str, Any]]:
+    """⛔⛔ **单一来源**：测试文件里**每一条**探针 —— **含被拒收的**。
+
+    返回 `[{stmt, expr, gold, fn, kind, attr, family, mapped}]`：
+
+      · `mapped=False` ⇒ 判据形态不支持（README 165 第二节），**不进**流水线
+        但必须记账 —— 它是"要不要扩张判据形态"的唯一依据（第 149 条）。
+      · `stmt` = 所在**整条语句**（用于与 PR 新增断言对拍，README 166）。
+      · `family` ∈ bare / pytest / unittest，`attr` = 断言写法名
+        （`assert` / `chk` / `raises` / `assertEqual` / `assertTrue` / …）。
+
+    ⛔⛔ 三个 `scoped_*` 与 `unmapped_unittest_calls` **全是本函数的投影**：
+    判据形态只在 `_UNITTEST_SAME`、`_RAISE_NAMES`、`_bare_assert_parts` 里
+    定义一次 ⇒ 改形态只改一处，不会出现两套规则各自漂移（README 166 第八节
+    就是要抓这个：165 里"三验说能跑、执行说跑不过"正是两套口径的产物）。
     """
     tree = ast.parse(test_src)
-    out: List[Tuple[str, str, str]] = []
+    out: List[Dict[str, Any]] = []
+
+    def rec(stmt, expr, gold, fn, kind, attr, family, mapped=True):
+        return {"stmt": ast.unparse(stmt), "expr": expr, "gold": gold,
+                "fn": fn, "kind": kind, "attr": attr, "family": family,
+                "mapped": mapped}
+
+    def callee_name(call: ast.AST):
+        f = getattr(call, "func", None)
+        if isinstance(f, ast.Name):
+            return f.id
+        if isinstance(f, ast.Attribute):
+            return getattr(f, "attr", None)
+        return None
+
+    #: ⛔ `with self.assertRaises(E):` 的 **context_expr 本身也是一个 Call**，
+    #:    而 `walk` 在 With 分支之后仍会递归进它的子节点 ⇒ 如果不记下来，
+    #:    它会被下面的 Call 分支**再记一次**（单参 ⇒ 判为"形态不支持"）
+    #:    ⇒ 一条 with 语句变成两条记录，其中一条是凭空造的拒收。
+    #:    （README 166：正是这类双计数让 `n_unmapped` 从 128 跳到 270。）
+    seen_ctx: Set[int] = set()
 
     def walk(node, fn: str):
         for ch in ast.iter_child_nodes(node):
             if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 walk(ch, ch.name)
                 continue
-            if isinstance(ch, ast.Call):
-                f = ch.func
-                nm = getattr(f, "id", None) or getattr(f, "attr", None)
-                if nm == "chk" and len(ch.args) == 2:
-                    out.append((ast.unparse(ch.args[0]),
-                                ast.unparse(ch.args[1]), fn))
             if isinstance(ch, ast.Assert):
-                t = ch.test
-                if (isinstance(t, ast.Compare) and len(t.ops) == 1
-                        and isinstance(t.ops[0], ast.Eq)):
-                    out.append((ast.unparse(t.left),
-                                ast.unparse(t.comparators[0]), fn))
+                parts = _bare_assert_parts(ch.test)
+                if parts is None:
+                    out.append(rec(ch, ast.unparse(ch.test), None, fn,
+                                   "expect", "assert", "bare", False))
+                else:
+                    out.append(rec(ch, parts[0], parts[1], fn,
+                                   "expect", "assert", "bare"))
+            elif isinstance(ch, ast.Call):
+                nm = callee_name(ch)
+                if id(ch) in seen_ctx:
+                    pass                      #: 已由 With 分支记过，不重复
+                elif nm == "chk" and len(ch.args) == 2:
+                    out.append(rec(ch, ast.unparse(ch.args[0]),
+                                   ast.unparse(ch.args[1]), fn,
+                                   "expect", "chk", "bare"))
+                elif nm in _UNITTEST_SAME:
+                    if len(ch.args) == 2:
+                        out.append(rec(ch, ast.unparse(ch.args[0]),
+                                       ast.unparse(ch.args[1]), fn,
+                                       "expect", nm, "unittest"))
+                    else:
+                        out.append(rec(ch, ast.unparse(ch), None, fn,
+                                       "expect", nm, "unittest", False))
+                elif nm == "assertRaises":
+                    a0 = ch.args[0] if ch.args else None
+                    exc = (getattr(a0, "id", None)
+                           or getattr(a0, "attr", None)) if a0 else None
+                    callee = ch.args[1] if len(ch.args) >= 2 else None
+                    #: ⛔⛔ README 166 第三节：**无参 lambda 是同形写法**。
+                    #:    `assertRaises(E, lambda: X)` ≡ `with raises(E): X`
+                    #:    —— 都是"执行 X 应抛 E"，不引入任何新比较语义。
+                    #:    165 的实现只认 Name/Attribute ⇒ 普查实测它正是
+                    #:    more-itertools **form 门最大的一格**（10/20）。
+                    #:    ⛔ 但**带参** lambda 一概不收：参数无从求值 ⇒ 那
+                    #:    是扩张，不是补漏。
+                    if (exc and isinstance(callee, ast.Lambda)
+                            and not _lambda_args(callee)):
+                        out.append(rec(ch, ast.unparse(callee.body), exc, fn,
+                                       "raises", nm, "unittest"))
+                    elif exc and isinstance(callee, (ast.Name, ast.Attribute)):
+                        probe = ast.Call(func=callee, args=ch.args[2:],
+                                         keywords=[])
+                        ast.fix_missing_locations(probe)
+                        out.append(rec(ch, ast.unparse(probe), exc, fn,
+                                       "raises", nm, "unittest"))
+                    else:
+                        out.append(rec(ch, ast.unparse(ch), None, fn,
+                                       "raises", nm, "unittest", False))
+                elif nm and nm.startswith("assert"):
+                    out.append(rec(ch, ast.unparse(ch), None, fn,
+                                   "expect", nm, "unittest", False))
+            elif isinstance(ch, ast.With):
+                for it in ch.items:
+                    cx = it.context_expr
+                    if isinstance(cx, ast.Call):
+                        seen_ctx.add(id(cx))
+                    if not isinstance(cx, ast.Call):
+                        continue
+                    if callee_name(cx) not in _RAISE_NAMES or not cx.args:
+                        continue
+                    a0 = cx.args[0]
+                    exc = getattr(a0, "id", None) or getattr(a0, "attr", None)
+                    if not exc:
+                        continue
+                    for st in ch.body:
+                        if isinstance(st, ast.Expr):
+                            out.append(rec(ch, ast.unparse(st.value), exc, fn,
+                                           "raises", "raises", "pytest"))
+                        else:
+                            out.append(rec(ch, ast.unparse(st), None, fn,
+                                           "raises", "raises", "pytest", False))
             walk(ch, fn)
 
     walk(tree, "<module>")
     return out
+
+
+def scoped_assertions(test_src: str):
+    """抽 `(实际表达式, 期望文本, 所在函数名)`。
+
+    ⛔ 多返回**所属函数**是必需的：`x` 在 A 函数里是 3、在 B 函数里是 'a'，
+    没有作用域就会被当成同一个 x ⇒ 内联出语义错误的探针。
+
+    ⛔ 实现上**只是** `_iter_all_probes` 的投影（裸 assert / chk 的同形部分）。
+    """
+    return [(p["expr"], p["gold"], p["fn"]) for p in _iter_all_probes(test_src)
+            if p["mapped"] and p["family"] == "bare" and p["kind"] == "expect"]
 
 
 def scoped_raise_probes(test_src: str):
@@ -126,38 +271,14 @@ def scoped_raise_probes(test_src: str):
     第一版普查只抽返回值断言 ⇒ `c1c25da`（靠 2 条 raises 判据修好的那个 bug）
     在普查里显示「0 条鉴别力」⇒ 差点据此写下「内联增益全在形态门外」的假结论。
     ⛔ 一个「0」有两种含义：**真的没有** vs **抽漏了**（第 25 条）。
+
+    ⛔ 实现上**只是** `_iter_all_probes` 的投影（`with raises(...)` 里的
+    每条表达式）。`assertRaises`（unittest）与 `raises`（pytest）同形，
+    第一版只认后者 ⇒ more-itertools 的 134 条 with 形态整个漏掉
+    —— 那个"0 条判据"里有一半是这个，不是没鉴别力。
     """
-    tree = ast.parse(test_src)
-    out: List[Tuple[str, str, str]] = []
-
-    def walk(node, fn: str):
-        for ch in ast.iter_child_nodes(node):
-            if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                walk(ch, ch.name)
-                continue
-            if isinstance(ch, ast.With):
-                for it in ch.items:
-                    ctx = it.context_expr
-                    if not isinstance(ctx, ast.Call) or not ctx.args:
-                        continue
-                    f = ctx.func
-                    nm = getattr(f, "id", None) or getattr(f, "attr", None)
-                    #: ⛔ `assertRaises`（unittest）与 `raises`（pytest）同形，
-                    #:    第一版只认后者 ⇒ more-itertools 的 134 条 with 形态
-                    #:    整个漏掉（"0 条判据"里有一半是这个，不是没鉴别力）。
-                    if nm not in _RAISE_NAMES:
-                        continue
-                    a0 = ctx.args[0]
-                    exc = getattr(a0, "id", None) or getattr(a0, "attr", None)
-                    if not exc:
-                        continue
-                    for st in ch.body:
-                        if isinstance(st, ast.Expr):
-                            out.append((ast.unparse(st.value), exc, fn))
-            walk(ch, fn)
-
-    walk(tree, "<module>")
-    return out
+    return [(p["expr"], p["gold"], p["fn"]) for p in _iter_all_probes(test_src)
+            if p["mapped"] and p["family"] == "pytest" and p["kind"] == "raises"]
 
 
 def scoped_unittest_probes(test_src: str):
@@ -176,41 +297,12 @@ def scoped_unittest_probes(test_src: str):
     第二版只做了 with 形态 ⇒ more-itertools 的 50 条直接调用式全漏。
     直接调用式映射成 `callee(args...)`，只接受 Name/Attribute 作 callee
     （lambda / 下标等 ⇒ 拒收，不做文本拼接，免得造出语法正确的假探针）。
+
+    ⛔ 实现上**只是** `_iter_all_probes` 的投影（unittest 家族的同形部分）。
     """
-    tree = ast.parse(test_src)
-    out: List[Tuple[str, str, str, str]] = []
-
-    def callee_name(call: ast.Call):
-        f = call.func
-        if isinstance(f, ast.Name):
-            return f.id
-        if isinstance(f, ast.Attribute):
-            return getattr(f, "attr", None)
-        return None
-
-    def walk(node, fn: str):
-        for ch in ast.iter_child_nodes(node):
-            if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                walk(ch, ch.name)
-                continue
-            if isinstance(ch, ast.Call):
-                nm = callee_name(ch)
-                if nm in _UNITTEST_SAME and len(ch.args) == 2:
-                    out.append((ast.unparse(ch.args[0]),
-                                ast.unparse(ch.args[1]), fn, "expect"))
-                elif nm == "assertRaises" and len(ch.args) >= 2:
-                    a0 = ch.args[0]
-                    exc = getattr(a0, "id", None) or getattr(a0, "attr", None)
-                    callee = ch.args[1]
-                    if exc and isinstance(callee, (ast.Name, ast.Attribute)):
-                        probe = ast.Call(func=callee, args=ch.args[2:],
-                                         keywords=[])
-                        ast.fix_missing_locations(probe)
-                        out.append((ast.unparse(probe), exc, fn, "raises"))
-            walk(ch, fn)
-
-    walk(tree, "<module>")
-    return out
+    return [(p["expr"], p["gold"], p["fn"], p["kind"])
+            for p in _iter_all_probes(test_src)
+            if p["mapped"] and p["family"] == "unittest"]
 
 
 def unmapped_unittest_calls(test_src: str) -> Dict[str, int]:
@@ -219,19 +311,14 @@ def unmapped_unittest_calls(test_src: str) -> Dict[str, int]:
     记账而非静默丢弃（第 149 条：跳过 ≠ 通过）。⛔ 这张表是"要不要扩张
     判据形态"的**唯一依据** —— 如果 `assertTrue` 有 800 条而 `assertEqual`
     只有 20 条，那么"覆盖率低"的原因就不是抽取没做，而是形态太窄。
+
+    ⛔ 实现上**只是** `_iter_all_probes` 的投影（`family == unittest` 且
+    `mapped=False` 的那些）⇒ 与抽取层共用同一张形态表，不会各说一套。
     """
-    tree = ast.parse(test_src)
     out: Dict[str, int] = {}
-    for n in ast.walk(tree):
-        if not isinstance(n, ast.Call):
-            continue
-        f = n.func
-        nm = getattr(f, "attr", None) or getattr(f, "id", None)
-        if not nm or not nm.startswith("assert"):
-            continue
-        if nm in _UNITTEST_SAME or nm == "assertRaises":
-            continue
-        out[nm] = out.get(nm, 0) + 1
+    for p in _iter_all_probes(test_src):
+        if p["family"] == "unittest" and not p["mapped"]:
+            out[p["attr"]] = out.get(p["attr"], 0) + 1
     return out
 
 
@@ -668,9 +755,50 @@ def _has_tuple(v) -> bool:
     return False
 
 
+def _drop(dropped: Optional[List[Dict[str, Any]]], gate: str,
+          probe: Dict[str, Any], call: Optional[str]):
+    """记账一条被拦下的探针（README 166）。`dropped=None` ⇒ 纯 no-op。"""
+    if dropped is None:
+        return
+    dropped.append({"gate": gate, "attr": probe["attr"],
+                    "stmt": probe["stmt"], "fn": probe["fn"],
+                    "kind": probe["kind"], "call": call})
+
+
+def attribute_statements(test_src: str, target: str,
+                         jsonable_only: bool = True,
+                         stats: Optional[Dict[str, int]] = None,
+                         ) -> List[Dict[str, Any]]:
+    """⛔⛔ README 166：测试文件里**每一条**探针 ⇒ **恰好一格门**。
+
+    返回 `out + dropped`，每条带 `gate`：
+
+        criterion      成为候选判据（⛔ 尚未跑沙箱，仍可能倒在下面的三验）
+        form           判据形态不支持
+        unserializable 期望值不可 JSON
+        tuple          期望是 tuple（JSON 往返会降级成 list ⇒ 恒失败）
+        unstable       时间/随机依赖
+
+    ⛔⛔ **为什么必须和 `extract_criteria` 同源**：165 的教训就是"两套口径"
+    —— 三验说能跑、判据执行说跑不过，于是 69 条假 F2P 被当成真鉴别力。
+    本函数**只调** `extract_criteria`（不自带第二份规则）⇒ 门标签与实际
+    抽取行为**不可能**漂移。契约 E 组盯着这条恒等式：
+
+        #{gate == criterion}  ==  len(extract_criteria(...))
+
+    ⛔ 只覆盖**抽取层**的门。沙箱一侧（参照实现上跑不过 / P2P / F2P）需要
+    真跑 ⇒ 由 `scripts/probe_gate_attribution.py` 补，不在这里伪造。
+    """
+    dropped: List[Dict[str, Any]] = []
+    out = extract_criteria(test_src, target, jsonable_only=jsonable_only,
+                           stats=stats, dropped=dropped)
+    return [dict(r, gate=GATE_CRITERION) for r in out] + dropped
+
+
 def extract_criteria(test_src: str, target: str,
                      jsonable_only: bool = True,
                      stats: Optional[Dict[str, int]] = None,
+                     dropped: Optional[List[Dict[str, Any]]] = None,
                      ) -> List[Dict[str, Any]]:
     """⛔ **纯 AST**：只要测试源码，产出候选判据（**尚未跑过，未验语义**）。
 
@@ -680,6 +808,10 @@ def extract_criteria(test_src: str, target: str,
     返回 `[{call, expect|raises, gold, fn, kind}]`（`kind` ∈ expect/raises）。
     `stats` 若传入，会被填上 `n_raw / n_unstable / n_unjsonable / n_out`
     —— 每一步丢了多少都记账，调用方不能只看最终条数。
+
+    `dropped`（README 166）若传入，会把**每条被丢掉的**探针 `{gate, attr,
+    stmt, fn, kind}` 追加进去 ⇒ 调用方可以回答"这条断言被哪道门拦了"，
+    而不是只看到总数变少。⛔ 不传 ⇒ 行为与 165 完全一致（向后兼容）。
     """
     st = {"n_raw": 0, "n_unstable": 0, "n_unjsonable": 0, "n_out": 0,
           "n_gold_resolved": 0}
@@ -694,10 +826,23 @@ def extract_criteria(test_src: str, target: str,
     pkg = target.rsplit(".", 1)[0] if "." in target else None
     if pkg and pkg not in set(aliases.values()):
         pkg = None
-    raw = ([(a, e, f, "expect") for a, e, f in scoped_assertions(test_src)]
-           + [(a, e, f, "raises") for a, e, f in scoped_raise_probes(test_src)]
-           + list(scoped_unittest_probes(test_src)))
-    for expr, gold, fn, kind in raw:
+    probes = _iter_all_probes(test_src)
+    #: ⛔ 形态不支持的**根本进不了流水线**（README 165 第二节）—— 它们不是
+    #:    "被抽出来又丢掉"，而是压根没被映射。归因时必须**单独记账**。
+    if dropped is not None:
+        for p in probes:
+            if not p["mapped"]:
+                dropped.append({"gate": GATE_FORM, "attr": p["attr"],
+                                "stmt": p["stmt"], "fn": p["fn"],
+                                "kind": p["kind"], "call": None})
+    #: ⛔ **稳定排序**保证产出顺序与 165 之前**一字不变**（bare → pytest
+    #:    → unittest 三段拼接）；否则只是换了顺序，就会让"条数没变"掩盖
+    #:    "索引变了"（判据名 `auto{j}` 跟着变 ⇒ 跨轮读数不可比）。
+    _fam = {"bare": 0, "pytest": 1, "unittest": 2}
+    raw = [(p["expr"], p["gold"], p["fn"], p["kind"], p)
+           for p in sorted((q for q in probes if q["mapped"]),
+                           key=lambda q: _fam[q["family"]])]
+    for expr, gold, fn, kind, p in raw:
         st["n_raw"] += 1
         binds = dict(binds_by_scope.get("<module>", {}))
         binds.update(binds_by_scope.get(fn, {}))
@@ -716,8 +861,10 @@ def extract_criteria(test_src: str, target: str,
         call = new or expr
         if has_unstable_call(call):
             st["n_unstable"] += 1
+            _drop(dropped, GATE_UNSTABLE, p, call)
             continue                      #: 自限 2：不可复现 ⇒ 不产出
-        row = {"call": call, "fn": fn, "kind": kind, "orig": expr}
+        row = {"call": call, "fn": fn, "kind": kind, "orig": expr,
+               "stmt": p["stmt"], "attr": p["attr"]}
         if kind == "raises":
             row["raises"] = gold
         else:
@@ -738,9 +885,11 @@ def extract_criteria(test_src: str, target: str,
                             st["n_gold_resolved"] + 1
             if jsonable_only and (g is None or not _jsonable(g)):
                 st["n_unjsonable"] += 1
+                _drop(dropped, GATE_UNSERIALIZABLE, p, call)
                 continue
             if jsonable_only and _has_tuple(g):
                 st["n_tuple_gold"] = st.get("n_tuple_gold", 0) + 1
+                _drop(dropped, GATE_TUPLE, p, call)
                 continue
             #: ⛔ `gold` 保留**原文**（契约按原文对拍），`gold_value` 是
             #:    解出来的**值**（可能来自内联）。调用方必须用后者 ——
