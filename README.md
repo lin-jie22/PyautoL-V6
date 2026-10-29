@@ -7253,3 +7253,69 @@ boltons 全量端到端重跑：门分布与交换前**一字不变**（仍是�
 ═══ 六、⛔ 待办（安全）═══
 
 PAT 明文出现在了对话里 ⇒ 应去 GitHub Settings 撤销 / 轮换该 token。
+
+### 169. ⛔⛔ **取证基线被外部破坏：本地红了 2 项，但红的不是代码**（2026-10-29）
+
+═══ 一、症状 ═══
+
+推完 168 之后跑本地全量 `aether check` ⇒ **RC=1**，红 2 项，
+都出在 `contract_alias_demote_test.py` 的 H 组（真实仓库读数）：
+
+    FAIL H1 ⛔ 真实测试里能自动抽出 ≥12 条判据          0 条
+    FAIL H3 ⛔ 其中真有鉴别力（F2P）≥1                  F2P=0
+
+而同一份提交在 CI 上三档**全绿**。
+
+═══ 二、先排除自己 ═══
+
+  · 本轮只改了 `probe_synth_layer.py` 的一处 print 与 README，没碰 `extract.py`；
+  · grep 全仓 `rmtree|rm -rf|unlink` ⇒ **没有任何 V6 代码会删 `/tmp/realrepo`**
+    （现有的 rmtree 全部指向各自的临时目录）。
+
+═══ 三、根因 ═══
+
+| 读数 | 结果 |
+|---|---|
+| 三个仓库的 git 可用性 | **只有 boltons 坏**；more-itertools / attrs 完好 |
+| `.git` 里剩什么 | `hooks info logs objects refs` |
+| 缺什么 | **`HEAD`、`config`、`index`、`packed-refs`、`description`** |
+| objects | `objects/pack/pack-a96e18….pack` **完好**（2.1M，1743 个 commit） |
+| `refs/heads` | **空**（本地分支引用没了） |
+| 工作区 | 缺若干点文件（`.github/…`、`.gitignore`、`.omp/…`） |
+
+⇒ 不是清理工具：那会删整个目录，不会精准地只留骨架。
+⇒ **来源仍未定位**，高度疑似 §1 记的那位并发编辑者。
+
+═══ 四、恢复：不重新 clone ═══
+
+⛔ 为什么不用 `git clone` 重来：探针按 **commit sha** 取源码，objects 在 ⇒ 读数本可复现；
+   但 `select_commits()` 是 `git log --format=%H` **从 HEAD 往下遍历取前 40 个**，
+   重新 clone 会让 HEAD 前移 ⇒ 那 40 个 commit 变了 ⇒ **跨轮不可比**。
+
+  1. `cp -R` 备份到 `/tmp/boltons_broken_backup`（先备份再动）。
+  2. 在副本上写回最小 `HEAD`（`ref: refs/heads/master`）与 `config`。
+  3. `git cat-file --batch-all-objects --batch-check` 枚举 1743 个 commit，
+     按 committer 时间戳取顶端 ⇒ `4e5faa3`（2026-10-22，与原快照一致）。
+  4. `git branch -f master 4e5faa3` + `git read-tree HEAD` 重建 index。
+  5. 验证：`git log -1` = 4e5faa3；`git show 766b554:tests/test_strutils.py` 可读；
+     原先报红的那份契约 **H1/H2/H3 全 PASS**。
+
+═══ 五、残留 ═══
+
+  · `refs/heads` 只剩重建出来的 master（原快照是否还有别的本地分支无从得知）。
+  · 工作区仍缺点文件 ⇒ 破坏**不只**动了 `.git`。探针 / 契约只读 objects，不受影响，
+    但**任何依赖工作区的工具都要重新核**。
+  · `/tmp` 上的东西不在版本控制里 ⇒ 同样的事还会再发生（见下条规则）。
+
+═══ 六、⛔⛔ 新规则 ═══
+
+**取证基线不在版本控制里 ⇒ 会被静默破坏，而且红的不是代码。**
+
+症状是固定的一对：
+
+    CI 绿（基线上游根本不存在 ⇒ H 组 SKIP，not covered ≠ passed）
+    本地红（基线坏了 ⇒ 抽到 0 条 ⇒ H1/H3 红）
+
+⇒ **每次跑普查之前，先验基线健康**（`git log -1` 出得来 + 关键 sha 能 `git show`），
+   并把健康度本身当成一个读数报出来。否则「判据侧又归零了」和「基线没了」
+   会长得一模一样，你又会去改不该改的代码。
