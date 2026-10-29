@@ -188,10 +188,16 @@ def main() -> int:
         r = probe(t, args.max_cands)
         rows.append(r)
         if "note" not in r:
+            #: ⛔ 别把 f-string **跨物理行**写：`f"{x\n if c else y}"` 是 PEP 701
+            #:    （3.12）才放开的，3.9 下直接 SyntaxError（EOL while scanning
+            #:    string literal）⇒ CI 的 3.9 job 就是这么红的，而 3.12/3.13
+            #:    全绿 ⇒ 症状是「只有最老那档红，本地还绿」。
+            #:    先把条件表达式落到变量里，print 里就不再跨行。
+            found = (f"搜出 {r['desc']} gain={r['gain']}"
+                     if r['found'] else "搜不出")
             print(f"   基线 {r['base_ok']}/{r['n_tests']}  定位 {r['focus'] or '失败'}"
                   f"  候选 {r['n_cands']}  全绿候选 {r['n_full']}"
-                  f"  {'搜出 ' + r['desc'] + ' gain=' + str(r['gain'])
-                     if r['found'] else '搜不出'}"
+                  f"  {found}"
                   f"  （{r['seconds']}s）", flush=True)
 
     report(rows)
