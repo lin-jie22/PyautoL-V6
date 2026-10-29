@@ -1,0 +1,398 @@
+[
+ {
+  "sha": "67fcf64",
+  "stage": "no_f2p",
+  "k": 287,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "b5e3886",
+  "stage": "no_f2p",
+  "k": 285,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "8a930ac",
+  "stage": "no_f2p",
+  "k": 282,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "b2f3aff",
+  "stage": "no_f2p",
+  "k": 282,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "def2dab",
+  "stage": "no_f2p",
+  "k": 282,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "6b1907d",
+  "stage": "no_f2p",
+  "k": 285,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "bc8be10",
+  "stage": "no_f2p",
+  "k": 282,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "d992be0",
+  "stage": "no_f2p",
+  "k": 12,
+  "reach": "L3",
+  "extend": "none"
+ },
+ {
+  "sha": "f51a53b",
+  "stage": "no_f2p",
+  "k": 280,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "37bb3ad",
+  "stage": "no_f2p",
+  "k": 272,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "edb3346",
+  "stage": "no_f2p",
+  "k": 272,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "e4d2a4a",
+  "stage": "no_f2p",
+  "k": 279,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "d71c4ad",
+  "stage": "no_f2p",
+  "k": 271,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "be5793a",
+  "stage": "no_f2p",
+  "k": 271,
+  "reach": "X",
+  "extend": "E"
+ },
+ {
+  "sha": "06f3181",
+  "k": 270,
+  "f2p": 1,
+  "stage": "no_fix",
+  "base_ok": 269,
+  "new_ok": 0,
+  "found": false,
+  "full_pass": false,
+  "n_unjson": 0,
+  "n_gold_unresolved": 174,
+  "n_gold_swapped": 7,
+  "desc": "",
+  "focus": "('nth_combination_with_replacement',)",
+  "gate": "S3_no_gain",
+  "n_cands": 45,
+  "n_ran": 45,
+  "n_blew": 0,
+  "render_modes": {
+   "splice": 40,
+   "fallback": 5
+  },
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "def2d82",
+  "k": 20,
+  "f2p": 1,
+  "stage": "no_fix",
+  "base_ok": 19,
+  "new_ok": 0,
+  "found": false,
+  "full_pass": false,
+  "n_unjson": 0,
+  "n_gold_unresolved": 68,
+  "n_gold_swapped": 10,
+  "desc": "",
+  "focus": "('nth_permutation',)",
+  "gate": "S3_no_gain",
+  "n_cands": 51,
+  "n_ran": 51,
+  "n_blew": 0,
+  "render_modes": {
+   "splice": 44,
+   "fallback": 7
+  },
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "b0aa91e",
+  "stage": "no_f2p",
+  "k": 64,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "073d234",
+  "stage": "no_f2p",
+  "k": 268,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "adeda34",
+  "stage": "no_f2p",
+  "k": 263,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "cf186b5",
+  "k": 263,
+  "f2p": 1,
+  "stage": "no_fix",
+  "base_ok": 262,
+  "new_ok": 0,
+  "found": false,
+  "full_pass": false,
+  "n_unjson": 0,
+  "n_gold_unresolved": 160,
+  "n_gold_swapped": 7,
+  "desc": "",
+  "focus": "('product_index',)",
+  "gate": "S3_no_gain",
+  "n_cands": 4,
+  "n_ran": 4,
+  "n_blew": 0,
+  "render_modes": {
+   "splice": 3,
+   "fallback": 1
+  },
+  "reach": "X",
+  "extend": "none"
+ },
+ {
+  "sha": "9463231",
+  "stage": "no_f2p",
+  "k": 262,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "11c8280",
+  "stage": "no_f2p",
+  "k": 255,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "cca3294",
+  "stage": "no_f2p",
+  "k": 245,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "f5774b6",
+  "stage": "no_f2p",
+  "k": 244,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "ae37eb3",
+  "k": 242,
+  "f2p": 1,
+  "stage": "no_fix",
+  "base_ok": 241,
+  "new_ok": 0,
+  "found": false,
+  "full_pass": false,
+  "n_unjson": 0,
+  "n_gold_unresolved": 158,
+  "n_gold_swapped": 7,
+  "desc": "",
+  "focus": "('sample',)",
+  "gate": "S3_no_gain",
+  "n_cands": 12,
+  "n_ran": 12,
+  "n_blew": 0,
+  "render_modes": {
+   "splice": 10,
+   "fallback": 2
+  },
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "8ee6991",
+  "stage": "no_f2p",
+  "k": 239,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "6197c8d",
+  "stage": "no_f2p",
+  "k": 46,
+  "reach": "X",
+  "extend": "none"
+ },
+ {
+  "sha": "0de4155",
+  "k": 238,
+  "f2p": 1,
+  "stage": "no_fix",
+  "base_ok": 237,
+  "new_ok": 0,
+  "found": false,
+  "full_pass": false,
+  "n_unjson": 0,
+  "n_gold_unresolved": 151,
+  "n_gold_swapped": 7,
+  "desc": "",
+  "focus": "('sample',)",
+  "gate": "S3_no_gain",
+  "n_cands": 9,
+  "n_ran": 9,
+  "n_blew": 0,
+  "render_modes": {
+   "splice": 7,
+   "fallback": 2
+  },
+  "reach": "X",
+  "extend": "none"
+ },
+ {
+  "sha": "4bd0bd8",
+  "k": 238,
+  "f2p": 1,
+  "stage": "elsewhere",
+  "base_ok": 237,
+  "new_ok": 238,
+  "found": true,
+  "full_pass": true,
+  "n_unjson": 0,
+  "n_gold_unresolved": 149,
+  "n_gold_swapped": 7,
+  "desc": "int+1@L3672",
+  "focus": "('sample',)",
+  "gate": "S5_full",
+  "n_cands": 9,
+  "n_ran": 9,
+  "n_blew": 0,
+  "render_modes": {
+   "splice": 7,
+   "fallback": 2
+  },
+  "reach": "X",
+  "extend": "none"
+ },
+ {
+  "sha": "db67158",
+  "stage": "no_f2p",
+  "k": 227,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "ab72fc8",
+  "stage": "no_f2p",
+  "k": 219,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "cd0a3a8",
+  "stage": "no_f2p",
+  "k": 220,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "4a8b7ee",
+  "stage": "no_f2p",
+  "k": 212,
+  "reach": "X",
+  "extend": "none"
+ },
+ {
+  "sha": "9245cd0",
+  "stage": "no_f2p",
+  "k": 209,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "ddbbea2",
+  "k": 228,
+  "f2p": 4,
+  "stage": "no_fix",
+  "base_ok": 224,
+  "new_ok": 0,
+  "found": false,
+  "full_pass": false,
+  "n_unjson": 0,
+  "n_gold_unresolved": 134,
+  "n_gold_swapped": 9,
+  "desc": "",
+  "focus": "()",
+  "gate": "S1_no_focus",
+  "n_cands": 0,
+  "n_ran": 0,
+  "n_blew": 0,
+  "render_modes": {},
+  "reach": "X",
+  "extend": "none"
+ },
+ {
+  "sha": "bff7cbe",
+  "stage": "no_f2p",
+  "k": 218,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "395bdfc",
+  "stage": "no_f2p",
+  "k": 218,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "8208096",
+  "stage": "no_f2p",
+  "k": 194,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "49a4b3c",
+  "stage": "no_f2p",
+  "k": 192,
+  "reach": "X",
+  "extend": "N"
+ }
+]
