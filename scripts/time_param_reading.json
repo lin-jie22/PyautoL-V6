@@ -1,0 +1,153 @@
+[
+ {
+  "sha": "93185b2",
+  "group": "base(原样)",
+  "stats": {
+   "n_cand": 8,
+   "n_gold_swapped": 0,
+   "n_gold_unresolved": 6,
+   "n_probe": 18,
+   "n_semantics_ok": 8,
+   "n_tests": 8,
+   "n_unpassed_on_fixed": 0,
+   "n_unserializable": 0,
+   "n_unstable": 4
+  },
+  "k": 8,
+  "verdicts": {
+   "ok": 8
+  },
+  "rows": [
+   {
+    "fn": "test_float_total_seconds",
+    "stmt": "assert total_seconds(timedelta(microseconds=1)) == 1e-06",
+    "call": "total_seconds(timedelta(microseconds=1))",
+    "verdict": "ok"
+   },
+   {
+    "fn": "test_float_total_seconds",
+    "stmt": "assert total_seconds(timedelta(microseconds=-1)) == -1e-06",
+    "call": "total_seconds(timedelta(microseconds=-1))",
+    "verdict": "ok"
+   },
+   {
+    "fn": "test_float_total_seconds",
+    "stmt": "assert total_seconds(timedelta(microseconds=-2)) == -2e-06",
+    "call": "total_seconds(timedelta(microseconds=-2))",
+    "verdict": "ok"
+   },
+   {
+    "fn": "test_float_total_seconds",
+    "stmt": "assert total_seconds(timedelta(days=2 ** 29, microseconds=1)) == 46385646796800.0",
+    "call": "total_seconds(timedelta(days=2 ** 29, microseconds=1))",
+    "verdict": "ok"
+   },
+   {
+    "fn": "test_float_total_seconds",
+    "stmt": "assert total_seconds(timedelta(seconds=123456.789012)) == 123456.789012",
+    "call": "total_seconds(timedelta(seconds=123456.789012))",
+    "verdict": "ok"
+   },
+   {
+    "fn": "test_float_total_seconds",
+    "stmt": "assert total_seconds(timedelta(seconds=-123456.789012)) == -123456.789012",
+    "call": "total_seconds(timedelta(seconds=-123456.789012))",
+    "verdict": "ok"
+   },
+   {
+    "fn": "test_daterange_years",
+    "stmt": "assert len(list(new_years_remaining)) == 22",
+    "call": "len(list(daterange(date(2017, 1, 1), date(2038, 1, 19), step=(1, 0, 0))))",
+    "verdict": "ok"
+   },
+   {
+    "fn": "test_daterange_years",
+    "stmt": "assert len(bakers_years_til_2025) == 8",
+    "call": "len(list(daterange(date(2017, 1, 1), date(2025, 1, 1), step=(1, 1, 0))))",
+    "verdict": "ok"
+   }
+  ]
+ },
+ {
+  "sha": "600f973",
+  "group": "param(参数化)",
+  "stats": {
+   "n_cand": 10,
+   "n_gold_swapped": 0,
+   "n_gold_unresolved": 8,
+   "n_probe": 18,
+   "n_semantics_ok": 9,
+   "n_tests": 9,
+   "n_unpassed_on_fixed": 0,
+   "n_unserializable": 0,
+   "n_unstable": 0
+  },
+  "k": 9,
+  "verdicts": {
+   "ok": 9,
+   "unpassed_on_fixed": 1
+  },
+  "rows": [
+   {
+    "fn": "test_float_total_seconds",
+    "stmt": "assert total_seconds(timedelta(microseconds=1)) == 1e-06",
+    "call": "total_seconds(timedelta(microseconds=1))",
+    "verdict": "ok"
+   },
+   {
+    "fn": "test_float_total_seconds",
+    "stmt": "assert total_seconds(timedelta(microseconds=-1)) == -1e-06",
+    "call": "total_seconds(timedelta(microseconds=-1))",
+    "verdict": "ok"
+   },
+   {
+    "fn": "test_float_total_seconds",
+    "stmt": "assert total_seconds(timedelta(microseconds=-2)) == -2e-06",
+    "call": "total_seconds(timedelta(microseconds=-2))",
+    "verdict": "ok"
+   },
+   {
+    "fn": "test_float_total_seconds",
+    "stmt": "assert total_seconds(timedelta(days=2 ** 29, microseconds=1)) == 46385646796800.0",
+    "call": "total_seconds(timedelta(days=2 ** 29, microseconds=1))",
+    "verdict": "ok"
+   },
+   {
+    "fn": "test_float_total_seconds",
+    "stmt": "assert total_seconds(timedelta(seconds=123456.789012)) == 123456.789012",
+    "call": "total_seconds(timedelta(seconds=123456.789012))",
+    "verdict": "ok"
+   },
+   {
+    "fn": "test_float_total_seconds",
+    "stmt": "assert total_seconds(timedelta(seconds=-123456.789012)) == -123456.789012",
+    "call": "total_seconds(timedelta(seconds=-123456.789012))",
+    "verdict": "ok"
+   },
+   {
+    "fn": "test_daterange_years",
+    "stmt": "assert len(list(new_years_remaining)) == 22",
+    "call": "len(list(daterange(date(2017, 1, 1), date(2038, 1, 19), step=(1, 0, 0))))",
+    "verdict": "ok"
+   },
+   {
+    "fn": "test_daterange_years",
+    "stmt": "assert len(bakers_years_til_2025) == 8",
+    "call": "len(list(daterange(date(2017, 1, 1), date(2025, 1, 1), step=(1, 1, 0))))",
+    "verdict": "ok"
+   },
+   {
+    "fn": "test_daterange_with_same_start_stop",
+    "stmt": "with pytest.raises(StopIteration):\n    next(date_range)",
+    "call": "next(daterange(date(2020, 1, 1), date(2020, 1, 1)))",
+    "verdict": "ok"
+   },
+   {
+    "fn": "test_daterange_with_same_start_stop",
+    "stmt": "with pytest.raises(StopIteration):\n    next(date_range_inclusive)",
+    "call": "next(daterange(date(2020, 1, 1), date(2020, 1, 1), inclusive=True))",
+    "verdict": "unpassed_on_fixed"
+   }
+  ]
+ }
+]
