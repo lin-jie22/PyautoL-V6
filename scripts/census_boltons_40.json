@@ -1,0 +1,464 @@
+[
+ {
+  "sha": "4e5faa3",
+  "stage": "no_criteria",
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "73e22c9",
+  "stage": "no_f2p",
+  "k": 11,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "1cdc0e9",
+  "stage": "no_f2p",
+  "k": 8,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "5eb6cc0",
+  "k": 24,
+  "f2p": 3,
+  "stage": "no_fix",
+  "base_ok": 21,
+  "new_ok": 0,
+  "found": false,
+  "full_pass": false,
+  "n_unjson": 0,
+  "n_gold_unresolved": 23,
+  "n_gold_swapped": 4,
+  "desc": "",
+  "focus": "('Bits',)",
+  "gate": "S3_no_gain",
+  "n_cands": 60,
+  "n_ran": 60,
+  "n_blew": 0,
+  "render_modes": {
+   "splice": 56,
+   "fallback": 4
+  },
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "f5f5cd8",
+  "stage": "no_f2p",
+  "k": 43,
+  "reach": "L2",
+  "extend": "none"
+ },
+ {
+  "sha": "ec1ff9f",
+  "stage": "no_f2p",
+  "k": 10,
+  "reach": "X",
+  "extend": "none"
+ },
+ {
+  "sha": "c1c25da",
+  "k": 21,
+  "f2p": 2,
+  "stage": "exact_file",
+  "base_ok": 19,
+  "new_ok": 21,
+  "found": true,
+  "full_pass": true,
+  "n_unjson": 0,
+  "n_gold_unresolved": 23,
+  "n_gold_swapped": 4,
+  "desc": "cmp@L164",
+  "focus": "('Bits',)",
+  "gate": "S5_full",
+  "n_cands": 60,
+  "n_ran": 60,
+  "n_blew": 0,
+  "render_modes": {
+   "splice": 56,
+   "fallback": 4
+  },
+  "reach": "L3",
+  "extend": "none"
+ },
+ {
+  "sha": "f1034b0",
+  "stage": "no_criteria",
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "eb65901",
+  "k": 4,
+  "f2p": 2,
+  "stage": "no_fix",
+  "base_ok": 2,
+  "new_ok": 0,
+  "found": false,
+  "full_pass": false,
+  "n_unjson": 0,
+  "n_gold_unresolved": 2,
+  "n_gold_swapped": 0,
+  "desc": "",
+  "focus": "('Table', 'to_text')",
+  "gate": "S3_no_gain",
+  "n_cands": 110,
+  "n_ran": 110,
+  "n_blew": 0,
+  "render_modes": {
+   "splice": 104,
+   "fallback": 6
+  },
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "99dec84",
+  "k": 7,
+  "f2p": 3,
+  "stage": "no_fix",
+  "base_ok": 4,
+  "new_ok": 0,
+  "found": false,
+  "full_pass": false,
+  "n_unjson": 0,
+  "n_gold_unresolved": 10,
+  "n_gold_swapped": 0,
+  "desc": "",
+  "focus": "()",
+  "gate": "S1_no_focus",
+  "n_cands": 0,
+  "n_ran": 0,
+  "n_blew": 0,
+  "render_modes": {},
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "ead236e",
+  "k": 37,
+  "f2p": 3,
+  "stage": "no_fix",
+  "base_ok": 34,
+  "new_ok": 0,
+  "found": false,
+  "full_pass": false,
+  "n_unjson": 0,
+  "n_gold_unresolved": 25,
+  "n_gold_swapped": 3,
+  "desc": "",
+  "focus": "('backoff',)",
+  "gate": "S3_no_gain",
+  "n_cands": 1,
+  "n_ran": 1,
+  "n_blew": 0,
+  "render_modes": {
+   "splice": 1
+  },
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "1e61524",
+  "k": 78,
+  "f2p": 9,
+  "stage": "elsewhere",
+  "base_ok": 69,
+  "new_ok": 73,
+  "found": true,
+  "full_pass": false,
+  "n_unjson": 0,
+  "n_gold_unresolved": 4,
+  "n_gold_swapped": 0,
+  "desc": "cmp@L216",
+  "focus": "('singularize',)",
+  "gate": "S4_partial",
+  "n_cands": 21,
+  "n_ran": 21,
+  "n_blew": 0,
+  "render_modes": {
+   "splice": 21
+  },
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "55dfe50",
+  "stage": "no_criteria",
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "ebc7a8f",
+  "stage": "no_f2p",
+  "k": 27,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "d0a284f",
+  "k": 10,
+  "f2p": 1,
+  "stage": "no_fix",
+  "base_ok": 9,
+  "new_ok": 0,
+  "found": false,
+  "full_pass": false,
+  "n_unjson": 0,
+  "n_gold_unresolved": 29,
+  "n_gold_swapped": 0,
+  "desc": "",
+  "focus": "('IndexedSet',)",
+  "gate": "S3_no_gain",
+  "n_cands": 156,
+  "n_ran": 156,
+  "n_blew": 0,
+  "render_modes": {
+   "splice": 141,
+   "fallback": 15
+  },
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "609cabe",
+  "stage": "no_f2p",
+  "k": 7,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "4aa77cd",
+  "k": 32,
+  "f2p": 2,
+  "stage": "no_fix",
+  "base_ok": 30,
+  "new_ok": 0,
+  "found": false,
+  "full_pass": false,
+  "n_unjson": 0,
+  "n_gold_unresolved": 25,
+  "n_gold_swapped": 3,
+  "desc": "",
+  "focus": "('split',)",
+  "gate": "S2_no_cands",
+  "n_cands": 0,
+  "n_ran": 0,
+  "n_blew": 0,
+  "render_modes": {},
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "766b554",
+  "k": 65,
+  "f2p": 7,
+  "stage": "same_core_fix",
+  "base_ok": 58,
+  "new_ok": 65,
+  "found": true,
+  "full_pass": true,
+  "n_unjson": 0,
+  "n_gold_unresolved": 4,
+  "n_gold_swapped": 0,
+  "desc": "cmp@L565",
+  "focus": "('bytes2human',)",
+  "gate": "S5_full",
+  "n_cands": 5,
+  "n_ran": 5,
+  "n_blew": 0,
+  "render_modes": {
+   "splice": 4,
+   "fallback": 1
+  },
+  "reach": "L3",
+  "extend": "none"
+ },
+ {
+  "sha": "8a2a93d",
+  "k": 12,
+  "f2p": 1,
+  "stage": "no_fix",
+  "base_ok": 11,
+  "new_ok": 0,
+  "found": false,
+  "full_pass": false,
+  "n_unjson": 0,
+  "n_gold_unresolved": 1,
+  "n_gold_swapped": 0,
+  "desc": "",
+  "focus": "('ParsedException',)",
+  "gate": "S3_no_gain",
+  "n_cands": 30,
+  "n_ran": 30,
+  "n_blew": 0,
+  "render_modes": {
+   "splice": 28,
+   "fallback": 2
+  },
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "f9c4f30",
+  "stage": "no_f2p",
+  "k": 2,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "b4697c1",
+  "stage": "no_criteria",
+  "reach": "X",
+  "extend": "none"
+ },
+ {
+  "sha": "6cac49c",
+  "stage": "no_f2p",
+  "k": 26,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "4815fc8",
+  "stage": "no_f2p",
+  "k": 1,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "c2b04b4",
+  "stage": "no_f2p",
+  "k": 1,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "0341ab3",
+  "stage": "no_f2p",
+  "k": 26,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "40a7b47",
+  "stage": "no_f2p",
+  "k": 18,
+  "reach": "X",
+  "extend": "E"
+ },
+ {
+  "sha": "93185b2",
+  "stage": "no_f2p",
+  "k": 8,
+  "reach": "L3",
+  "extend": "none"
+ },
+ {
+  "sha": "6505c6b",
+  "stage": "no_criteria",
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "8ba3a7f",
+  "stage": "no_f2p",
+  "k": 8,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "8177b93",
+  "stage": "no_f2p",
+  "k": 26,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "16a258e",
+  "stage": "no_criteria",
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "754afdd",
+  "stage": "no_f2p",
+  "k": 26,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "41a926e",
+  "stage": "no_f2p",
+  "k": 6,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "64e6430",
+  "stage": "no_f2p",
+  "k": 6,
+  "reach": "L3",
+  "extend": "none"
+ },
+ {
+  "sha": "4457dec",
+  "stage": "no_f2p",
+  "k": 6,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "0a20b37",
+  "stage": "no_criteria",
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "9b3392a",
+  "stage": "no_f2p",
+  "k": 24,
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "9a5017d",
+  "stage": "no_f2p",
+  "k": 5,
+  "reach": "X",
+  "extend": "none"
+ },
+ {
+  "sha": "2d7f4a1",
+  "k": 26,
+  "f2p": 1,
+  "stage": "no_fix",
+  "base_ok": 25,
+  "new_ok": 0,
+  "found": false,
+  "full_pass": false,
+  "n_unjson": 0,
+  "n_gold_unresolved": 30,
+  "n_gold_swapped": 0,
+  "desc": "",
+  "focus": "('OneToOne',)",
+  "gate": "S3_no_gain",
+  "n_cands": 16,
+  "n_ran": 16,
+  "n_blew": 0,
+  "render_modes": {
+   "splice": 15,
+   "fallback": 1
+  },
+  "reach": "X",
+  "extend": "N"
+ },
+ {
+  "sha": "d34e461",
+  "stage": "no_criteria",
+  "reach": "X",
+  "extend": "N"
+ }
+]

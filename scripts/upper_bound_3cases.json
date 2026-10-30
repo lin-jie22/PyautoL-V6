@@ -1,0 +1,76 @@
+[
+ {
+  "id": "A-93185b2",
+  "sha": "93185b2",
+  "reach": "L3",
+  "shape": "Compare 节点 `start < stop` → `start <= stop`（与已修好的 c1c25da 同形）",
+  "fixed_ok": "5/5",
+  "k": 5,
+  "f2p": 1,
+  "f2p_names": [
+   "a1"
+  ],
+  "gate": "S5_full",
+  "base_ok": 4,
+  "new_ok": 5,
+  "found": true,
+  "full_pass": true,
+  "desc": "cmp@L385",
+  "n_cands": 23,
+  "n_ran": 23,
+  "n_blew": 0,
+  "focus": "('daterange',)",
+  "stage": "exact_file",
+  "human_diff": [
+   "-elif start < stop:",
+   "+elif start <= stop:"
+  ],
+  "machine_diff": [
+   "-elif start < stop:",
+   "+elif start <= stop:"
+  ]
+ },
+ {
+  "id": "B-64e6430",
+  "sha": "64e6430",
+  "reach": "L3",
+  "shape": "BinOp `apparent_index -= d_stop + d_start` → `d_stop - d_start`（旁边的 `_get_real_index` 用的是正确的 `-`）",
+  "fixed_ok": "10/10",
+  "k": 10,
+  "f2p": 2,
+  "f2p_names": [
+   "b2",
+   "b3"
+  ],
+  "gate": "S5_full",
+  "base_ok": 8,
+  "new_ok": 10,
+  "found": true,
+  "full_pass": true,
+  "desc": "cmp@L122",
+  "n_cands": 139,
+  "n_ran": 139,
+  "n_blew": 0,
+  "focus": "('IndexedSet',)",
+  "stage": "elsewhere",
+  "human_diff": [
+   "-apparent_index -= d_stop + d_start",
+   "+apparent_index -= d_stop - d_start"
+  ],
+  "machine_diff": [
+   "-elif len(ded) > 384:",
+   "+elif len(ded) < 384:"
+  ]
+ },
+ {
+  "id": "C-f5f5cd8",
+  "sha": "f5f5cd8",
+  "reach": "L2",
+  "shape": "异常消息**字符串文案** `'expected 20 < size <= 36'` → '…20 <= size…'；⛔ `if size < 20 or size > 36` 这行没动 ⇒ **行为零变化**",
+  "fixed_ok": "4/4",
+  "k": 4,
+  "f2p": 0,
+  "f2p_names": [],
+  "stage": "no_f2p_under_oracle"
+ }
+]
