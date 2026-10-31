@@ -1,0 +1,142 @@
+[
+ {
+  "id": "A-93185b2",
+  "sha": "93185b2",
+  "reach": "L3",
+  "units": [
+   "daterange"
+  ],
+  "focus": [
+   "daterange"
+  ],
+  "in_reach": true,
+  "base_ok": 4,
+  "k": 5,
+  "auto_best": 5,
+  "auto_gain": 1,
+  "auto_desc": "cmp@L385",
+  "auto_n_cands": 23,
+  "forced_best": 5,
+  "forced_gain": 1,
+  "forced_desc": "cmp@L385",
+  "forced_n_cands": 23,
+  "stage": "fixable_if_focused"
+ },
+ {
+  "id": "B-64e6430",
+  "sha": "64e6430",
+  "reach": "L3",
+  "units": [
+   "IndexedSet"
+  ],
+  "focus": [
+   "IndexedSet"
+  ],
+  "in_reach": true,
+  "base_ok": 8,
+  "k": 10,
+  "auto_best": 10,
+  "auto_gain": 2,
+  "auto_desc": "cmp@L122",
+  "auto_n_cands": 139,
+  "forced_best": 10,
+  "forced_gain": 2,
+  "forced_desc": "cmp@L122",
+  "forced_n_cands": 139,
+  "stage": "fixable_if_focused"
+ },
+ {
+  "id": "C-f5f5cd8",
+  "sha": "f5f5cd8",
+  "reach": "L2",
+  "units": [
+   "GUIDerator"
+  ],
+  "focus": [
+   "GUIDerator"
+  ],
+  "in_reach": true,
+  "base_ok": 4,
+  "k": 4,
+  "auto_best": 4,
+  "auto_gain": 0,
+  "auto_desc": "int+1@L1473",
+  "auto_n_cands": 16,
+  "forced_best": 4,
+  "forced_gain": 0,
+  "forced_desc": "int+1@L1473",
+  "forced_n_cands": 16,
+  "stage": "shape_bound"
+ },
+ {
+  "id": "D-d992be0",
+  "sha": "d992be0",
+  "reach": "L3",
+  "units": [
+   "_windowed_running_min",
+   "_windowed_running_max"
+  ],
+  "focus": [
+   "running_min",
+   "running_max"
+  ],
+  "in_reach": false,
+  "base_ok": 5,
+  "k": 7,
+  "auto_best": 5,
+  "auto_gain": 0,
+  "auto_desc": "int+1@L1508",
+  "auto_n_cands": 12,
+  "forced_best": 6,
+  "forced_gain": 1,
+  "forced_desc": "cmp@L1478",
+  "forced_n_cands": 34,
+  "stage": "unreachable_focus"
+ },
+ {
+  "id": "E-358c85e",
+  "sha": "358c85e",
+  "reach": "L2",
+  "units": [
+   "define"
+  ],
+  "focus": [
+   "define"
+  ],
+  "in_reach": true,
+  "base_ok": 2,
+  "k": 4,
+  "auto_best": 0,
+  "auto_gain": -2,
+  "auto_desc": "cmp@L76",
+  "auto_n_cands": 1,
+  "forced_best": 0,
+  "forced_gain": -2,
+  "forced_desc": "cmp@L76",
+  "forced_n_cands": 1,
+  "stage": "shape_bound"
+ },
+ {
+  "id": "F-e2b02ec",
+  "sha": "e2b02ec",
+  "reach": "L3",
+  "units": [
+   "_ClassBuilder"
+  ],
+  "focus": [
+   "attrib"
+  ],
+  "in_reach": false,
+  "base_ok": 3,
+  "k": 4,
+  "auto_best": 3,
+  "auto_gain": 0,
+  "auto_desc": "cmp@L197",
+  "auto_n_cands": 6,
+  "forced_best": 4,
+  "forced_gain": 1,
+  "forced_desc": "cmp@L511",
+  "forced_n_cands": 17,
+  "stage": "unreachable_focus"
+ }
+]

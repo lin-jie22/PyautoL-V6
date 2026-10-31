@@ -55,6 +55,19 @@ sys.path.insert(0, str(ROOT))
 from aether.environment import run_in_sandbox              # noqa: E402
 from aether.synthesize import synthesize_patch              # noqa: E402
 
+#: 整包装载（README 164）：attrs / more-itertools 的子模块单独塞进沙箱会
+#: `import-failed`（相对导入 + 包内兄弟模块取不到）⇒ 必须走 `pkg_context`。
+#: ⛔ 惰性导入：这个模块在 `scripts/` 里，且 `probe_auto_unlock` 也是这么用的。
+_PPL = ROOT / "scripts" / "probe_package_load.py"
+
+
+def _pkg_context(repo: str, sha: str, src: str, main_src: str):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_ppl", _PPL)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.pkg_context(Path(repo), sha, src, main_src)
+
 
 def _git(repo: str, *args: str) -> str:
     r = subprocess.run(["git", "-C", repo, *args], capture_output=True,
@@ -215,6 +228,115 @@ CASES = [
              "call": "len(next(iter(GUIDerator(size=24))))"},
         ],
     },
+
+    #: ══════════ 以下是 r94 追加的**跨仓库**案例 ══════════
+    #: 171 的 A 结论（"合成层没问题、形态不是拦路虎"）最大的分寸问题是
+    #: **n=3 且全在 boltons**。这三个来自 more-itertools / attrs，用来验
+    #: 它跨不跨仓库。D 与 F 是 L3 + Compare 翻转（与 A 同形），E 是 L2。
+
+    {
+        "id": "D-d992be0",
+        "repo": "/tmp/realrepo/more-itertools",
+        "sha": "d992be0",
+        "src": "more_itertools/recipes.py",
+        "reach": "L3",
+        "shape": "Compare `not s[-1][1] < value` → `not s[-1][1] <= value`"
+                 "（窗口内**相等时保留先到者** ⇒ 稳定性）",
+        "source": "commit message『Fix stability in running_min and "
+                  "running_max』+ 人类 `test_stability`（判 `type()`）",
+        #: ⛔ 期望值一律来自 **doctest**（作者写的规范），不自己构造。
+        #:   `data = [0, 0.0, Fraction(0)]` 取自人类测试；`min(x, y)` 在
+        #:   `x == y` 时返回 **先到者** ⇒ 第 3 项应是 float 不是 Fraction。
+        #: ⛔ `recipes.py` **没有** import Fraction ⇒ 探针里自己取。
+        "tests": [
+            #: 【F2P ×2】稳定性：窗口 [0.0, Fraction(0)] 的 min/max 必须是
+            #: 先到的 0.0（float）。buggy 会把旧的 0.0 弹掉 ⇒ 变 Fraction。
+            {"name": "d1", "expect": "['int', 'int', 'float']",
+             "call": "str([type(x).__name__ for x in running_min("
+                     "[0, 0.0, __import__('fractions').Fraction(0)], "
+                     "maxlen=2)])"},
+            {"name": "d2", "expect": "['int', 'int', 'float']",
+             "call": "str([type(x).__name__ for x in running_max("
+                     "[0, 0.0, __import__('fractions').Fraction(0)], "
+                     "maxlen=2)])"},
+            #: 【P2P ×4】doctest 原文（无窗口 / 窗口=3）
+            {"name": "d3", "expect": "[4, 3, 3, 0, 0, 0, 0, 0, 0, 0]",
+             "call": "str(list(running_min([4, 3, 7, 0, 8, 1, 6, 2, 9, 5])))"},
+            {"name": "d4", "expect": "[4, 3, 3, 0, 0, 0, 1, 1, 2, 2]",
+             "call": "str(list(running_min([4, 3, 7, 0, 8, 1, 6, 2, 9, 5], "
+                     "maxlen=3)))"},
+            {"name": "d5", "expect": "[4, 4, 7, 7, 8, 8, 8, 8, 9, 9]",
+             "call": "str(list(running_max([4, 3, 7, 0, 8, 1, 6, 2, 9, 5])))"},
+            {"name": "d6", "expect": "[4, 4, 7, 7, 8, 8, 8, 6, 9, 9]",
+             "call": "str(list(running_max([4, 3, 7, 0, 8, 1, 6, 2, 9, 5], "
+                     "maxlen=3)))"},
+            #: 【P2P】窗口非法 ⇒ 必须抛（防止合成层把 && 换成 || 之类蒙混）
+            {"name": "d7", "raises": "ValueError",
+             "call": "running_min([1], maxlen=0)"},
+        ],
+    },
+    {
+        "id": "E-358c85e",
+        "repo": "/tmp/realrepo/attrs",
+        "sha": "358c85e",
+        "src": "src/attr/_next_gen.py",
+        "pkg": True,
+        "reach": "L2",
+        "shape": "常量 `eq=True` → `eq=None`（define 的参数默认值）"
+                 " ⇒ auto-detect：用户自己写了 `__eq__` 就不覆盖",
+        "source": "commit message『Fix auto-detection of eq/ne in NG APIs』"
+                  "+ 人类 `test_auto_detect_eq`（`pytest.raises(ValueError)`）",
+        "tests": [
+            #: 【F2P】人类测试原文：类自己定义 __eq__ 并 raise ⇒ `C() == C()`
+            #: 必须**抛**。buggy（eq=True）会生成 __eq__ 覆盖它 ⇒ 不抛。
+            {"name": "e1", "raises": "ValueError",
+             "call": "(lambda C: C() == C())(define(type('C', (), "
+                     "{'__eq__': lambda self, o: (_ for _ in ()"
+                     ").throw(ValueError())})))"},
+            #: 【F2P】同上但__eq__ 返回 42 ⇒ 必须**透传**，不能被覆盖成 bool
+            {"name": "e2", "expect": 42,
+             "call": "(lambda E: E() == E())(define(type('E', (), "
+                     "{'__eq__': lambda s, o: 42})))"},
+            #: 【P2P ×2】没自定义 __eq__ ⇒ 照旧自动生成（相等/不等）
+            {"name": "e3", "expect": True,
+             "call": "(lambda D: D(1) == D(1))(define(type('D', (), "
+                     "{'__annotations__': {'x': int}})))"},
+            {"name": "e4", "expect": False,
+             "call": "(lambda D: D(1) == D(2))(define(type('D', (), "
+                     "{'__annotations__': {'x': int}})))"},
+        ],
+    },
+    {
+        "id": "F-e2b02ec",
+        "repo": "/tmp/realrepo/attrs",
+        "sha": "e2b02ec",
+        "src": "src/attr/_make.py",
+        "pkg": True,
+        "reach": "L3",
+        "shape": "Compare `getattr(cls, name, _sentinel) != _sentinel` → "
+                 "`is not _sentinel` ⇒ 不再调用默认值的 `__eq__`",
+        "source": "commit message『Fix default values that are not comparable"
+                  " with ==』+ 人类 `test_non_comparable_defaults`",
+        "tests": [
+            #: 【F2P】默认值的 __eq__ 会 raise ⇒ buggy 用 `!=` 触发它 ⇒ 崩；
+            #: fixed 用 `is not` ⇒ 不触发 ⇒ 类构造成功。
+            {"name": "f1", "expect": "C",
+             "call": "attrs(auto_attribs=True)(type('C', (), "
+                     "{'__annotations__': {'x': int}, 'x': type('NC', (), "
+                     "{'__eq__': lambda s, o: (_ for _ in ()"
+                     ").throw(ValueError)})()})).__name__"},
+            #: 【P2P ×3】普通默认值照旧能用（`is not` 不能把普通分支改坏）
+            {"name": "f2", "expect": 5,
+             "call": "attrs(auto_attribs=True)(type('D', (), "
+                     "{'__annotations__': {'y': int}, 'y': 5}))().y"},
+            {"name": "f3", "expect": "hi",
+             "call": "attrs(auto_attribs=True)(type('E', (), "
+                     "{'__annotations__': {'z': str}, 'z': 'hi'}))().z"},
+            {"name": "f4", "expect": 7,
+             "call": "attrs(type('F', (), {'__annotations__': {'w': int}, "
+                     "'w': attrib(default=7)}))().w"},
+        ],
+    },
 ]
 
 
@@ -236,8 +358,17 @@ def run_case(c: dict, timeout: float = 20.0, buggy_src: str = "",
         return out
     tests = c["tests"]
 
+    #: 整包装载：包内模块必须带着兄弟模块一起装载，否则 `import-failed`。
+    #: ⛔ buggy / fixed 用**各自的** pkg —— 兄弟模块在两个版本间可能也变了，
+    #:   拿 fixed 的兄弟配 buggy 的主模块会造出并不存在的组合（第 24 条）。
+    pkg = None
+    if c.get("pkg") and not buggy_src:
+        pkg = _pkg_context(repo, f"{sha}^", src, buggy)
+
     #: ── 第 1 步：oracle 判据必须在**参照实现**上全绿 ──
-    rf = run_in_sandbox(fixed, tests, timeout=timeout)
+    pkg_f = _pkg_context(repo, sha, src, fixed) if (c.get("pkg")
+                                                    and not fixed_src) else None
+    rf = run_in_sandbox(fixed, tests, timeout=timeout, pkg=pkg_f)
     n_ok_fixed = sum(1 for r in rf.results if r.get("passed"))
     out["fixed_ok"] = f"{n_ok_fixed}/{len(tests)}"
     if n_ok_fixed != len(tests):
@@ -248,7 +379,7 @@ def run_case(c: dict, timeout: float = 20.0, buggy_src: str = "",
         return out
 
     #: ── 第 2 步：缺陷版上的 F2P ──
-    rb = run_in_sandbox(buggy, tests, timeout=timeout)
+    rb = run_in_sandbox(buggy, tests, timeout=timeout, pkg=pkg)
     f2p = [r.get("name") for r in rb.results if not r.get("passed")]
     out["k"] = len(tests)
     out["f2p"] = len(f2p)
@@ -258,7 +389,7 @@ def run_case(c: dict, timeout: float = 20.0, buggy_src: str = "",
         return out
 
     #: ── 第 3 步：合成（**不看答案**）──
-    res = synthesize_patch(buggy, tests, timeout=timeout)
+    res = synthesize_patch(buggy, tests, timeout=timeout, pkg=pkg)
     out.update({"gate": res.gate, "base_ok": res.base_ok,
                 "new_ok": res.new_ok, "found": res.found,
                 "full_pass": res.full_pass, "desc": res.desc,
