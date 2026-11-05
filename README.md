@@ -7684,3 +7684,130 @@ PAT 明文出现在了对话里 ⇒ 应去 GitHub Settings 撤销 / 轮换该 to
   2. **修定位门**本身（`locate_focus` 扩到"调用闭包内的顶层单元"）是**产品
      代码改动 + 口径变更**，属扩张 ⇒ **需拍板**，不自己开工。
   3. 172 的第 2 条（多步状态序列普查）与 E 类（常量替换）的扩张都仍需拍板。
+
+### 174. ⛔⛔ **取证基线第二次被静默破坏：这次连 objects 都没了；把尺子的零点钉进版本控制**（2026-11-05）
+
+═══ 一、怎么撞上的 ═══
+
+按 173 第七节准备做「定位门量级普查」，先执行 169 留下的规则「每次普查
+先验基线健康并把健康度当读数报出来」⇒ 一验就是红的：
+
+| 读数 | 169（10-29） | **174（11-05）** |
+|---|---|---|
+| 坏几个仓库 | 只有 boltons | **三个全坏** |
+| `HEAD/config/index` | 缺 | **缺** |
+| `objects` | pack 完好（2.1M / 1743 commit） | **boltons 还在；mi / attrs 全空** |
+| 工作区文件 | 缺点文件 | **0 个** |
+| 目录时间戳 | — | 11-02 00:00 / 11-04 00:12 / 11-05 00:00 |
+
+⇒ 169 的「靠 objects 原地重建」对 mi / attrs **已不成立**。
+⛔ 来源**仍未定位**：与 169 一样，全仓没有任何 V6 代码会删 `/tmp/realrepo`；
+   目录骨架被保留、只剩文件被清 ⇒ 像周期性清理，但**不猜**。
+   结论边界：观察到「被破坏」，**没有**观察到「谁破坏的」。
+
+═══ 二、⛔⛔ 真正的病：HEAD 是尺子的零点，而零点不在版本控制里 ═══
+
+`probe_alias_demote.select_commits` 用 `git log --format=%H`（**从 HEAD 往下**）
+加固定词表筛前 40 个。所以：
+
+    HEAD 变了 ⇒ 那 40 个 commit 全变 ⇒ 跨轮读数不可比，
+    而且**不会报错**：照样出一份看起来很正常的分布表。
+
+169 只钉了「每次先验健康」，没钉「健康的标准是什么」。这次暴露两处：
+
+  · 旧自检 `_realrepo_ok()` 只查 `.git/HEAD` **存在**，objects 全空也放行；
+  · 基线不存在时契约 H 组 **SKIP**，CI 显示全绿 ⇒ 未覆盖被读成通过。
+
+⇒ 标准可读、不可被被测者改写。缺的不是备份，是**锚 + fail-closed**。
+
+═══ 三、恢复（不重新 clone 到最新）═══
+
+  · **boltons**：现存 pack 完好 ⇒ 按 169 原地写回 `HEAD/config`、
+    `update-ref master 4e5faa3`、`read-tree`、`checkout -- .`（113 文件）。
+  · **mi / attrs**：从远端完整 clone，然后
+    **`git checkout --detach <钉死的 head>`**。⛔ 用远端最新 HEAD 会把
+    `select_commits` 的前 40 个换掉 —— 169 那条「不许重 clone」真正要防的
+    是**零点前移**，不是 clone 这个动作本身。
+  · 旧骨架全部 `mv` 到 `/tmp/realrepo_backup_20261105/`，**不删**。
+
+⛔ 判定恢复是否精确，不用「看起来能跑」，用**同源对拍**：跑同一份
+   `select_commits` 与存档读数逐字比。boltons 40/40、attrs 40/40、
+   mi 前 39/39 全等 ⇒ 零点与口径都复原。
+
+═══ 四、⛔ 顺带发现：两本账被混了很久 ═══
+
+mi 的 `census_mi_40.json` 只有 **39** 行，而 `select_commits` 给 **40** 个候选：
+前者是**探针跑完的行数**（`probe_auto_unlock` 主循环在 `sha^:src` 读不到 /
+`buggy==fixed` 时 `continue`），后者是**候选池**。
+
+    实测：存档 39 条是 40 条候选的**保序子序列**，多出的是 `9f4f31f`
+    （序列第 36 位，`Fix linter complaints`）。
+    ⛔ 但直接复算它的 buggy / fixed：都非空且不等 ⇒ **主循环不会跳过它**。
+       ⇒ 那一行为什么没进存档，**仍未定位**（标为未知，不编原因）。
+       boltons / attrs 两本账都是 40/40，无差异。
+
+⇒ 锚里 `commit_shas` 与 `census_shas` **分开存、分开验**：合并成一个布尔
+   就分不清「候选池变了」和「探针跳过一条」，而这两者修法完全不同。
+
+═══ 五、新设施 ═══
+
+| 文件 | 作用 |
+|---|---|
+| `scripts/realrepo_baseline.json` | 锚：三仓库 `remote` / `head`(40 位) / `commit_shas` / `census_shas` / `smoke`(blob sha256) / `extractor_sha256` / 口径签名 |
+| `scripts/realrepo_baseline.py` | `verify` / `snapshot` / `bootstrap`；`require_baseline()` 供普查入口 fail-closed |
+| `tests/contract_realrepo_baseline_test.py` | 19 项契约，其中 **9 条注入反证** |
+
+四条设计约束：
+
+  1. **同源**：验签直接调 `probe_alias_demote.select_commits`，锚里
+     **不另写一份词表**。
+  2. **锁尺子本身**：`extractor_sha256` 钉住抽取器源码 hash。有人改
+     `FIX_WORDS` 也会红 —— 否则改词表就能让「前 40 个」悄悄换一批。
+  3. **缺键用哨兵 `__MISSING__` 并点名字段**，不合并成一个布尔；写锚前
+     校验口径签名，换口径要 `--allow-supersede` 且旧值另存。
+  4. **fail-closed**：`require_baseline()` 不健康时 `SystemExit(2)`，
+     不是 SKIP。缺失不得被读作通过。
+
+`bootstrap` 从远端 clone 后 checkout **锚里钉死的 head**，验签通过才替换
+现网基线，旧基线另存 ⇒ 任何机器可复现同一把尺子。
+
+═══ 六、读数 ═══
+
+    $ python scripts/realrepo_baseline.py verify
+    [boltons        ] PASS head=4e5faa3  select=40 census=40 smoke=3/3 tracked=113
+    [more-itertools ] PASS head=67fcf64  select=40 census=39 smoke=3/3 tracked=39
+    [attrs          ] PASS head=97f8d17  select=40 census=40 smoke=3/3 tracked=133
+    baseline_health=OK  repos=3/3  diffs=0
+
+契约 `contract_realrepo_baseline_test.py`：**19/19**，其中反证组
+**B0**（健康 fixture 必须绿，证明闸不恒红）+ **B1–B8**（换 HEAD / 改候选
+序列 / 删键 / 改抽取器 hash / 删 `.git/HEAD` / 弱自检同源对照 / 坏锚 /
+缺锚）逐项转红且**点名预期字段**。CLI 层另做两次实操：篡改 head、删
+`census_shas` 均 `rc=1` 并打印具体差异。
+
+⛔ `head_evidence` 分寸：boltons 的 `4e5faa3` 是 169 从 objects 里读出的
+   **观察**；mi / attrs 的 `67fcf64` / `97f8d17` 是「存档首个 sha + 同源
+   对拍全等」的**推断**（原 `.git` 已毁，无从直接读 HEAD）。两者都由
+   `select_commits` 40 条逐字对拍担保口径一致，但**不许写成观察**。
+
+═══ 七、规则更新与残留 ═══
+
+- 169 的「先验健康」**升级为「先验锚」**：不但要看仓库在不在，还要看
+  **零点与候选序列是不是原来那把尺子**；健康度本身作为读数落盘。
+- ⛔ 普查脚本的**默认行为本轮未改**（新口径默认关）。要启用就在入口显式
+  调 `require_baseline()`，或先跑 `verify`；本轮**没有动 `aether/` 一个字节**。
+- 残留 ①：`C` 组在 CI 上仍会 SKIP（CI 没有 /tmp/realrepo）⇒ 169 那对
+  「CI 绿 / 本地红」的**结构性条件还在**，只是现在锚自身与闸的 17 项
+  A/B 组在 CI 上真跑。彻底解法是 CI 里先 `bootstrap` 再跑 H 组，属
+  workflow 改动（需带 workflow scope 的 PAT）⇒ **待拍板**。
+- 残留 ②：`9f4f31f` 未进存档的原因未定位。
+- 残留 ③：mi / attrs 的 head 是推断值（见上）。
+
+═══ 八、下一步（173 主线未变）═══
+
+本轮**没有做**定位门量级普查 —— 它是 173 第七节第 1 条，但基线坏了时
+任何读数都不可信，先把前置条件补齐。现在可以开工：
+
+  1. 定位门量级普查（仍只能在「判据可写」子集上做，**分母不是 119**）；
+  2. 修 `locate_focus` = 改产品代码 + 口径变更 ⇒ **仍需拍板**；
+  3. 判据形态扩张 / 多步状态序列普查 ⇒ 仍需拍板。
