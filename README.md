@@ -7811,3 +7811,137 @@ mi 的 `census_mi_40.json` 只有 **39** 行，而 `select_commits` 给 **40** �
   1. 定位门量级普查（仍只能在「判据可写」子集上做，**分母不是 119**）；
   2. 修 `locate_focus` = 改产品代码 + 口径变更 ⇒ **仍需拍板**；
   3. 判据形态扩张 / 多步状态序列普查 ⇒ 仍需拍板。
+
+### 175. ⛔⛔ **定位门量级普查：全自动路径下「修 locate_focus」收益为 0；173 的定位门是 oracle 判据条件下的现象**（2026-11-05）
+
+═══ 一、做了什么 ═══
+
+173 第七节第 1 条留的活，174 把前置条件（基线锚 + fail-closed 验签）补齐后
+本轮开工。三仓库各 40 个 `select_commits` 候选 = **120**（其中 119 与 census
+读数对得上，多出的 `9f4f31f` 见 174 ⇒ **两本账分开报**）。
+
+判据来自同源 `auto_extract`，**focus 来自产品自己的 `synthesize_patch`**，
+改动单元来自 173 的 `changed_units`。每次跑先 `require_baseline()`
+（174 的第一次实战；契约 B6 用行为反证它确属必经）。
+
+═══ 二、⛔⛔ 先踩到一个能让结论反转的坑 ═══
+
+第一版尺子自己拼 `texts` 再调 `locate_focus`（**全部判据 + 无空格拼接**）。
+而产品 `aether/synthesize.py:359` 是
+
+    texts = [f"{t['name']} {t['call']}" for t in tests if t["name"] in bad_set]
+
+—— **有空格**，且**只取 F2P 判据**。两把尺子在真实案例上给出相反答案：
+
+| sha | 第一版（错） | 产品实际 | 产品 gate |
+|---|---|---|---|
+| `93185b2`（173 的 A） | `['daterange']` | `[]` | `S1_no_focus` |
+| `d992be0`（173 的 D） | `['Stats','running_statistics']` | `[]` | `S1_no_focus` |
+
+⇒ 照第一版出读数，会把「**定位根本没开工**」写成「定位射程外」，整节结论反过来。
+修法：把 `synth_candidates` 临时替身成空（跳过昂贵候选跑分），**其余路径一字不改**
+地调 `synthesize_patch` 取 `res.focus`。替身版与正常版 focus 在 3 例上逐字相同
+（契约 B0），B1 把「旧尺子」复现成离线反证钉死。
+
+═══ 三、判定八格（互斥、覆盖）═══
+
+    no_src            buggy/fixed 读不到
+    no_criteria       一条判据都没抽到
+    blew              沙箱基线跑挂（S0）
+    no_f2p            判据全过 ⇒ texts 为空 ⇒ focus 必空
+    f2p_but_no_focus  有 F2P、但标识符映射不到顶层 def/class（定位没开工）
+    no_units          纯 INSERT ⇒ changed_units 为空 ⇒ 射程无从判定
+    out_of_reach      focus 非空、units 非空、不相交（**173 定义的定位门**）
+    in_reach          至少一个改动单元 ∈ focus
+
+⛔ `no_f2p` 与 `f2p_but_no_focus` **必须分开**：前者该修判据、后者才该修定位。
+   合并成一个「focus 空」会同时得出「扩射程没用」和「扩射程能救一大片」
+   两种相反但都错的结论。契约 B4 逐格反证七格都能触发。
+
+═══ 四、读数（`scripts/focus_census.json`）═══
+
+| verdict | 全部 120 | boltons | more-itertools | attrs |
+|---|---:|---:|---:|---:|
+| `no_criteria` | 30 | 8 | 0 | 22 |
+| `no_f2p` | **72** | 21 | 34 | 17 |
+| `f2p_but_no_focus` | 2 | 1 | 1 | 0 |
+| `no_units` | 2 | 1 | 1 | 0 |
+| `out_of_reach` | **3** | 2 | 1 | 0 |
+| `in_reach` | 11 | 7 | 3 | 1 |
+| `blew` / `no_src` | 0 | 0 | 0 | 0 |
+
+按 `reach` 分层（⛔ 166：跨仓库/跨层的覆盖率必须带门分布才可比）：
+
+| reach | n | 门分布 |
+|---|---:|---|
+| X | 110 | no_criteria 27 / no_f2p 67 / f2p_but_no_focus 2 / no_units 2 / **out_of_reach 3** / in_reach 9 |
+| L2 | 3 | no_criteria 2 / no_f2p 1 |
+| L3 | 6 | no_criteria 1 / no_f2p 3 / **in_reach 2** |
+| （不在 census） | 1 | no_f2p 1 |
+
+可判定 in/out of reach 共 **14** 例，射程外 3 例（21.4%）。
+
+═══ 五、⛔⛔ 结论 ═══
+
+  1. **判据侧仍是唯一大头：102/120 = 85%**（`no_criteria` 30 + `no_f2p` 72）。
+  2. 定位侧三格合计 **7 例，全部 `reach=X`** —— 形态门在下游挡着。
+  3. **形态可达的 9 个里定位侧零拦截**：`no_criteria` 3 / `no_f2p` 4 /
+     `in_reach` 2 / **`out_of_reach` 0**。
+  4. 173 的两个定位门案例，在全自动路径下 **D `d992be0` 是 `no_f2p`、
+     F `e2b02ec` 是 `no_criteria`** ⇒ 173 发现的定位门是**喂 oracle 判据的
+     上界实验现象**，不是产品路径上正在拦人的门。173 第五节的判断要按前提收窄。
+
+⛔ `reach` 是**事后 oracle**（要看 fixed 源码），不能当 predictor。
+   「定位侧全在 X」是事后归因，不是预测规则。
+
+═══ 六、强制 focus 对照（决定性证据，非抽样）═══
+
+`out_of_reach` 全集恰好 3 例 ⇒ 对**全部 3 例**强制 `focus=改动单元`
+（绕过 `locate_focus`，⛔ 诊断读数、不算修复），再加 2 个 L3 正例证明装置
+没有把所有题判死。读数 `scripts/focus_forced_gain.json`：
+
+| sha | reach | 自动 gate | 强制 gate | 判定 | 人类/机器改动行 |
+|---|---|---|---|---|---|
+| `ead236e` | X | `S3_no_gain` | `S3_no_gain` | `no_fix` | 10 / 0 |
+| `4aa77cd` | X | `S2_no_cands` | `S5_full` | **`elsewhere`** | 2 / 2 |
+| `ae37eb3` | X | `S3_no_gain` | `S3_no_gain` | `no_fix` | 4 / 0 |
+| `c1c25da` | L3 | `S5_full` | `S5_full` | `exact_file`（正例） | 2 / 2 |
+| `766b554` | L3 | `S5_full` | `S5_full` | `same_core_fix`（正例） | 4 / 2 |
+
+⇒ **3 例真修复 0 个**：2 个仍 `no_fix`，1 个 `full_pass=True` 却是
+   `elsewhere`（机器改了别处绕开有 bug 的路径，与 171 的 B 同类）。
+   又一次印证 161：`full_pass` 只是**必要条件**。
+⇒ 正例照常修好 ⇒ 「强制后全 no_fix」不是量具把题判死。
+⇒ **把定位门开到位，收益仍被形态门吞掉。**
+
+═══ 七、这改变了哪条待办 ═══
+
+⛔ **173 第七节第 2 条「修 `locate_focus`（扩到调用闭包内的顶层单元）」
+   在全自动路径下实测收益 0 ⇒ cancel**（与 172 的时间参数化同类：
+   便宜的对照实验把一条待办变成「确认不用做」）。
+
+   它解决的是「focus 非空但射程外」，而那 3 例全在 `reach=X`；
+   真要让它有用，得先解决判据侧（102/120）与形态门（110/120）。
+
+⛔ **别把这句读成「定位层没问题」**：在 oracle 判据的上界实验里它仍是真门
+   （173 的 D/F 强制 focus 后 gain 0→+1）。两句分属**不同前提**，不许合并。
+
+═══ 八、新规则与残留 ═══
+
+- **量定位门之前，先拿被测对象自己的定位函数对拍**：另写一份 `texts`
+  就足以让结论反转（本轮第一版实测）。
+- 「分母不是 119」的准确说法：**120 个候选 / 119 个 census 读数**；
+  173 说的「判据可写子集」实测 89 个，但普查按 120 全跑、把
+  `no_criteria` 单列成格，比先筛掉更不容易丢信息。
+- 残留 ①：CI 上 C 组仍 SKIP（需 workflow scope 的 PAT，见 174）。
+- 残留 ②：`9f4f31f` 未进 census 的原因仍未定位（174）。
+- 残留 ③：`changed_lines` 在 `probe_auto_unlock.py:68` 与
+  `probe_upper_bound.py:78` **各有一份**（本轮核过逐字等价，口径无分歧，
+  但属两处写入隐患）。本轮判定取 census 同源的那份。
+- 残留 ④：n=3 仓库 / 120 候选，结论不外推到别的题源。
+
+═══ 九、下一步 ═══
+
+判据侧（`no_criteria` 30 / `no_f2p` 72）已是唯一大头，但
+「扩张判据形态（truthy / ∈ / ≠ / match=）」与「多步状态序列」都属
+**口径变更 ⇒ 仍需拍板**，本轮没有擅自开工。本轮也**没动 `aether/` 一个字节**。

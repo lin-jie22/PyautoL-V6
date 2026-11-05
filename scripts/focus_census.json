@@ -1,0 +1,2041 @@
+{
+  "schema": "focus-census/v1",
+  "rows": [
+    {
+      "repo": "boltons",
+      "sha": "4e5faa3",
+      "src": "boltons/ioutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "boltons",
+      "sha": "73e22c9",
+      "src": "boltons/statsutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 11,
+      "gate": "S1_no_focus",
+      "base_ok": 11,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "1cdc0e9",
+      "src": "boltons/statsutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 8,
+      "gate": "S1_no_focus",
+      "base_ok": 8,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "5eb6cc0",
+      "src": "boltons/mathutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_fix",
+      "k": 24,
+      "gate": "S2_no_cands",
+      "base_ok": 21,
+      "n_f2p": 3,
+      "focus": [
+        "Bits"
+      ],
+      "units": [
+        "Bits"
+      ],
+      "in_reach": true,
+      "verdict": "in_reach"
+    },
+    {
+      "repo": "boltons",
+      "sha": "f5f5cd8",
+      "src": "boltons/iterutils.py",
+      "in_census": true,
+      "reach": "L2",
+      "census_stage": "no_f2p",
+      "k": 43,
+      "gate": "S1_no_focus",
+      "base_ok": 43,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "GUIDerator"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "ec1ff9f",
+      "src": "boltons/setutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 10,
+      "gate": "S1_no_focus",
+      "base_ok": 10,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "_ComplementSet"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "c1c25da",
+      "src": "boltons/mathutils.py",
+      "in_census": true,
+      "reach": "L3",
+      "census_stage": "exact_file",
+      "k": 21,
+      "gate": "S2_no_cands",
+      "base_ok": 19,
+      "n_f2p": 2,
+      "focus": [
+        "Bits"
+      ],
+      "units": [
+        "Bits"
+      ],
+      "in_reach": true,
+      "verdict": "in_reach"
+    },
+    {
+      "repo": "boltons",
+      "sha": "f1034b0",
+      "src": "boltons/jsonutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "boltons",
+      "sha": "eb65901",
+      "src": "boltons/tableutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_fix",
+      "k": 4,
+      "gate": "S2_no_cands",
+      "base_ok": 2,
+      "n_f2p": 2,
+      "focus": [
+        "Table",
+        "to_text"
+      ],
+      "units": [
+        "Table"
+      ],
+      "in_reach": true,
+      "verdict": "in_reach"
+    },
+    {
+      "repo": "boltons",
+      "sha": "99dec84",
+      "src": "boltons/timeutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_fix",
+      "k": 7,
+      "gate": "S1_no_focus",
+      "base_ok": 4,
+      "n_f2p": 3,
+      "focus": [],
+      "units": [
+        "USTimeZone"
+      ],
+      "in_reach": false,
+      "verdict": "f2p_but_no_focus"
+    },
+    {
+      "repo": "boltons",
+      "sha": "ead236e",
+      "src": "boltons/iterutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_fix",
+      "k": 37,
+      "gate": "S2_no_cands",
+      "base_ok": 34,
+      "n_f2p": 3,
+      "focus": [
+        "backoff"
+      ],
+      "units": [
+        "backoff_iter"
+      ],
+      "in_reach": false,
+      "verdict": "out_of_reach"
+    },
+    {
+      "repo": "boltons",
+      "sha": "1e61524",
+      "src": "boltons/strutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "elsewhere",
+      "k": 78,
+      "gate": "S2_no_cands",
+      "base_ok": 69,
+      "n_f2p": 9,
+      "focus": [
+        "singularize"
+      ],
+      "units": [],
+      "in_reach": false,
+      "verdict": "no_units"
+    },
+    {
+      "repo": "boltons",
+      "sha": "55dfe50",
+      "src": "boltons/fileutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "boltons",
+      "sha": "ebc7a8f",
+      "src": "boltons/dictutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 27,
+      "gate": "S1_no_focus",
+      "base_ok": 27,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "d0a284f",
+      "src": "boltons/setutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_fix",
+      "k": 10,
+      "gate": "S2_no_cands",
+      "base_ok": 9,
+      "n_f2p": 1,
+      "focus": [
+        "IndexedSet"
+      ],
+      "units": [
+        "IndexedSet"
+      ],
+      "in_reach": true,
+      "verdict": "in_reach"
+    },
+    {
+      "repo": "boltons",
+      "sha": "609cabe",
+      "src": "boltons/setutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 7,
+      "gate": "S1_no_focus",
+      "base_ok": 7,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "IndexedSet"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "4aa77cd",
+      "src": "boltons/iterutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_fix",
+      "k": 32,
+      "gate": "S2_no_cands",
+      "base_ok": 30,
+      "n_f2p": 2,
+      "focus": [
+        "split"
+      ],
+      "units": [
+        "split_iter"
+      ],
+      "in_reach": false,
+      "verdict": "out_of_reach"
+    },
+    {
+      "repo": "boltons",
+      "sha": "766b554",
+      "src": "boltons/strutils.py",
+      "in_census": true,
+      "reach": "L3",
+      "census_stage": "same_core_fix",
+      "k": 65,
+      "gate": "S2_no_cands",
+      "base_ok": 58,
+      "n_f2p": 7,
+      "focus": [
+        "bytes2human"
+      ],
+      "units": [
+        "bytes2human"
+      ],
+      "in_reach": true,
+      "verdict": "in_reach"
+    },
+    {
+      "repo": "boltons",
+      "sha": "8a2a93d",
+      "src": "boltons/tbutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_fix",
+      "k": 12,
+      "gate": "S2_no_cands",
+      "base_ok": 11,
+      "n_f2p": 1,
+      "focus": [
+        "ParsedException"
+      ],
+      "units": [
+        "ParsedException"
+      ],
+      "in_reach": true,
+      "verdict": "in_reach"
+    },
+    {
+      "repo": "boltons",
+      "sha": "f9c4f30",
+      "src": "boltons/listutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 2,
+      "gate": "S1_no_focus",
+      "base_ok": 2,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "BarrelList"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "b4697c1",
+      "src": "boltons/strutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "boltons",
+      "sha": "6cac49c",
+      "src": "boltons/dictutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 26,
+      "gate": "S1_no_focus",
+      "base_ok": 26,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "4815fc8",
+      "src": "boltons/cacheutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 1,
+      "gate": "S1_no_focus",
+      "base_ok": 1,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "LRI"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "c2b04b4",
+      "src": "boltons/funcutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 1,
+      "gate": "S1_no_focus",
+      "base_ok": 1,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "0341ab3",
+      "src": "boltons/dictutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 26,
+      "gate": "S1_no_focus",
+      "base_ok": 26,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "OrderedMultiDict"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "40a7b47",
+      "src": "boltons/mathutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 18,
+      "gate": "S1_no_focus",
+      "base_ok": 18,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "Bits"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "93185b2",
+      "src": "boltons/timeutils.py",
+      "in_census": true,
+      "reach": "L3",
+      "census_stage": "no_f2p",
+      "k": 8,
+      "gate": "S1_no_focus",
+      "base_ok": 8,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "daterange"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "6505c6b",
+      "src": "boltons/ioutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "boltons",
+      "sha": "8ba3a7f",
+      "src": "boltons/timeutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 8,
+      "gate": "S1_no_focus",
+      "base_ok": 8,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "daterange"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "8177b93",
+      "src": "boltons/dictutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 26,
+      "gate": "S1_no_focus",
+      "base_ok": 26,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "OrderedMultiDict"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "16a258e",
+      "src": "boltons/typeutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "boltons",
+      "sha": "754afdd",
+      "src": "boltons/dictutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 26,
+      "gate": "S1_no_focus",
+      "base_ok": 26,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "FrozenDict"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "41a926e",
+      "src": "boltons/setutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 6,
+      "gate": "S1_no_focus",
+      "base_ok": 6,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "IndexedSet"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "64e6430",
+      "src": "boltons/setutils.py",
+      "in_census": true,
+      "reach": "L3",
+      "census_stage": "no_f2p",
+      "k": 6,
+      "gate": "S1_no_focus",
+      "base_ok": 6,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "IndexedSet"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "4457dec",
+      "src": "boltons/setutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 6,
+      "gate": "S1_no_focus",
+      "base_ok": 6,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "IndexedSet"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "0a20b37",
+      "src": "boltons/socketutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "boltons",
+      "sha": "9b3392a",
+      "src": "boltons/iterutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 24,
+      "gate": "S1_no_focus",
+      "base_ok": 24,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "9a5017d",
+      "src": "boltons/funcutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 5,
+      "gate": "S1_no_focus",
+      "base_ok": 5,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "boltons",
+      "sha": "2d7f4a1",
+      "src": "boltons/dictutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_fix",
+      "k": 26,
+      "gate": "S2_no_cands",
+      "base_ok": 25,
+      "n_f2p": 1,
+      "focus": [
+        "OneToOne"
+      ],
+      "units": [
+        "OneToOne"
+      ],
+      "in_reach": true,
+      "verdict": "in_reach"
+    },
+    {
+      "repo": "boltons",
+      "sha": "d34e461",
+      "src": "boltons/setutils.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "67fcf64",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 287,
+      "gate": "S1_no_focus",
+      "base_ok": 287,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "bucket"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "b5e3886",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 285,
+      "gate": "S1_no_focus",
+      "base_ok": 285,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "8a930ac",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 282,
+      "gate": "S1_no_focus",
+      "base_ok": 282,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "numeric_range"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "b2f3aff",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 282,
+      "gate": "S1_no_focus",
+      "base_ok": 282,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "one",
+        "only"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "def2dab",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 282,
+      "gate": "S1_no_focus",
+      "base_ok": 282,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "one",
+        "only"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "6b1907d",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 286,
+      "gate": "S2_no_cands",
+      "base_ok": 285,
+      "n_f2p": 1,
+      "focus": [
+        "sample"
+      ],
+      "units": [],
+      "in_reach": false,
+      "verdict": "no_units"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "bc8be10",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 282,
+      "gate": "S1_no_focus",
+      "base_ok": 282,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "numeric_range"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "d992be0",
+      "src": "more_itertools/recipes.py",
+      "in_census": true,
+      "reach": "L3",
+      "census_stage": "no_f2p",
+      "k": 12,
+      "gate": "S1_no_focus",
+      "base_ok": 12,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "_windowed_running_min",
+        "_windowed_running_max"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "f51a53b",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 280,
+      "gate": "S1_no_focus",
+      "base_ok": 280,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "37bb3ad",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 272,
+      "gate": "S1_no_focus",
+      "base_ok": 272,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "edb3346",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 272,
+      "gate": "S1_no_focus",
+      "base_ok": 272,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "numeric_range"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "e4d2a4a",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 279,
+      "gate": "S1_no_focus",
+      "base_ok": 279,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "locate",
+        "replace"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "d71c4ad",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 271,
+      "gate": "S1_no_focus",
+      "base_ok": 271,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "locate",
+        "replace"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "be5793a",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 271,
+      "gate": "S1_no_focus",
+      "base_ok": 271,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "gray_product",
+        "partial_product"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "06f3181",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_fix",
+      "k": 270,
+      "gate": "S2_no_cands",
+      "base_ok": 269,
+      "n_f2p": 1,
+      "focus": [
+        "nth_combination_with_replacement"
+      ],
+      "units": [
+        "nth_combination_with_replacement"
+      ],
+      "in_reach": true,
+      "verdict": "in_reach"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "def2d82",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_fix",
+      "k": 20,
+      "gate": "S2_no_cands",
+      "base_ok": 19,
+      "n_f2p": 1,
+      "focus": [
+        "nth_permutation"
+      ],
+      "units": [
+        "nth_permutation"
+      ],
+      "in_reach": true,
+      "verdict": "in_reach"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "b0aa91e",
+      "src": "more_itertools/recipes.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 64,
+      "gate": "S1_no_focus",
+      "base_ok": 64,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "random_product"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "073d234",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 268,
+      "gate": "S1_no_focus",
+      "base_ok": 268,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "nth_product",
+        "product_index"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "adeda34",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 263,
+      "gate": "S1_no_focus",
+      "base_ok": 263,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "exactly_n"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "cf186b5",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_fix",
+      "k": 263,
+      "gate": "S2_no_cands",
+      "base_ok": 262,
+      "n_f2p": 1,
+      "focus": [
+        "product_index"
+      ],
+      "units": [
+        "product_index"
+      ],
+      "in_reach": true,
+      "verdict": "in_reach"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "9463231",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 262,
+      "gate": "S1_no_focus",
+      "base_ok": 262,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "numeric_range"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "11c8280",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 255,
+      "gate": "S1_no_focus",
+      "base_ok": 255,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "extract"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "cca3294",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 245,
+      "gate": "S1_no_focus",
+      "base_ok": 245,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "last"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "f5774b6",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 244,
+      "gate": "S1_no_focus",
+      "base_ok": 244,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "one"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "ae37eb3",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_fix",
+      "k": 242,
+      "gate": "S2_no_cands",
+      "base_ok": 241,
+      "n_f2p": 1,
+      "focus": [
+        "sample"
+      ],
+      "units": [
+        "_sample_counted"
+      ],
+      "in_reach": false,
+      "verdict": "out_of_reach"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "8ee6991",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 239,
+      "gate": "S1_no_focus",
+      "base_ok": 239,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "one",
+        "numeric_range",
+        "only"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "6197c8d",
+      "src": "more_itertools/recipes.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 46,
+      "gate": "S1_no_focus",
+      "base_ok": 46,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "loops"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "0de4155",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_fix",
+      "k": 237,
+      "gate": "S1_no_focus",
+      "base_ok": 237,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "set_partitions"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "4bd0bd8",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "elsewhere",
+      "k": 237,
+      "gate": "S1_no_focus",
+      "base_ok": 237,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "distinct_permutations"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "db67158",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 227,
+      "gate": "S1_no_focus",
+      "base_ok": 227,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "distinct_permutations"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "ab72fc8",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 219,
+      "gate": "S1_no_focus",
+      "base_ok": 219,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "unique_in_window"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "cd0a3a8",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 220,
+      "gate": "S1_no_focus",
+      "base_ok": 220,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "iterate"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "4a8b7ee",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 212,
+      "gate": "S1_no_focus",
+      "base_ok": 212,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "9245cd0",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 209,
+      "gate": "S1_no_focus",
+      "base_ok": 209,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "split_after"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "ddbbea2",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_fix",
+      "k": 228,
+      "gate": "S1_no_focus",
+      "base_ok": 224,
+      "n_f2p": 4,
+      "focus": [],
+      "units": [],
+      "in_reach": false,
+      "verdict": "f2p_but_no_focus"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "bff7cbe",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 218,
+      "gate": "S1_no_focus",
+      "base_ok": 218,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "zip_broadcast"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "9f4f31f",
+      "src": "more_itertools/more.py",
+      "in_census": false,
+      "reach": null,
+      "census_stage": null,
+      "k": 218,
+      "gate": "S1_no_focus",
+      "base_ok": 218,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "395bdfc",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 218,
+      "gate": "S1_no_focus",
+      "base_ok": 218,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "zip_broadcast"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "8208096",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 194,
+      "gate": "S1_no_focus",
+      "base_ok": 194,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "zip_broadcast"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "49a4b3c",
+      "src": "more_itertools/more.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 192,
+      "gate": "S1_no_focus",
+      "base_ok": 192,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "_chunked_even_online"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "attrs",
+      "sha": "97f8d17",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 1,
+      "gate": "S1_no_focus",
+      "base_ok": 1,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "attrs",
+      "sha": "af9c510",
+      "src": "src/attr/validators.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 9,
+      "gate": "S1_no_focus",
+      "base_ok": 9,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "disabled"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "attrs",
+      "sha": "ce89f5d",
+      "src": "src/attr/exceptions.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "862696a",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 9,
+      "gate": "S1_no_focus",
+      "base_ok": 9,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "_transform_attrs"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "attrs",
+      "sha": "000c563",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 9,
+      "gate": "S1_no_focus",
+      "base_ok": 9,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "attrs",
+      "sha": "937b1e2",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 9,
+      "gate": "S1_no_focus",
+      "base_ok": 9,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "_attrs_to_init_script"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "attrs",
+      "sha": "09161fc",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 7,
+      "gate": "S1_no_focus",
+      "base_ok": 7,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "_attrs_to_init_script"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f9ff913",
+      "src": "src/attr/_compat.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "0bf0678",
+      "src": "src/attr/_funcs.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 2,
+      "gate": "S1_no_focus",
+      "base_ok": 2,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "asdict",
+        "astuple"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c9150d2",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "a71fbba",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "a819155",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "L2",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "947bfb5",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 7,
+      "gate": "S1_no_focus",
+      "base_ok": 7,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "_make_method",
+        "_make_hash"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "attrs",
+      "sha": "7cfa3b6",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 7,
+      "gate": "S1_no_focus",
+      "base_ok": 7,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "_ClassBuilder"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f31bb28",
+      "src": "src/attr/_funcs.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 1,
+      "gate": "S1_no_focus",
+      "base_ok": 1,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "resolve_types"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "attrs",
+      "sha": "ce8bb4f",
+      "src": "src/attr/_funcs.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "1499c77",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 1,
+      "gate": "S1_no_focus",
+      "base_ok": 1,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "_make_attr_tuple_class",
+        "_make_hash",
+        "_make_eq",
+        "_make_init"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "attrs",
+      "sha": "9de675f",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "1f627dd",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "4cfd52d",
+      "src": "src/attr/_next_gen.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "358c85e",
+      "src": "src/attr/_next_gen.py",
+      "in_census": true,
+      "reach": "L2",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c42bf9e",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "33b6131",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 6,
+      "gate": "S1_no_focus",
+      "base_ok": 6,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "_transform_attrs",
+        "_ClassBuilder",
+        "Attribute"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "attrs",
+      "sha": "07810ae",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "9b5e988",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 6,
+      "gate": "S1_no_focus",
+      "base_ok": 6,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "_ClassBuilder"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "attrs",
+      "sha": "e2b02ec",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "L3",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "957b198",
+      "src": "src/attr/validators.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 1,
+      "gate": "S1_no_focus",
+      "base_ok": 1,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "attrs",
+      "sha": "9e1f136",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "5ed8c4a",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "9d441d7",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f5b59a0",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "a84a36d",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c1adf5c",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "a6cf2d5",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 3,
+      "gate": "S1_no_focus",
+      "base_ok": 3,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "attributes",
+        "_add_repr"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "attrs",
+      "sha": "b79a49e",
+      "src": "src/attr/_funcs.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f560500",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_fix",
+      "k": 8,
+      "gate": "S2_no_cands",
+      "base_ok": 5,
+      "n_f2p": 3,
+      "focus": [
+        "make_class",
+        "attr"
+      ],
+      "units": [
+        "attr",
+        "attributes",
+        "_add_hash"
+      ],
+      "in_reach": true,
+      "verdict": "in_reach"
+    },
+    {
+      "repo": "attrs",
+      "sha": "97a0247",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "1481227",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 5,
+      "gate": "S1_no_focus",
+      "base_ok": 5,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "_attrs_to_script"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    },
+    {
+      "repo": "attrs",
+      "sha": "e59c360",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_criteria",
+      "k": 0,
+      "verdict": "no_criteria"
+    },
+    {
+      "repo": "attrs",
+      "sha": "a624035",
+      "src": "src/attr/_make.py",
+      "in_census": true,
+      "reach": "X",
+      "census_stage": "no_f2p",
+      "k": 6,
+      "gate": "S1_no_focus",
+      "base_ok": 6,
+      "n_f2p": 0,
+      "focus": [],
+      "units": [
+        "_convert",
+        "_attrs_to_script"
+      ],
+      "in_reach": false,
+      "verdict": "no_f2p"
+    }
+  ],
+  "summary": {
+    "all": {
+      "no_src": 0,
+      "no_criteria": 30,
+      "blew": 0,
+      "no_f2p": 72,
+      "f2p_but_no_focus": 2,
+      "no_units": 2,
+      "out_of_reach": 3,
+      "in_reach": 11
+    },
+    "in_census_only": {
+      "no_src": 0,
+      "no_criteria": 30,
+      "blew": 0,
+      "no_f2p": 71,
+      "f2p_but_no_focus": 2,
+      "no_units": 2,
+      "out_of_reach": 3,
+      "in_reach": 11
+    },
+    "by_repo": {
+      "boltons": {
+        "no_src": 0,
+        "no_criteria": 8,
+        "blew": 0,
+        "no_f2p": 21,
+        "f2p_but_no_focus": 1,
+        "no_units": 1,
+        "out_of_reach": 2,
+        "in_reach": 7
+      },
+      "more-itertools": {
+        "no_src": 0,
+        "no_criteria": 0,
+        "blew": 0,
+        "no_f2p": 34,
+        "f2p_but_no_focus": 1,
+        "no_units": 1,
+        "out_of_reach": 1,
+        "in_reach": 3
+      },
+      "attrs": {
+        "no_src": 0,
+        "no_criteria": 22,
+        "blew": 0,
+        "no_f2p": 17,
+        "f2p_but_no_focus": 0,
+        "no_units": 0,
+        "out_of_reach": 0,
+        "in_reach": 1
+      }
+    },
+    "by_reach": {
+      "X": {
+        "no_src": 0,
+        "no_criteria": 27,
+        "blew": 0,
+        "no_f2p": 67,
+        "f2p_but_no_focus": 2,
+        "no_units": 2,
+        "out_of_reach": 3,
+        "in_reach": 9
+      },
+      "L2": {
+        "no_src": 0,
+        "no_criteria": 2,
+        "blew": 0,
+        "no_f2p": 1,
+        "f2p_but_no_focus": 0,
+        "no_units": 0,
+        "out_of_reach": 0,
+        "in_reach": 0
+      },
+      "L3": {
+        "no_src": 0,
+        "no_criteria": 1,
+        "blew": 0,
+        "no_f2p": 3,
+        "f2p_but_no_focus": 0,
+        "no_units": 0,
+        "out_of_reach": 0,
+        "in_reach": 2
+      },
+      "None": {
+        "no_src": 0,
+        "no_criteria": 0,
+        "blew": 0,
+        "no_f2p": 1,
+        "f2p_but_no_focus": 0,
+        "no_units": 0,
+        "out_of_reach": 0,
+        "in_reach": 0
+      }
+    },
+    "determinable": 14,
+    "out_of_reach_ratio": 0.2143
+  }
+}

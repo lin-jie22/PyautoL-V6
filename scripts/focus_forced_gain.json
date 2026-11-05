@@ -1,0 +1,126 @@
+{
+  "schema": "focus-forced-gain/v1",
+  "note": "⛔ 强制 focus 是诊断读数，绕过 locate_focus，不算修复",
+  "rows": [
+    {
+      "repo": "boltons",
+      "sha": "c1c25da",
+      "stage": "measured",
+      "auto_focus": [
+        "Bits"
+      ],
+      "units": [
+        "Bits"
+      ],
+      "auto_gate": "S5_full",
+      "auto_found": true,
+      "auto_full_pass": true,
+      "forced_gate": "S5_full",
+      "forced_found": true,
+      "forced_full_pass": true,
+      "forced_n_cands": 60,
+      "forced_n_ran": 60,
+      "exact_file": true,
+      "forced_verdict": "exact_file",
+      "n_human_changes": 2,
+      "n_machine_changes": 2,
+      "diagnostic_only": true
+    },
+    {
+      "repo": "boltons",
+      "sha": "ead236e",
+      "stage": "measured",
+      "auto_focus": [
+        "backoff"
+      ],
+      "units": [
+        "backoff_iter"
+      ],
+      "auto_gate": "S3_no_gain",
+      "auto_found": false,
+      "auto_full_pass": false,
+      "forced_gate": "S3_no_gain",
+      "forced_found": false,
+      "forced_full_pass": false,
+      "forced_n_cands": 51,
+      "forced_n_ran": 51,
+      "exact_file": false,
+      "forced_verdict": "no_fix",
+      "n_human_changes": 10,
+      "n_machine_changes": 0,
+      "diagnostic_only": true
+    },
+    {
+      "repo": "boltons",
+      "sha": "4aa77cd",
+      "stage": "measured",
+      "auto_focus": [
+        "split"
+      ],
+      "units": [
+        "split_iter"
+      ],
+      "auto_gate": "S2_no_cands",
+      "auto_found": false,
+      "auto_full_pass": false,
+      "forced_gate": "S5_full",
+      "forced_found": true,
+      "forced_full_pass": true,
+      "forced_n_cands": 16,
+      "forced_n_ran": 16,
+      "exact_file": false,
+      "forced_verdict": "elsewhere",
+      "n_human_changes": 2,
+      "n_machine_changes": 2,
+      "diagnostic_only": true
+    },
+    {
+      "repo": "boltons",
+      "sha": "766b554",
+      "stage": "measured",
+      "auto_focus": [
+        "bytes2human"
+      ],
+      "units": [
+        "bytes2human"
+      ],
+      "auto_gate": "S5_full",
+      "auto_found": true,
+      "auto_full_pass": true,
+      "forced_gate": "S5_full",
+      "forced_found": true,
+      "forced_full_pass": true,
+      "forced_n_cands": 5,
+      "forced_n_ran": 5,
+      "exact_file": false,
+      "forced_verdict": "same_core_fix",
+      "n_human_changes": 4,
+      "n_machine_changes": 2,
+      "diagnostic_only": true
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "ae37eb3",
+      "stage": "measured",
+      "auto_focus": [
+        "sample"
+      ],
+      "units": [
+        "_sample_counted"
+      ],
+      "auto_gate": "S3_no_gain",
+      "auto_found": false,
+      "auto_full_pass": false,
+      "forced_gate": "S3_no_gain",
+      "forced_found": false,
+      "forced_full_pass": false,
+      "forced_n_cands": 17,
+      "forced_n_ran": 17,
+      "exact_file": false,
+      "forced_verdict": "no_fix",
+      "n_human_changes": 4,
+      "n_machine_changes": 0,
+      "diagnostic_only": true
+    }
+  ]
+}
