@@ -1,0 +1,111 @@
+{
+  "schema": "truthy_synth/v1",
+  "caliber": {
+    "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+    "aether/environment.py": "ee35fe9d77361fc807bf8a4d26839020c76eafd266eb23a90bc008577b5c2d38",
+    "scripts/probe_alias_demote.py": "d6aa0788f31a9bb9c454b1cf9046618d43b05028e55b046d443e73446310769a",
+    "scripts/probe_context_gate.py": "f51908ab750c3e175f8e6e1ec35581a994208e50837869750c8c62696940b5ca",
+    "scripts/probe_package_load.py": "befe2f620f09e84f31627edd7f15d3fd5f2355934a6091aa474ee36de53e543e",
+    "scripts/probe_criteria_gate_census.py": "04073d064ff65ef70e69b5786072307e79f977b868f36bfe2f639d96c9af58b1"
+  },
+  "rows": [
+    {
+      "sha": "37bb3ad",
+      "n_tests": 1,
+      "calls": [
+        "peekable[str].__args__"
+      ],
+      "gate": "S3_no_gain",
+      "found": false,
+      "full_pass": false,
+      "base_ok": 0,
+      "new_ok": 0,
+      "n_cands": 56,
+      "n_ran": 56,
+      "focus": [
+        "peekable"
+      ],
+      "verdict": "no_fix",
+      "n_human_changes": 3,
+      "n_machine_changes": 0,
+      "diagnostic_only": true,
+      "repo": "more-itertools"
+    },
+    {
+      "sha": "be5793a",
+      "n_tests": 1,
+      "calls": [
+        "list(gray_product(iter('abc'), iter('def'), repeat=2))"
+      ],
+      "gate": "S3_no_gain",
+      "found": false,
+      "full_pass": false,
+      "base_ok": 0,
+      "new_ok": 0,
+      "n_cands": 38,
+      "n_ran": 38,
+      "focus": [
+        "gray_product"
+      ],
+      "verdict": "no_fix",
+      "n_human_changes": 4,
+      "n_machine_changes": 0,
+      "diagnostic_only": true,
+      "repo": "more-itertools"
+    },
+    {
+      "sha": "06f3181",
+      "n_tests": 1,
+      "calls": [
+        "nth_combination_with_replacement('abcde', 7, 320)"
+      ],
+      "gate": "S5_full",
+      "found": true,
+      "full_pass": true,
+      "base_ok": 0,
+      "new_ok": 1,
+      "n_cands": 45,
+      "n_ran": 45,
+      "focus": [
+        "nth_combination_with_replacement"
+      ],
+      "verdict": "elsewhere",
+      "n_human_changes": 10,
+      "n_machine_changes": 2,
+      "diagnostic_only": true,
+      "repo": "more-itertools"
+    },
+    {
+      "sha": "073d234",
+      "n_tests": 2,
+      "calls": [
+        "nth_product(123, iter('AB'), iter('CD'), iter('EFG'), repeat=2)",
+        "product_index(iter(['B', 'D', 'E', 'A', 'C', 'G']), iter('AB'), iter('CD'), iter('EFG'), repeat=2)"
+      ],
+      "gate": "S3_no_gain",
+      "found": false,
+      "full_pass": false,
+      "base_ok": 0,
+      "new_ok": 0,
+      "n_cands": 21,
+      "n_ran": 21,
+      "focus": [
+        "nth_product",
+        "product_index"
+      ],
+      "verdict": "no_fix",
+      "n_human_changes": 4,
+      "n_machine_changes": 0,
+      "diagnostic_only": true,
+      "repo": "more-itertools"
+    }
+  ],
+  "summary": {
+    "verdicts": {
+      "no_fix": 3,
+      "elsewhere": 1
+    },
+    "diagnostic_only": true,
+    "note": "解开 truthy 门的诊断读数，不是自动端到端修复"
+  }
+}

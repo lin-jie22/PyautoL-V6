@@ -8077,3 +8077,143 @@ out_of_reach 6 / in_reach 23`，判据侧**一条都没有**。
 唯一一次历史实测收益 0、下游未测、且形态门仍在下游等着。
 ⛔ 本轮**没有擅自开工，也没有据此宣布「扩张无用」**——那是把
 「没测过」读成「测出来是 0」。
+
+### 177. ⛔⛔ **抽取层门下游上界普查：254 条 unknown 变成 measured，但解开 truthy 门后端到端真修复仍是 0**（2026-11-06）
+
+174 规则先验锚：`baseline_health=OK repos=3/3 diffs=0`。本轮**没动
+`aether/` 一个字节**，没扩张判据形态，纯诊断取证。
+
+═══ 一、要填的洞 ═══
+
+176 留下 254 条 `downstream=unknown`（倒在抽取层门，下游从未测过），
+并写明「没测过 ≠ 测出 0」。本轮把它变成 **measured**，测的是一条
+**与判据形态无关的严格必要条件**：
+
+    探针 `call` 在 buggy / fixed 两侧求值结果相同
+      ⇒ 任何形态的判据（expect / truthy / ∈ / ≠ / match= / raises）
+        都不可能区分两版 ⇒ 永远不可能 F2P
+
+⛔⛔ **这给出的是收益上界，不是收益**。`diff` 后面还压着三验、
+判据形态、定位门、形态门（`reach`）、合成层。
+
+═══ 二、两本账分开（⛔ 不许合并成一张分布表）═══
+
+| 账 | 条数 | 处理 |
+|---|---:|---|
+| 主账（产品已抽出 `call`） | **135** | 真跑同源 `run_all` 两侧求值 |
+| form 门（产品**没有**探针表达式） | **119** | 一律 `unmeasurable`，不跑沙箱 |
+
+⛔⛔ 第一版曾拿产品 `_iter_all_probes` 的原始 `expr`
+（`self.assertTrue(stream._rolled)`）跑沙箱，7/7 全 `no_result_both`
+—— 那是**构造必然**（原始 expr 依赖测试函数里的 `self` / 局部变量，
+没经 `resolve_probe` 加工），不是证据（第 122 条），且会重演 175
+第一版「不同源尺子 ⇒ 结论反转」。⇒ 改掉，form 账只记硬事实：
+**要测它的下游，必须先扩张判据形态（需拍板）**。
+
+⛔ 为什么不重演 165 的 tuple / JSON 假 F2P：`run_all` 不带 `expect`
+⇒ 沙箱走 truthy 分支，比的是两侧 `got` 的 **repr**，不做 JSON 往返、
+不与 `expect` 比较。fixed 侧跑两次做稳定性自检（172 教训），
+`repr` 含内存地址一律剔为 `unstable`。
+
+═══ 三、主账全量读数（135 条）═══
+
+| verdict | 条数 | 含义 |
+|---|---:|---|
+| `no_result_both` | **94** | 两侧都求不出值 ⇒ ⛔ **保留未知**（含两侧都抛异常，`raises` 形态看不见），不参与排除/收益 |
+| `same` | **22** | 两侧同值 ⇒ **结构性排除**：扩张判据形态也救不回来 |
+| `diff` | **10** | 必要条件成立 ⇒ 上界候选，**不是收益** |
+| `import_failed` | **9** | 装载层（boltons 2 / attrs 7）⇒ ⛔ 保留未知 |
+
+抽查 evidence 确认 `no_result_both` 不是量具坏：
+`NameError: name 'stream' is not defined` —— 探针依赖测试函数的
+局部变量，正是 162–164 的上下文门。
+
+按门：`unserializable 122 / tuple 6 / unstable 3 / unmatched 4`。
+⛔⛔ **10 条 `diff` 全部 `reach=X`**（形态门在下游等着）；
+按 175 八格：`no_f2p 7 / f2p_but_no_focus 2 / in_reach 1`。
+
+═══ 四、决定性对照：解开 truthy 门 ═══
+
+`run_all` 的 truthy 分支（`passed = bool(got)`）恰好等价于
+「解开 truthy 判据形态」，**不改产品一个字节**即可测。
+实测 `passed_fixed=True / passed_buggy=False` 的**真 F2P 判据 5 条**
+（4 commit：`06f3181 / 073d234 / 37bb3ad / be5793a`），
+⛔ 5 条**全部 `reach=X`**。这比 166 那次「解开 assertRaises-lambda
+10 条全落 ctx、F2P 仍 0」更进一步：这次**真的拿到了 F2P 判据**。
+
+再把这 5 条判据真喂进 `synthesize_patch`（175 `--forced-focus` 同类
+诊断，`diagnostic_only=True`，判据来自产品自己的 `call` + 现有
+truthy 形态，**不是手写 oracle** ⇒ 不触发 171 的 `oracle_bad` 闸）：
+
+| sha | n_tests | gate | 161 口径 |
+|---|---:|---|---|
+| `37bb3ad` | 1 | `S3_no_gain` | `no_fix` |
+| `be5793a` | 1 | `S3_no_gain` | `no_fix` |
+| `073d234` | 2 | `S3_no_gain` | `no_fix` |
+| `06f3181` | 1 | `S5_full / full_pass=True` | **`elsewhere`** |
+
+⛔⛔ **真修复 0**（3 `no_fix` + 1 `elsewhere`）。`06f3181` 虽
+`full_pass=True`，机器改的 2 行不是人类那 10 行 ⇒ 按 161 口径是
+**绕开**，与 175 的 `4aa77cd` 同类。4 个 commit 都真跑了候选
+（21–56 个），不是空跑。
+
+⇒ **「扩张判据形态」在全自动路径下的收益，本轮实测仍被形态门
+吞掉**。这与 172（时间参数化）、175（修 `locate_focus`）同类。
+
+═══ 五、量具与反证 ═══
+
+- ⛔ **零命中先证查询能命中**（第 133 条）：契约 C4 用真实沙箱
+  正例证明已知 F2P 探针判 `diff`、恒真常量判 `same`；
+  B0 系列再用离线合成正例覆盖六格。
+- 契约 **61 项全绿、0 skip**，B 组 25 条离线注入反证（篡改 call、
+  地址噪声、稳定性、双空不许读成排除、口径签名缺键、默认路径
+  行为级验锚）。
+- 一次**真红**：B9f 抓到 `truthy_f2p(a1=None, …)` 因
+  `not bool(b.passed)` 恰好成立而把「缺结果」写成 F2P ⇒ 修成
+  fail-closed 后重跑全量，**读数一字不变**。
+- 一次 import 错：`changed_lines` 在 `probe_auto_unlock.py:68`
+  （不在 `probe_alias_demote`）⇒ 合成层诊断首跑 ImportError，
+  修正后重跑。
+- 存档写 6 个相关源码 sha256 + 口径签名（补 174 锚只钉
+  `select_commits` 的洞）；契约 A2/A27 钉死「存档 hash == 磁盘」。
+
+═══ 六、分寸与残留 ═══
+
+- ⛔ 全程**没动 `aether/`**、没扩张判据形态、没改产品探针；
+  新口径默认 `require_baseline()` fail-closed（174 规则第三次实战）。
+- ⛔ `no_result_both` / `import_failed` 共 103 条**保留未知**；
+  form 账 119 条**不可测**。合起来 222 条仍未知
+  ⇒ **不许宣布「扩张判据形态无用」**。本轮的结论只是
+  「在能测的 135 条里，解开 truthy 门后端到端真修复为 0」。
+- ⛔ `diff` 是必要条件上界；`reach` 是事后 oracle，不能当 predictor；
+  truthy 合成对照是**诊断读数，不算修复**（等于替它开了门）。
+  n=3 仓库 / 120 候选，不外推。
+- ⛔ 166/167 的 boltons HEAD 零点未钉死（176 残留⑥）仍在；
+  `9f4f31f` 未进 census、`changed_lines` 两处写入、`n_unjson` 恒 0、
+  CI C 组 SKIP 均未动。
+
+═══ 七、下一步 ═══
+
+给拍板的证据已补齐：**254 条里能测的 135 条 → 22 条结构性排除、
+10 条必要条件成立但全 `reach=X`、5 条真 F2P 判据端到端真修复 0、
+222 条仍未知**。
+⛔ 「扩张判据形态（truthy / ∈ / ≠ / match=）」「多步状态序列普查」
+「CI 先 bootstrap 再跑 H 组」仍属口径变更，**需你拍板**。
+本轮**没有擅自开工，也没有据此宣布扩张无用**。
+
+**新设施**：`scripts/probe_extract_downstream.py`（含
+`--truthy-synth` 诊断）、`scripts/extract_downstream.json`、
+`scripts/truthy_synth.json`、
+`tests/contract_extract_downstream_test.py`（61 项）。
+
+═══ 八、全量验收的 1 次真红（收尾记录）═══
+
+首次 `aether check --json -j 2`：**108 份契约 / 110 次执行
+= 109 pass / 1 fail**。红的不是新契约本身，而是既有
+`contract_static_hygiene_test.py` B3「所有 `noqa` 必须带具体码」：
+全仓 615 条里唯一一条裸 `noqa` 出在本轮新契约第 352 行的函数内
+动态 import 上（上一轮随手加的抑制；E402 对该位置本就不成立）。
+修法 = **直接删掉抑制**，而不是编一个具体码糊过闸
+（`select_commits` / `run_all` / `_git` 在 C4 中均真实使用）。
+⛔ 抓到它的是**既有闸、不是本轮自写的反证** ⇒ 恰好证明这份闸有牙；
+删掉后单跑两份契约转绿，再重跑全量。
