@@ -8217,3 +8217,152 @@ truthy 形态，**不是手写 oracle** ⇒ 不触发 171 的 `oracle_bad` 闸�
 （`select_commits` / `run_all` / `_git` 在 C4 中均真实使用）。
 ⛔ 抓到它的是**既有闸、不是本轮自写的反证** ⇒ 恰好证明这份闸有牙；
 删掉后单跑两份契约转绿，再重跑全量。
+
+### 178. ⛔⛔ **94 条「无结果」的结构化归因：94/94 两侧真的都抛异常，但「补上下文」不是一件事**（2026-11-06）
+
+174 规则先验锚：`baseline_health=OK repos=3/3 diffs=0`。本轮**没动
+`aether/` 一个字节**，没扩张判据形态、没改 176 的存档口径，纯诊断取证。
+
+═══ 一、要填的洞 ═══
+
+177 把 254 条 `downstream=unknown` 中 135 条测出必要条件上界，但主账里
+**94 条 `no_result_both` 连「为什么没结果」都没记账**：存档里
+`sandbox_verdict / got_buggy / got_fixed` 全是 `None`。根因是
+`probe_context_gate.run_all` 在异常时丢掉 `evidence`、只留 `got=None`；
+README 177 里那句 `NameError: stream is not defined` 只是抽查观察，
+不是结构化读数 ⇒ 「上下文门」至今仍是一个大格。
+
+═══ 二、两本账（⛔ 不许合并成一个布尔）═══
+
+| 账 | 口径 | 来源 |
+|---|---|---|
+| ① 静态归因账 | 自由变量的**出身**分类，每条恰好一格 | 产品同源 `_iter_all_probes` / `collect_bindings` + AST |
+| ② 运行时硬证据账 | 两侧 `why` + evidence 原文 | `aether.environment.run_in_sandbox` 本身 |
+
+⛔ ② 一律取**产出方写死的 `why`**（`environment.py:302` 明令不许解析
+evidence 文案猜分类）；evidence 只做留痕与计数，不参与分类。
+⛔ 主格是「出身」，**不是「运行时失败原因」**，两本账交叉表单独报。
+
+先做便宜对照（172/175 纪律）取 5 种形态，确认尺子能分格：
+`stream.getvalue()`（with-as）、`Stats(data)`（产品内联过但残留循环变量）、
+`typing.List[int]`（import 名）、`...slice(start, stop, step)`（3 个循环变量）、
+`i`（裸循环变量）。
+
+═══ 三、全量读数（94 条）═══
+
+**运行时账封闭**：`sandbox_pair = both_raise 94/94`，
+`why_fixed / why_buggy` 全 `raise`，evidence 无一条为空
+⇒ 177 的「两侧都无结果」第一次有硬证据，不是推测。
+
+**静态主格**（94 条，其中 5 条是量具格）：
+
+| 主格 | 条数 | 真实缺失名样例 |
+|---|---:|---|
+| `unbound` | 23 | `n` / `m` / `A`（测试函数内定义的类） |
+| `imported_name` | 22 | `typing` 12 / `copy` / `Fraction` / `pickle` |
+| `loop_var` | 17 | `i` / `start` / `stop` / `step` |
+| `param_or_fixture` | 13 | `cmp` 7 / `args` 7 |
+| `with_binding` | 6 | `e` 4 / `stream` 2 |
+| `ambiguous_rhs` | 4 | `roundtripped` / `dates` |
+| `self_attr` | 4 | `self` 3 / `cls` 1 |
+| `unparseable`（量具格） | 5 | `SyntaxError: '(' was never closed` |
+
+⛔ **可归因分母是 89 条**（94 − 5 截断）。**`inlinable_rhs = 0`**
+⇒ 产品内联器能做的都做完了，剩下的名字**本来就不在**
+`collect_bindings` 里。
+
+正交账 `inline_state`：`none 43 / partial 42 / unknown 4 /
+unparseable 5`。`partial 42` 说明产品内联过但残留自由变量——
+根因不是 `resolve_probe` 的 bug，而是残留名字本就没有绑定。
+
+═══ 四、5 条截断是构造必然，不是上下文门 ═══
+
+5 条 `unparseable` 的 `call` 长度**全部恰好 240**，尾部被切断
+⇒ 176 的 `"call": (r.get("call") or "")[:240]` 把表达式截断了；
+9 条 `probe_index miss` 同源于 `stmt` 被截断。按第 83 条
+**不擅自改上游尺子**（改了会让 166/176/177 的历史读数不可比），
+只如实记为残留。
+
+═══ 五、出身格 ≠ 失败原因（2 条例外）═══
+
+22 条 `imported_name` 里 20 条真缺名，但 2 条不是：
+- `93185b2` `next(daterange(date.today(), date.today()))` → `StopIteration`
+  （`date` / `daterange` 在沙箱里其实可解析）；
+- `f560500` `Attribute(...)` → `AttributeError: 'function' object has no
+  attribute 'Factory'`（`attr` 被同名对象遮蔽）。
+
+⇒ 静态格只说「名字从哪来」，不能读成「22 条因 import 未装载而失败」。
+契约 C5 用**精确计数 20/1/1** 钉死，C8 逐条点名这两个 sha，
+不许用 `all(...)` 把两本账糊成全等。
+
+═══ 六、结论与分寸 ═══
+
+89 条可归因里 **67 条落在测试函数局部作用域**（self / fixture /
+循环变量 / with-as / 同名多 rhs / 测试内定义的类），这是
+`probe_context_gate.py:38-45` 四条自限**明确排除**的对象；
+另 22 条含 import 出身名（其中 20 条真缺名）。
+⇒ **「修内联器」不是修 bug，是放宽自限的产品口径变更**，需拍板；
+而且 `inlinable_rhs=0` 说明现有口径内没有「能修却没修」的漏网。
+
+⛔⛔ **只报归因、不报收益**：后面还压着三验 / 判据形态 / 定位门 /
+形态门 / 合成层，177 已证 10 条 `diff` 全 `reach=X`。
+⛔ 177 的「222 条仍未知」中，本轮把 94 条变成 **measured 的归因**，
+**仍有 128 条未知**（9 `import_failed` + 119 form 不可测）
+⇒ **不许宣布「扩张判据形态无用」**，也不许宣布「补上下文就能救」。
+
+═══ 七、拍板边界（未开工）═══
+
+「扩张判据形态（truthy / ∈ / ≠ / match=）」「多步状态序列普查」
+「CI 先 bootstrap 再跑 H 组」「放宽内联器自限」仍属口径变更，
+**需你拍板**。本轮没有擅自开工。
+
+**新设施**：`scripts/probe_no_result_attribution.py`（`--no-sandbox`
+仅供离线反证）、`scripts/no_result_attribution.json`、
+`tests/contract_no_result_attribution_test.py`（75 项：A 组 24 条钉死读数、
+B 组 43 条离线反证、C 组 8 条本机与真实沙箱正例）。存档写 8 个源码
+sha256 口径签名（含尺子自身，补 174 只钉 `select_commits` 的洞）。
+
+═══ 八、首次全量验收的 2 次 timeout：环境性假失败，不是逻辑红 ═══
+
+首次 `aether check --json -j 2`：`109 份契约 / 111 次执行
+= 109 pass + 2 timeout`，`ok=False / exit_code=1`，`subset/empty/
+all_skipped=False`，`undeclared_modes=[]`，stderr 0 字节。
+**红的只有既有 `contract_evolution_test.py` 的 default 与 e2e**，
+两次都记「超过 600s 未结束」；本轮新增的
+`contract_no_result_attribution_test.py` 是 pass。
+
+⛔ 与 r98 的「静态卫生 B3 裸 noqa」不同，这次**没有一行判据失败**。
+前后同源耗时对拍（同一份 `check.py`、同一 `-j 2`、同一批机器）：
+
+| 契约 / mode | r98-2 | r99 首次 |
+|---|---:|---:|
+| `contract_evolution_test.py` default | 85.75s pass | 1467.54s timeout |
+| 同 e2e | 81.52s pass | 1467.41s timeout |
+| `contract_criteria_gate_census_test.py` | 149.86s | 280.73s |
+| `contract_autonomy_test.py` | 100.43s | 215.40s |
+| `contract_archive_test.py` | 85.32s | 186.78s |
+
+**整份全量普遍慢约 2 倍**，不是某一格单独变慢。验收期间本机
+15 分钟 load average **16.95**（收尾时回落到 3.82），且 V6 生产
+`run.py --bench` 周期性短跑在整段窗口里 PID 轮换了 3 次。
+
+**判别实验（不加任何并发）**：单跑 `contract_evolution_test.py`
+default **rc=0 / 90s**、e2e **rc=0 / 94s**，两份全绿、零 FAIL，
+与 r98-2 的 85.75s / 81.52s 同一量级 ⇒ 契约逻辑没坏，是**并发资源
+竞争把墙钟放大到超过 600s**。
+
+⛔ 编排侧根因（`check.py:371-395`）：分段调度只把声明
+`EXCLUSIVE = True` 的测量型契约（`contract_ops_test` /
+`contract_streaming_test`，见 `check.py:277-286` 的历史实测）放进
+独占段；`contract_evolution_test.py` **未声明**，它的两个 mode
+都落在 `-j 2` 并发段，与自身另一 mode 及其它契约争抢 CPU。
+
+⛔⛔ **处置分寸（三条都不做）**：
+① **不提 timeout** —— `check.py:286` 已写死「不能靠提 timeout 糊过去，
+那会把失效藏进十分钟里」；
+② **不擅自给既有契约加 `EXCLUSIVE`** —— 那是改验收编排口径，
+会让后续所有读数与历史不可比，属需拍板项；
+③ **不改 `aether/` 或任何既有契约一个字节**。
+⇒ 按 r98 先例 **原参数重跑全量**，只有拿到 `ok=True` 且零
+fail/timeout/error 的全绿读数才提交；若重跑仍超时，**不提交**，
+把「本机全量验收在当前负载下不稳定」作为问题上报，而不是放宽判据。

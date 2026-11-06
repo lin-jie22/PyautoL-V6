@@ -1,0 +1,2845 @@
+{
+  "schema": "no_result_attribution/v1",
+  "caliber": {
+    "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+    "aether/environment.py": "ee35fe9d77361fc807bf8a4d26839020c76eafd266eb23a90bc008577b5c2d38",
+    "scripts/probe_alias_demote.py": "d6aa0788f31a9bb9c454b1cf9046618d43b05028e55b046d443e73446310769a",
+    "scripts/probe_extract_downstream.py": "1897a4a0dbdc497f554c50503541da3b1ea54bdf95bbf3c80bb4569477efaa10",
+    "scripts/probe_criteria_gate_census.py": "04073d064ff65ef70e69b5786072307e79f977b868f36bfe2f639d96c9af58b1",
+    "scripts/probe_no_result_attribution.py": "bc9182c5f097cb736c6bcbfc90987648b63ee77d65d064cc5348f6cefacf8f0a",
+    "scripts/criteria_gate_census.json": "0e4b58ad13251bf66543764e96b0759ade8a4442b602b5fd681455a48f276f20",
+    "scripts/extract_downstream.json": "896220cd2849f6740a0fc28daf6e434c7ed77445237b60f3b1288a3cf7d8d266"
+  },
+  "rows": [
+    {
+      "repo": "boltons",
+      "sha": "4e5faa3",
+      "fn": "test_write_returns_byte_count",
+      "stmt": "self.assertEqual(stream.getvalue(), b'abc')",
+      "call": "stream.getvalue()",
+      "orig_expr": "stream.getvalue()",
+      "free_vars": [
+        "stream"
+      ],
+      "name_classes": {
+        "stream": "with_binding"
+      },
+      "main_gate": "with_binding",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'stream' is not defined",
+      "evidence_buggy": "NameError: name 'stream' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "4e5faa3",
+      "fn": "test_buffer_write_rollover_uses_byte_count",
+      "stmt": "self.assertEqual(stream.getvalue(), b'abcd')",
+      "call": "stream.getvalue()",
+      "orig_expr": "stream.getvalue()",
+      "free_vars": [
+        "stream"
+      ],
+      "name_classes": {
+        "stream": "with_binding"
+      },
+      "main_gate": "with_binding",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'stream' is not defined",
+      "evidence_buggy": "NameError: name 'stream' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "1cdc0e9",
+      "fn": "test_histogram_zero_interquartile_range",
+      "stmt": "assert counts == [(float(min(data)), len(data))]",
+      "call": "Stats(data).get_histogram_counts()",
+      "orig_expr": "counts",
+      "free_vars": [
+        "Stats",
+        "data"
+      ],
+      "name_classes": {
+        "Stats": "imported_name",
+        "data": "loop_var"
+      },
+      "main_gate": "loop_var",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'data' is not defined",
+      "evidence_buggy": "NameError: name 'data' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "f1034b0",
+      "fn": "test_jsonl_iterator_rel_seek_negative",
+      "stmt": "assert tail == list(JSONLIterator(open(JSONL_DATA_PATH), rel_seek=0.5))",
+      "call": "list(JSONLIterator(_CappedReadFile(open(os.path.dirname(os.path.abspath(__file__)) + '/jsonl_test_data.txt')), rel_seek=-0.5))",
+      "orig_expr": "tail",
+      "free_vars": [
+        "JSONLIterator",
+        "_CappedReadFile",
+        "__file__",
+        "list",
+        "open",
+        "os"
+      ],
+      "name_classes": {
+        "JSONLIterator": "imported_name",
+        "_CappedReadFile": "unbound",
+        "__file__": "unbound",
+        "list": "builtin_only",
+        "open": "builtin_only",
+        "os": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name '_CappedReadFile' is not defined",
+      "evidence_buggy": "NameError: name '_CappedReadFile' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "f1034b0",
+      "fn": "test_jsonl_iterator_rel_seek_negative",
+      "stmt": "assert tail == ref[len(ref) - len(tail):]",
+      "call": "list(JSONLIterator(_CappedReadFile(open(os.path.dirname(os.path.abspath(__file__)) + '/jsonl_test_data.txt')), rel_seek=-0.5))",
+      "orig_expr": "tail",
+      "free_vars": [
+        "JSONLIterator",
+        "_CappedReadFile",
+        "__file__",
+        "list",
+        "open",
+        "os"
+      ],
+      "name_classes": {
+        "JSONLIterator": "imported_name",
+        "_CappedReadFile": "unbound",
+        "__file__": "unbound",
+        "list": "builtin_only",
+        "open": "builtin_only",
+        "os": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name '_CappedReadFile' is not defined",
+      "evidence_buggy": "NameError: name '_CappedReadFile' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "ebc7a8f",
+      "fn": "test_omd_copy_module",
+      "stmt": "assert shallow == omd",
+      "call": "copy.copy(OMD([('a', 1), ('a', 2), ('b', 3)]))",
+      "orig_expr": "shallow",
+      "free_vars": [
+        "OMD",
+        "copy"
+      ],
+      "name_classes": {
+        "OMD": "imported_name",
+        "copy": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'copy' is not defined. Did you forget to import 'copy'?",
+      "evidence_buggy": "NameError: name 'copy' is not defined. Did you forget to import 'copy'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "ebc7a8f",
+      "fn": "test_omd_copy_module",
+      "stmt": "assert deep == omd",
+      "call": "copy.deepcopy(OMD([('a', 1), ('a', 2), ('b', 3)]))",
+      "orig_expr": "deep",
+      "free_vars": [
+        "OMD",
+        "copy"
+      ],
+      "name_classes": {
+        "OMD": "imported_name",
+        "copy": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'copy' is not defined. Did you forget to import 'copy'?",
+      "evidence_buggy": "NameError: name 'copy' is not defined. Did you forget to import 'copy'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "d0a284f",
+      "fn": "test_iset_scalar_index_multiple_dead_intervals",
+      "stmt": "assert iset[i] == ref[i]",
+      "call": "IndexedSet(range(100))[i]",
+      "orig_expr": "iset[i]",
+      "free_vars": [
+        "IndexedSet",
+        "i",
+        "range"
+      ],
+      "name_classes": {
+        "IndexedSet": "imported_name",
+        "i": "loop_var",
+        "range": "builtin_only"
+      },
+      "main_gate": "loop_var",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "in_reach",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'i' is not defined. Did you mean: 'id'?",
+      "evidence_buggy": "NameError: name 'i' is not defined. Did you mean: 'id'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "609cabe",
+      "fn": "test_iset_slice_agreement",
+      "stmt": "assert list(iset[s]) == list(fresh[s]), (pops, s)",
+      "call": "list(IndexedSet(range(10))[slice(start, stop, step)])",
+      "orig_expr": "list(iset[s])",
+      "free_vars": [
+        "IndexedSet",
+        "list",
+        "range",
+        "slice",
+        "start",
+        "step",
+        "stop"
+      ],
+      "name_classes": {
+        "IndexedSet": "imported_name",
+        "list": "builtin_only",
+        "range": "builtin_only",
+        "slice": "builtin_only",
+        "start": "loop_var",
+        "step": "loop_var",
+        "stop": "loop_var"
+      },
+      "main_gate": "loop_var",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'start' is not defined",
+      "evidence_buggy": "NameError: name 'start' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "609cabe",
+      "fn": "test_iset_slice_agreement",
+      "stmt": "assert list(iset[s]) == ref[s], (pops, s)",
+      "call": "list(IndexedSet(range(10))[slice(start, stop, step)])",
+      "orig_expr": "list(iset[s])",
+      "free_vars": [
+        "IndexedSet",
+        "list",
+        "range",
+        "slice",
+        "start",
+        "step",
+        "stop"
+      ],
+      "name_classes": {
+        "IndexedSet": "imported_name",
+        "list": "builtin_only",
+        "range": "builtin_only",
+        "slice": "builtin_only",
+        "start": "loop_var",
+        "step": "loop_var",
+        "stop": "loop_var"
+      },
+      "main_gate": "loop_var",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'start' is not defined",
+      "evidence_buggy": "NameError: name 'start' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "0341ab3",
+      "fn": "test_omd_pickle",
+      "stmt": "assert roundtripped == empty",
+      "call": "roundtripped",
+      "orig_expr": "roundtripped",
+      "free_vars": [
+        "roundtripped"
+      ],
+      "name_classes": {
+        "roundtripped": "ambiguous_rhs"
+      },
+      "main_gate": "ambiguous_rhs",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'roundtripped' is not defined",
+      "evidence_buggy": "NameError: name 'roundtripped' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "0341ab3",
+      "fn": "test_omd_pickle",
+      "stmt": "assert roundtripped == nonempty",
+      "call": "roundtripped",
+      "orig_expr": "roundtripped",
+      "free_vars": [
+        "roundtripped"
+      ],
+      "name_classes": {
+        "roundtripped": "ambiguous_rhs"
+      },
+      "main_gate": "ambiguous_rhs",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'roundtripped' is not defined",
+      "evidence_buggy": "NameError: name 'roundtripped' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "93185b2",
+      "fn": "test_daterange_with_same_start_stop",
+      "stmt": "with pytest.raises(StopIteration):\n    next(date_range)",
+      "call": "next(daterange(date.today(), date.today()))",
+      "orig_expr": "next(date_range)",
+      "free_vars": [
+        "date",
+        "daterange",
+        "next"
+      ],
+      "name_classes": {
+        "date": "imported_name",
+        "daterange": "imported_name",
+        "next": "builtin_only"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unstable",
+      "reach": "L3",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "StopIteration",
+      "evidence_buggy": "StopIteration",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "8ba3a7f",
+      "fn": "test_daterange_years_step",
+      "stmt": "assert dates == expected",
+      "call": "dates",
+      "orig_expr": "dates",
+      "free_vars": [
+        "dates"
+      ],
+      "name_classes": {
+        "dates": "ambiguous_rhs"
+      },
+      "main_gate": "ambiguous_rhs",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'dates' is not defined. Did you mean: 'date'?",
+      "evidence_buggy": "NameError: name 'dates' is not defined. Did you mean: 'date'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "8ba3a7f",
+      "fn": "test_daterange_years_step",
+      "stmt": "assert dates == expected",
+      "call": "dates",
+      "orig_expr": "dates",
+      "free_vars": [
+        "dates"
+      ],
+      "name_classes": {
+        "dates": "ambiguous_rhs"
+      },
+      "main_gate": "ambiguous_rhs",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'dates' is not defined. Did you mean: 'date'?",
+      "evidence_buggy": "NameError: name 'dates' is not defined. Did you mean: 'date'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "64e6430",
+      "fn": "test_iset_index_method",
+      "stmt": "assert i == indexed_list.pop(index)",
+      "call": "i",
+      "orig_expr": "i",
+      "free_vars": [
+        "i"
+      ],
+      "name_classes": {
+        "i": "loop_var"
+      },
+      "main_gate": "loop_var",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "L3",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'i' is not defined. Did you mean: 'id'?",
+      "evidence_buggy": "NameError: name 'i' is not defined. Did you mean: 'id'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "64e6430",
+      "fn": "test_iset_index_method",
+      "stmt": "assert i == indexed_list.pop(index)",
+      "call": "i",
+      "orig_expr": "i",
+      "free_vars": [
+        "i"
+      ],
+      "name_classes": {
+        "i": "loop_var"
+      },
+      "main_gate": "loop_var",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "L3",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'i' is not defined. Did you mean: 'id'?",
+      "evidence_buggy": "NameError: name 'i' is not defined. Did you mean: 'id'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "0a20b37",
+      "fn": "test_socketutils_netstring_timeout",
+      "stmt": "assert client.read_ns() == b'pong'",
+      "call": "client_connect().read_ns()",
+      "orig_expr": "client.read_ns()",
+      "free_vars": [
+        "client_connect"
+      ],
+      "name_classes": {
+        "client_connect": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'client_connect' is not defined",
+      "evidence_buggy": "NameError: name 'client_connect' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "9a5017d",
+      "fn": "test_get_invocation_sig_str",
+      "stmt": "assert fb.get_invocation_str() == invocation_str",
+      "call": "FunctionBuilder(name='return_five', body='return 5', args=args, varargs=varargs, varkw=varkw, defaults=defaults).get_invocation_str()",
+      "orig_expr": "fb.get_invocation_str()",
+      "free_vars": [
+        "FunctionBuilder",
+        "args",
+        "defaults",
+        "varargs",
+        "varkw"
+      ],
+      "name_classes": {
+        "FunctionBuilder": "imported_name",
+        "args": "param_or_fixture",
+        "defaults": "param_or_fixture",
+        "varargs": "param_or_fixture",
+        "varkw": "param_or_fixture"
+      },
+      "main_gate": "param_or_fixture",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'args' is not defined",
+      "evidence_buggy": "NameError: name 'args' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "9a5017d",
+      "fn": "test_get_invocation_sig_str",
+      "stmt": "assert fb.get_sig_str() == sig_str",
+      "call": "FunctionBuilder(name='return_five', body='return 5', args=args, varargs=varargs, varkw=varkw, defaults=defaults).get_sig_str()",
+      "orig_expr": "fb.get_sig_str()",
+      "free_vars": [
+        "FunctionBuilder",
+        "args",
+        "defaults",
+        "varargs",
+        "varkw"
+      ],
+      "name_classes": {
+        "FunctionBuilder": "imported_name",
+        "args": "param_or_fixture",
+        "defaults": "param_or_fixture",
+        "varargs": "param_or_fixture",
+        "varkw": "param_or_fixture"
+      },
+      "main_gate": "param_or_fixture",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'args' is not defined",
+      "evidence_buggy": "NameError: name 'args' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "9a5017d",
+      "fn": "test_get_invocation_sig_str",
+      "stmt": "assert fb.get_invocation_str() == invocation_str",
+      "call": "FunctionBuilder(name='return_five', body='return 5', args=args, varargs=varargs, varkw=varkw, defaults=defaults, kwonlyargs=kwonlyargs, kwonlydefaults=kwonlydefaults).get_invocation_str()",
+      "orig_expr": "fb.get_invocation_str()",
+      "free_vars": [
+        "FunctionBuilder",
+        "args",
+        "defaults",
+        "kwonlyargs",
+        "kwonlydefaults",
+        "varargs",
+        "varkw"
+      ],
+      "name_classes": {
+        "FunctionBuilder": "imported_name",
+        "args": "param_or_fixture",
+        "defaults": "param_or_fixture",
+        "kwonlyargs": "unbound",
+        "kwonlydefaults": "unbound",
+        "varargs": "param_or_fixture",
+        "varkw": "param_or_fixture"
+      },
+      "main_gate": "param_or_fixture",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'args' is not defined",
+      "evidence_buggy": "NameError: name 'args' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "boltons",
+      "sha": "9a5017d",
+      "fn": "test_get_invocation_sig_str",
+      "stmt": "assert fb.get_sig_str() == sig_str",
+      "call": "FunctionBuilder(name='return_five', body='return 5', args=args, varargs=varargs, varkw=varkw, defaults=defaults, kwonlyargs=kwonlyargs, kwonlydefaults=kwonlydefaults).get_sig_str()",
+      "orig_expr": "fb.get_sig_str()",
+      "free_vars": [
+        "FunctionBuilder",
+        "args",
+        "defaults",
+        "kwonlyargs",
+        "kwonlydefaults",
+        "varargs",
+        "varkw"
+      ],
+      "name_classes": {
+        "FunctionBuilder": "imported_name",
+        "args": "param_or_fixture",
+        "defaults": "param_or_fixture",
+        "kwonlyargs": "unbound",
+        "kwonlydefaults": "unbound",
+        "varargs": "param_or_fixture",
+        "varkw": "param_or_fixture"
+      },
+      "main_gate": "param_or_fixture",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'args' is not defined",
+      "evidence_buggy": "NameError: name 'args' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "67fcf64",
+      "fn": "test_falsey_validator_is_honoured",
+      "stmt": "self.assertEqual(set(D), set())",
+      "call": "set(bucket(iter([10, 20, 11, 21]), key=lambda x: x, validator=AllowedKeys()))",
+      "orig_expr": "set(D)",
+      "free_vars": [
+        "AllowedKeys",
+        "bucket",
+        "iter",
+        "set",
+        "x"
+      ],
+      "name_classes": {
+        "AllowedKeys": "unbound",
+        "bucket": "unbound",
+        "iter": "builtin_only",
+        "set": "builtin_only",
+        "x": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'AllowedKeys' is not defined",
+      "evidence_buggy": "NameError: name 'AllowedKeys' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "8a930ac",
+      "fn": "test_reversed_preserves_float_values",
+      "stmt": "self.assertEqual(list(values)[::-1], list(reversed(values)))",
+      "call": "list(numeric_range(*args))[::-1]",
+      "orig_expr": "list(values)[::-1]",
+      "free_vars": [
+        "args",
+        "list",
+        "numeric_range"
+      ],
+      "name_classes": {
+        "args": "loop_var",
+        "list": "builtin_only",
+        "numeric_range": "unbound"
+      },
+      "main_gate": "loop_var",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'args' is not defined",
+      "evidence_buggy": "NameError: name 'args' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "8a930ac",
+      "fn": "test_reversed_datetime_limits",
+      "stmt": "self.assertEqual(list(values)[::-1], list(reversed(values)))",
+      "call": "list(numeric_range(start, start + 2 * step, step))[::-1]",
+      "orig_expr": "list(values)[::-1]",
+      "free_vars": [
+        "list",
+        "numeric_range",
+        "start",
+        "step"
+      ],
+      "name_classes": {
+        "list": "builtin_only",
+        "numeric_range": "unbound",
+        "start": "loop_var",
+        "step": "loop_var"
+      },
+      "main_gate": "loop_var",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'start' is not defined",
+      "evidence_buggy": "NameError: name 'start' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "bc8be10",
+      "fn": "test_contains_items_with_inexact_step",
+      "stmt": "self.assertEqual(i, r.index(v))",
+      "call": "i",
+      "orig_expr": "i",
+      "free_vars": [
+        "i"
+      ],
+      "name_classes": {
+        "i": "loop_var"
+      },
+      "main_gate": "loop_var",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'i' is not defined. Did you mean: 'id'?",
+      "evidence_buggy": "NameError: name 'i' is not defined. Did you mean: 'id'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "bc8be10",
+      "fn": "test_contains_items_with_inexact_step",
+      "stmt": "self.assertEqual(v, r[i])",
+      "call": "v",
+      "orig_expr": "v",
+      "free_vars": [
+        "v"
+      ],
+      "name_classes": {
+        "v": "loop_var"
+      },
+      "main_gate": "loop_var",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'v' is not defined",
+      "evidence_buggy": "NameError: name 'v' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "bc8be10",
+      "fn": "test_len_matches_iteration",
+      "stmt": "self.assertEqual(len(items), len(r))",
+      "call": "len(list(numeric_range(*args)))",
+      "orig_expr": "len(items)",
+      "free_vars": [
+        "args",
+        "len",
+        "list",
+        "numeric_range"
+      ],
+      "name_classes": {
+        "args": "loop_var",
+        "len": "builtin_only",
+        "list": "builtin_only",
+        "numeric_range": "unbound"
+      },
+      "main_gate": "loop_var",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'args' is not defined",
+      "evidence_buggy": "NameError: name 'args' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "bc8be10",
+      "fn": "test_len_matches_iteration",
+      "stmt": "self.assertEqual(items[-1], r[len(r) - 1])",
+      "call": "list(numeric_range(*args))[-1]",
+      "orig_expr": "items[-1]",
+      "free_vars": [
+        "args",
+        "list",
+        "numeric_range"
+      ],
+      "name_classes": {
+        "args": "loop_var",
+        "list": "builtin_only",
+        "numeric_range": "unbound"
+      },
+      "main_gate": "loop_var",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'args' is not defined",
+      "evidence_buggy": "NameError: name 'args' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "d992be0",
+      "fn": "test_stability",
+      "stmt": "self.assertEqual(list(map(type, mi.running_min(data, maxlen=2))), [type(min(data[0:1])), type(min(data[0:2])), type(min(data[1:3]))])",
+      "call": "list(map(type, running_min([0, 0.0, Fraction(0)], maxlen=2)))",
+      "orig_expr": "list(map(type, mi.running_min(data, maxlen=2)))",
+      "free_vars": [
+        "Fraction",
+        "list",
+        "map",
+        "running_min",
+        "type"
+      ],
+      "name_classes": {
+        "Fraction": "imported_name",
+        "list": "builtin_only",
+        "map": "builtin_only",
+        "running_min": "unbound",
+        "type": "builtin_only"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "L3",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'Fraction' is not defined",
+      "evidence_buggy": "NameError: name 'Fraction' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "d992be0",
+      "fn": "test_stability",
+      "stmt": "self.assertEqual(list(map(type, mi.running_max(data, maxlen=2))), [type(max(data[0:1])), type(max(data[0:2])), type(max(data[1:3]))])",
+      "call": "list(map(type, running_max([0, 0.0, Fraction(0)], maxlen=2)))",
+      "orig_expr": "list(map(type, mi.running_max(data, maxlen=2)))",
+      "free_vars": [
+        "Fraction",
+        "list",
+        "map",
+        "running_max",
+        "type"
+      ],
+      "name_classes": {
+        "Fraction": "imported_name",
+        "list": "builtin_only",
+        "map": "builtin_only",
+        "running_max": "unbound",
+        "type": "builtin_only"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "L3",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'Fraction' is not defined",
+      "evidence_buggy": "NameError: name 'Fraction' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "b0aa91e",
+      "fn": "test_list_with_repeat",
+      "stmt": "self.assertEqual(n, set(nums))",
+      "call": "n",
+      "orig_expr": "n",
+      "free_vars": [
+        "n"
+      ],
+      "name_classes": {
+        "n": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'n' is not defined",
+      "evidence_buggy": "NameError: name 'n' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "b0aa91e",
+      "fn": "test_list_with_repeat",
+      "stmt": "self.assertEqual(m, set(lets))",
+      "call": "m",
+      "orig_expr": "m",
+      "free_vars": [
+        "m"
+      ],
+      "name_classes": {
+        "m": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'm' is not defined",
+      "evidence_buggy": "NameError: name 'm' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "b0aa91e",
+      "fn": "test_list_with_repeat",
+      "stmt": "self.assertEqual(len(n), len(nums))",
+      "call": "len(n)",
+      "orig_expr": "len(n)",
+      "free_vars": [
+        "len",
+        "n"
+      ],
+      "name_classes": {
+        "len": "builtin_only",
+        "n": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'n' is not defined",
+      "evidence_buggy": "NameError: name 'n' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "b0aa91e",
+      "fn": "test_list_with_repeat",
+      "stmt": "self.assertEqual(len(m), len(lets))",
+      "call": "len(m)",
+      "orig_expr": "len(m)",
+      "free_vars": [
+        "len",
+        "m"
+      ],
+      "name_classes": {
+        "len": "builtin_only",
+        "m": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'm' is not defined",
+      "evidence_buggy": "NameError: name 'm' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "b0aa91e",
+      "fn": "test_list_with_repeat",
+      "stmt": "self.assertEqual(n, set(nums))",
+      "call": "n",
+      "orig_expr": "n",
+      "free_vars": [
+        "n"
+      ],
+      "name_classes": {
+        "n": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'n' is not defined",
+      "evidence_buggy": "NameError: name 'n' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "b0aa91e",
+      "fn": "test_list_with_repeat",
+      "stmt": "self.assertEqual(m, set(lets))",
+      "call": "m",
+      "orig_expr": "m",
+      "free_vars": [
+        "m"
+      ],
+      "name_classes": {
+        "m": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'm' is not defined",
+      "evidence_buggy": "NameError: name 'm' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "b0aa91e",
+      "fn": "test_list_with_repeat",
+      "stmt": "self.assertEqual(len(n), len(nums))",
+      "call": "len(n)",
+      "orig_expr": "len(n)",
+      "free_vars": [
+        "len",
+        "n"
+      ],
+      "name_classes": {
+        "len": "builtin_only",
+        "n": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'n' is not defined",
+      "evidence_buggy": "NameError: name 'n' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "b0aa91e",
+      "fn": "test_list_with_repeat",
+      "stmt": "self.assertEqual(len(m), len(lets))",
+      "call": "len(m)",
+      "orig_expr": "len(m)",
+      "free_vars": [
+        "len",
+        "m"
+      ],
+      "name_classes": {
+        "len": "builtin_only",
+        "m": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'm' is not defined",
+      "evidence_buggy": "NameError: name 'm' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "bff7cbe",
+      "fn": "test_strict",
+      "stmt": "self.assertEqual(list(mi.zip_broadcast(*objects)), zipped)",
+      "call": "list(zip_broadcast(*objects))",
+      "orig_expr": "list(mi.zip_broadcast(*objects))",
+      "free_vars": [
+        "list",
+        "objects",
+        "zip_broadcast"
+      ],
+      "name_classes": {
+        "list": "builtin_only",
+        "objects": "loop_var",
+        "zip_broadcast": "unbound"
+      },
+      "main_gate": "loop_var",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'objects' is not defined. Did you mean: 'object'?",
+      "evidence_buggy": "NameError: name 'objects' is not defined. Did you mean: 'object'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "more-itertools",
+      "sha": "395bdfc",
+      "fn": "test_strict",
+      "stmt": "self.assertEqual(list(mi.zip_broadcast(*objects)), zipped)",
+      "call": "list(zip_broadcast(*objects))",
+      "orig_expr": "list(mi.zip_broadcast(*objects))",
+      "free_vars": [
+        "list",
+        "objects",
+        "zip_broadcast"
+      ],
+      "name_classes": {
+        "list": "builtin_only",
+        "objects": "loop_var",
+        "zip_broadcast": "unbound"
+      },
+      "main_gate": "loop_var",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'objects' is not defined. Did you mean: 'object'?",
+      "evidence_buggy": "NameError: name 'objects' is not defined. Did you mean: 'object'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "862696a",
+      "fn": "test_fields",
+      "stmt": "assert (Attribute(name='x', alias='x', default=foo, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False, alias_is_default=True), Attribute(name='y', alias='y', default=attr.Factory(list), validato",
+      "call": "(Attribute(name='x', alias='x', default=None, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False, alias_is_default=True), Attribute(name='y', alias='y', default=attr.Factory(list), validator=None",
+      "orig_expr": null,
+      "free_vars": null,
+      "name_classes": {},
+      "main_gate": "unparseable",
+      "inline_state": "unparseable",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "SyntaxError: '(' was never closed",
+      "evidence_buggy": "SyntaxError: '(' was never closed",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "862696a",
+      "fn": "test_programmatic",
+      "stmt": "assert (Attribute(name='a', alias='a', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False, alias_is_default=True), Attribute(name='b', alias='b', default=NOTHING, validator=None,",
+      "call": "(Attribute(name='a', alias='a', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False, alias_is_default=True), Attribute(name='b', alias='b', default=NOTHING, validator=None, repr=T",
+      "orig_expr": null,
+      "free_vars": null,
+      "name_classes": {},
+      "main_gate": "unparseable",
+      "inline_state": "unparseable",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "SyntaxError: '(' was never closed",
+      "evidence_buggy": "SyntaxError: '(' was never closed",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "862696a",
+      "fn": "test_hook_conflicting_defaults_after_reorder",
+      "stmt": "assert (\"No mandatory attributes allowed after an attribute with a default value or factory.  Attribute in question: Attribute(name='x', default=NOTHING, validator=None, repr=True, eq=True, eq_key=None, order=True, order_key=None, hash=None",
+      "call": "e.value.args",
+      "orig_expr": null,
+      "free_vars": [
+        "e"
+      ],
+      "name_classes": {
+        "e": "with_binding"
+      },
+      "main_gate": "with_binding",
+      "inline_state": "unknown",
+      "scope_found": true,
+      "gate_176": "tuple",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'e' is not defined",
+      "evidence_buggy": "NameError: name 'e' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "862696a",
+      "fn": "test_conflicting_defaults",
+      "stmt": "assert (\"No mandatory attributes allowed after an attribute with a default value or factory.  Attribute in question: Attribute(name='y', default=NOTHING, validator=None, repr=True, eq=True, eq_key=None, order=True, order_key=None, hash=None",
+      "call": "e.value.args",
+      "orig_expr": null,
+      "free_vars": [
+        "e"
+      ],
+      "name_classes": {
+        "e": "with_binding"
+      },
+      "main_gate": "with_binding",
+      "inline_state": "unknown",
+      "scope_found": true,
+      "gate_176": "tuple",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'e' is not defined",
+      "evidence_buggy": "NameError: name 'e' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "862696a",
+      "fn": "test_alias_is_default_pickle_roundtrip",
+      "stmt": "assert a.alias == restored.alias",
+      "call": "a.alias",
+      "orig_expr": "a.alias",
+      "free_vars": [
+        "a"
+      ],
+      "name_classes": {
+        "a": "loop_var"
+      },
+      "main_gate": "loop_var",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'a' is not defined. Did you mean: '_a'?",
+      "evidence_buggy": "NameError: name 'a' is not defined. Did you mean: '_a'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "862696a",
+      "fn": "test_alias_is_default_pickle_roundtrip",
+      "stmt": "assert a.alias_is_default == restored.alias_is_default",
+      "call": "a.alias_is_default",
+      "orig_expr": "a.alias_is_default",
+      "free_vars": [
+        "a"
+      ],
+      "name_classes": {
+        "a": "loop_var"
+      },
+      "main_gate": "loop_var",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'a' is not defined. Did you mean: '_a'?",
+      "evidence_buggy": "NameError: name 'a' is not defined. Did you mean: '_a'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "862696a",
+      "fn": "test_can_unpickle_25_3_attributes",
+      "stmt": "assert Attribute(name=name, alias=alias, alias_is_default=alias_is_default, default=attrs.NOTHING, validator=None, repr=True, cmp=None, eq=True, eq_key=None, order=True, order_key=None, hash=None, init=True, metadata=types.MappingProxyType(",
+      "call": "Attribute(name=name, alias=alias, alias_is_default=alias_is_default, default=attrs.NOTHING, validator=None, repr=True, cmp=None, eq=True, eq_key=None, order=True, order_key=None, hash=None, init=True, metadata=types.MappingProxyType({}), ty",
+      "orig_expr": null,
+      "free_vars": null,
+      "name_classes": {},
+      "main_gate": "unparseable",
+      "inline_state": "unparseable",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "SyntaxError: '(' was never closed",
+      "evidence_buggy": "SyntaxError: '(' was never closed",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f9ff913",
+      "fn": "test_ne",
+      "stmt": "assert method.__doc__.strip() == f'Check equality and either forward a NotImplemented or\\n{indent}return the result negated.'",
+      "call": "self.cls.__ne__.__doc__.strip()",
+      "orig_expr": "method.__doc__.strip()",
+      "free_vars": [
+        "self"
+      ],
+      "name_classes": {
+        "self": "self_attr"
+      },
+      "main_gate": "self_attr",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'self' is not defined",
+      "evidence_buggy": "NameError: name 'self' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f9ff913",
+      "fn": "test_ne",
+      "stmt": "assert method.__doc__.strip() == f'Check equality and either forward a NotImplemented or\\n{indent}return the result negated.'",
+      "call": "self.cls.__ne__.__doc__.strip()",
+      "orig_expr": "method.__doc__.strip()",
+      "free_vars": [
+        "self"
+      ],
+      "name_classes": {
+        "self": "self_attr"
+      },
+      "main_gate": "self_attr",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'self' is not defined",
+      "evidence_buggy": "NameError: name 'self' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f9ff913",
+      "fn": "test_ne",
+      "stmt": "assert method.__doc__.strip() == f'Check equality and either forward a NotImplemented or\\n{indent}return the result negated.'",
+      "call": "self.cls.__ne__.__doc__.strip()",
+      "orig_expr": "method.__doc__.strip()",
+      "free_vars": [
+        "self"
+      ],
+      "name_classes": {
+        "self": "self_attr"
+      },
+      "main_gate": "self_attr",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'self' is not defined",
+      "evidence_buggy": "NameError: name 'self' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "0bf0678",
+      "fn": "test_named_tuple_retain_type",
+      "stmt": "assert {'coords': Coordinates(50.419019, 30.516225)} == attr.asdict(instance, retain_collection_types=True)",
+      "call": "{'coords': Coordinates(50.419019, 30.516225)}",
+      "orig_expr": "{'coords': Coordinates(50.419019, 30.516225)}",
+      "free_vars": [
+        "Coordinates"
+      ],
+      "name_classes": {
+        "Coordinates": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'Coordinates' is not defined",
+      "evidence_buggy": "NameError: name 'Coordinates' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "0bf0678",
+      "fn": "test_named_tuple_retain_type",
+      "stmt": "assert (Coordinates(50.419019, 30.516225),) == attr.astuple(instance, retain_collection_types=True)",
+      "call": "(Coordinates(50.419019, 30.516225),)",
+      "orig_expr": "(Coordinates(50.419019, 30.516225),)",
+      "free_vars": [
+        "Coordinates"
+      ],
+      "name_classes": {
+        "Coordinates": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'Coordinates' is not defined",
+      "evidence_buggy": "NameError: name 'Coordinates' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c9150d2",
+      "fn": "test_slots_unpickle_is_backward_compatible",
+      "stmt": "assert a_unpickled == a",
+      "call": "pickle.loads(b'\\x80\\x04\\x95&\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x8c\\x10' + A(1, 2, 3).__module__.encode() + b'\\x94\\x8c\\x01A\\x94\\x93\\x94)\\x81\\x94K\\x01K\\x02K\\x03\\x87\\x94b.')",
+      "orig_expr": "a_unpickled",
+      "free_vars": [
+        "A",
+        "pickle"
+      ],
+      "name_classes": {
+        "A": "unbound",
+        "pickle": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'pickle' is not defined. Did you forget to import 'pickle'?",
+      "evidence_buggy": "NameError: name 'pickle' is not defined. Did you forget to import 'pickle'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "947bfb5",
+      "fn": "test_hash_uses_eq",
+      "stmt": "assert hash(C('1')) == hash(C(1))",
+      "call": "hash(C('1'))",
+      "orig_expr": "hash(C('1'))",
+      "free_vars": [
+        "C",
+        "hash"
+      ],
+      "name_classes": {
+        "C": "unbound",
+        "hash": "builtin_only"
+      },
+      "main_gate": "unbound",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'C' is not defined",
+      "evidence_buggy": "NameError: name 'C' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "1499c77",
+      "fn": "test_init_type_hints",
+      "stmt": "assert typing.get_type_hints(C.__init__) == {'return': type(None), 'x': typing.List[int]}",
+      "call": "typing.get_type_hints(C.__init__)",
+      "orig_expr": "typing.get_type_hints(C.__init__)",
+      "free_vars": [
+        "C",
+        "typing"
+      ],
+      "name_classes": {
+        "C": "unbound",
+        "typing": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'C' is not defined",
+      "evidence_buggy": "NameError: name 'C' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "1f627dd",
+      "fn": "test_inheritance_from_slots_with_attribute_override",
+      "stmt": "assert {'z'} == set(C2Slots.__slots__)",
+      "call": "set(C2Slots.__slots__)",
+      "orig_expr": "{'z'}",
+      "free_vars": [
+        "C2Slots",
+        "set"
+      ],
+      "name_classes": {
+        "C2Slots": "unbound",
+        "set": "builtin_only"
+      },
+      "main_gate": "unbound",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'C2Slots' is not defined",
+      "evidence_buggy": "NameError: name 'C2Slots' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "1f627dd",
+      "fn": "test_inheritance_from_slots_with_attribute_override",
+      "stmt": "assert {'__weakref__', 'y', 'z'} == set(NonAttrsChild.__slots__)",
+      "call": "set(NonAttrsChild.__slots__)",
+      "orig_expr": "{'__weakref__', 'y', 'z'}",
+      "free_vars": [
+        "NonAttrsChild",
+        "set"
+      ],
+      "name_classes": {
+        "NonAttrsChild": "unbound",
+        "set": "builtin_only"
+      },
+      "main_gate": "unbound",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'NonAttrsChild' is not defined",
+      "evidence_buggy": "NameError: name 'NonAttrsChild' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "1f627dd",
+      "fn": "test_inherited_slot_reuses_slot_descriptor",
+      "stmt": "assert set() == set(Child.__slots__)",
+      "call": "set(Child.__slots__)",
+      "orig_expr": "set()",
+      "free_vars": [
+        "Child",
+        "set"
+      ],
+      "name_classes": {
+        "Child": "unbound",
+        "set": "builtin_only"
+      },
+      "main_gate": "unbound",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'Child' is not defined",
+      "evidence_buggy": "NameError: name 'Child' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "4cfd52d",
+      "fn": "test_auto_attribs_detect",
+      "stmt": "assert OldSchool2(1) == OldSchool2(1)",
+      "call": "OldSchool2(1)",
+      "orig_expr": "OldSchool2(1)",
+      "free_vars": [
+        "OldSchool2"
+      ],
+      "name_classes": {
+        "OldSchool2": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'OldSchool2' is not defined",
+      "evidence_buggy": "NameError: name 'OldSchool2' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "4cfd52d",
+      "fn": "test_auto_attribs_detect_annotations",
+      "stmt": "assert NewSchool(1) == NewSchool(1)",
+      "call": "NewSchool(1)",
+      "orig_expr": "NewSchool(1)",
+      "free_vars": [
+        "NewSchool"
+      ],
+      "name_classes": {
+        "NewSchool": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'NewSchool' is not defined",
+      "evidence_buggy": "NameError: name 'NewSchool' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "4cfd52d",
+      "fn": "test_auto_attribs_detect_annotations",
+      "stmt": "assert NewSchool2(1) == NewSchool2(1)",
+      "call": "NewSchool2(1)",
+      "orig_expr": "NewSchool2(1)",
+      "free_vars": [
+        "NewSchool2"
+      ],
+      "name_classes": {
+        "NewSchool2": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'NewSchool2' is not defined",
+      "evidence_buggy": "NameError: name 'NewSchool2' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c42bf9e",
+      "fn": "test_resolve_types_auto_attrib",
+      "stmt": "assert typing.List[int] == attr.fields(A).a.type",
+      "call": "typing.List[int]",
+      "orig_expr": "typing.List[int]",
+      "free_vars": [
+        "int",
+        "typing"
+      ],
+      "name_classes": {
+        "int": "builtin_only",
+        "typing": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "evidence_buggy": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c42bf9e",
+      "fn": "test_resolve_types_auto_attrib",
+      "stmt": "assert typing.List['int'] == attr.fields(A).b.type",
+      "call": "typing.List['int']",
+      "orig_expr": "typing.List['int']",
+      "free_vars": [
+        "typing"
+      ],
+      "name_classes": {
+        "typing": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "evidence_buggy": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c42bf9e",
+      "fn": "test_resolve_types_auto_attrib",
+      "stmt": "assert typing.List[int] == attr.fields(A).a.type",
+      "call": "typing.List[int]",
+      "orig_expr": "typing.List[int]",
+      "free_vars": [
+        "int",
+        "typing"
+      ],
+      "name_classes": {
+        "int": "builtin_only",
+        "typing": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "evidence_buggy": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c42bf9e",
+      "fn": "test_resolve_types_auto_attrib",
+      "stmt": "assert typing.List[int] == attr.fields(A).b.type",
+      "call": "typing.List[int]",
+      "orig_expr": "typing.List[int]",
+      "free_vars": [
+        "int",
+        "typing"
+      ],
+      "name_classes": {
+        "int": "builtin_only",
+        "typing": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "evidence_buggy": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c42bf9e",
+      "fn": "test_resolve_types_auto_attrib",
+      "stmt": "assert typing.List[int] == attr.fields(A).c.type",
+      "call": "typing.List[int]",
+      "orig_expr": "typing.List[int]",
+      "free_vars": [
+        "int",
+        "typing"
+      ],
+      "name_classes": {
+        "int": "builtin_only",
+        "typing": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "evidence_buggy": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c42bf9e",
+      "fn": "test_resolve_types_decorator",
+      "stmt": "assert typing.List[int] == attr.fields(A).a.type",
+      "call": "typing.List[int]",
+      "orig_expr": "typing.List[int]",
+      "free_vars": [
+        "int",
+        "typing"
+      ],
+      "name_classes": {
+        "int": "builtin_only",
+        "typing": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "evidence_buggy": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c42bf9e",
+      "fn": "test_resolve_types_decorator",
+      "stmt": "assert typing.List[int] == attr.fields(A).b.type",
+      "call": "typing.List[int]",
+      "orig_expr": "typing.List[int]",
+      "free_vars": [
+        "int",
+        "typing"
+      ],
+      "name_classes": {
+        "int": "builtin_only",
+        "typing": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "evidence_buggy": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c42bf9e",
+      "fn": "test_resolve_types_decorator",
+      "stmt": "assert typing.List[int] == attr.fields(A).c.type",
+      "call": "typing.List[int]",
+      "orig_expr": "typing.List[int]",
+      "free_vars": [
+        "int",
+        "typing"
+      ],
+      "name_classes": {
+        "int": "builtin_only",
+        "typing": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "evidence_buggy": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c42bf9e",
+      "fn": "test_self_reference",
+      "stmt": "assert typing.Optional['A'] == attr.fields(A).b.type",
+      "call": "typing.Optional['A']",
+      "orig_expr": "typing.Optional['A']",
+      "free_vars": [
+        "typing"
+      ],
+      "name_classes": {
+        "typing": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "evidence_buggy": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c42bf9e",
+      "fn": "test_self_reference",
+      "stmt": "assert A == attr.fields(A).a.type",
+      "call": "A",
+      "orig_expr": "A",
+      "free_vars": [
+        "A"
+      ],
+      "name_classes": {
+        "A": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'A' is not defined",
+      "evidence_buggy": "NameError: name 'A' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c42bf9e",
+      "fn": "test_self_reference",
+      "stmt": "assert typing.Optional[A] == attr.fields(A).b.type",
+      "call": "typing.Optional[A]",
+      "orig_expr": "typing.Optional[A]",
+      "free_vars": [
+        "A",
+        "typing"
+      ],
+      "name_classes": {
+        "A": "unbound",
+        "typing": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "evidence_buggy": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c42bf9e",
+      "fn": "test_forward_reference",
+      "stmt": "assert typing.List['B'] == attr.fields(A).a.type",
+      "call": "typing.List['B']",
+      "orig_expr": "typing.List['B']",
+      "free_vars": [
+        "typing"
+      ],
+      "name_classes": {
+        "typing": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "evidence_buggy": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c42bf9e",
+      "fn": "test_forward_reference",
+      "stmt": "assert A == attr.fields(B).a.type",
+      "call": "A",
+      "orig_expr": "A",
+      "free_vars": [
+        "A"
+      ],
+      "name_classes": {
+        "A": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'A' is not defined",
+      "evidence_buggy": "NameError: name 'A' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c42bf9e",
+      "fn": "test_forward_reference",
+      "stmt": "assert typing.List[B] == attr.fields(A).a.type",
+      "call": "typing.List[B]",
+      "orig_expr": "typing.List[B]",
+      "free_vars": [
+        "B",
+        "typing"
+      ],
+      "name_classes": {
+        "B": "unbound",
+        "typing": "imported_name"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "evidence_buggy": "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "c42bf9e",
+      "fn": "test_forward_reference",
+      "stmt": "assert A == attr.fields(B).a.type",
+      "call": "A",
+      "orig_expr": "A",
+      "free_vars": [
+        "A"
+      ],
+      "name_classes": {
+        "A": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'A' is not defined",
+      "evidence_buggy": "NameError: name 'A' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "33b6131",
+      "fn": "test_fields",
+      "stmt": "assert (Attribute(name='x', default=foo, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False), Attribute(name='y', default=attr.Factory(list), validator=None, repr=True, cmp=None, eq=True, order=T",
+      "call": "(Attribute(name='x', default=None, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False), Attribute(name='y', default=attr.Factory(list), validator=None, repr=True, cmp=None, eq=True, order=True, h",
+      "orig_expr": null,
+      "free_vars": null,
+      "name_classes": {},
+      "main_gate": "unparseable",
+      "inline_state": "unparseable",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "SyntaxError: '(' was never closed",
+      "evidence_buggy": "SyntaxError: '(' was never closed",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "33b6131",
+      "fn": "test_programmatic",
+      "stmt": "assert (Attribute(name='a', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False), Attribute(name='b', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, ha",
+      "call": "(Attribute(name='a', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False), Attribute(name='b', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None",
+      "orig_expr": null,
+      "free_vars": null,
+      "name_classes": {},
+      "main_gate": "unparseable",
+      "inline_state": "unparseable",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "SyntaxError: '(' was never closed",
+      "evidence_buggy": "SyntaxError: '(' was never closed",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "33b6131",
+      "fn": "test_conflicting_defaults",
+      "stmt": "assert (\"No mandatory attributes allowed after an attribute with a default value or factory.  Attribute in question: Attribute(name='y', default=NOTHING, validator=None, repr=True, eq=True, order=True, hash=None, init=True, metadata=mapping",
+      "call": "e.value.args",
+      "orig_expr": null,
+      "free_vars": [
+        "e"
+      ],
+      "name_classes": {
+        "e": "with_binding"
+      },
+      "main_gate": "with_binding",
+      "inline_state": "unknown",
+      "scope_found": true,
+      "gate_176": "tuple",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'e' is not defined",
+      "evidence_buggy": "NameError: name 'e' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "33b6131",
+      "fn": "test_mro",
+      "stmt": "assert d.x == d.xx()",
+      "call": "D().x",
+      "orig_expr": "d.x",
+      "free_vars": [
+        "D"
+      ],
+      "name_classes": {
+        "D": "unbound"
+      },
+      "main_gate": "unbound",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_f2p",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'D' is not defined",
+      "evidence_buggy": "NameError: name 'D' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "b79a49e",
+      "fn": "test_change",
+      "stmt": "assert getattr(changed, name) == change_dict[name.replace('_', '')]",
+      "call": "getattr(evolve(C(), **{name.replace('_', ''): data.draw(st.integers()) for name in data.draw(st.sets(st.sampled_from([a.name for a in fields(C)])))}), name)",
+      "orig_expr": "getattr(changed, name)",
+      "free_vars": [
+        "C",
+        "a",
+        "data",
+        "evolve",
+        "fields",
+        "getattr",
+        "name",
+        "st"
+      ],
+      "name_classes": {
+        "C": "param_or_fixture",
+        "a": "loop_var",
+        "data": "param_or_fixture",
+        "evolve": "imported_name",
+        "fields": "imported_name",
+        "getattr": "builtin_only",
+        "name": "loop_var",
+        "st": "imported_name"
+      },
+      "main_gate": "param_or_fixture",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'C' is not defined",
+      "evidence_buggy": "NameError: name 'C' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f560500",
+      "fn": "test_fields",
+      "stmt": "assert (Attribute(name='x', default=foo, _validator=None, repr=True, cmp=True, hash=None, init=True), Attribute(name='y', default=attr.Factory(list), _validator=None, repr=True, cmp=True, hash=None, init=True)) == attr.fields(cls)",
+      "call": "(Attribute(name='x', default=None, _validator=None, repr=True, cmp=True, hash=None, init=True), Attribute(name='y', default=attr.Factory(list), _validator=None, repr=True, cmp=True, hash=None, init=True))",
+      "orig_expr": "(Attribute(name='x', default=foo, _validator=None, repr=True, cmp=True, hash=None, init=True), Attribute(name='y', default=attr.Factory(list), _validator=None, repr=True, cmp=True, hash=None, init=True))",
+      "free_vars": [
+        "Attribute",
+        "attr",
+        "list"
+      ],
+      "name_classes": {
+        "Attribute": "imported_name",
+        "attr": "imported_name",
+        "list": "builtin_only"
+      },
+      "main_gate": "imported_name",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "in_reach",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "AttributeError: 'function' object has no attribute 'Factory'",
+      "evidence_buggy": "AttributeError: 'function' object has no attribute 'Factory'",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f560500",
+      "fn": "test_hash_attribute",
+      "stmt": "assert hash(C(1, 2)) == hash(C(2, 2))",
+      "call": "hash(make_class('C', {'a': attr(hash=False), 'b': attr()}, slots=slots, hash=True)(1, 2))",
+      "orig_expr": "hash(C(1, 2))",
+      "free_vars": [
+        "attr",
+        "hash",
+        "make_class",
+        "slots"
+      ],
+      "name_classes": {
+        "attr": "imported_name",
+        "hash": "builtin_only",
+        "make_class": "imported_name",
+        "slots": "param_or_fixture"
+      },
+      "main_gate": "param_or_fixture",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "in_reach",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'slots' is not defined",
+      "evidence_buggy": "NameError: name 'slots' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f560500",
+      "fn": "test_hash_attribute_mirrors_cmp",
+      "stmt": "assert hash(C(1)) == hash(C(1))",
+      "call": "hash(make_class('C', {'a': attr(cmp=cmp)}, cmp=True, frozen=True)(1))",
+      "orig_expr": "hash(C(1))",
+      "free_vars": [
+        "attr",
+        "cmp",
+        "hash",
+        "make_class"
+      ],
+      "name_classes": {
+        "attr": "imported_name",
+        "cmp": "param_or_fixture",
+        "hash": "builtin_only",
+        "make_class": "imported_name"
+      },
+      "main_gate": "param_or_fixture",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "in_reach",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'cmp' is not defined",
+      "evidence_buggy": "NameError: name 'cmp' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f560500",
+      "fn": "test_hash_attribute_mirrors_cmp",
+      "stmt": "assert C(1) == C(2)",
+      "call": "make_class('C', {'a': attr(cmp=cmp)}, cmp=True, frozen=True)(1)",
+      "orig_expr": "C(1)",
+      "free_vars": [
+        "attr",
+        "cmp",
+        "make_class"
+      ],
+      "name_classes": {
+        "attr": "imported_name",
+        "cmp": "param_or_fixture",
+        "make_class": "imported_name"
+      },
+      "main_gate": "param_or_fixture",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "in_reach",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'cmp' is not defined",
+      "evidence_buggy": "NameError: name 'cmp' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f560500",
+      "fn": "test_hash_attribute_mirrors_cmp",
+      "stmt": "assert hash(C(1)) == hash(C(2))",
+      "call": "hash(make_class('C', {'a': attr(cmp=cmp)}, cmp=True, frozen=True)(1))",
+      "orig_expr": "hash(C(1))",
+      "free_vars": [
+        "attr",
+        "cmp",
+        "hash",
+        "make_class"
+      ],
+      "name_classes": {
+        "attr": "imported_name",
+        "cmp": "param_or_fixture",
+        "hash": "builtin_only",
+        "make_class": "imported_name"
+      },
+      "main_gate": "param_or_fixture",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "in_reach",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'cmp' is not defined",
+      "evidence_buggy": "NameError: name 'cmp' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f560500",
+      "fn": "test_hash_mirrors_cmp",
+      "stmt": "assert i == i",
+      "call": "make_class('C', {'a': attr()}, cmp=cmp, frozen=True)(1)",
+      "orig_expr": "i",
+      "free_vars": [
+        "attr",
+        "cmp",
+        "make_class"
+      ],
+      "name_classes": {
+        "attr": "imported_name",
+        "cmp": "param_or_fixture",
+        "make_class": "imported_name"
+      },
+      "main_gate": "param_or_fixture",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "in_reach",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'cmp' is not defined",
+      "evidence_buggy": "NameError: name 'cmp' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f560500",
+      "fn": "test_hash_mirrors_cmp",
+      "stmt": "assert hash(i) == hash(i)",
+      "call": "hash(make_class('C', {'a': attr()}, cmp=cmp, frozen=True)(1))",
+      "orig_expr": "hash(i)",
+      "free_vars": [
+        "attr",
+        "cmp",
+        "hash",
+        "make_class"
+      ],
+      "name_classes": {
+        "attr": "imported_name",
+        "cmp": "param_or_fixture",
+        "hash": "builtin_only",
+        "make_class": "imported_name"
+      },
+      "main_gate": "param_or_fixture",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "in_reach",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'cmp' is not defined",
+      "evidence_buggy": "NameError: name 'cmp' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f560500",
+      "fn": "test_hash_mirrors_cmp",
+      "stmt": "assert C(1) == C(1)",
+      "call": "make_class('C', {'a': attr()}, cmp=cmp, frozen=True)(1)",
+      "orig_expr": "C(1)",
+      "free_vars": [
+        "attr",
+        "cmp",
+        "make_class"
+      ],
+      "name_classes": {
+        "attr": "imported_name",
+        "cmp": "param_or_fixture",
+        "make_class": "imported_name"
+      },
+      "main_gate": "param_or_fixture",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "in_reach",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'cmp' is not defined",
+      "evidence_buggy": "NameError: name 'cmp' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f560500",
+      "fn": "test_hash_mirrors_cmp",
+      "stmt": "assert hash(C(1)) == hash(C(1))",
+      "call": "hash(make_class('C', {'a': attr()}, cmp=cmp, frozen=True)(1))",
+      "orig_expr": "hash(C(1))",
+      "free_vars": [
+        "attr",
+        "cmp",
+        "hash",
+        "make_class"
+      ],
+      "name_classes": {
+        "attr": "imported_name",
+        "cmp": "param_or_fixture",
+        "hash": "builtin_only",
+        "make_class": "imported_name"
+      },
+      "main_gate": "param_or_fixture",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "in_reach",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'cmp' is not defined",
+      "evidence_buggy": "NameError: name 'cmp' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f560500",
+      "fn": "test_conflicting_defaults",
+      "stmt": "assert (\"No mandatory attributes allowed after an attribute with a default value or factory.  Attribute in question: Attribute(name='y', default=NOTHING, validator=None, repr=True, cmp=True, hash=None, init=True, convert=None, metadata=mapp",
+      "call": "e.value.args",
+      "orig_expr": null,
+      "free_vars": [
+        "e"
+      ],
+      "name_classes": {
+        "e": "with_binding"
+      },
+      "main_gate": "with_binding",
+      "inline_state": "unknown",
+      "scope_found": true,
+      "gate_176": "tuple",
+      "reach": "X",
+      "v175": "in_reach",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'e' is not defined",
+      "evidence_buggy": "NameError: name 'e' is not defined",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "e59c360",
+      "fn": "test_pickle_attributes",
+      "stmt": "assert attribute == pickle.loads(pickle.dumps(attribute, protocol))",
+      "call": "attribute",
+      "orig_expr": "attribute",
+      "free_vars": [
+        "attribute"
+      ],
+      "name_classes": {
+        "attribute": "loop_var"
+      },
+      "main_gate": "loop_var",
+      "inline_state": "none",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'attribute' is not defined. Did you mean: 'Attribute'?",
+      "evidence_buggy": "NameError: name 'attribute' is not defined. Did you mean: 'Attribute'?",
+      "sandbox_pair": "both_raise"
+    },
+    {
+      "repo": "attrs",
+      "sha": "e59c360",
+      "fn": "test_pickle_object",
+      "stmt": "assert repr(obj) == repr(pickle.loads(pickle.dumps(obj, protocol)))",
+      "call": "repr(cls(123, 456))",
+      "orig_expr": "repr(obj)",
+      "free_vars": [
+        "cls",
+        "repr"
+      ],
+      "name_classes": {
+        "cls": "self_attr",
+        "repr": "builtin_only"
+      },
+      "main_gate": "self_attr",
+      "inline_state": "partial",
+      "scope_found": true,
+      "gate_176": "unserializable",
+      "reach": "X",
+      "v175": "no_criteria",
+      "diagnostic_only": true,
+      "why_fixed": "raise",
+      "why_buggy": "raise",
+      "evidence_fixed": "NameError: name 'cls' is not defined",
+      "evidence_buggy": "NameError: name 'cls' is not defined",
+      "sandbox_pair": "both_raise"
+    }
+  ],
+  "unmatched": [
+    {
+      "repo": "attrs",
+      "sha": "862696a",
+      "fn": "test_fields",
+      "stmt": "assert (Attribute(name='x', alias='x', default=foo, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False, alias_is_default=True), Attribute(name='y', alias='y', default=attr.Factory(list), validato",
+      "reason": "probe_index miss"
+    },
+    {
+      "repo": "attrs",
+      "sha": "862696a",
+      "fn": "test_programmatic",
+      "stmt": "assert (Attribute(name='a', alias='a', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False, alias_is_default=True), Attribute(name='b', alias='b', default=NOTHING, validator=None,",
+      "reason": "probe_index miss"
+    },
+    {
+      "repo": "attrs",
+      "sha": "862696a",
+      "fn": "test_hook_conflicting_defaults_after_reorder",
+      "stmt": "assert (\"No mandatory attributes allowed after an attribute with a default value or factory.  Attribute in question: Attribute(name='x', default=NOTHING, validator=None, repr=True, eq=True, eq_key=None, order=True, order_key=None, hash=None",
+      "reason": "probe_index miss"
+    },
+    {
+      "repo": "attrs",
+      "sha": "862696a",
+      "fn": "test_conflicting_defaults",
+      "stmt": "assert (\"No mandatory attributes allowed after an attribute with a default value or factory.  Attribute in question: Attribute(name='y', default=NOTHING, validator=None, repr=True, eq=True, eq_key=None, order=True, order_key=None, hash=None",
+      "reason": "probe_index miss"
+    },
+    {
+      "repo": "attrs",
+      "sha": "862696a",
+      "fn": "test_can_unpickle_25_3_attributes",
+      "stmt": "assert Attribute(name=name, alias=alias, alias_is_default=alias_is_default, default=attrs.NOTHING, validator=None, repr=True, cmp=None, eq=True, eq_key=None, order=True, order_key=None, hash=None, init=True, metadata=types.MappingProxyType(",
+      "reason": "probe_index miss"
+    },
+    {
+      "repo": "attrs",
+      "sha": "33b6131",
+      "fn": "test_fields",
+      "stmt": "assert (Attribute(name='x', default=foo, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False), Attribute(name='y', default=attr.Factory(list), validator=None, repr=True, cmp=None, eq=True, order=T",
+      "reason": "probe_index miss"
+    },
+    {
+      "repo": "attrs",
+      "sha": "33b6131",
+      "fn": "test_programmatic",
+      "stmt": "assert (Attribute(name='a', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False), Attribute(name='b', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, ha",
+      "reason": "probe_index miss"
+    },
+    {
+      "repo": "attrs",
+      "sha": "33b6131",
+      "fn": "test_conflicting_defaults",
+      "stmt": "assert (\"No mandatory attributes allowed after an attribute with a default value or factory.  Attribute in question: Attribute(name='y', default=NOTHING, validator=None, repr=True, eq=True, order=True, hash=None, init=True, metadata=mapping",
+      "reason": "probe_index miss"
+    },
+    {
+      "repo": "attrs",
+      "sha": "f560500",
+      "fn": "test_conflicting_defaults",
+      "stmt": "assert (\"No mandatory attributes allowed after an attribute with a default value or factory.  Attribute in question: Attribute(name='y', default=NOTHING, validator=None, repr=True, cmp=True, hash=None, init=True, convert=None, metadata=mapp",
+      "reason": "probe_index miss"
+    }
+  ],
+  "skipped": [],
+  "summary": {
+    "n_rows": 94,
+    "gates": {
+      "ambiguous_rhs": 4,
+      "imported_name": 22,
+      "loop_var": 17,
+      "param_or_fixture": 13,
+      "self_attr": 4,
+      "unbound": 23,
+      "unparseable": 5,
+      "with_binding": 6
+    },
+    "inline_state": {
+      "none": 43,
+      "partial": 42,
+      "unknown": 4,
+      "unparseable": 5
+    },
+    "cross": {
+      "ambiguous_rhs/none": 4,
+      "imported_name/none": 13,
+      "imported_name/partial": 9,
+      "loop_var/none": 7,
+      "loop_var/partial": 10,
+      "param_or_fixture/partial": 13,
+      "self_attr/partial": 4,
+      "unbound/none": 17,
+      "unbound/partial": 6,
+      "unparseable/unparseable": 5,
+      "with_binding/none": 2,
+      "with_binding/unknown": 4
+    },
+    "sandbox_pair": {
+      "both_raise": 94
+    },
+    "why_fixed": {
+      "raise": 94
+    },
+    "pair_x_gate": {
+      "both_raise/ambiguous_rhs": 4,
+      "both_raise/imported_name": 22,
+      "both_raise/loop_var": 17,
+      "both_raise/param_or_fixture": 13,
+      "both_raise/self_attr": 4,
+      "both_raise/unbound": 23,
+      "both_raise/unparseable": 5,
+      "both_raise/with_binding": 6
+    },
+    "n_distinct_evidence": 38,
+    "top_evidence": [
+      [
+        "NameError: name 'typing' is not defined. Did you forget to import 'typing'?",
+        12
+      ],
+      [
+        "NameError: name 'args' is not defined",
+        7
+      ],
+      [
+        "NameError: name 'cmp' is not defined",
+        7
+      ],
+      [
+        "SyntaxError: '(' was never closed",
+        5
+      ],
+      [
+        "NameError: name 'i' is not defined. Did you mean: 'id'?",
+        4
+      ],
+      [
+        "NameError: name 'n' is not defined",
+        4
+      ]
+    ],
+    "by_repo": {
+      "attrs": 53,
+      "boltons": 22,
+      "more-itertools": 19
+    },
+    "n_scope_missing": 0,
+    "n_unmatched": 9,
+    "n_skipped_commits": 0,
+    "baseline_health": {
+      "ok": true,
+      "diffs": 0,
+      "repos": 3
+    },
+    "note": "⛔ 两本账分开：静态归因（main_gate + inline_state）与运行时硬证据（sandbox_pair / why / evidence）绝不合并成布尔。不产出判据、不报收益；unparseable / unmatched / skipped 是量具格，不参与归因推断。"
+  }
+}
