@@ -8464,3 +8464,121 @@ not_expr 2 / isinstance 1 / raises_other 1`。
 仅供离线反证）、`scripts/form_shape_attribution.json`、
 `tests/contract_form_shape_attribution_test.py`（69 项）。
 存档写 8 个源码 sha256 口径签名（含尺子自身，补 174 只钉 `select_commits` 的洞）。
+
+---
+
+### 180. ⛔⛔ **9 条 `import_failed` 的运行时归因：8 条是沙箱安全边界正确拒收、1 条是题源年代错配**（2026-11-07）
+
+═══ 一、起点：254 条 `unknown` 的最后一格 ═══
+
+177 把 254 条抽取层门的下游分成两本账：主账 135 条真跑、form 账 119 条
+`unmeasurable`。178 把主账里 94 条 `no_result_both` 变成 measured，179 把
+form 账 119 条从「形态未描述」变成「形态已描述、下游仍 unmeasurable」。
+**剩下的只有主账 9 条 `import_failed`**——它们连「为什么没结果」都没被记账：
+存档里 `sandbox_verdict` / `got_buggy` / `got_fixed` 全是 `None`，
+`downstream` 一律 `unknown`。
+
+177 的判定来自 `probe_extract_downstream.py:380-388`：
+
+```python
+broke = any("__import_error__" in (x or {}) for x in (r1, r2, rb))
+...
+v = "import_failed" if broke else classify(...)
+```
+
+而 `probe_context_gate.run_all` 一见到 `ExecResult.import_error` 就直接返回
+`{"__import_error__": err[:200]}` ⇒ **一个 commit 的所有探针连坐**，逐条
+`got` 被写成 `None`。⇒ 这 9 条不是「探针求值失败」，是 **fixed / buggy 源码
+根本没装起来**，探针一次都没执行。
+
+═══ 二、⛔ 量具坑：只看前 220 字符会把归因带反 ═══
+
+便宜对照第一版把 `import_error` 截到 220 字符，看到的**全是 traceback 开头**
+（`File "runner.py", line 192, in <module>`），六组读数一模一样 ⇒ 差点得出
+「同一个原因」的恒真表。改成取**最后一个非空行**之后立刻分出三类。
+⛔ 归因必须看异常末行，不许拿 traceback 前缀推断。
+
+═══ 三、全量读数（6 sha / 9 条，两侧真跑）═══
+
+| 主格 | 条数 | detail | 运行时末行（观察） |
+|---|---:|---|---|
+| `sandbox_deny` | 8 | `ctypes 7` / `fcntl 1` | `PermissionError: V6_SANDBOX_DENY:import:<mod>` |
+| `stdlib_incompat` | 1 | `collections.MutableSet` | `ImportError: cannot import name 'MutableSet' from 'collections'` |
+
+- `9/9 both_import`（fixed 与 buggy **两侧**都装不起来）、`9/9` 两侧分类一致；
+  `n_skipped=0`、`n_other_unknown=0`、基线 `OK 3/3 diffs=0`。
+- `by_repo`：attrs **7** / boltons **2**；176 门交叉 `unserializable 5 / unmatched 4`；
+  `reach` 全 **X**（⛔ 事后 oracle，只交叉、不当 predictor）。
+- 词表**同源**：deny 名单取产品 `aether/environment.py:470`
+  `_AUDIT_DENY_MODULES`（runner 的 `_hook` 就是拿它抛错）；stdlib 名单取
+  `sys.stdlib_module_names`。**不另抄第二把尺子**；词表外末行一律
+  `other_unknown`（fail-closed 保留未知）。
+
+═══ 四、性质改写：不是「装载门没开」 ═══
+
+164 曾记载整包装载把 attrs 从 8% 开到 **25/25**，本轮却在 40-commit
+全集里遇到 4 个 attrs sha 装不起来——**不是回退，也不是样本偏差**：
+
+- 其中 7 条（4 个 sha）的 `attr/_compat.py:95 import_ctypes` 触发
+  `V6_SANDBOX_DENY:import:ctypes`；boltons 1 条触发 `fcntl`——164 明确写过
+  「boltons 唯一的失败是 `fcntl` 被 deny-modules 拦（**正确的拒收**），前后同一条」。
+  ⇒ **8/9 是隔离边界按设计主动拒收**，不是产品缺陷。
+- 剩下 1 条 `collections.MutableSet` 是 Python **3.13 已移除**的旧 stdlib 名
+  ⇒ **题源年代与解释器错配**，同样不是产品能力问题。
+
+⇒ 「修装载就能救这 9 条」不成立；它们也**不属于** 162–164 的装载门缺口。
+
+═══ 五、254 条账目闭合（可复算等式） ═══
+
+```
+主账 135 = no_result_both 94 + same 22 + diff 10 + import_failed 9 + unstable 0
+254      = 主账 135 + form 账 119
+178 rows 94 == no_result_both 94 ｜ 179 rows 119 == form 119 ｜ 180 rows 9 == import_failed 9
+178 ∩ 179 = 0
+```
+
+六个等式全部 `true`，`closure` 逐条落盘，契约 A9.1–A9.6 各钉一条
+（⛔ 不合并成单一布尔）。
+
+═══ 六、⛔ 观察 / 分类 / 未知：三条不许越界的分寸 ═══
+
+1. **观察**：`evidence_tail` 是产出方 `ExecResult.import_error` 的运行时末行。
+2. **分类**：`main_gate` 只做同源词表的可复算归类，词表外 `other_unknown`。
+3. **未知**：9 条 `downstream` 恒 `unknown`。⛔ **本轮没有跑「放宽
+   deny-modules」的对照** —— 那会削弱沙箱隔离边界，属显式人工审批节点 /
+   产品口径变更。⇒ 「放宽后能测几条」是**推断**、不是观察，绝不写成结论；
+   「8 条 deny 命中」也不许读成「产品缺陷」。
+
+⇒ 128 条未知里，**9 条性质变为「结构性不可测（安全边界 / 题源年代）」**，
+**119 条仍是「形态已描述、下游 unmeasurable」**。⛔ 177 的 `unmeasurable`
+没被推翻；**既不宣布扩张判据形态无用，也不宣布扩张有效**；
+没测过 ≠ 测出 0。
+
+═══ 七、契约与反证 ═══
+
+`tests/contract_import_failure_attribution_test.py`：**58 项全绿 0 skip**。
+A 组钉死读数与六个封闭性等式；B 组离线反证（词表外 fail-closed、
+只认末行不许前缀冒充、恒真分类、篡改三条账、`pair_verdict` 四格、
+AST 行为级断言「真的调了 `require_baseline` / `run_in_sandbox`」）；
+C 组本机验锚 + **三个真实沙箱正例**（`import ctypes` 命中 deny、
+`x = 1` 命中非 import 路径、`from collections import MutableSet` 命中
+stdlib 错配）——第 133 条「零命中先证查询能命中」，且必须能命中反例。
+
+按「首次全绿必须注入反证」，在 `/tmp` + 内存注入三起事故：篡改读数
+（8→999）⇒ **恰好 A3 一项红**；分类函数恒真 ⇒ **B 组 11 项红**；
+去掉验锚路径（脚本副本）⇒ **恰好 B26 一项红**。失败总数与预期清单一一
+对应，V6 未被改动。真 3.9（3.9.6）语法通过，静态卫生
+`640 条 noqa / 裸 0`。
+
+═══ 八、拍板清单 ═══
+
+① 扩张判据形态 ② 多步状态序列普查 ③ CI 先 `bootstrap` 再跑 H 组
+④ 放宽内联器自限 —— 四项维持未开工。本轮**新增第 ⑤ 项**：
+放宽 / 降级 deny-modules 隔离边界（⛔ 安全边界，需显式人工审批；
+**本轮没有跑过、也没有证明它有效**）。五项均**需你拍板**，
+本轮没有擅自开工，也没有据此宣布扩张无用。
+
+**新设施**：`scripts/probe_import_failure_attribution.py`、
+`scripts/import_failure_attribution.json`、
+`tests/contract_import_failure_attribution_test.py`（58 项）。
+存档写 10 个源码 sha256 口径签名（含尺子自身）。
