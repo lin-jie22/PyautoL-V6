@@ -8366,3 +8366,101 @@ default **rc=0 / 90s**、e2e **rc=0 / 94s**，两份全绿、零 FAIL，
 ⇒ 按 r98 先例 **原参数重跑全量**，只有拿到 `ok=True` 且零
 fail/timeout/error 的全绿读数才提交；若重跑仍超时，**不提交**，
 把「本机全量验收在当前负载下不稳定」作为问题上报，而不是放宽判据。
+（结果：重跑 `111/111` 全绿、两份契约 `159.76s / 158.29s` pass，
+`40e7cc3` 已推送；`-j 1` 预案未启用。）
+
+### 179. ⛔⛔ **119 条 form 账的「判据形态需求」：最大格 `is 27` 不在已宣布的四种形态里**（2026-11-07）
+
+═══ 一、起点：178 之后最大的一块未知 ═══
+
+178 把主账 94 条 `no_result_both` 变成 measured 归因，但**仍有 128 条未知**
+= `9 import_failed` + **119 form 账**。这 119 条正是拍板项 ①
+「扩张判据形态（`truthy / ∈ / ≠ / match=`）」要面对的对象，而 176 只统计到
+`form_attrs`（断言方法名）这一层，**没有「需要哪种判据形态」的细分**。
+⇒ 本轮**纯静态描述性分类**，把这块从「形态未描述」推进到「形态已知」，
+为拍板补证据。⛔ **不跑沙箱、不产出判据、不报收益、不改 `aether/`**。
+
+═══ 二、尺子：分母只认产品的 `mapped=False` ═══
+
+⛔ 产品 `aether/extract.py:140` 已把 `_iter_all_probes` 的 `mapped=False`
+钉成「**要不要扩张判据形态的唯一依据**」（第 149 条规则），且形态只在
+`_UNITTEST_SAME` / `_bare_assert_parts` 定义一次。按 175 教训**不另写第二把
+尺子**：分母与原始 `expr` 全部取自 177 的 `probe_index`（内部调产品
+`_iter_all_probes`），并与 177 存档 `expr` **逐字对拍**。
+分类只是给拒收集合贴**描述性标签**，不回写 `mapped`、不改变任何一条判据
+能不能进来。`SHAPES` 是**封闭 19 格**（14 实格 + 5 量具格），出现集合外的格
+⇒ fail-closed 报错，不许为迁就读数临时新增（166 纪律）。
+
+═══ 三、全量读数（119 条）═══
+
+**分母可靠**：`119/119` 同源 `expr` 零 mismatch、`probe_index` 零 miss、
+`119/119` 确为 `mapped=False`；量具格 **0**；`baseline_health=OK 3/3 diffs=0`。
+分出 **13 个实格**（三仓库 attrs 60 / more-itertools 34 / boltons 25）：
+
+| 需要的形态 | 条数 | 例子 |
+|---|---:|---|
+| `is` | **27** | `OMD().popall('', None) is None` |
+| `truthy` | 25 | `self.assertTrue(stream._rolled)` |
+| `in` | 18 | `'fileutils.py' in basenames` |
+| `chained_compare` | **15** | `f(21) == f_copy(21) == 42` |
+| `order` / `multiset` / `ne` | 6 / 6 / 6 | `cab <= complement('a')` |
+| `is_not` / `not_in` | 5 / 4 | `self.assertIsNot(prefix[0], ...)` |
+| `raises_match` / `not_expr` | 3 / 2 | `pytest.raises(..., match='...')` |
+| `isinstance` / `raises_other` | 1 / 1 | |
+
+⛔ **两本账正交**：177 判这 119 条一律 `unmeasurable`（不同源、不跑沙箱）
+**没有被推翻**；存档每行都保留 `verdict_177=unmeasurable`，179 只加一列
+`shape`。`reach` 交叉 `X 116 / L2 3`、`v175` 交叉如实记账，但 `reach` 是
+**事后 oracle，不能当 predictor**。
+
+═══ 四、对拍板项 ① 的意义：只报形态，不报收益 ═══
+
+按**字面**把 13 格对应到已宣布要扩张的四种形态：
+`truthy 25` / `∈ 22`（`in 18 + not_in 4`）/ `≠ 6` / `match= 3`
+⇒ **合计 56 / 119**；其余 **63 条**是
+`is 27 / chained_compare 15 / order 6 / multiset 6 / is_not 5 /
+not_expr 2 / isinstance 1 / raises_other 1`。
+
+⛔⛔ **最大格 `is 27` 与 `chained_compare 15` 都不在这四种形态里**：
+产品 `_bare_assert_parts` 只认 `a == b` 且 `len(test.ops) == 1`，
+所以恒等比较与链式比较是**独立的两种扩张**，不在原四项清单内。
+⇒ 拍板 ① 若只批四种形态，其覆盖面本来就不完整；这是**形态分布**，
+不是「扩张能救几条」。
+
+⛔ **绝不读成收益**：116/119 的 `reach=X` 是事后 oracle（要看 fixed 源码），
+177 已证主账 10 条 `diff` 全 `reach=X`、解开 truthy 门拿到 5 条真 F2P 判据
+却端到端真修复 0。本轮**没有**测下游、没有跑沙箱、没有喂合成层。
+
+═══ 五、量具坑：`raises` 的 `expr` 是语句，不是表达式 ═══
+
+4 条 `raises` 的 `expr` 是 `fd |= fd` / `frozen.x = 2` / `del frozen.x` /
+`raise MyException()` —— 是 `with` 块**内部语句**；`match=` 在整条 `stmt`
+的 `with pytest.raises(..., match=...)` 头里。第一版用
+`ast.parse(expr, mode='eval')` 把前两条误判成 `unparseable`；改用 exec 模式
+解析语句 + `has_match_kw(stmt)` 后，4 条正确落到
+`raises_match 3 / raises_other 1`，量具格归零。
+
+═══ 六、契约与注入反证 ═══
+
+`tests/contract_form_shape_attribution_test.py` **69 项全绿 0 skip**
+（A 组 23 条钉死全量读数与同源性、B 组 38 条离线反证、C 组 8 条本机健康
+与真实正例，含「每种实格都能在真实读数里命中」，第 133 条）。
+⛔ 跨轮规则「**契约首次全绿 ⇒ 必须注入反证**」已执行：在 `/tmp` 与内存里
+注入三起事故，全部按预期转红 —— 篡改 `is 27→999` ⇒ `A3` 红；
+把 `shape_of` 替身成恒真 ⇒ **26 项**红（含 `B27`）；
+去掉 `require_baseline()` ⇒ `B33` 红。⇒ 闸有牙，V6 未被改动。
+真 3.9（3.9.6）ast.parse 两个新文件通过；静态卫生 `629 条 noqa / 裸 0`。
+
+═══ 七、分寸与拍板边界（未开工）═══
+
+⛔ 128 条未知的**性质变了、条数不是简单减法**：119 条从「形态未描述」变成
+「形态已描述、下游仍 `unmeasurable`」；`9 import_failed` 未动。
+⇒ **不许宣布「扩张判据形态无用」**，也不许宣布「扩张有效」。
+① 扩张判据形态（现在多了形态分布证据，但仍属口径变更）② 多步状态序列普查
+③ CI 先 `bootstrap` 再跑 H 组 ④ 放宽内联器自限 —— **四项均需你拍板**，
+本轮没有擅自开工。
+
+**新设施**：`scripts/probe_form_shape_attribution.py`（`--no-baseline-gate`
+仅供离线反证）、`scripts/form_shape_attribution.json`、
+`tests/contract_form_shape_attribution_test.py`（69 项）。
+存档写 8 个源码 sha256 口径签名（含尺子自身，补 174 只钉 `select_commits` 的洞）。
