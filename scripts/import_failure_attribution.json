@@ -49,8 +49,8 @@
       "gate_fixed": "stdlib_incompat",
       "gate_buggy": "stdlib_incompat",
       "sides_agree": true,
-      "evidence_tail_fixed": "ImportError: cannot import name 'MutableSet' from 'collections' (/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/lib/python3.13/collections/__init__.py)",
-      "evidence_tail_buggy": "ImportError: cannot import name 'MutableSet' from 'collections' (/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/lib/python3.13/collections/__init__.py)",
+      "evidence_tail_fixed": "ImportError: cannot import name 'MutableSet' from 'collections' (/Users/…/lib/python3.13/collections/__init__.py)",
+      "evidence_tail_buggy": "ImportError: cannot import name 'MutableSet' from 'collections' (/Users/…/lib/python3.13/collections/__init__.py)",
       "downstream": "unknown",
       "diagnostic_only": true,
       "note": "observation=import_error tail; classification=product-caliber; downstream NOT measured"
@@ -231,8 +231,8 @@
       "gate_buggy": "stdlib_incompat",
       "detail_fixed": "collections.MutableSet",
       "detail_buggy": "collections.MutableSet",
-      "evidence_tail_fixed": "ImportError: cannot import name 'MutableSet' from 'collections' (/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/lib/python3.13/collections/__init__.py)",
-      "evidence_tail_buggy": "ImportError: cannot import name 'MutableSet' from 'collections' (/Users/linshaojie/.workbuddy/binaries/python/versions/3.13.12/lib/python3.13/collections/__init__.py)",
+      "evidence_tail_fixed": "ImportError: cannot import name 'MutableSet' from 'collections' (/Users/…/lib/python3.13/collections/__init__.py)",
+      "evidence_tail_buggy": "ImportError: cannot import name 'MutableSet' from 'collections' (/Users/…/lib/python3.13/collections/__init__.py)",
       "import_error_len_fixed": 439,
       "import_error_len_buggy": 439
     },

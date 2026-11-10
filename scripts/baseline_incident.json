@@ -1,0 +1,355 @@
+{
+  "schema": "baseline_incident/v1",
+  "caliber": {
+    "scripts/realrepo_baseline.py": "6d4ce9ee2684b3407510a1f54b208ed74caadf41e02c7fb2630bb086eda785ab",
+    "scripts/realrepo_baseline.json": "0585f86b9146fe0aa203c936af2dcd576f34b3b55c27fabc59db93073558b0fb",
+    "scripts/probe_alias_demote.py": "d6aa0788f31a9bb9c454b1cf9046618d43b05028e55b046d443e73446310769a",
+    "tests/contract_realrepo_baseline_test.py": "210991b9ca76783d1a6c11068f815eff6a841dae1fcc395c283bae8e7dd98c65",
+    "scripts/probe_baseline_incident.py": "25b3a85a4f820a9439849ecdf6a612f89472398bc17b9dd800fb26a53e2c8edc"
+  },
+  "incidents": [
+    {
+      "id": "169",
+      "date": "2026-10-29",
+      "scope": "boltons",
+      "shape": "HEAD/config/index 缺；objects pack 完好；工作区缺点文件"
+    },
+    {
+      "id": "174",
+      "date": "2026-11-05",
+      "scope": "boltons+mi+attrs",
+      "shape": "HEAD/config/index 全缺；mi/attrs objects 全空；工作区 0 文件"
+    },
+    {
+      "id": "181",
+      "date": "2026-11-10 00:01",
+      "scope": "boltons+mi+attrs",
+      "shape": "HEAD/config 缺；index 保留；objects 全空；工作区 0 文件"
+    }
+  ],
+  "broken": {
+    "n_skeletons": 3,
+    "rows": [
+      {
+        "skeleton": "/var/folders/x7/pt_pky992jv04px88bwyxh140000gn/T/realrepo_bootstrap_509paz0k/more-itertools_broken_20261110_203421",
+        "repo": "more-itertools",
+        "in_anchor": true,
+        "shape": {
+          "git_is_dir": true,
+          "head_present": false,
+          "config_present": false,
+          "index_present": true,
+          "objects_n_files": 2,
+          "worktree_n_files": 0,
+          "git_mtime": 1794240113.3655677
+        },
+        "verify_ok": false,
+        "diffs": [
+          "more-itertools.path: .git/HEAD 缺失"
+        ],
+        "gate": "head_missing_early_exit",
+        "note": "⛔ verify_repo 早退 ⇒ objects / head / commit_shas 等后续字段没测过，不等于没问题"
+      },
+      {
+        "skeleton": "/var/folders/x7/pt_pky992jv04px88bwyxh140000gn/T/realrepo_bootstrap_exy1iri8/boltons_broken_20261110_203217",
+        "repo": "boltons",
+        "in_anchor": true,
+        "shape": {
+          "git_is_dir": true,
+          "head_present": false,
+          "config_present": false,
+          "index_present": true,
+          "objects_n_files": 2,
+          "worktree_n_files": 0,
+          "git_mtime": 1794240113.3472908
+        },
+        "verify_ok": false,
+        "diffs": [
+          "boltons.path: .git/HEAD 缺失"
+        ],
+        "gate": "head_missing_early_exit",
+        "note": "⛔ verify_repo 早退 ⇒ objects / head / commit_shas 等后续字段没测过，不等于没问题"
+      },
+      {
+        "skeleton": "/var/folders/x7/pt_pky992jv04px88bwyxh140000gn/T/realrepo_bootstrap_if7avtda/attrs_broken_20261110_203757",
+        "repo": "attrs",
+        "in_anchor": true,
+        "shape": {
+          "git_is_dir": true,
+          "head_present": false,
+          "config_present": false,
+          "index_present": true,
+          "objects_n_files": 2,
+          "worktree_n_files": 0,
+          "git_mtime": 1794240113.3575282
+        },
+        "verify_ok": false,
+        "diffs": [
+          "attrs.path: .git/HEAD 缺失"
+        ],
+        "gate": "head_missing_early_exit",
+        "note": "⛔ verify_repo 早退 ⇒ objects / head / commit_shas 等后续字段没测过，不等于没问题"
+      }
+    ],
+    "gates": {
+      "head_missing_early_exit": 3,
+      "other_diff": 0,
+      "healthy": 0
+    },
+    "n_all_head_missing": 3
+  },
+  "bootstrap": {
+    "log_present": true,
+    "log_sha256": "5a3b09a0a51583a46a64b2920c10cddb602b8233242ff6274f13bc04fe625873",
+    "n_entries": 3,
+    "n_rc0": 3,
+    "n_heads_match_anchor": 3,
+    "entries": [
+      {
+        "repo": "boltons",
+        "rc": 0,
+        "head": "4e5faa3",
+        "rebuilt_line_present": true,
+        "old_skeleton_moved_not_deleted": true,
+        "clone_line_present": true,
+        "head_matches_anchor": true
+      },
+      {
+        "repo": "more-itertools",
+        "rc": 0,
+        "head": "67fcf64",
+        "rebuilt_line_present": true,
+        "old_skeleton_moved_not_deleted": true,
+        "clone_line_present": true,
+        "head_matches_anchor": true
+      },
+      {
+        "repo": "attrs",
+        "rc": 0,
+        "head": "97f8d17",
+        "rebuilt_line_present": true,
+        "old_skeleton_moved_not_deleted": true,
+        "clone_line_present": true,
+        "head_matches_anchor": true
+      }
+    ]
+  },
+  "recovered": {
+    "ok": true,
+    "caliber_diffs": [],
+    "n_repos": 3,
+    "n_pass": 3,
+    "rows": [
+      {
+        "repo": "boltons",
+        "ok": true,
+        "diffs": [],
+        "readings": {
+          "path": "/tmp/realrepo/boltons",
+          "head": "4e5faa3",
+          "n_tracked": 113,
+          "n_commits": 40,
+          "smoke": "3/3",
+          "census": "40/40"
+        },
+        "anchor_head": "4e5faa3"
+      },
+      {
+        "repo": "more-itertools",
+        "ok": true,
+        "diffs": [],
+        "readings": {
+          "path": "/tmp/realrepo/more-itertools",
+          "head": "67fcf64",
+          "n_tracked": 39,
+          "n_commits": 40,
+          "smoke": "3/3",
+          "census": "39/40"
+        },
+        "anchor_head": "67fcf64"
+      },
+      {
+        "repo": "attrs",
+        "ok": true,
+        "diffs": [],
+        "readings": {
+          "path": "/tmp/realrepo/attrs",
+          "head": "97f8d17",
+          "n_tracked": 133,
+          "n_commits": 40,
+          "smoke": "3/3",
+          "census": "40/40"
+        },
+        "anchor_head": "97f8d17"
+      }
+    ]
+  },
+  "gate_coverage": {
+    "n_scripts": 6,
+    "n_calls_gate": 6,
+    "n_bypass_default_off": 6,
+    "n_has_health_channel": 5,
+    "n_bypass_trace_channel": 5,
+    "no_trace_scripts": [
+      "probe_focus_census.py"
+    ],
+    "rows": [
+      {
+        "script": "probe_focus_census.py",
+        "present": true,
+        "calls_require_baseline": 1,
+        "bypass_default_off": true,
+        "has_health_channel": false,
+        "bypass_trace_channel": false,
+        "sha256": "3e46a579937cdcc6c3ee8e54a818b89ef82c6ffdf8ee572184bbaddf10e4baed"
+      },
+      {
+        "script": "probe_criteria_gate_census.py",
+        "present": true,
+        "calls_require_baseline": 1,
+        "bypass_default_off": true,
+        "has_health_channel": true,
+        "bypass_trace_channel": true,
+        "sha256": "04073d064ff65ef70e69b5786072307e79f977b868f36bfe2f639d96c9af58b1"
+      },
+      {
+        "script": "probe_extract_downstream.py",
+        "present": true,
+        "calls_require_baseline": 1,
+        "bypass_default_off": true,
+        "has_health_channel": true,
+        "bypass_trace_channel": true,
+        "sha256": "1897a4a0dbdc497f554c50503541da3b1ea54bdf95bbf3c80bb4569477efaa10"
+      },
+      {
+        "script": "probe_no_result_attribution.py",
+        "present": true,
+        "calls_require_baseline": 1,
+        "bypass_default_off": true,
+        "has_health_channel": true,
+        "bypass_trace_channel": true,
+        "sha256": "bc9182c5f097cb736c6bcbfc90987648b63ee77d65d064cc5348f6cefacf8f0a"
+      },
+      {
+        "script": "probe_form_shape_attribution.py",
+        "present": true,
+        "calls_require_baseline": 1,
+        "bypass_default_off": true,
+        "has_health_channel": true,
+        "bypass_trace_channel": true,
+        "sha256": "dd1d7673292462dd92bce68785558b5c6f7ff748ed8b08e7cab4f2c85c874a77"
+      },
+      {
+        "script": "probe_import_failure_attribution.py",
+        "present": true,
+        "calls_require_baseline": 1,
+        "bypass_default_off": true,
+        "has_health_channel": true,
+        "bypass_trace_channel": true,
+        "sha256": "7fba91dea556327964eff3a29d4c1955b41a2eef4fcc40260e25f0b755b55e1f"
+      }
+    ],
+    "note": "⛔ 闸有牙（6/6 调用 + 6/6 默认关）与『旁路可观测』（5/6）是两本账。no_trace 的那把不是闸没牙，是旁路开过时读数里查不到 ⇒ 真实的可观测性缺口，本轮如实报出、不擅自改。"
+  },
+  "falsification": {
+    "kind": "offline_injected",
+    "cases": [
+      {
+        "case": "healthy_anchor",
+        "exit_code": null,
+        "expected_exit": false,
+        "passed": true,
+        "stderr_names_failure": false
+      },
+      {
+        "case": "bad_head",
+        "exit_code": 2,
+        "expected_exit": true,
+        "passed": true,
+        "stderr_names_failure": true
+      },
+      {
+        "case": "bad_path",
+        "exit_code": 2,
+        "expected_exit": true,
+        "passed": true,
+        "stderr_names_failure": true
+      },
+      {
+        "case": "always_true_verify",
+        "exit_code": null,
+        "expected_exit": false,
+        "passed": true,
+        "stderr_names_failure": false
+      }
+    ],
+    "n_cases": 4,
+    "n_passed": 4
+  },
+  "summary": {
+    "n_incidents": 3,
+    "incident_ids": [
+      "169",
+      "174",
+      "181"
+    ],
+    "n_skeletons": 3,
+    "broken_gates": {
+      "head_missing_early_exit": 3,
+      "other_diff": 0,
+      "healthy": 0
+    },
+    "n_bootstrap_rc0": 3,
+    "n_heads_match_anchor": 3,
+    "recovered": {
+      "ok": true,
+      "n_pass": 3,
+      "n_repos": 3
+    },
+    "gate_coverage": {
+      "n_scripts": 6,
+      "n_calls_gate": 6,
+      "n_bypass_default_off": 6,
+      "n_has_health_channel": 5,
+      "n_bypass_trace_channel": 5,
+      "no_trace_scripts": [
+        "probe_focus_census.py"
+      ]
+    },
+    "falsification": {
+      "n_cases": 4,
+      "n_passed": 4,
+      "kind": "offline_injected"
+    },
+    "closure": {
+      "eq_3_skeletons": true,
+      "eq_broken_all_head_missing": true,
+      "eq_broken_none_healthy": true,
+      "eq_bootstrap_3_rc0": true,
+      "eq_bootstrap_heads_anchored": true,
+      "eq_old_skeletons_kept": true,
+      "eq_recovered_3_pass": true,
+      "eq_gate_6_scripts": true,
+      "eq_bypass_trace_5_plus_1": true,
+      "eq_falsify_all_passed": true,
+      "eq_three_incidents": true
+    },
+    "n_closure_true": 11,
+    "n_closure_items": 11,
+    "observations": {
+      "real_broken_verify_cli": "UNHEALTHY repos=0/3 diffs=3（三条 .git/HEAD 缺失）",
+      "mid_recovery_verify_cli": "UNHEALTHY repos=2/3 diffs=1（attrs 仍未复原）",
+      "real_broken_require_baseline_exit": "NOT_CAPTURED"
+    },
+    "unknowns": [
+      "破坏源仍未定位（第三次）；00:0x 定点与骨架保留只是形态，不是归因",
+      "真实破坏态下 require_baseline() 的退出码没抓到：恢复动作关掉了窗口",
+      "verify_repo 在 HEAD 缺失时早退 ⇒ 后续字段没测过 ≠ 没问题",
+      "正式普查有没有人开过 --no-baseline-gate：本轮没测，不是测出 0",
+      "probe_focus_census.py 开旁路时读数里查不到（无 health 通道）：真实的可观测性缺口，本轮只报不改",
+      "CI H 组仍 SKIP（需拍板 ③）；bootstrap 是人工触发，不是自动恢复",
+      "119 条 form 下游仍 unmeasurable；5 项待拍板口径变更维持未开工"
+    ],
+    "note": "⛔ 只报设施是否真跑到、是否按钉死零点复原、闸是否有牙；不报真实任务域收益。离线反证 ≠ 真实事故的运行时读数，绝不合并成『fail-closed 实战拦截成功』。"
+  }
+}

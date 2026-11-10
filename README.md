@@ -8582,3 +8582,190 @@ stdlib 错配）——第 133 条「零命中先证查询能命中」，且必�
 `scripts/import_failure_attribution.json`、
 `tests/contract_import_failure_attribution_test.py`（58 项）。
 存档写 10 个源码 sha256 口径签名（含尺子自身）。
+
+---
+
+### 181. ⛔⛔ **取证基线第三次被破坏：174 的锚与 bootstrap 第一次真跑到；但「实战拦截」没测到**（2026-11-10）
+
+═══ 一、起点：有机制 ≠ 已跑到 ═══
+
+174 建锚时写了 `require_baseline()` fail-closed 与 `bootstrap` 按钉死
+sha 重建，并用 **19 项契约 / 9 条注入反证**验证它们有牙。但那时验证的
+全是**离线构造的坏锚**：真实破坏来临时这套设施到底跑没跑到、
+有没有按零点复原，从来没被观察过。
+
+2026-11-10 00:01，三仓库 `.git` 骨架第三次被破坏。按 169 留下的规则
+「每次普查先验锚并报读数」，一验就是红的：
+
+```
+baseline_health=UNHEALTHY  repos=0/3  diffs=3
+  ⛔ boltons.path / more-itertools.path / attrs.path: .git/HEAD 缺失
+```
+
+⇒ **锚主动拒绝出读数，第一次在真实破坏下生效**；三次 `bootstrap` 也
+第一次被真实触发。本轮是把这次事故做成端到端取证（纯只读，
+**没改 `aether/`、没改 `realrepo_baseline.py`、没重建锚**）。
+
+═══ 二、⛔⛔ 量具坑：我自己把 fail-closed 的实战窗口关掉了 ═══
+
+发现破坏后立刻启动了三仓库 `bootstrap`，没有先在破坏态下跑一次
+`require_baseline()` 并记下退出码。等想起来再抓，attrs 已复原：
+
+```
+REAL_BROKEN verify.ok = True   （窗口已关闭）
+```
+
+⇒ 存档里 `real_broken_require_baseline_exit` 恒 **`NOT_CAPTURED`**。
+⛔ **绝不**把「离线坏锚反证 ⇒ `SystemExit(2)`」合并成
+「这次事故里 fail-closed 实战拦截成功」。前者证明机制有牙，
+后者需要事故当时的运行时读数，而它**没测到**。
+事发时只观察到 `verify`（CLI）报 `UNHEALTHY 0/3`、恢复中途
+`2/3`；这两条与「普查入口真的退出了」是三件不同的事。
+
+**教训（跨轮）**：遇到真实事故，**先取运行时证据，再恢复**。
+恢复动作会销毁现场；这次靠 `bootstrap` 把旧骨架 `mv` 到备份
+（**不删**）才留下可复算物证。
+
+═══ 三、三次破坏的对照（形态，不是归因）═══
+
+| 轮次 | 时间 | 范围 | 骨架形态 |
+|---|---|---|---|
+| 169 | 10-29 | boltons 1 个 | `HEAD/config/index` 缺；objects pack 完好；工作区缺点文件 |
+| 174 | 11-05 | 三个全坏 | `HEAD/config/index` 全缺；mi / attrs objects 全空；工作区 0 文件 |
+| **181** | **11-10 00:01** | **三个全坏** | **`HEAD/config` 缺、`index` 仍在**；objects 全空（各剩 2 个占位）；工作区 0 文件 |
+
+⛔ **破坏源仍未定位**（第三次）。00:0x 定点、目录骨架保留、只有
+文件被清，像周期性清理，但**不猜**是系统 periodic / V6 任务 / 外部工具。
+查过 crontab（本环境不允许）、`/etc/periodic/daily/`（不存在）、
+全仓 V5/V6 代码（没有任何一处删 `/tmp/realrepo`）。
+观察到「被破坏」，**没有**观察到「谁破坏的」。
+
+═══ 四、全量读数（3 份物证 + 3 次重建 + 恢复态同源复算）═══
+
+| 项 | 读数 |
+|---|---|
+| 真实破坏态骨架 | **3 份**（bootstrap `mv` 保留、未删） |
+| 逐份喂产品同源 `verify_repo` | **3/3 `ok=False`**，全部点名 `.git/HEAD 缺失` |
+| 破坏态封闭格 | `head_missing_early_exit 3 / other_diff 0 / healthy 0` |
+| `bootstrap` | **3/3 `rc=0`**，各含 clone + 重建 + 旧骨架另存 |
+| 重建 head | `4e5faa3 / 67fcf64 / 97f8d17`，**与锚逐字相同**（不是远端最新） |
+| 恢复后 `verify` | **`OK repos=3/3 diffs=0`**，caliber 无漂移 |
+| 逐仓库读数 | `n_commits 40`、`smoke 3/3`、`census 40/40 · 39/40 · 40/40` |
+| 闸覆盖（AST 行为级） | **6/6** 尺子真调 `require_baseline()`、**6/6** 旁路默认关 |
+| 旁路留痕 | **5/6**（见第五节） |
+| 离线反证 | **4/4**（健康锚放行 / 坏 head / 坏路径 / 恒真 verify 放行） |
+| 封闭等式 | **11/11 全 true** |
+
+⛔ `verify_repo` 在 `.git/HEAD` 缺失时**第一条就早退** ⇒ objects、
+head、`commit_shas` 等后续字段**没测过 ≠ 没问题**，存档逐条显式记下。
+
+═══ 五、⛔ 首次真红是尺子口径错，不是迁就读数 ═══
+
+第一版把「闸有牙」和「旁路可观测」合成一条等式，跑出 `closure 9/10`：
+`probe_focus_census.py` 的 `bypass_marked=False`。查源码后判定：
+它是 **173 时代**建的尺子，验锚是后来补的直接
+`if not args.no_baseline_gate: require_baseline()`，**不落盘 `health`
+读数通道**；另外五把才有 `health["diffs"] = ["BYPASS（仅反证）"]`。
+
+⇒ **不是闸没牙**，是「旁路开过时读数里查不到」。按「两本账别合并成布尔」
+拆成两条独立等式（6/6 与 5+1），重跑 `closure 11/11`。
+⛔ 这个缺口是**真实的可观测性缺口**，本轮**只报不改**——改它属于
+动既有普查尺子，不擅自开工。
+
+═══ 六、⛔ 观察 / 反证 / 未知：不越界的分寸 ═══
+
+1. **观察**：三份骨架形态、`verify_repo` 逐字段 diff、三次 `rc=0`、
+   恢复后 `OK 3/3`、六把尺子的 AST 入口形态。
+2. **离线反证**：坏 head / 坏路径 ⇒ `SystemExit(2)` 且 stderr 点名；
+   恒真 `verify` ⇒ 放行（证明闸依赖真输出、不是恒真断言）。
+   ⛔ 这些是**内存 / `/tmp` 构造的坏锚**，不是 11-10 那次事故的运行时读数。
+3. **未知**：破坏源、`require_baseline()` 的真实退出码、早退后的
+   后续字段、正式普查有没有人开过旁路、CI H 组仍 SKIP（需拍板 ③）。
+4. **边界**：⛔ 存档是**快照不是可复跑普查**——破坏态骨架在系统临时
+   目录，会被清理；契约 C 组缺失时**单列 SKIP，不读成通过**。
+   ⛔ 只报设施是否真跑到、是否按零点复原、闸是否有牙，
+   **不报真实任务域收益**。
+
+═══ 七、契约与反证 ═══
+
+`tests/contract_baseline_incident_test.py`：**56 项全绿 0 skip**。
+A 组钉死快照读数、11 条封闭等式逐条钉（不合并成布尔）、
+`NOT_CAPTURED` 与未知清单；B 组纯内存离线反证（篡改读数 / 恒真分类 /
+AST 行为级「真的调了 `verify` / 真的 `raise SystemExit`」/ 两本账抹平 /
+零命中先证查询能命中）；C 组本机验锚与易失骨架复算（缺失单列 SKIP）。
+
+按「首次全绿必须注入反证」，在 `/tmp` + 内存注入三起事故：
+篡改破坏态读数 `3→999` ⇒ **恰好 A5 一项红**；分类函数恒真 ⇒
+**B4/B5 两项红**；把 `NOT_CAPTURED` 伪造成 `2` ⇒ **恰好 A21 一项红**；
+基线无注入 `fail=0`。失败清单与预期一一对应，V6 未被改动。
+真 3.9（3.9.6）`ast.parse` 两文件 OK，静态卫生裸 `noqa` 0。
+
+═══ 八、拍板清单与边界 ═══
+
+① 扩张判据形态 ② 多步状态序列普查 ③ CI 先 `bootstrap` 再跑 H 组
+④ 放宽内联器自限 ⑤ 放宽 / 降级 deny-modules —— **五项维持未开工**；
+第九节新增 **⑥ 验收扫描面覆盖 untracked**（改判据，同样需拍板）。
+本轮**没有**改产品口径、没有跑任何「放宽」对照、没有动 `aether/`；
+177 的 `unmeasurable`、179 的「119 条 form 下游未知」、
+180 的「9 条结构性不可测」**都没被推翻**。
+⛔ 既不宣布扩张判据形态无用，也不宣布有效；**没测过 ≠ 测出 0**。
+
+**新设施**：`scripts/probe_baseline_incident.py`、
+`scripts/baseline_incident.json`、
+`tests/contract_baseline_incident_test.py`（56 项）。
+存档写 5 个源码 sha256 口径签名（含尺子自身）。
+
+═══ 九、⛔⛔ 首次全量验收真红 1 项：r101 的 113/113 全绿是「untracked 扫描面盲区」造成的假绿 ═══
+
+首次 `aether check --json -j 2`：**112 份契约 / 114 次执行 /
+113 pass / 1 fail / 0 skip / 0 timeout / 0 error**，25m51s。
+唯一红项是 `contract_portability_test.py` 的 A1：
+
+```
+FAIL A1 ⛔ 跟踪文件里零真实家目录（44 → 0） 命中 4 处：
+  scripts/import_failure_attribution.json:52 / :53 / :234 / :235
+```
+
+**根因分两层**（⛔ 不是本轮新文件的问题）：
+
+1. **直接原因**：r101 存档把 3.13 的 `collections.MutableSet`
+   运行时末行**逐字**写进 `evidence_tail`，末行括号里带解释器绝对路径
+   `/Users/<本机用户名>/.workbuddy/binaries/python/versions/3.13.12/
+   lib/python3.13/collections/__init__.py` ⇒ 4 处真实家目录。
+2. **⛔⛔ 为什么 r101 全绿**：A1 的扫描面是 `git ls-files`
+   （**只覆盖已跟踪文件**），而全量验收按纪律**跑在提交前**——
+   那时 r101 新加的 4 个文件全是 `??`（untracked）⇒ A1 根本没看见。
+   提交后变成 tracked，本轮才被扫到。⇒ r101 的 113/113 是
+   **扫描面盲区造成的假绿**，不是「那时真的没有」。
+
+**修法（不放宽判据、不改产品）**：A1 自己的反证 A2c 明确写了
+「脱敏形式（省略号 / 尖括号占位）不命中 —— 历史读数可以保留」。
+按这个**判据已经允许的形式**把 4 处路径改成 `/Users/…/lib/...`，
+保留异常类型 / 模块名 / Python 版本 / 文件相对位置：
+
+```
+ImportError: cannot import name 'MutableSet' from 'collections'
+  (/Users/…/lib/python3.13/collections/__init__.py)
+```
+
+⛔ 不是删读数、不是给存档开白名单、不是改 A1 正则。
+影响面先查过：180 契约的分类只依赖 `MutableSet` /
+`V6_SANDBOX_DENY:import:` 关键字，且有 `rows ↔ by_sha` 的
+`evidence_tail` 逐字对拍 ⇒ 4 处同步改；**没有任何 caliber 引用这份
+存档的 sha256**，改它不会破坏口径签名。
+
+**验证**：`scan_text` 对脱敏后存档命中行 `[]`；
+180 契约 **58 项全绿 0 skip**；`contract_portability_test.py` 全绿
+（A2b 注入三条真实样式仍命中 3 行、A2c 脱敏仍零命中 ⇒ 判据有牙，
+没被这次修复弄钝）。
+
+**⛔ 仍未修的结构性盲区（本轮只报不改）**：
+「全量验收跑在提交前」+「A1 只扫 tracked」⇒ **任何新引入的真实
+家目录都要等下一轮才可能被抓到**。修它要改 A1 的扫描面
+（把 untracked 也纳入）或调整验收与提交的先后，属**改判据 /
+改验收口径**，需你拍板；本轮没动 `contract_portability_test.py`
+一个字节，也没动 `aether/check.py`。
+⇒ 拍板清单由 5 项增至 **6 项**（新增 ⑥：验收扫描面覆盖 untracked）。
+
+按 r98 先例：README 只记「首次异常 + 修法 + 未修盲区」，
+二次全绿读数写进 commit message。
