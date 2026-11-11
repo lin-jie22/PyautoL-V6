@@ -8769,3 +8769,150 @@ ImportError: cannot import name 'MutableSet' from 'collections'
 
 按 r98 先例：README 只记「首次异常 + 修法 + 未修盲区」，
 二次全绿读数写进 commit message。
+
+---
+
+### 182. ⛔⛔ **123 条 `ctx` 门的「门后第一格」：第一次在 buggy 侧真跑，现有 truthy 形态下真 F2P 判据 0 条 —— 但 0 不是「门没价值」**（2026-11-11）
+
+═══ 一、起点：176 留下的那块「没测过」═══
+
+176（README 7949）把 459 条 PR 新增断言逐条归到门，其中 **123 条落 `ctx`**
+（`no_result 61 / unpassed_on_fixed 53 / gold_mismatch 9`），
+并写下「`ctx` 门 123 条是不需拍板就能动的工程缺口」（8047）。
+但它同时提醒别急着说它值钱，理由是 167 的「三轮开门收益 0」。
+
+⛔⛔ 本轮先把这三个说法拆开，发现**没有一条真的测过这块**：
+
+- 167 的三轮 = 164 装载 / 165 判据抽取 / 166 `form` 最大格
+  `assertRaises`（README 7027–7031），**没有一轮开过 ctx**；167 的
+  「结构性必然」是 commit 级 `reach=X` 归因（35/40），不是对 123 条
+  逐条做开门对照。
+- 176 的 `downstream=measured` 只表示「这行**跑到过沙箱三验**」，
+  `downstream_of()` 把 `SAND_GATES` 一律标 measured；存档 123 行
+  **没有任何 gain / f2p / fix / repair 字段**。
+- 177 只处理 `downstream == "unknown"` 的 254 条
+  （`probe_extract_downstream.py:305`），`ctx` 一条都没进主账。
+- ⛔⛔ **最硬的洞**：`attribute_commit`（`probe_gate_attribution.py:139–151`）
+  只在 **fixed 侧**做三验，`run_in_sandbox(buggy, sel_tests, ...)` 只对
+  **过了三验**的 `sel_tests` 跑 ⇒ 这 123 条**从没在 buggy 侧跑过**。
+
+⇒ 按「没测过 ≠ 测出 0」，本轮把这块从「没测过」推进到「测出来是多少」。
+⛔ 这是**诊断读数**，不是修复，也没有动产品一个字节。
+
+═══ 二、尺子：不许另写第二把 ═══
+
+新设施 `scripts/probe_ctx_downstream.py`，`schema = ctx_downstream/v1`，
+读数落 `scripts/ctx_downstream.json`。四条自律：
+
+1. **分母只认 176 存档 `gate == "ctx"` 的 123 条**，并用产品自己的
+   `attribute_commit` 重跑逐字对拍（对齐键 8 字段，`mismatch != 0`
+   ⇒ `SystemExit(2)` fail-closed，不许出读数）。
+2. ⛔ **不手写 oracle**：探针 `{"name", "call"}` **不带 `expect`**，
+   走产品 `aether/environment.py:299` 的 `ok = bool(got)` truthy 分支；
+   `call` 取 `attribute_commit` 的**未截断**值（176 存档 `call[:240]`
+   是已知残留⑦）。⇒ 不触发 171 的 `oracle_bad` 闸，也不属于
+   「扩张判据形态」。
+3. **不另写第二把尺子**（175 教训）：沙箱用
+   `aether.environment.run_in_sandbox` 本身，分类只看**产出方写死的
+   `why` / `passed`**，不解析 `evidence` 文案猜分类（178 教训）。
+4. **两本账分开**（181 教训）：176 的 `verdict3` 与本轮 `pair_verdict`
+   只做交叉表，绝不合并成一个布尔；`reach = X/L2` 是事后 oracle，
+   只记账、不当 predictor。
+
+fixed 侧跑两次做稳定性自检；`f2p_criterion` 照抄 177 `truthy_f2p`
+的 fail-closed（缺结果 / 异常 / import / 不稳定一律 False）。
+
+═══ 三、便宜对照（172/175 纪律）═══
+
+动全量前先用 4 个 commit（`4e5faa3 / eb65901 / ddbbea2 / 1f627dd`）
+验证尺子有牙且同源：
+
+- `28 条 ctx` 与 176 存档 **13 字段逐字对拍 `mismatch=0`**；
+- 三格都非空（`no_result 18 / unpassed_on_fixed 9 / gold_mismatch 1`）；
+- 篡改 `sandbox_verdict` / `call` / 删一行 ⇒ 对拍分别 `2 / 2 / 1` 翻红；
+- 恒真判据 `always_equal` 在篡改下仍「绿」⇒ 排除；
+- `caliber` 与磁盘零差异，篡改一个 hash ⇒ 恰好抓到
+  `aether/environment.py`。
+
+═══ 四、全量读数（120 commit / 123 条 / 0 跳过 / 4m02s）═══
+
+| 账 | 读数 |
+|---|---|
+| 分母 | `saved_ctx 123 = live_ctx 123`，`align_mismatch = 0` |
+| 176 三验裁决 `verdict3` | `no_result 61 / unpassed_on_fixed 53 / gold_mismatch 9`（逐字同源） |
+| 本轮两侧运行时 `pair_verdict` | **`both_raise 86 / mixed_raise 14 / not_raise 23`** |
+| `f2p_criterion` | **0** |
+| `fixed_unstable` | 0 |
+| 三仓库 | boltons 52 / attrs 37 / more-itertools 34 |
+| `reach`（事后 oracle） | `X 121 / L2 2` |
+
+交叉表（两本账，**不合并**）：`no_result/both_raise 61`、
+`unpassed_on_fixed/both_raise 25`、`unpassed_on_fixed/mixed_raise 12`、
+`unpassed_on_fixed/not_raise 16`、`gold_mismatch/mixed_raise 2`、
+`gold_mismatch/not_raise 7`。
+
+⛔⛔ **0 的结构原因**（不是「没跑到」）：`why` 全表
+`fixed = raise 86 / mismatch 25 / behavior 12`、
+`buggy = raise 100 / mismatch 12 / behavior 11`，
+123/123 都有 `why` 与 `evidence`；其中 **23 条两侧都求值成功**，
+它们的 `passed_fixed × passed_buggy` 是
+`(False,False) 12 / (True,True) 10 / (False,True) 1`
+⇒ **一条 `(True,False)` 都没有**，甚至有 1 条反向。
+其余 100 条至少一侧抛异常（探针自由变量问题，与 178 同类）。
+⇒ 现有 truthy 形态下，这 123 条给不出真 F2P 判据。
+
+═══ 五、⛔ 零命中先证查询能命中（第 24 / 133 条）═══
+
+`f2p_criterion` 恒 0 先怀疑量具。用 176 里**已知 `F2P` 的 45 条**
+（取 6 个 commit / 23 条实跑）喂**同一把尺子**：
+⇒ **`truthy_f2p_hits = 2 / 23`，`POSITIVE_CONTROL_OK = True`**。
+契约 C 组把 `5eb6cc0` 固化成真实沙箱正例，要求 `hits > 0`、
+且 `hits < n`（判据不是恒真）、同侧不许判 F2P。
+
+⛔ 命中率低不是量具坏，是 177 已写明的分寸：
+**truthy 只看真假、看不出值本身，它只是 `diff` 的一个子集**。
+⇒ 本轮的 0 只是「**现有 truthy 判据形态下**这 123 条给不出 F2P 判据」，
+不是「这 123 条不可能有鉴别力」。
+
+═══ 六、分寸：哪些话本轮不许说 ═══
+
+- ⛔ **不许宣布「扩张判据形态无用」**（177/179 纪律）。本轮没扩张任何
+  形态、没放宽内联器（拍板 ④）、没喂 `synthesize_patch`、没改
+  `aether/` 一个字节，也没动 176 标为「不需拍板」的 ctx 工程缺口本身。
+- ⛔ **`f2p_criterion` 是判据条数，不是收益、不是修复**；
+  `reach` 只记账不当 predictor；`elsewhere` 不算修复（161）。
+- ⛔ **两本账不许合并**：`verdict3`（fixed 侧三验）与
+  `pair_verdict`（两侧 truthy 运行时）是**两把不同尺子** ——
+  23 条 `not_raise` **不等于**「三验过了」。
+- ⛔ 本轮结论只在 **120 commit / 3 仓库 / 现有 truthy 形态**下成立，
+  不外推。177 的 `unmeasurable`（119 条 form）、179 的「119 条 form
+  下游未知」、180 的 9 条结构性不可测**均未被推翻**。
+
+═══ 七、契约与反证 ═══
+
+`tests/contract_ctx_downstream_test.py`：**67 项全绿 0 skip**。
+A 组钉死 123 条读数与 9 条封闭等式（含 caliber 与磁盘逐字一致、
+「改尺子必须重跑普查」）；B 组纯内存注入（分格 / fail-closed /
+恒真恒假 / 篡改读数 / 两本账抹平 / AST 行为级确认探针不带 `expect`）；
+C 组才碰本机锚与真实沙箱正例。
+
+⛔ **首次全绿必须注入反证**（181 教训）：`/tmp/r103_falsify.py`
+七起注入全部按预期翻红 —— `n_f2p 0→5` ⇒ 恰好 A7；
+抹平 `by_pair` ⇒ 恰好 A5；篡改 caliber ⇒ 恰好 A18；删一行 ⇒ A2；
+恒真分类 ⇒ B1 多项 + B10；恒假判据 ⇒ B2.01/B3/B9；
+「改尺子未重跑普查」⇒ 恰好 A18。基线无注入 `fail=0`。
+
+真 3.9（3.9.6）`ast.parse(feature_version=(3,9))` 两份新 `.py` OK；
+裸 `noqa` 0；`diff --check` rc=0；
+⛔ **按 181 教训主动用 `scan_text()` 扫三个新文件 ⇒ 零命中**，
+避免 r101 那种「untracked ⇒ tracked-only 闸假绿」重演。
+
+═══ 八、拍板清单：6 项维持未开工 ═══
+
+① 扩张判据形态 ② 多步状态序列普查 ③ CI 先 `bootstrap` 再跑 H 组
+④ 放宽内联器四条自限 ⑤ 放宽 / 降级 deny-modules（安全边界）
+⑥ 验收扫描面覆盖 untracked —— **6 项一律未开工**。
+
+本轮与 ④ 的关系要说清：100 条至少一侧抛异常，与 178 的
+「`inlinable_rhs=0`、67/89 局部作用域」同类；要开这道门就得放宽
+内联器自限，属**口径变更、需拍板**，本轮只报不修。
