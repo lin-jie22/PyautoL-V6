@@ -1,0 +1,405 @@
+{
+ "schema": "import_error_census/v1",
+ "caliber": {
+  "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+  "aether/environment.py": "ee35fe9d77361fc807bf8a4d26839020c76eafd266eb23a90bc008577b5c2d38",
+  "scripts/probe_gate_attribution.py": "8ad653713fb9517ad9a7c27d8f33d38f9b74f01d567fd012b0673ca680ba5d20",
+  "scripts/probe_criteria_gate_census.py": "04073d064ff65ef70e69b5786072307e79f977b868f36bfe2f639d96c9af58b1",
+  "scripts/probe_alias_demote.py": "d6aa0788f31a9bb9c454b1cf9046618d43b05028e55b046d443e73446310769a",
+  "scripts/probe_package_load.py": "befe2f620f09e84f31627edd7f15d3fd5f2355934a6091aa474ee36de53e543e",
+  "scripts/probe_extract_downstream.py": "1897a4a0dbdc497f554c50503541da3b1ea54bdf95bbf3c80bb4569477efaa10",
+  "scripts/probe_import_failure_attribution.py": "7fba91dea556327964eff3a29d4c1955b41a2eef4fcc40260e25f0b755b55e1f",
+  "scripts/criteria_gate_census.json": "0e4b58ad13251bf66543764e96b0759ade8a4442b602b5fd681455a48f276f20",
+  "scripts/import_failure_attribution.json": "77d0d182bbeb69d5af176482c29e6fe00bcf3ddc2fdc53a5409589a37d0352c6",
+  "scripts/extract_downstream.json": "896220cd2849f6740a0fc28daf6e434c7ed77445237b60f3b1288a3cf7d8d266",
+  "scripts/realrepo_baseline.json": "0585f86b9146fe0aa203c936af2dcd576f34b3b55c27fabc59db93073558b0fb",
+  "scripts/probe_import_error_census.py": "0878a5ded4b634cb909674ea1233223f401774b7b68d5c4120ccdfadfea77423"
+ },
+ "ie_commits": [
+  {
+   "repo": "boltons",
+   "sha": "55dfe50",
+   "n_new": 2,
+   "n_tests_total": 0,
+   "gates": {
+    "form": 1,
+    "unserializable": 1
+   },
+   "cat": "deny_fcntl",
+   "tail": "PermissionError: V6_SANDBOX_DENY:import:fcntl",
+   "why": "import"
+  },
+  {
+   "repo": "boltons",
+   "sha": "d34e461",
+   "n_new": 1,
+   "n_tests_total": 0,
+   "gates": {
+    "unserializable": 1
+   },
+   "cat": "stdlib_mismatch",
+   "tail": "ImportError: cannot import name 'MutableSet' from 'collections' (/Users/…/lib/python3.13/collections/__init__.py)",
+   "why": "import"
+  },
+  {
+   "repo": "attrs",
+   "sha": "9e1f136",
+   "n_new": 5,
+   "n_tests_total": 0,
+   "gates": {
+    "form": 2,
+    "unserializable": 3
+   },
+   "cat": "deny_ctypes",
+   "tail": "PermissionError: V6_SANDBOX_DENY:import:ctypes",
+   "why": "import"
+  },
+  {
+   "repo": "attrs",
+   "sha": "5ed8c4a",
+   "n_new": 0,
+   "n_tests_total": 0,
+   "gates": {},
+   "cat": "deny_ctypes",
+   "tail": "PermissionError: V6_SANDBOX_DENY:import:ctypes",
+   "why": "import"
+  },
+  {
+   "repo": "attrs",
+   "sha": "9d441d7",
+   "n_new": 1,
+   "n_tests_total": 0,
+   "gates": {
+    "unmatched": 1
+   },
+   "cat": "deny_ctypes",
+   "tail": "PermissionError: V6_SANDBOX_DENY:import:ctypes",
+   "why": "import"
+  },
+  {
+   "repo": "attrs",
+   "sha": "f5b59a0",
+   "n_new": 2,
+   "n_tests_total": 0,
+   "gates": {
+    "unmatched": 2
+   },
+   "cat": "deny_ctypes",
+   "tail": "PermissionError: V6_SANDBOX_DENY:import:ctypes",
+   "why": "import"
+  },
+  {
+   "repo": "attrs",
+   "sha": "a84a36d",
+   "n_new": 1,
+   "n_tests_total": 0,
+   "gates": {
+    "unmatched": 1
+   },
+   "cat": "deny_ctypes",
+   "tail": "PermissionError: V6_SANDBOX_DENY:import:ctypes",
+   "why": "import"
+  },
+  {
+   "repo": "attrs",
+   "sha": "c1adf5c",
+   "n_new": 2,
+   "n_tests_total": 0,
+   "gates": {
+    "form": 2
+   },
+   "cat": "deny_ctypes",
+   "tail": "PermissionError: V6_SANDBOX_DENY:import:ctypes",
+   "why": "import"
+  }
+ ],
+ "rows": [
+  {
+   "repo": "boltons",
+   "sha": "55dfe50",
+   "gate": "form",
+   "fn": "test_iter_find_files_pathlike",
+   "stmt": "assert 'fileutils.py' in basenames",
+   "call": "",
+   "downstream": "unknown",
+   "reach": "X",
+   "v175": "no_criteria",
+   "in_census": true,
+   "ie_cat": "deny_fcntl",
+   "ie_tail": "PermissionError: V6_SANDBOX_DENY:import:fcntl"
+  },
+  {
+   "repo": "boltons",
+   "sha": "55dfe50",
+   "gate": "unserializable",
+   "fn": "test_atomicsaver_pathlike",
+   "stmt": "assert dest.read_bytes() == b'pathlike works'",
+   "call": "(tmp_path / 'output.bin').read_bytes()",
+   "downstream": "unknown",
+   "reach": "X",
+   "v175": "no_criteria",
+   "in_census": true,
+   "ie_cat": "deny_fcntl",
+   "ie_tail": "PermissionError: V6_SANDBOX_DENY:import:fcntl"
+  },
+  {
+   "repo": "boltons",
+   "sha": "d34e461",
+   "gate": "unserializable",
+   "fn": "test_complement_set",
+   "stmt": "assert sab - cab == sab",
+   "call": "set('ab') - complement('ab')",
+   "downstream": "unknown",
+   "reach": "X",
+   "v175": "no_criteria",
+   "in_census": true,
+   "ie_cat": "stdlib_mismatch",
+   "ie_tail": "ImportError: cannot import name 'MutableSet' from 'collections' (/Users/…/lib/python3.13/collections/__init__.py)"
+  },
+  {
+   "repo": "attrs",
+   "sha": "9e1f136",
+   "gate": "form",
+   "fn": "test_handles_missing_meta_on_class",
+   "stmt": "assert '42' == rv.__module__ == fake_meth.__module__",
+   "call": "",
+   "downstream": "unknown",
+   "reach": "X",
+   "v175": "no_criteria",
+   "in_census": true,
+   "ie_cat": "deny_ctypes",
+   "ie_tail": "PermissionError: V6_SANDBOX_DENY:import:ctypes"
+  },
+  {
+   "repo": "attrs",
+   "sha": "9e1f136",
+   "gate": "form",
+   "fn": "test_handles_missing_meta_on_class",
+   "stmt": "assert '23' == rv.__qualname__ == fake_meth.__qualname__",
+   "call": "",
+   "downstream": "unknown",
+   "reach": "X",
+   "v175": "no_criteria",
+   "in_census": true,
+   "ie_cat": "deny_ctypes",
+   "ie_tail": "PermissionError: V6_SANDBOX_DENY:import:ctypes"
+  },
+  {
+   "repo": "attrs",
+   "sha": "9e1f136",
+   "gate": "unserializable",
+   "fn": "test_attaches_meta_dunders",
+   "stmt": "assert meth_name == meth.__name__",
+   "call": "meth_name",
+   "downstream": "unknown",
+   "reach": "X",
+   "v175": "no_criteria",
+   "in_census": true,
+   "ie_cat": "deny_ctypes",
+   "ie_tail": "PermissionError: V6_SANDBOX_DENY:import:ctypes"
+  },
+  {
+   "repo": "attrs",
+   "sha": "9e1f136",
+   "gate": "unserializable",
+   "fn": "test_attaches_meta_dunders",
+   "stmt": "assert C.organic.__module__ == meth.__module__",
+   "call": "C.organic.__module__",
+   "downstream": "unknown",
+   "reach": "X",
+   "v175": "no_criteria",
+   "in_census": true,
+   "ie_cat": "deny_ctypes",
+   "ie_tail": "PermissionError: V6_SANDBOX_DENY:import:ctypes"
+  },
+  {
+   "repo": "attrs",
+   "sha": "9e1f136",
+   "gate": "unserializable",
+   "fn": "test_attaches_meta_dunders",
+   "stmt": "assert organic_prefix + '.' + meth_name == meth.__qualname__",
+   "call": "C.organic.__qualname__.rsplit('.', 1)[0] + '.' + meth_name",
+   "downstream": "unknown",
+   "reach": "X",
+   "v175": "no_criteria",
+   "in_census": true,
+   "ie_cat": "deny_ctypes",
+   "ie_tail": "PermissionError: V6_SANDBOX_DENY:import:ctypes"
+  },
+  {
+   "repo": "attrs",
+   "sha": "9d441d7",
+   "gate": "unmatched",
+   "fn": "test_repr_uninitialized_member",
+   "stmt": "assert 'C(a=NOTHING)' == repr(C())",
+   "call": "repr(make_class('C', {'a': attr.ib(init=False)})())",
+   "downstream": "unknown",
+   "reach": "X",
+   "v175": "no_criteria",
+   "in_census": true,
+   "ie_cat": "deny_ctypes",
+   "ie_tail": "PermissionError: V6_SANDBOX_DENY:import:ctypes"
+  },
+  {
+   "repo": "attrs",
+   "sha": "f5b59a0",
+   "gate": "unmatched",
+   "fn": "test_auto_attribs_subclassing",
+   "stmt": "assert 'B(a=1, b=2)' == repr(B())",
+   "call": "repr(B())",
+   "downstream": "unknown",
+   "reach": "X",
+   "v175": "no_criteria",
+   "in_census": true,
+   "ie_cat": "deny_ctypes",
+   "ie_tail": "PermissionError: V6_SANDBOX_DENY:import:ctypes"
+  },
+  {
+   "repo": "attrs",
+   "sha": "f5b59a0",
+   "gate": "unmatched",
+   "fn": "test_auto_attribs_subclassing",
+   "stmt": "assert 'C(a=1)' == repr(C())",
+   "call": "repr(C())",
+   "downstream": "unknown",
+   "reach": "X",
+   "v175": "no_criteria",
+   "in_census": true,
+   "ie_cat": "deny_ctypes",
+   "ie_tail": "PermissionError: V6_SANDBOX_DENY:import:ctypes"
+  },
+  {
+   "repo": "attrs",
+   "sha": "a84a36d",
+   "gate": "unmatched",
+   "fn": "test_multiple_inheritance",
+   "stmt": "assert \"E(a1='a1', a2='a2', b1='b1', b2='b2', c1='c1', c2='c2', d1='d1', d2='d2', e1='e1', e2='e2')\" == repr(E())",
+   "call": "repr(E())",
+   "downstream": "unknown",
+   "reach": "X",
+   "v175": "no_criteria",
+   "in_census": true,
+   "ie_cat": "deny_ctypes",
+   "ie_tail": "PermissionError: V6_SANDBOX_DENY:import:ctypes"
+  },
+  {
+   "repo": "attrs",
+   "sha": "c1adf5c",
+   "gate": "form",
+   "fn": "test_attr_args",
+   "stmt": "assert repr(C(1)).startswith('<tests.test_make.C object at 0x')",
+   "call": "",
+   "downstream": "unknown",
+   "reach": "X",
+   "v175": "no_criteria",
+   "in_census": true,
+   "ie_cat": "deny_ctypes",
+   "ie_tail": "PermissionError: V6_SANDBOX_DENY:import:ctypes"
+  },
+  {
+   "repo": "attrs",
+   "sha": "c1adf5c",
+   "gate": "form",
+   "fn": "test_missing_sys_getframe",
+   "stmt": "assert C.__attrs_attrs__",
+   "call": "",
+   "downstream": "unknown",
+   "reach": "X",
+   "v175": "no_criteria",
+   "in_census": true,
+   "ie_cat": "deny_ctypes",
+   "ie_tail": "PermissionError: V6_SANDBOX_DENY:import:ctypes"
+  }
+ ],
+ "summary": {
+  "schema": "import_error_census/v1",
+  "n_per_commit": 120,
+  "n_census_rows": 459,
+  "n_ie_commits": 8,
+  "n_ie_rows": 14,
+  "n_tests_total_zero": 30,
+  "n_tests_total_zero_not_ie": 22,
+  "ie_by_repo": {
+   "attrs": 6,
+   "boltons": 2
+  },
+  "ie_by_cat": {
+   "deny_ctypes": 6,
+   "deny_fcntl": 1,
+   "stdlib_mismatch": 1
+  },
+  "ie_rows_by_gate": {
+   "form": 5,
+   "unmatched": 4,
+   "unserializable": 5
+  },
+  "ie_rows_by_downstream": {
+   "unknown": 14
+  },
+  "ie_rows_by_repo": {
+   "attrs": 11,
+   "boltons": 3
+  },
+  "n_unmatched": 4,
+  "n_unmatched_in_ie": 4,
+  "n_unmatched_outside_ie": 0,
+  "unmatched_shas": [
+   "9d441d7",
+   "a84a36d",
+   "f5b59a0"
+  ],
+  "cross_180": {
+   "n_rows_180": 9,
+   "n_sha_180": 6,
+   "covered_ie_shas": [
+    "55dfe50",
+    "9d441d7",
+    "9e1f136",
+    "a84a36d",
+    "d34e461",
+    "f5b59a0"
+   ],
+   "uncovered_ie_shas": [
+    "5ed8c4a",
+    "c1adf5c"
+   ],
+   "uncovered_cats": {
+    "5ed8c4a": "deny_ctypes",
+    "c1adf5c": "deny_ctypes"
+   },
+   "note": "⛔ 两本账分开：180 是行级 import_failed（9 条 / 6 sha），本轮是 commit 级 import_error（8 个）；只交叉，不合并。"
+  },
+  "cross_177": {
+   "n_rows": 135,
+   "n_import_failed": 9
+  },
+  "baseline_health": {
+   "ok": true,
+   "diffs": 0,
+   "repos": 3
+  },
+  "closure_eqs": {
+   "eq_denominator": true,
+   "eq_ie8": true,
+   "eq_ie_key_8_112": true,
+   "eq_ie_tests_zero": true,
+   "eq_two_books_not_iff": true,
+   "eq_ie_rows14": true,
+   "eq_ie_rows_gates": true,
+   "eq_ie_rows_gates_closed": true,
+   "eq_ie_rows_unknown": true,
+   "eq_unmatched_all_ie": true,
+   "eq_no_unmatched_outside_ie": true,
+   "eq_probe_coverage": true,
+   "eq_cats_closed": true,
+   "eq_cats_no_other": true,
+   "eq_all_why_import": true,
+   "eq_180_cross": true,
+   "eq_177_import_failed9": true,
+   "eq_caliber_self": true
+  },
+  "n_closure_true": 18,
+  "n_closure_items": 18,
+  "note": "⛔ 176 的 unmatched 4 条是 auto_extract 装载失败的派生格，不是「两边对不上」；8/8 是安全边界正确拒收或题源年代错配。⛔ 只报归因与账目、不报收益；没跑放宽 deny 对照 ⇒ 不许宣称放宽后能测几条（⑤ 未开工）。⛔ 不推翻 177 unmeasurable / 179 的 119 条 form 下游 / 182 的 truthy 0；179 的 form 下游属拍板 ①，177 已 cancel 拿原始 expr 跑沙箱（构造必然）。"
+ }
+}

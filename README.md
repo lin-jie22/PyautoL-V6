@@ -8916,3 +8916,121 @@ C 组才碰本机锚与真实沙箱正例。
 本轮与 ④ 的关系要说清：100 条至少一侧抛异常，与 178 的
 「`inlinable_rhs=0`、67/89 局部作用域」同类；要开这道门就得放宽
 内联器自限，属**口径变更、需拍板**，本轮只报不修。
+
+---
+
+### 183. ⛔⛔ **176 的 `unmatched` 4 条是伪格：`import_error` 污染面全量普查；并纠偏 182 留下的候选方向**（2026-11-11）
+
+═══ 一、起点：上一轮留的候选方向是判断偏差，先纠偏 ═══
+
+182 收口时把「补 179 那 119 条 form 的下游归因」列为**不需拍板**的
+候选方向。⛔ **这是判断偏差，本轮撤回**：
+`scripts/probe_extract_downstream.py` 开头逐字写着，第一版曾拿产品
+`_iter_all_probes` 的原始 `expr`（`self.assertTrue(stream._rolled)`）
+跑沙箱，7/7 全 `no_result_both` —— 那是**构造必然**（原始 expr 依赖
+测试函数里的 `self` / 局部变量，没经 `resolve_probe` 加工），
+不是证据（第 122 条），且会重演 175「不同源尺子 ⇒ 结论反转」；
+硬结论是「要测这 119 条下游，**必须先扩张判据形态 ⇒ 拍板 ①**」。
+⇒ 179 的 119 条 form 下游**属拍板项 ①，不是纯取证空白**。
+注入层已把这条钉成跨轮规则，避免下次再被当成「不需拍板」。
+
+═══ 二、真实空白：176 存档里一直躺着一个没人查的字段 ═══
+
+176 把 459 条 PR 新增断言逐条归到门，其中 `unmatched 4`，注释是
+「判据在新增集合里，但三验没给它裁决 ⇒ 说明两边**对不上**」
+（`scripts/probe_gate_attribution.py:162`）。177 把 4 条算进主账 135 条，
+180 归因了 9 条 `import_failed` 的运行时成因，但**没人查过**
+`criteria_gate_census.json` 的 `per_commit[].extract_stats` 里
+本来就存着 `import_error`。
+
+⛔ 这个键是**可选键**：120 个 commit 里只有 **8 个有且为 True**，
+112 个**连键都没有**。看 `per_commit[0]` 的键集合会直接读漏
+（data-artifact-contract 量具坑）。
+
+═══ 三、根因：三验整体没跑，不是「键对不上」 ═══
+
+8/8 的 `n_tests_total == 0`；对其中 3 个 commit 重跑 `auto_extract`，
+`detail["rows"] = 0`、`tests = 0`（便宜对照实测），
+`stx["import_error"] = True`。⇒ `attribute_commit` 拿不到任何三验裁决，
+`verdict.get(key) is None` 把 `GATE_CRITERION` 的行一律落成 `unmatched`。
+**所以「两边对不上」是推断，真相是上游装载失败、三验根本没跑到**：
+第 146 条「没被闸看过 ≠ 被闸拦」＋第 25 条「一个异常两种含义」。
+
+⛔⛔ **封闭证据**：4 条 `unmatched` **100%** 落在这 8 个 commit 里
+（`9d441d7` / `f5b59a0` ×2 / `a84a36d`），其余 **112 个 commit 里 0 条**。
+⇒ `unmatched` 是装载失败的**派生格**，不是独立门。本轮**只报不修**，
+没有改 176 的归源代码。
+
+═══ 四、全量读数（120 commit / 459 行 / 8 个 ie commit）═══
+
+`import_error` 的 commit 分布：attrs 6 / boltons 2；
+异常末行按 180 纪律**只看末行**、封闭 5 格分类
+（无 `other`、8/8 产出方 `why=import`）：
+
+| 末行归因 | commit 数 | 性质 |
+|---|---:|---|
+| `V6_SANDBOX_DENY:import:ctypes` | **6** | 安全边界正确拒收 |
+| `V6_SANDBOX_DENY:import:fcntl` | 1 | 安全边界正确拒收 |
+| `ImportError: cannot import name 'MutableSet' from 'collections'` | 1 | 题源与解释器 stdlib 年代错配 |
+
+8 个 ie commit 共贡献 **14 行**，全部 `downstream=unknown`：
+`form 5 / unserializable 5 / unmatched 4`（attrs 11 / boltons 3）。
+⛔ **两本账分开**：`n_tests_total == 0` 的 commit 有 **30 个**，
+其中只有 8 个是 `import_error` ⇒ 另外 22 个是别的原因，
+**不许拿 `n_tests_total=0` 反推 `import_error`**。
+
+═══ 五、与 177 / 180 的两本账对拍（只交叉、不合并）═══
+
+| 账 | 粒度 | 读数 |
+|---|---|---|
+| 180 `import_failure_attribution.json` | 行级 | 9 条 `import_failed` / 6 sha |
+| 177 `extract_downstream.json` | 行级 | 135 行 / 9 `import_failed` |
+| 本轮 `criteria_gate_census.json` | **commit 级** | 8 个 `import_error` |
+
+8 个 ie commit 里 **6 个**被 180 覆盖；**2 个从未归因过**：
+`5ed8c4a`（`n_new=0`，0 新增行）与 `c1adf5c`（2 条 form 行），
+末行均为 `deny_ctypes`。`5ed8c4a` 连新增断言都没有却照样
+`import_error` ⇒ 更坐实这是**装载层的事，与判据无关**。
+
+⛔ 180 的 9 条与本轮 8 个 commit **数不同、粒度不同**，只做交叉表，
+绝不合并成布尔（181 教训）。
+
+═══ 六、契约与注入反证 ═══
+
+`tests/contract_import_error_census_test.py` **47 项全绿 0 skip**
+（A 组 30 条钉死读数与 18 条封闭等式、B 组 12 条纯内存反证、
+C 组 5 条本机验锚 + 真实沙箱正/反例）。C 组用真实末行证明
+`classify` / `redact` 能命中（`55dfe50 → deny_fcntl`），
+且非 ie commit `4e5faa3` **不产生** `import_error`（判据不是恒真）。
+
+⛔ **首次全绿必须注入反证**（181 教训）：`/tmp/r104_falsify.py`
+**11 起**注入全部**恰好**命中预期项（篡改 `ie_by_cat` ⇒ A6、
+`unmatched_shas` ⇒ A11、伪造末行 ⇒ A22、note 删「属拍板 ①」⇒ A28、
+`closure_eqs` ⇒ A16、尺子自身 caliber ⇒ A17、去验锚 ⇒ A29、
+tail 注入真实家目录 ⇒ A23 …）；基线无注入 `fail=0`。
+`d34e461` 的末行与 180 存档**逐字同形**（A22）。
+
+真 3.9（3.9.6）`ast.parse` 两份新 `.py` OK；裸 `noqa` 0；
+`diff --check` rc=0；按 181 教训主动 `scan_text()` 扫
+README + 三个新文件 ⇒ 零命中。
+
+═══ 七、分寸与拍板边界 ═══
+
+⛔ **只报归因与账目，不报收益**。8/8 是安全边界正确拒收或
+题源年代错配；⛔ **没跑「放宽 deny-modules」对照**
+⇒ 不许宣称「放宽后能测几条」（180 纪律）。⑤ 仍属安全边界、
+需显式审批，**未开工**。
+⛔ **不推翻** 177 `unmeasurable`、179 的 119 条 form 下游、
+182 的 truthy 0；也不改 `aether/` 一个字节、不扩张判据形态、
+不放宽内联器（④）。
+① 扩张判据形态 ② 多步状态序列普查 ③ CI 先 `bootstrap`
+④ 放宽内联器四条自限 ⑤ 放宽 deny-modules
+⑥ 验收扫描面覆盖 untracked —— **6 项一律未开工**。
+
+**新设施**：`scripts/probe_import_error_census.py`、
+`scripts/import_error_census.json`、
+`tests/contract_import_error_census_test.py`（47 项）。
+主账**纯离线同源**（读 176 / 177 / 180 存档），
+只对 8 个 commit 跑极简控制探针（`call="1"`，只为触发装载、
+取异常末行，⛔ 不产出判据、不手写 oracle）；
+存档写 13 个源码 sha256 口径签名（含尺子自身）。
