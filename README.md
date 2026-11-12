@@ -9034,3 +9034,134 @@ README + 三个新文件 ⇒ 零命中。
 只对 8 个 commit 跑极简控制探针（`call="1"`，只为触发装载、
 取异常末行，⛔ 不产出判据、不手写 oracle）；
 存档写 13 个源码 sha256 口径签名（含尺子自身）。
+
+### 184. ⛔⛔ **178 的 5 条 `unparseable` 是 `call[:240]` 写盘截断造成的伪格：截断污染面全量普查**（2026-11-13）
+
+═══ 一、选题：把残留 ⑦ 从「没测过」推到「测出来是多少」 ═══
+
+183 收口后，注入层「不需拍板」的候选池已近空。本轮先把残留逐条
+盘过：`n_unjson` 恒 0 属改产品探针（口径变更、需拍板）；`unmatched`
+4 条已由 183 归因；166/167 的 boltons HEAD 零点 176 已判**不可考**
+（复算只能拿「钉死 head + 当前抽取器」的差值、拿不到历史零点）；
+`changed_lines` 175 已人工核过逐字等价；`9f4f31f` 来源未定位；
+held-out `no_gate` / CI C 组 SKIP 需改判据或 workflow。
+⇒ 唯一剩下的纯取证空白是 176 残留 ⑦：`call[:240]` / `stmt[:240]`
+写盘截断及其在 177/178 的下游归因。
+
+⛔ 一处假设已撤回：本轮先猜「178 的 5 条 `unparseable` 会不会就是
+183 的 5 条 `unserializable` ie 派生行」，实测**不是同一批** —— 截断
+5 条在 `862696a` / `33b6131`，183 的 8 个 `import_error` commit 里
+没有这两个 sha；两条链互不重叠。与 183 撤回 182 候选同类，如实留痕。
+
+═══ 二、伪格根因 ═══
+
+176 写盘 `probe_criteria_gate_census.py:362-363`：
+`"call": (r.get("call") or "")[:240]`、`"stmt": ...[:240]`。
+177 直接读截断值 → 这两个 sha 的 5 条 `verdict=no_result_both`；
+178 用 `ast.parse(call, mode="eval")` 对**断尾表达式**必然
+`SyntaxError` ⇒ `main_gate="unparseable"` ⇒ 从 94 条里剔除 5 条，
+得「可归因分母 89 条」（README 8270）。
+
+⛔ 但便宜对照实测：用产品同源 `attribute_commit` 重取**未截断**
+call，5 条长度 270 / 278 / 312 / 338 / 346，
+**5/5 `ast.parse(mode="eval")` OK**、5/5 存档值逐字等于完整值前
+240 字符（`prefix240=True`）。⇒ `unparseable` 是**写盘截断造成的
+构造必然**（122 条：构造必然≠证据），不是探针本身不可解析。
+182 已证这条同源通道可用（它用未截断 call 跑沙箱，但分母钉死
+123 条 ctx 门，这 5 条不在内）。
+
+═══ 三、全量读数（`scripts/truncation_census.json`） ═══
+
+分母只认 176 存档 459 行里**恰好 240** 的行：
+- `call` 截断 **5 条**：全 `gate=unserializable` / attrs / 2 个 sha /
+  `downstream=unknown`；同批也是 `stmt` 截断。
+- `stmt` 截断 **9 条**：`unserializable 5 + tuple 4`、
+  3 个 sha（`862696a` 5 / `33b6131` 3 / `f560500` 1），
+  全 `downstream=unknown`、`reach=X`；**`call5 ⊂ stmt9`**。
+
+恢复与真跑（主账 5 条，用 182 同源 truthy 探针，⛔ 不带 `expect`、
+不手写 oracle、不触发 171 的 `oracle_bad` 闸）：
+- `prefix240 5/5`、`full_parseable 5/5`、`saved_unparseable 5/5`、
+  `align_mismatch=0`（同源对齐用截断值，182 惯例）。
+- 两侧运行时账 **`both_raise 3 / mixed_raise 2`**、
+  **`f2p_criterion = 0`**、`fixed_unstable = 0`。
+- 3 条 `both_raise` 的 fixed evidence 是 `NameError: name 'attr' /
+  'name' is not defined`（自由变量）；2 条 `mixed_raise` 的 fixed 侧
+  求值成功拿到 `got=(Attribute(...)` 值、buggy 侧 raise。
+- ⛔ 恒 0 先证量具（规则 24）：复用 182 同源正例，45 条已知 `F2P`
+  行（6 commit / 23 条实跑）喂同一把尺子**命中 2/23**；契约 C5
+  真实沙箱正例 `5eb6cc0` 也命中 ≥1 ⇒ 不是量具恒假。
+
+交叉账（四份存档，分母按 `sha/fn/call[:240]` 主键精确对齐）：
+| 存档 | 主键命中 | 归因 | 未截断值重跑 |
+|---|---|---|---|
+| 177 `extract_downstream.json` | 5 | `no_result_both` 5 | 0 |
+| 178 `no_result_attribution.json` | 5 | `unparseable` 5 | 0 |
+| 182 `ctx_downstream.json` | 0 | 分母钉死 ctx 门 | 0 |
+| 183 `import_error_census.json` | 0 | 不在 ie commit | 0 |
+
+⇒ **这 5 条在 177/178/182/183 里用未截断值跑过 0 次**。
+⛔ 零命中先证查询能命中（规则 133）：177/178 各命中 5 条，
+且契约 B5 注入一条 `call_len=346` 的正例恰好命中 1 条
+⇒ 182/183 的 0 是**分母排除**不是查询失效。
+（另一条原假设「182 存档有 `call_len>240` 的行」被实测否定：
+max=135、`n_gt240=0`，已改以上述证据替代。）
+
+上游存档 `scripts/criteria_gate_census.json` 前后 `sha256`
+`0e4b58ad…` 完全一致 ⇒ **一个字节都没改**。封闭 **18/18** 全 true。
+
+═══ 四、两本账分开（181 教训） ═══
+
+- 账 A（176 存档口径）：178 的 9 条 stmt 截断行 =
+  **5 条 `unparseable` 剔除 + 4 条 `with_binding` 保留**；
+  「可归因分母 89 = 94 − 5」在**当时存档口径下成立**。
+- 账 B（完整值口径）：5 条恢复后仍 `3 both_raise / 2 mixed_raise`、
+  truthy F2P **0**。
+⛔ 两账绝不合并成布尔；4 条 `tuple` 行的 `stmt` 同样被截断，
+但 178 没把它们判成 `unparseable`（`stmt` 截断只影响
+`probe_index`，不影响 `ast.parse(call)`）⇒ 污染面按字段分账。
+
+═══ 五、⛔ 分寸：只修归因，不推翻 178 ═══
+
+完整值下这 5 条**仍全 raise、truthy F2P=0** ⇒ 178 的 89 条分母
+结论方向不变；本轮只把「结构性不可解析」的**归因**改成
+「写盘截断的构造必然」。⛔ 不宣布 178 被推翻、不宣布
+「89 条分母错了」；177 `unmeasurable`、179 的 119 条 form 下游、
+182 的 truthy 0、183 的伪格结论均未被推翻。
+⛔ **完整值可解析 ≠ 能产生真 F2P**；`f2p=0` 只成立于现有
+truthy 形态，**不许读成「扩张判据形态无用」**。
+异常全是自由变量 `NameError`，与 178 的 `loop_var` /
+`with_binding`、182 的 100 条至少一侧 raise 同类 ⇒ 要开它
+需 ④ 放宽内联器四条自限（**拍板项**），本轮只报不修。
+⛔ **不改上游尺子**：README 8283 已定「改了会让 166/176/177
+历史读数不可比，属口径变更、需拍板」；恢复值只写本轮旁证存档，
+不回写 `criteria_gate_census.json`，也不擅自新增第 7 项拍板。
+没改 `aether/` 一个字节、不扩张判据形态、不喂 `synthesize_patch`、
+不报「修好几个」。
+
+═══ 六、契约与反证 ═══
+
+`tests/contract_truncation_census_test.py` **50 项全绿 0 skip**
+（A 30 条钉读数与 18 条封闭等式 / B 14 条纯内存反证 / C 6 条
+本机验锚 + 真实正例）。`/tmp/r105_falsify.py` **15 起注入反证
+全部恰好命中预期 A 项**、基线 `fail=0`（`FALSIFICATION_OK=True`），
+含「篡改 caliber 尺子自身 hash ⇒ A4」「抹平两本账 ⇒ A20」
+「177 命中数抹成 0 ⇒ A22」「上游改成已改动 ⇒ A24」。
+⛔ 量具自身修正四处如实留痕：反证脚本首版把 `FAILS` 里的完整
+断言名与短编号直接比 ⇒ 15 起全误报 `BAD`（修比较方式后全绿）；
+契约首跑 C1 `rb.verify()` 缺 `baseline` ⇒ 改 `require_baseline()`；
+C4 首版只查 `bool(full)` 无牙 ⇒ 改成真送沙箱对拍 `why`；
+A14 首版假设 5 条全 `NameError` ⇒ 实测 3 `NameError` + 2 `got=`。
+真 3.9.6 `ast.parse` 两个新 `.py` OK、裸 `noqa` 0、
+`diff --check` rc=0、三个新文件 `scan_text()` 零命中
+（按 181 教训提前避开 untracked 假绿）。
+
+**新设施**：`scripts/probe_truncation_census.py`、
+`scripts/truncation_census.json`、
+`tests/contract_truncation_census_test.py`（50 项）。
+主账**纯只读取证**：除 2 个 commit 的产品同源 `attribute_commit`
+与极简 truthy 沙箱外全是离线存档交叉；存档写 14 个源码
+sha256 口径签名（含尺子自身与四份交叉存档）。
+① 扩张判据形态 ② 多步状态序列普查 ③ CI 先 `bootstrap`
+④ 放宽内联器四条自限 ⑤ 放宽 deny-modules
+⑥ 验收扫描面覆盖 untracked —— **6 项一律未开工**。

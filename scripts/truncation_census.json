@@ -1,0 +1,394 @@
+{
+ "schema": "truncation_census/v1",
+ "caliber": {
+  "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+  "aether/environment.py": "ee35fe9d77361fc807bf8a4d26839020c76eafd266eb23a90bc008577b5c2d38",
+  "scripts/probe_gate_attribution.py": "8ad653713fb9517ad9a7c27d8f33d38f9b74f01d567fd012b0673ca680ba5d20",
+  "scripts/probe_criteria_gate_census.py": "04073d064ff65ef70e69b5786072307e79f977b868f36bfe2f639d96c9af58b1",
+  "scripts/probe_alias_demote.py": "d6aa0788f31a9bb9c454b1cf9046618d43b05028e55b046d443e73446310769a",
+  "scripts/probe_package_load.py": "befe2f620f09e84f31627edd7f15d3fd5f2355934a6091aa474ee36de53e543e",
+  "scripts/probe_no_result_attribution.py": "bc9182c5f097cb736c6bcbfc90987648b63ee77d65d064cc5348f6cefacf8f0a",
+  "scripts/probe_ctx_downstream.py": "4aa232742592c966b9714b02925c2bd79c6ce6751e8db8cc3233404d489db296",
+  "scripts/criteria_gate_census.json": "0e4b58ad13251bf66543764e96b0759ade8a4442b602b5fd681455a48f276f20",
+  "scripts/extract_downstream.json": "896220cd2849f6740a0fc28daf6e434c7ed77445237b60f3b1288a3cf7d8d266",
+  "scripts/no_result_attribution.json": "1feae1a5d74e830d0d609e3b507d8842d577c6a851b377c9ef205e2161446d0b",
+  "scripts/ctx_downstream.json": "ac88b96b16cf76ed98a8fef74a2e13b1d46e59c420b2a7d7b24e9b06bcd3423f",
+  "scripts/import_error_census.json": "f19d58bb205dbb4f6cc17b971035994a811dccb995bc8bc1a91b249ed1b87471",
+  "scripts/probe_truncation_census.py": "b96e574331c760c0f5ff22f591a59b170854c1f6247a9c636f3652554ce213c3"
+ },
+ "rows": [
+  {
+   "repo": "attrs",
+   "sha": "862696a",
+   "fn": "test_fields",
+   "attr": "assert",
+   "kind": "expect",
+   "gate": "unserializable",
+   "downstream": "unknown",
+   "reach": "X",
+   "saved_call": "(Attribute(name='x', alias='x', default=None, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False, alias_is_default=True), Attribute(name='y', alias='y', default=attr.Factory(list), validator=None",
+   "saved_call_len": 240,
+   "saved_stmt_len": 240,
+   "full_call": "(Attribute(name='x', alias='x', default=None, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False, alias_is_default=True), Attribute(name='y', alias='y', default=attr.Factory(list), validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False, alias_is_default=True))",
+   "full_call_len": 346,
+   "full_stmt_len": 372,
+   "prefix240": true,
+   "parseable": true,
+   "saved_parseable": false,
+   "verdict3": null,
+   "pair_verdict": "both_raise",
+   "f2p_criterion": false,
+   "fixed_unstable": false,
+   "passed_fixed": false,
+   "passed_buggy": false,
+   "why_fixed": "raise",
+   "why_buggy": "raise",
+   "evidence_fixed": "NameError: name 'attr' is not defined. Did you mean: 'attrs'?",
+   "evidence_buggy": "TypeError: Attribute.__init__() got an unexpected keyword argument 'alias_is_default'",
+   "import_flags": [
+    false,
+    false,
+    false
+   ]
+  },
+  {
+   "repo": "attrs",
+   "sha": "862696a",
+   "fn": "test_programmatic",
+   "attr": "assert",
+   "kind": "expect",
+   "gate": "unserializable",
+   "downstream": "unknown",
+   "reach": "X",
+   "saved_call": "(Attribute(name='a', alias='a', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False, alias_is_default=True), Attribute(name='b', alias='b', default=NOTHING, validator=None, repr=T",
+   "saved_call_len": 240,
+   "saved_stmt_len": 240,
+   "full_call": "(Attribute(name='a', alias='a', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False, alias_is_default=True), Attribute(name='b', alias='b', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False, alias_is_default=True))",
+   "full_call_len": 338,
+   "full_stmt_len": 364,
+   "prefix240": true,
+   "parseable": true,
+   "saved_parseable": false,
+   "verdict3": null,
+   "pair_verdict": "mixed_raise",
+   "f2p_criterion": false,
+   "fixed_unstable": false,
+   "passed_fixed": true,
+   "passed_buggy": false,
+   "why_fixed": "behavior",
+   "why_buggy": "raise",
+   "evidence_fixed": "got=(Attribute(name='a', default=NOTHING, validator=None, repr=True, eq=True, eq_key=None, order=True, order_key=None, hash=None, init=True, metadata=mappingpro",
+   "evidence_buggy": "TypeError: Attribute.__init__() got an unexpected keyword argument 'alias_is_default'",
+   "import_flags": [
+    false,
+    false,
+    false
+   ]
+  },
+  {
+   "repo": "attrs",
+   "sha": "862696a",
+   "fn": "test_can_unpickle_25_3_attributes",
+   "attr": "assert",
+   "kind": "expect",
+   "gate": "unserializable",
+   "downstream": "unknown",
+   "reach": "X",
+   "saved_call": "Attribute(name=name, alias=alias, alias_is_default=alias_is_default, default=attrs.NOTHING, validator=None, repr=True, cmp=None, eq=True, eq_key=None, order=True, order_key=None, hash=None, init=True, metadata=types.MappingProxyType({}), ty",
+   "saved_call_len": 240,
+   "saved_stmt_len": 240,
+   "full_call": "Attribute(name=name, alias=alias, alias_is_default=alias_is_default, default=attrs.NOTHING, validator=None, repr=True, cmp=None, eq=True, eq_key=None, order=True, order_key=None, hash=None, init=True, metadata=types.MappingProxyType({}), type=int, converter=None, kw_only=False, inherited=False, on_setattr=None)",
+   "full_call_len": 312,
+   "full_stmt_len": 348,
+   "prefix240": true,
+   "parseable": true,
+   "saved_parseable": false,
+   "verdict3": null,
+   "pair_verdict": "both_raise",
+   "f2p_criterion": false,
+   "fixed_unstable": false,
+   "passed_fixed": false,
+   "passed_buggy": false,
+   "why_fixed": "raise",
+   "why_buggy": "raise",
+   "evidence_fixed": "NameError: name 'name' is not defined",
+   "evidence_buggy": "NameError: name 'name' is not defined",
+   "import_flags": [
+    false,
+    false,
+    false
+   ]
+  },
+  {
+   "repo": "attrs",
+   "sha": "33b6131",
+   "fn": "test_fields",
+   "attr": "assert",
+   "kind": "expect",
+   "gate": "unserializable",
+   "downstream": "unknown",
+   "reach": "X",
+   "saved_call": "(Attribute(name='x', default=None, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False), Attribute(name='y', default=attr.Factory(list), validator=None, repr=True, cmp=None, eq=True, order=True, h",
+   "saved_call_len": 240,
+   "saved_stmt_len": 240,
+   "full_call": "(Attribute(name='x', default=None, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False), Attribute(name='y', default=attr.Factory(list), validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False))",
+   "full_call_len": 278,
+   "full_stmt_len": 304,
+   "prefix240": true,
+   "parseable": true,
+   "saved_parseable": false,
+   "verdict3": null,
+   "pair_verdict": "both_raise",
+   "f2p_criterion": false,
+   "fixed_unstable": false,
+   "passed_fixed": false,
+   "passed_buggy": false,
+   "why_fixed": "raise",
+   "why_buggy": "raise",
+   "evidence_fixed": "NameError: name 'attr' is not defined. Did you mean: 'attrs'?",
+   "evidence_buggy": "TypeError: Attribute.__init__() got an unexpected keyword argument 'inherited'",
+   "import_flags": [
+    false,
+    false,
+    false
+   ]
+  },
+  {
+   "repo": "attrs",
+   "sha": "33b6131",
+   "fn": "test_programmatic",
+   "attr": "assert",
+   "kind": "expect",
+   "gate": "unserializable",
+   "downstream": "unknown",
+   "reach": "X",
+   "saved_call": "(Attribute(name='a', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False), Attribute(name='b', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None",
+   "saved_call_len": 240,
+   "saved_stmt_len": 240,
+   "full_call": "(Attribute(name='a', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False), Attribute(name='b', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False))",
+   "full_call_len": 270,
+   "full_stmt_len": 296,
+   "prefix240": true,
+   "parseable": true,
+   "saved_parseable": false,
+   "verdict3": null,
+   "pair_verdict": "mixed_raise",
+   "f2p_criterion": false,
+   "fixed_unstable": false,
+   "passed_fixed": true,
+   "passed_buggy": false,
+   "why_fixed": "behavior",
+   "why_buggy": "raise",
+   "evidence_fixed": "got=(Attribute(name='a', default=NOTHING, validator=None, repr=True, eq=True, order=True, hash=None, init=True, metadata=mappingproxy({}), type=None, converter=",
+   "evidence_buggy": "TypeError: Attribute.__init__() got an unexpected keyword argument 'inherited'",
+   "import_flags": [
+    false,
+    false,
+    false
+   ]
+  }
+ ],
+ "summary": {
+  "schema": "truncation_census/v1",
+  "n_rows": 5,
+  "align_mismatch": 0,
+  "n_prefix240": 5,
+  "n_full_parseable": 5,
+  "n_saved_unparseable": 5,
+  "full_call_len": {
+   "270": 1,
+   "278": 1,
+   "312": 1,
+   "338": 1,
+   "346": 1
+  },
+  "by_pair": {
+   "both_raise": 3,
+   "mixed_raise": 2
+  },
+  "n_f2p_criterion": 0,
+  "n_fixed_unstable": 0,
+  "by_why_fixed": {
+   "behavior": 2,
+   "raise": 3
+  },
+  "by_why_buggy": {
+   "raise": 5
+  },
+  "surface": {
+   "n_call_truncated": 5,
+   "n_stmt_truncated": 9,
+   "n_call_subset_of_stmt": 5,
+   "call_subset_of_stmt": true,
+   "call_by_gate": {
+    "unserializable": 5
+   },
+   "stmt_by_gate": {
+    "tuple": 4,
+    "unserializable": 5
+   },
+   "stmt_by_sha": {
+    "33b6131": 3,
+    "862696a": 5,
+    "f560500": 1
+   },
+   "stmt_by_downstream": {
+    "unknown": 9
+   },
+   "stmt_by_reach": {
+    "X": 9
+   },
+   "call_keys": [
+    [
+     "33b6131",
+     "test_fields",
+     "(Attribute(name='x', default=None, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False), Attribute(name='y', default=attr.Factory(list), validator=None, repr=True, cmp=None, eq=True, order=True, h"
+    ],
+    [
+     "33b6131",
+     "test_programmatic",
+     "(Attribute(name='a', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False), Attribute(name='b', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None"
+    ],
+    [
+     "862696a",
+     "test_can_unpickle_25_3_attributes",
+     "Attribute(name=name, alias=alias, alias_is_default=alias_is_default, default=attrs.NOTHING, validator=None, repr=True, cmp=None, eq=True, eq_key=None, order=True, order_key=None, hash=None, init=True, metadata=types.MappingProxyType({}), ty"
+    ],
+    [
+     "862696a",
+     "test_fields",
+     "(Attribute(name='x', alias='x', default=None, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False, alias_is_default=True), Attribute(name='y', alias='y', default=attr.Factory(list), validator=None"
+    ],
+    [
+     "862696a",
+     "test_programmatic",
+     "(Attribute(name='a', alias='a', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False, alias_is_default=True), Attribute(name='b', alias='b', default=NOTHING, validator=None, repr=T"
+    ]
+   ],
+   "stmt_keys": [
+    [
+     "33b6131",
+     "test_conflicting_defaults",
+     "e.value.args"
+    ],
+    [
+     "33b6131",
+     "test_fields",
+     "(Attribute(name='x', default=None, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False), Attribute(name='y', default=attr.Factory(list), validator=None, repr=True, cmp=None, eq=True, order=True, h"
+    ],
+    [
+     "33b6131",
+     "test_programmatic",
+     "(Attribute(name='a', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False), Attribute(name='b', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None"
+    ],
+    [
+     "862696a",
+     "test_can_unpickle_25_3_attributes",
+     "Attribute(name=name, alias=alias, alias_is_default=alias_is_default, default=attrs.NOTHING, validator=None, repr=True, cmp=None, eq=True, eq_key=None, order=True, order_key=None, hash=None, init=True, metadata=types.MappingProxyType({}), ty"
+    ],
+    [
+     "862696a",
+     "test_conflicting_defaults",
+     "e.value.args"
+    ],
+    [
+     "862696a",
+     "test_fields",
+     "(Attribute(name='x', alias='x', default=None, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False, alias_is_default=True), Attribute(name='y', alias='y', default=attr.Factory(list), validator=None"
+    ],
+    [
+     "862696a",
+     "test_hook_conflicting_defaults_after_reorder",
+     "e.value.args"
+    ],
+    [
+     "862696a",
+     "test_programmatic",
+     "(Attribute(name='a', alias='a', default=NOTHING, validator=None, repr=True, cmp=None, eq=True, order=True, hash=None, init=True, inherited=False, alias_is_default=True), Attribute(name='b', alias='b', default=NOTHING, validator=None, repr=T"
+    ],
+    [
+     "f560500",
+     "test_conflicting_defaults",
+     "e.value.args"
+    ]
+   ]
+  },
+  "cross": {
+   "n_archives": 4,
+   "n_full_value_reruns": 0,
+   "archives": {
+    "scripts/extract_downstream.json": {
+     "present": true,
+     "n_rows": 135,
+     "n_key_hits": 5,
+     "n_full_value": 0,
+     "by_verdict": {
+      "no_result_both": 5
+     }
+    },
+    "scripts/no_result_attribution.json": {
+     "present": true,
+     "n_rows": 94,
+     "n_key_hits": 5,
+     "n_full_value": 0,
+     "by_verdict": {
+      "unparseable": 5
+     }
+    },
+    "scripts/ctx_downstream.json": {
+     "present": true,
+     "n_rows": 123,
+     "n_key_hits": 0,
+     "n_full_value": 0,
+     "by_verdict": {}
+    },
+    "scripts/import_error_census.json": {
+     "present": true,
+     "n_rows": 14,
+     "n_key_hits": 0,
+     "n_full_value": 0,
+     "by_verdict": {}
+    }
+   }
+  },
+  "two_books": {
+   "n_hit": 9,
+   "n_excluded": 5,
+   "n_kept": 4,
+   "gates": {
+    "unparseable": 5,
+    "with_binding": 4
+   }
+  },
+  "upstream": {
+   "path": "scripts/criteria_gate_census.json",
+   "sha256_before": "0e4b58ad13251bf66543764e96b0759ade8a4442b602b5fd681455a48f276f20",
+   "sha256_after": "0e4b58ad13251bf66543764e96b0759ade8a4442b602b5fd681455a48f276f20",
+   "unchanged": true
+  },
+  "baseline_health": "OK",
+  "closure_eqs": {
+   "eq_denominator_5": true,
+   "eq_align_zero": true,
+   "eq_prefix240_all": true,
+   "eq_full_longer_all": true,
+   "eq_full_parseable_all": true,
+   "eq_saved_unparseable_all": true,
+   "eq_pair_sum": true,
+   "eq_pair_closed": true,
+   "eq_f2p_subset": true,
+   "eq_no_unstable": true,
+   "eq_surface_5_9": true,
+   "eq_call_subset_stmt": true,
+   "eq_two_books_5_4": true,
+   "eq_cross_zero": true,
+   "eq_cross_four": true,
+   "eq_upstream_untouched": true,
+   "eq_baseline_ok": true,
+   "eq_caliber_self": true
+  },
+  "n_closure_true": 18,
+  "n_closure_items": 18,
+  "note": "⛔ 5 条 unparseable 是 call[:240] 写盘截断造成的构造必然；完整值 5/5 可 ast.parse，但两侧真跑仍 3 both_raise / 2 mixed_raise、truthy F2P=0（自由变量 NameError）⇒ 178 的 89 条分母结论方向不变，本轮只修归因不推翻结论。⛔ 不改上游存档；改上游尺子属口径变更需拍板。"
+ }
+}
