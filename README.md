@@ -9165,3 +9165,137 @@ sha256 口径签名（含尺子自身与四份交叉存档）。
 ① 扩张判据形态 ② 多步状态序列普查 ③ CI 先 `bootstrap`
 ④ 放宽内联器四条自限 ⑤ 放宽 deny-modules
 ⑥ 验收扫描面覆盖 untracked —— **6 项一律未开工**。
+
+---
+
+### 185. ⛔⛔ **拍板 ⑥ 落地：A1 静态闸的扫描面覆盖 untracked，r101 那种「提交前假绿」不再可能**（2026-11-13）
+
+═══ 一、起点：纯取证候选池已空，由用户拍板 ⑥ ═══
+
+184 收口后逐条盘过残留：「不需拍板」的纯取证方向**一个不剩**
+（179 的 119 条 form 下游已由 183 撤回并归到拍板 ①；
+`n_unjson` / `changed_lines` / `9f4f31f` / held-out `no_gate` /
+CI C 组分别属改产品探针、人工核过、来源未定位、需改判据、
+workflow 改动）。按 `eval-standard-anchoring` 的最小落地顺序
+「口径闸优先、不要先优化引擎」，且 r101 有**实战假绿读数**，
+建议先修量具。用户拍板 **⑥ 验收扫描面覆盖 untracked**，
+其余 5 项维持未开工。
+
+═══ 二、根因两层：盲区不在「执行面」，只在静态闸 ═══
+
+⛔ 先证「执行面本来就能看到 untracked」：
+`aether/check.py:220` 的 `discover()` 是
+**`d.glob("contract_*_test.py")`**（磁盘 glob，不看 git）——
+r105 的 117/117 里就有本轮新契约，它当时是 `??`。契约 C4
+用临时目录复现：`discover()` 立刻看见刚写下的 `contract_*_test.py`。
+⇒ ⑥ 不是「验收漏跑了新契约」，而是
+**`contract_portability_test.py` 的 A1 用 `git ls-files` 只扫 tracked**。
+全量验收按纪律跑在**提交前** ⇒ r101 新加的 4 个文件全是 `??`
+⇒ A1 根本没看见 ⇒ 113/113 假绿（§181 有逐字读数：提交后
+A1 立刻红 4 处）。
+
+**修法选择：改闸，不改流程。** ⑥ 原始清单里还有一条
+「调整验收与提交的先后」（先 `git add` 再跑）。本轮**不选**：
+`git add` 只是把这个洞从「提交前」挪到「暂存前」，任何在 add
+之后新建的文件仍会绕过；而且它把判据的正确性绑在人的操作顺序上，
+正是契约①要防的「尺子可被流程改写」。扩扫描面是结构性修法。
+
+═══ 三、改了什么（只动扫描面，判据语义一个字节没改） ═══
+
+`tests/contract_portability_test.py`：
+
+| 函数 | 作用 |
+|---|---|
+| `git_files(*args, root=None)` | `git ls-files -z <args>`；失败 ⇒ `None`（跑不了 ≠ 通过） |
+| `tracked_files(root=None)` | 修前的旧扫描面，留给反证组当「旧尺子」 |
+| `untracked_files(root=None)` | `--others --exclude-standard` |
+| `candidate_files(root=None)` | tracked ∪ untracked，去重排序；任一命令失败 ⇒ `None` |
+| `scan_surface(root=None)` | A1 的**实际扫描动作**，tracked / untracked **两本账分开** |
+
+⛔ `--exclude-standard` 是**边界不是优化**：`.gitignore` 里有
+`data/*.json`、`data/*.db`、`__pycache__/` 等运行产物，纳入扫描面
+会把「生成物」读成「待提交文件」⇒ 每轮假红。
+⛔ 不动：`scan_text()` 正则、A2 的 `≥200` 扫描面下限、
+`aether/check.py`、验收与提交先后、任何判据形态、产品代码、
+安全边界。A1 的 detail 现在分开报 `[tracked N / untracked N]`
+（契约④：两本账绝不合并成布尔）。
+
+误伤面取证：CI 在 `actions/checkout` 后直接跑
+`python -m aether check -j 2`，没有生成 untracked 文件的步骤；
+所有契约的写文件都落在 `tempfile.TemporaryDirectory()`
+（历次全量验收后 `git status --porcelain` 为空即是实证）。
+
+═══ 四、读数：干净仓库修前修后都是零命中 ⇒ 必须靠临时仓库正例 ═══
+
+⛔ **这是本轮最容易误判的一格**：生产仓库 `tracked 324 /
+untracked 0`，A1 修前修后都「零命中」。只看生产读数**证明不了
+闸被修好**（第 133 条：零命中先要证明量具能命中）。
+
+`scripts/probe_scan_surface.py` 在临时 git 仓库造 **6 类样本**
+（tracked clean / tracked dirty / untracked dirty /
+子目录 untracked dirty / ignored dirty / 脱敏 untracked），
+判据全部复用被测对象自己的 `scan_text()` / `read_text()` /
+`scan_surface()`（契约⑥：同源）。落盘
+`scripts/scan_surface_census.json`：
+
+| 扫描面 | 文件数 | hits |
+|---|---|---|
+| 旧（tracked-only） | 3 | `tracked_dirty.txt:1` |
+| 新 · tracked 账 | — | `tracked_dirty.txt:1`（**不变**） |
+| 新 · untracked 账 | 6 | `untracked_dirty.txt:1` + `nested/untracked_dirty.py:1` |
+
+`checks` **10/10 全 true**、`closure_ok=true`：旧尺子同源自检
+命中 1（量具没坏）、旧尺子漏掉根与子目录两条 untracked、
+新尺子两条都抓到、tracked 账不变、ignored 被排除、脱敏与
+干净文件零误伤、untracked 账里没有串账。
+⛔ 样本里的真实家目录一律**拼**出来、JSON 只存文件名与计数：
+本轮三个新文件自身都在 A1 扫描面里，`scan_text()` 零命中已复核。
+
+═══ 五、契约与反证 ═══
+
+`tests/contract_scan_surface_test.py` **27 项全绿 0 skip**
+（A 11 条钉读数 + 同源重跑 `measure()` / B 10 条临时仓库反证 /
+C 6 条本机实战与边界）。
+`/tmp/r106_falsify.py` **27 起注入反证全部恰好命中预期项**
+（`FALSIFICATION_OK=True`、基线 `FAILS=[]`）：逐条把 `ck` 的条件
+改成 `False`、保留 body 与缩进，确认每条断言都真会转红。
+
+B 组三个**事故版**各自钉住一个部件：
+
+- ① `candidate_files` 退回 tracked-only ⇒ untracked 账归零
+  （证明那 2 条命中确来自 ⑥ 的扩张，不是恒真）；
+- ② 去掉 `--exclude-standard` ⇒ ignored 脏文件被扫到
+  （证明它不是装饰，去掉就每轮假红）；
+- ③ `scan_text` 恒返回空 ⇒ 两本账全空
+  （证明「零命中」另有一种含义，A1 不是恒真）。
+
+C 组：生产扫描面 `≥200` 且两本账空、`candidate ⊇ tracked`、
+**本契约文件自身在候选面里**（提交前它正是 untracked）、
+`discover()` 是磁盘 glob、非 git 目录 ⇒ `git_files` 返回 `None`。
+
+量具自身的两处手滑如实留痕：`discover(d)` 首测返回 `[]`
+是因为临时目录没建 `tests/` 子目录（补建后 `True`）；
+反证脚本把事故版放 `/tmp` 后 `__file__` 推导会把 ROOT 指到 `/`，
+改成由 argv 传 ROOT、并把 C3 的文件名替换回真契约名。
+
+真 3.9.6 `ast.parse` 三个待提交 `.py` OK、裸 `noqa` 0、
+`diff --check` rc=0、**五个待提交文件**（含 3 个 untracked）
+`scan_text()` 零命中。
+
+**新设施**：`scripts/probe_scan_surface.py`、
+`scripts/scan_surface_census.json`、
+`tests/contract_scan_surface_test.py`（27 项）。
+
+═══ 六、⛔ 分寸 ═══
+
+- ⑥ 是**改量具**，不是改判据形态、不是改产品、不是改安全边界；
+  本轮不产出任何 F2P 读数，也不报「修好几个」。
+- 不宣布历史读数作废：§181 当时如实记录了「113/113 是假绿」，
+  本轮只是把那个洞**堵上**；166/176/177/178/182/183/184 的
+  结论不受影响。
+- ⛔ A1 现在扫 untracked ⇒ 提交前的新文件（含本轮 3 个
+  untracked）都会进扫描面；所以「待提交文件 `scan_text()`
+  零命中」仍是每轮静态四项里的一条，不能省。
+- 拍板清单更新：**⑥ 已落地**；① 扩张判据形态 ② 多步状态序列普查
+  ③ CI 先 `bootstrap` ④ 放宽内联器四条自限
+  ⑤ 放宽 / 降级 deny-modules —— **5 项一律未开工**。

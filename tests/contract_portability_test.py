@@ -21,9 +21,19 @@
 
 ═══ 本契约守什么 ═══
 
-1. **静态闸**：所有 `git ls-files` 里的文本文件，不许出现真实家目录
+1. **静态闸**：所有**候选文件**（`git ls-files` 的 tracked ∪
+   `--others --exclude-standard` 的 untracked）里的文本文件，不许出现真实家目录
    （`/Users/<名>` `/home/<名>` `C:\\Users\\<名>`）。脱敏形式
    （`/Users/…/V6`，取的是省略号不是用户名）**允许**，因为历史读数要保真。
+
+   ⛔ **§185 / 拍板 ⑥**：扫描面曾只认 tracked，而全量验收按纪律跑在
+   **提交前** —— 那时新加的文件全是 `??` ⇒ r101 的 113/113 是
+   「untracked 盲区」造成的假绿（README §181 有实战读数）。
+   `--exclude-standard` 不能省：`data/*.json` 等被 ignore 的运行产物
+   若纳入扫描面，会把「生成物」读成「待提交文件」，每轮假红。
+   ⛔ 只改**扫描面**：`scan_text()` 的正则、A2 的 ≥200 下限、
+   `aether/check.py` 的 `discover()`（它本来就是磁盘 glob，
+   执行面一直覆盖 untracked）、验收与提交的先后，一律不动。
 2. **占位符闸**：`impl.argv` 只认 `{python}` / `{repo}`，未知占位符
    **fail-closed**（`rejected`）—— 留成字面量会让"清单写错了"表现成
    "能力坏了"（第 107 条）。展开后**每个 argv 指向的文件必须真的存在**，
@@ -99,16 +109,46 @@ def scan_text(text: str) -> list[int]:
     return hits
 
 
-def tracked_files() -> list[str] | None:
-    """`git ls-files` 的清单；不是 git 检出 ⇒ None（"跑不了"≠"通过了"）。"""
+def git_files(*args: str, root: Path | None = None) -> list[str] | None:
+    """`git ls-files -z <args>` 的清单；不是 git 检出 / 命令失败 ⇒ None。
+
+    ⛔ "跑不了" ≠ "通过了"：A0 单独判 None（第 25 条：一个异常两种含义）。
+    ⛔ `root` 只给契约在**临时仓库**里做正例用；生产路径一律不传（= ROOT）。
+    """
     try:
-        r = subprocess.run(["git", "ls-files", "-z"], cwd=str(ROOT),
+        r = subprocess.run(["git", "ls-files", "-z", *args],
+                           cwd=str(root or ROOT),
                            capture_output=True, timeout=60)
     except (OSError, subprocess.SubprocessError):
         return None
     if r.returncode != 0:
         return None
     return [x for x in r.stdout.decode("utf-8", "replace").split("\0") if x]
+
+
+def tracked_files(root: Path | None = None) -> list[str] | None:
+    """§185 之前 A1 的全部扫描面；保留给反证组当「旧尺子」。"""
+    return git_files(root=root)
+
+
+def untracked_files(root: Path | None = None) -> list[str] | None:
+    """⑥：未跟踪但**没被 .gitignore 排除**的文件。
+
+    ⛔ `--exclude-standard` 是边界，不是优化：仓库的运行产物（`data/*.json`
+       之类）被 ignore，纳入扫描面会让每次全量验收都假红。
+    """
+    return git_files("--others", "--exclude-standard", root=root)
+
+
+def candidate_files(root: Path | None = None) -> list[str] | None:
+    """A1 的扫描面 = tracked ∪ untracked-non-ignored（去重、稳定排序）。
+
+    ⛔ 任一 git 命令失败 ⇒ None，绝不退化成「只扫一半」的假绿。
+    """
+    t, u = tracked_files(root), untracked_files(root)
+    if t is None or u is None:
+        return None
+    return sorted(set(t) | set(u))
 
 
 def read_text(p: Path) -> str | None:
@@ -122,32 +162,58 @@ def read_text(p: Path) -> str | None:
     return b.decode("utf-8", "replace")
 
 
-def main() -> None:
-    print("== A 组：静态闸 —— 跟踪文件里不许有真实家目录 ==")
-    files = tracked_files()
-    ck("A0 这是 git 检出（否则本组**没跑**，不是通过）", files is not None,
-       "git ls-files 失败 —— 从 tarball 解出来的目录里本组无从断言")
-    if files is None:
-        files = []
+def scan_surface(root: Path | None = None) -> dict | None:
+    """A1 的**实际扫描动作**：两本账分别记 tracked / untracked 命中。
 
-    hits: list[str] = []
+    ⛔ `main()` 与 `contract_scan_surface_test.py` 都调它 —— 契约不许
+       另写一份扫描器（eval-standard-anchoring 契约⑥：判据必须同源）。
+    ⛔ 两本账**分开记、分开报**：tracked 命中是存量脏数据，untracked
+       命中是「提交前的新文件」，两者修法完全不同（契约④的同形）。
+    """
+    base = root or ROOT
+    files = candidate_files(base)
+    if files is None:
+        return None
+    tracked = set(tracked_files(base) or ())
+    hits_t: list[str] = []
+    hits_u: list[str] = []
     n_scanned = 0
     for rel in files:
-        p = ROOT / rel
+        p = base / rel
         if not p.is_file():
             continue
         text = read_text(p)
         if text is None:
             continue
         n_scanned += 1
+        bucket = hits_t if rel in tracked else hits_u
         for ln in scan_text(text):
-            hits.append(f"{rel}:{ln}")
+            bucket.append(f"{rel}:{ln}")
+    return {
+        "files": files,
+        "n_scanned": n_scanned,
+        "tracked": sorted(hits_t),
+        "untracked": sorted(hits_u),
+    }
 
-    ck("A1 ⛔ 跟踪文件里零真实家目录（44 → 0）", not hits,
-       f"命中 {len(hits)} 处：{hits[:6]}")
+
+def main() -> None:
+    print("== A 组：静态闸 —— 候选文件（含 untracked）里不许有真实家目录 ==")
+    surf = scan_surface()
+    ck("A0 这是 git 检出（否则本组**没跑**，不是通过）", surf is not None,
+       "git ls-files 失败 —— 从 tarball 解出来的目录里本组无从断言")
+    if surf is None:
+        surf = {"files": [], "n_scanned": 0, "tracked": [], "untracked": []}
+
+    #: ⛔ 两本账分开报：只给一个合并布尔，就分不清「存量脏数据」和
+    #:    「提交前的新文件」—— 这正是 r101 假绿当时看不出来的那一格。
+    hits = surf["tracked"] + surf["untracked"]
+    ck("A1 ⛔ 候选文件里零真实家目录（44 → 0）", not hits,
+       f"命中 {len(hits)} 处 [tracked {len(surf['tracked'])} / "
+       f"untracked {len(surf['untracked'])}]：{hits[:6]}")
     #: 扫描面必须够大：只扫到 3 个文件也会"零命中"。
-    ck("A2 扫描面覆盖足够（≥200 个文本文件）", n_scanned >= 200,
-       f"只扫了 {n_scanned} 个")
+    ck("A2 扫描面覆盖足够（≥200 个文本文件）", surf["n_scanned"] >= 200,
+       f"只扫了 {surf['n_scanned']} 个")
     #: ⛔ 反证：注入三条**必定命中**的样本 ⇒ 扫描器必须报出来。
     #:    没有这一条，"零命中"可能只是正则写错了（第 133 条）。
     injected = ("x = \"" + _PREFIXES[0] + "alice" + "/repo/y.py\"\n"

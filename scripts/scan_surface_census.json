@@ -1,0 +1,52 @@
+{
+  "fixture": {
+    "n_tracked": 3,
+    "n_untracked": 3,
+    "tracked": [
+      ".gitignore",
+      "tracked_clean.txt",
+      "tracked_dirty.txt"
+    ],
+    "untracked": [
+      "nested/untracked_dirty.py",
+      "untracked_dirty.txt",
+      "untracked_redacted.txt"
+    ],
+    "ignored": [
+      "ignored_dirty.txt"
+    ],
+    "n_categories": 6
+  },
+  "old_surface": {
+    "kind": "tracked-only (git ls-files)",
+    "n_files": 3,
+    "hits": [
+      "tracked_dirty.txt:1"
+    ]
+  },
+  "new_surface": {
+    "kind": "tracked + untracked-non-ignored",
+    "n_files": 6,
+    "n_scanned": 6,
+    "hits_tracked": [
+      "tracked_dirty.txt:1"
+    ],
+    "hits_untracked": [
+      "nested/untracked_dirty.py:1",
+      "untracked_dirty.txt:1"
+    ]
+  },
+  "checks": {
+    "old_selfcheck_hit": true,
+    "old_missed_root_untracked": true,
+    "old_missed_nested_untracked": true,
+    "new_caught_root_untracked": true,
+    "new_caught_nested_untracked": true,
+    "tracked_hit_unchanged": true,
+    "ignored_excluded": true,
+    "redacted_not_hit": true,
+    "clean_not_hit": true,
+    "untracked_only_leak": true
+  },
+  "closure_ok": true
+}
