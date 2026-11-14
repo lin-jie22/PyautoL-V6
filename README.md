@@ -9991,3 +9991,114 @@ F 组，不 spawn 子进程（单次契约 50–60s 全耗在 3 仓库 census）
 —— **3 项一律未开工**；① 已取证收口、④ / ⑥ 已落地；
 ⛔ 另有 190 留下的「修 `ok_nogold` ledger 语义 / 补 189 反证组」
 一条，合计 4 条待拍板。
+
+### 192. ⛔⛔ **189 的「四条全放宽且默认生效」只有三类证据：静态 AST / 零沙箱合成 / 零沙箱离线；产品主流程运行证据 0 份**（2026-11-14）
+
+═══ 一、起点：191 只证明「源码 AST 里四位各有读取点」 ═══
+
+189（r110，用户二次逐字拍板）把四条自限做成 `RelaxPolicy` 四个
+布尔位，默认 `RELAXED` 签名 `1111`、`--strict` 逐字回 `0000`，
+并声明「四条全放宽且默认生效」。190 报两口径 `verified 60→60`；
+191（r112）把 190 的 reach 量成 `1/4`，同时明确**四位在产品源码
+里各有读取点**。
+
+⛔ 契约⑤：**静态不得声称看到了运行**。191 的 `4/4` 是 AST
+读取点，不是运行时走到；而 189 拍板里「**默认生效**」这半句，
+从未被按**证据类型**分层量过。本轮**纯只读取证**只查这一件：
+「默认生效」由哪几类证据支撑、产品主流程运行证据有几份。
+
+便宜对照（零沙箱）先定方向：
+
+| 证据面 | 实际读数 | 能不能算「主流程运行」 |
+|---|---|---|
+| 产品 AST | 四位 `policy.<field>` 各有读取点 `4/4` | 否（静态） |
+| 189 C 账 | 真跑 `run_all` **2 次** | 否：`run_all(source, items, timeout, pkg)` 签名**没有 `policy`** ⇒ 对四位触达 `0/4` |
+| 190 / 191 | 零沙箱离线重放 135 主账，reach `1/4` | 否（离线） |
+| 产品主流程 | `main()` 唯一接 `resolve_policy(args.strict)`；`--repo` required、会遍历真实 commit / expr | 属 §183 禁令面，**189 / 190 / 191 三轮 0 次运行** |
+
+`scripts/*.json` 共 29 份，排除本轮自身产物后 28 份里，
+`main() --out` 产物形态（`policy + stats + per_commit`）**0 份**；
+探测器先喂合成正例证明能命中（零命中先证查询能命中，第 133 条）。
+⛔⛔ **`0` 是「运行证据 0 份」，不是「默认没生效」**。
+
+═══ 二、四本账（⛔ 不合并成布尔）═══
+
+| 账 | 做法 | 封闭读数 |
+|---|---|---|
+| **A 接入点** | AST 同源抽四位字段 / 读取函数 / `resolve_policy` 调用点；`is_call_to()` 同时认 `name(...)` 与 `mod.name(...)`；**显式排除自身量具 + 契约 2 个模块**（否则契约文件自己成第 7 个调用点 ⇒ 分母漂移、F3/F6 恒红），排除项写进 A 账与 closure `a16` | 4 位 / `readers`：`cross_scope→merge_bindings`、`first_rhs→bindings_for`、`allow_unstable→evaluate_case, main`、`no_gold_gate→adopt_probe`；`n_call_sites=5`（5 个文件）、`n_attribute_form_sites=4`、`production_entry_calls=["main"]`、`n_production_entry_files=1`；`run_all.args=["source","items","timeout","pkg"]`、`has_policy=false`；`main --repo` required、`__name__ == "__main__"` guard 在位 |
+| **B 运行证据** | 扫描 `scripts/*.json`，按形态判 `main()` 产物；189 C 账源码级核对 | `n_all_json_in_scripts=29` → 排除自身产物 → `n_archives_scanned=28`（幂等）；22 份 dict 的 `has_main_product_keys` / `has_policy_field` 全 `false`、6 份顶层 list 记「**不适用**」（契约⑤：缺键不得读作零命中）；`n_archives_with_per_commit=1`（`criteria_gate_census.json`，无 `policy`）；探测器 `teeth=True`；189 C 账 2 次 `run_all` 全是合成 `f(3)`、真实 expr 0 / commit 0；**`n_main_runtime_evidence=0`** |
+| **C 四层 reach** | 四条链各按**本链实际调用到的函数**对拍四位字段，calls 全从源码 AST 派生 | `static 4/4`（AST，非运行）/ `synthetic_189 4/4`（36 行 / 6 合成 case）/ `offline_190_191 1/4`（与 191 逐字一致）/ `production_main_runtime 0/4`；四层分母不同（静态源码 / 6 合成 case / 135 主账 / 真实主流程），`denominators_different=true`、`merged_into_bool=false`；`synthetic` 7 个 calls、`offline` 3 个 calls |
+| **D 边界** | 策略签名、三分母双源、superseded、验锚、自身沙箱自检 | 默认 `1111` / `--strict` `0000` **只在纯函数层可复算**（F4 事故版恒返 `STRICT` ⇒ 同源实算 `resolve_default` 翻到 `0000`）；`135 / 119 / 94` 分开且 `rows` 与 `summary.n_rows` 双源相等；superseded `3/3` sha 对拍；验锚 `OK 3/3 diffs=0`；尺子零 `eval/exec/环境模块`；真实 expr / commit / F2P / 收益全 0 |
+
+═══ 三、⛔ 分寸：证据类型边界，不是产品洞 ═══
+
+1. 本轮量的是**证据类型**，不是开关状态。`resolve_policy(False)`
+   返回 `RELAXED` 在纯函数层可复算；据此说「默认没生效」是越界推论。
+2. 静态 `4/4` 只表示四位各有读取点；按契约⑤，不得声称看到了运行。
+3. 189 C 账那 2 次真跑是**合成装置自检**，`run_all` 不接
+   `policy` ⇒ 对四位触达 `0/4`；不能拿它当主流程运行证据。
+4. `0/28` 是「没有该类产物」，不是「差异为 0」；6 份顶层 list
+   的缺键按「不适用」记（190 的同源教训）。
+5. 唯一能补出产品主流程运行证据的入口是 `main() --repo`，会碰
+   真实 commit / expr ⇒ §183 禁令面，**本轮零触碰**。
+6. ⛔ **不推翻 186–191、不改 189 语义、不报收益、不宣布 ④
+   有效 / 无效**；`aether/`、`probe_context_gate.py`、
+   189 / 190 / 191 存档一个字节未改。
+
+═══ 四、契约、反证与静态四项 ═══
+
+`tests/contract_default_effect_test.py` **A–E 100 项 + F 组 6 项
+= 106 项全绿 0 skip**。⛔ F3 是同源实算（不读存档结论字段），
+专供事故版补丁打红；F4 事故版恒返 `STRICT`；F5 探测器正例命中 /
+真实存档全不命中（证明 `0` 不是恒空）；F6 一次真实验锚读数 +
+尺子同源重算幂等 + `closure 49/49` + A1 三文件纳入。
+
+`/tmp/r113_falsify.py` 注入反证全中：阶段 1 `100/100` 逐条置
+`False` 恰好该项转红、阶段 2 `83/83` 篡改存档字段、阶段 2b
+`6/6` 事故版产品 / 尺子函数（均打红 F3 同源实算）、阶段 3
+`6/6` F 组同进程逐条撤回，基线完整真跑 `FAILS=[]`、
+`FALSIFICATION_OK=True BAD=[]`。沿用 r109/r111/r112 分层反证：
+一次真实验锚读数缓存 + 同进程跑 F 组，不 spawn 子进程。
+
+⛔ 尺子 / 契约自身 **6 类真红**如实留痕（第 34 条：修尺子、
+不放宽断言）：
+① 首跑 `41/43`：`fields_reached_by()` 把量具 `evaluate_case`
+硬编码进所有链 ⇒ 190/191 离线链误含 `allow_unstable`（`2/4`）；
+改成本链实际调用集合 ⇒ 复跑 `43/43`、`offline 1/4`。
+② `superseded` 首版把登记簿 `archives` 猜成 dict ⇒ 真红；改按
+`archive_sha256_at_registration` 逐份对拍磁盘 sha ⇒ `3/3`。
+③ `resolve_policy` 抽取器只认 `ast.Name`，漏
+`CG.resolve_policy(...)` 属性形式 ⇒ 新增 `is_call_to()` 同时认
+`ast.Name` / `ast.Attribute` + 属性正例 `attr_form_teeth` ⇒ `46/46`。
+④ 契约文件自身成为第 7 个调用点，分母漂移使 F3/F6 恒红 ⇒
+新增 `SELF_MEASURE_MODULES` 显式排除量具 + 契约 2 个模块，
+排除项写进 A 账与 closure `a16` ⇒ `49/49`。
+⑤ 契约首跑 A23 / F3 / F6 真红：A23 断言文案写成「非运行」而
+boundary 逐字是「读取点存在 ≠ 运行时走到」；F3/F6 同上条分母。
+⑥ 反证阶段 2 只有 `82/83`：B6 初版只断言 `len(shapes)==28`、
+篡改内容打不红 ⇒ 加强为「22 份 dict 零命中 + 6 份非 dict 标
+不适用」，复跑 `83/83`。另有一次契约进程被并发资源争用
+SIGTERM(137)，单独重跑给足 timeout ⇒ 106 全绿（环境性，非产品）。
+
+静态四项：真 3.9.6 `ast.parse(feature_version=(3,9))` 对 2 个
+新 `.py` 全 OK、裸 `noqa` 0、`git diff --check` rc=0、A1 扫描面
+`n_scanned=348` / 候选面 `n_candidates=350`、4 个待交付文件
+（含 `README.md`）全在候选面且 `scan_text()` 零命中 +
+正例反证命中 1。`closure 49/49`、尺子重跑 sha 幂等
+（`c08618ed…`）、验锚 `OK 3/3 diffs=0`。
+
+**新设施**：`scripts/probe_default_effect.py`、
+`scripts/default_effect_census.json`（口径
+`default_effect_census/v1` 另存）、
+`tests/contract_default_effect_test.py`。
+
+═══ 五、拍板清单（未变，仍是 4 条）═══
+
+本轮是**纯只读取证**，不构成新拍板项。② 多步状态序列
+③ CI 先 `bootstrap` 再跑 H 组（需 workflow scope PAT）
+⑤ 放宽 / 降级 deny-modules（安全边界、需显式审批）
+—— **3 项一律未开工**；① 已取证收口、④ / ⑥ 已落地；
+⛔ 另有 190 留下的「修 `ok_nogold` ledger 语义 / 补 189 反证组」
+一条，合计 4 条待拍板。⛔ 补产品主流程运行证据须跑
+`main() --repo`、碰 §183 禁令面，属**取证面授权**而非改判据
+语义；未经显式拍板一律不跑，不并入上述 4 条。

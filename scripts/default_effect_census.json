@@ -1,0 +1,1305 @@
+{
+  "schema": "default_effect_census/v1",
+  "caliber": {
+    "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+    "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+    "scripts/probe_inliner_relax.py": "94e150f006ea6be8d3e3ec9b039ee1de5f6d7837952d485220a9cb4a499156f4",
+    "scripts/probe_nogold_gap.py": "ef428eeb1bae1182be0fa5152ab62b88bea20572ed0ce10eaed6e2eb8c7082fd",
+    "scripts/probe_policy_reach.py": "13088aee616e32d2fe7a70f839e92364c59216ed2355b5a705ff63042c07de5d",
+    "scripts/probe_default_effect.py": "881318647f769036f321a0dfb5f7ececa1d4279355ee27027e2f342ccfd0d9f3",
+    "scripts/inliner_relax_census.json": "4399b741b6383b8cc2238972e765f1a71c187ec35ae650f76099f12b582c3bcd",
+    "scripts/nogold_gap_census.json": "c3a588e42b16c79e11cdfaaeda4a595106a59bba2e87a950f02353b0bf71a9c9",
+    "scripts/policy_reach_census.json": "d58b3356c3d31266576650feaffe2c7d5687193f87b67f24f62592b797946205",
+    "scripts/extract_downstream.json": "896220cd2849f6740a0fc28daf6e434c7ed77445237b60f3b1288a3cf7d8d266",
+    "scripts/form_shape_attribution.json": "b536f832e4ba0fc7bc734321dae058007de4e556d6699a7ec8c010b6d7556309",
+    "scripts/no_result_attribution.json": "1feae1a5d74e830d0d609e3b507d8842d577c6a851b377c9ef205e2161446d0b",
+    "scripts/caliber_superseded.json": "77a828b6a82e3afefa83f23c21cbbab7360e091486a4f517e867a89c277265fb",
+    "scripts/realrepo_baseline.json": "0585f86b9146fe0aa203c936af2dcd576f34b3b55c27fabc59db93073558b0fb"
+  },
+  "accounts": {
+    "A_entry_points": {
+      "n_call_sites": 5,
+      "n_attribute_form_sites": 4,
+      "excluded_self_measure_modules": [
+        "scripts/probe_default_effect.py",
+        "tests/contract_default_effect_test.py"
+      ],
+      "n_excluded_self_measure_modules": 2,
+      "denominator_stable_by_explicit_exclusion": true,
+      "source": "scripts/probe_context_gate.py::RelaxPolicy / resolve_policy / run_all / main",
+      "fields": [
+        "cross_scope",
+        "first_rhs",
+        "allow_unstable",
+        "no_gold_gate"
+      ],
+      "n_fields": 4,
+      "readers": {
+        "cross_scope": [
+          "merge_bindings"
+        ],
+        "first_rhs": [
+          "bindings_for"
+        ],
+        "allow_unstable": [
+          "evaluate_case",
+          "main"
+        ],
+        "no_gold_gate": [
+          "adopt_probe"
+        ]
+      },
+      "n_fields_with_reader": 4,
+      "resolve_policy_calls": {
+        "scripts/probe_context_gate.py": {
+          "functions": [
+            "main",
+            "selftest"
+          ],
+          "forms": [
+            "direct"
+          ]
+        },
+        "scripts/probe_inliner_relax.py": {
+          "functions": [
+            "measure"
+          ],
+          "forms": [
+            "attribute"
+          ]
+        },
+        "scripts/probe_policy_reach.py": {
+          "functions": [
+            "account_d"
+          ],
+          "forms": [
+            "attribute"
+          ]
+        },
+        "tests/contract_context_gate_test.py": {
+          "functions": [
+            "main"
+          ],
+          "forms": [
+            "attribute"
+          ]
+        },
+        "tests/contract_inliner_relax_test.py": {
+          "functions": [
+            "group_c"
+          ],
+          "forms": [
+            "attribute"
+          ]
+        }
+      },
+      "production_entry_calls": [
+        "main"
+      ],
+      "n_production_entry_files": 1,
+      "nonproduction_call_sites": {
+        "scripts/probe_context_gate.py": {
+          "functions": [
+            "main",
+            "selftest"
+          ],
+          "forms": [
+            "direct"
+          ]
+        },
+        "scripts/probe_inliner_relax.py": {
+          "functions": [
+            "measure"
+          ],
+          "forms": [
+            "attribute"
+          ]
+        },
+        "scripts/probe_policy_reach.py": {
+          "functions": [
+            "account_d"
+          ],
+          "forms": [
+            "attribute"
+          ]
+        },
+        "tests/contract_context_gate_test.py": {
+          "functions": [
+            "main"
+          ],
+          "forms": [
+            "attribute"
+          ]
+        },
+        "tests/contract_inliner_relax_test.py": {
+          "functions": [
+            "group_c"
+          ],
+          "forms": [
+            "attribute"
+          ]
+        }
+      },
+      "run_all_signature": {
+        "args": [
+          "source",
+          "items",
+          "timeout",
+          "pkg"
+        ],
+        "has_policy": false,
+        "n_args": 4
+      },
+      "main_entry": {
+        "required_args": [
+          "--repo"
+        ],
+        "requires_repo": true,
+        "has_name_main_guard": true,
+        "main_callers_in_repo": {
+          "aether/__main__.py": [
+            "<module>"
+          ],
+          "aether/check.py": [
+            "<module>"
+          ],
+          "aether/cli.py": [
+            "<module>"
+          ],
+          "aether/selfcheck.py": [
+            "<module>"
+          ],
+          "aether/serve.py": [
+            "<module>"
+          ],
+          "aether/ui.py": [
+            "<module>"
+          ],
+          "scripts/ab_generalization.py": [
+            "<module>"
+          ],
+          "scripts/arch_scan.py": [
+            "<module>"
+          ],
+          "scripts/audit_zero_events.py": [
+            "<module>"
+          ],
+          "scripts/demo_evolve.py": [
+            "<module>"
+          ],
+          "scripts/embedding_bench.py": [
+            "<module>"
+          ],
+          "scripts/ext_reverse.py": [
+            "<module>"
+          ],
+          "scripts/llm_e2e.py": [
+            "<module>"
+          ],
+          "scripts/probe_alias_demote.py": [
+            "<module>"
+          ],
+          "scripts/probe_allthin_denominator.py": [
+            "<module>"
+          ],
+          "scripts/probe_auto_unlock.py": [
+            "<module>"
+          ],
+          "scripts/probe_baseline_incident.py": [
+            "<module>"
+          ],
+          "scripts/probe_boolop_dimension.py": [
+            "<module>"
+          ],
+          "scripts/probe_boundary_audit.py": [
+            "<module>"
+          ],
+          "scripts/probe_candidate_squeeze.py": [
+            "<module>"
+          ],
+          "scripts/probe_context_gate.py": [
+            "<module>"
+          ],
+          "scripts/probe_criteria_gate_census.py": [
+            "<module>"
+          ],
+          "scripts/probe_ctx_downstream.py": [
+            "<module>"
+          ],
+          "scripts/probe_default_effect.py": [
+            "<module>"
+          ],
+          "scripts/probe_default_values_audit.py": [
+            "<module>"
+          ],
+          "scripts/probe_env_sensitivity.py": [
+            "<module>"
+          ],
+          "scripts/probe_extract_downstream.py": [
+            "<module>"
+          ],
+          "scripts/probe_focus_census.py": [
+            "<module>"
+          ],
+          "scripts/probe_focus_reach.py": [
+            "<module>"
+          ],
+          "scripts/probe_form_boundary.py": [
+            "<module>"
+          ],
+          "scripts/probe_form_shape_attribution.py": [
+            "<module>"
+          ],
+          "scripts/probe_frontier_audit.py": [
+            "<module>"
+          ],
+          "scripts/probe_frozen_suite_design.py": [
+            "<module>"
+          ],
+          "scripts/probe_gate_attribution.py": [
+            "<module>"
+          ],
+          "scripts/probe_gate_discrimination.py": [
+            "<module>"
+          ],
+          "scripts/probe_growth_ceiling.py": [
+            "<module>"
+          ],
+          "scripts/probe_headroom_source.py": [
+            "<module>"
+          ],
+          "scripts/probe_import_error_census.py": [
+            "<module>"
+          ],
+          "scripts/probe_import_failure_attribution.py": [
+            "<module>"
+          ],
+          "scripts/probe_inliner_relax.py": [
+            "<module>"
+          ],
+          "scripts/probe_is_shape.py": [
+            "<module>"
+          ],
+          "scripts/probe_kind_mix.py": [
+            "<module>"
+          ],
+          "scripts/probe_level_alignment.py": [
+            "<module>"
+          ],
+          "scripts/probe_loader_gate.py": [
+            "<module>"
+          ],
+          "scripts/probe_memory_audit.py": [
+            "<module>"
+          ],
+          "scripts/probe_mutate_render.py": [
+            "<module>"
+          ],
+          "scripts/probe_no_result_attribution.py": [
+            "<module>"
+          ],
+          "scripts/probe_nogold_gap.py": [
+            "<module>"
+          ],
+          "scripts/probe_package_load.py": [
+            "<module>"
+          ],
+          "scripts/probe_parallel_feasibility.py": [
+            "<module>"
+          ],
+          "scripts/probe_policy_reach.py": [
+            "<module>"
+          ],
+          "scripts/probe_render_mode.py": [
+            "<module>"
+          ],
+          "scripts/probe_repair_literals.py": [
+            "<module>"
+          ],
+          "scripts/probe_residual_diag.py": [
+            "<module>"
+          ],
+          "scripts/probe_route_chain.py": [
+            "<module>"
+          ],
+          "scripts/probe_sandbox_audit.py": [
+            "<module>"
+          ],
+          "scripts/probe_scan_surface.py": [
+            "<module>"
+          ],
+          "scripts/probe_shape_ruler.py": [
+            "<module>"
+          ],
+          "scripts/probe_spread_audit.py": [
+            "<module>"
+          ],
+          "scripts/probe_synth_layer.py": [
+            "<module>"
+          ],
+          "scripts/probe_synth_overfit.py": [
+            "<module>"
+          ],
+          "scripts/probe_time_param.py": [
+            "<module>"
+          ],
+          "scripts/probe_truncation_census.py": [
+            "<module>"
+          ],
+          "scripts/probe_uci_e2e.py": [
+            "<module>"
+          ],
+          "scripts/probe_unlock_candidates.py": [
+            "<module>"
+          ],
+          "scripts/probe_upper_bound.py": [
+            "<module>"
+          ],
+          "scripts/rea_bridge.py": [
+            "<module>"
+          ],
+          "scripts/realbug_batch.py": [
+            "<module>"
+          ],
+          "scripts/realbug_experiment.py": [
+            "<module>"
+          ],
+          "scripts/realbug_import.py": [
+            "<module>"
+          ],
+          "scripts/realbug_shape_census.py": [
+            "<module>"
+          ],
+          "scripts/realrepo_baseline.py": [
+            "<module>"
+          ],
+          "scripts/run_contracts.py": [
+            "<module>"
+          ],
+          "scripts/swb_import.py": [
+            "<module>"
+          ],
+          "scripts/worldgen.py": [
+            "<module>"
+          ],
+          "tests/contract_agent_test.py": [
+            "<module>"
+          ],
+          "tests/contract_alias_demote_test.py": [
+            "<module>"
+          ],
+          "tests/contract_allthin_denominator_test.py": [
+            "<module>"
+          ],
+          "tests/contract_archive_reseed_test.py": [
+            "<module>"
+          ],
+          "tests/contract_assert_wiring_test.py": [
+            "<module>"
+          ],
+          "tests/contract_auth_test.py": [
+            "<module>"
+          ],
+          "tests/contract_auto_probes_class_test.py": [
+            "<module>"
+          ],
+          "tests/contract_autonomy_test.py": [
+            "<module>"
+          ],
+          "tests/contract_backup_test.py": [
+            "<module>"
+          ],
+          "tests/contract_baseline_incident_test.py": [
+            "<module>"
+          ],
+          "tests/contract_baseline_leak_test.py": [
+            "<module>"
+          ],
+          "tests/contract_boulders_test.py": [
+            "<module>"
+          ],
+          "tests/contract_boundary_test.py": [
+            "<module>"
+          ],
+          "tests/contract_caliber_test.py": [
+            "<module>"
+          ],
+          "tests/contract_caps_candidate_test.py": [
+            "<module>"
+          ],
+          "tests/contract_causality_test.py": [
+            "<module>"
+          ],
+          "tests/contract_ceiling_test.py": [
+            "<module>"
+          ],
+          "tests/contract_check_test.py": [
+            "<module>"
+          ],
+          "tests/contract_checkpoint_test.py": [
+            "<module>"
+          ],
+          "tests/contract_cleanup_test.py": [
+            "<module>"
+          ],
+          "tests/contract_cli_help_test.py": [
+            "<module>"
+          ],
+          "tests/contract_commit_verdict_test.py": [
+            "<module>"
+          ],
+          "tests/contract_console_render_test.py": [
+            "<module>"
+          ],
+          "tests/contract_context_gate_test.py": [
+            "<module>"
+          ],
+          "tests/contract_criteria_gate_census_test.py": [
+            "<module>"
+          ],
+          "tests/contract_ctx_downstream_test.py": [
+            "<module>"
+          ],
+          "tests/contract_default_effect_test.py": [
+            "<module>"
+          ],
+          "tests/contract_discover_test.py": [
+            "<module>"
+          ],
+          "tests/contract_entrypoints_test.py": [
+            "<module>"
+          ],
+          "tests/contract_env_docs_test.py": [
+            "<module>"
+          ],
+          "tests/contract_evidence_granularity_test.py": [
+            "<module>"
+          ],
+          "tests/contract_evolution_test.py": [
+            "<module>"
+          ],
+          "tests/contract_experience_loop_test.py": [
+            "<module>"
+          ],
+          "tests/contract_extract_downstream_test.py": [
+            "<module>"
+          ],
+          "tests/contract_fallback_reachability_test.py": [
+            "<module>"
+          ],
+          "tests/contract_focus_census_test.py": [
+            "<module>"
+          ],
+          "tests/contract_focus_reach_test.py": [
+            "<module>"
+          ],
+          "tests/contract_form_boundary_test.py": [
+            "<module>"
+          ],
+          "tests/contract_form_shape_attribution_test.py": [
+            "<module>"
+          ],
+          "tests/contract_gate_attribution_test.py": [
+            "<module>"
+          ],
+          "tests/contract_gate_discrimination_test.py": [
+            "<module>"
+          ],
+          "tests/contract_generalization_test.py": [
+            "<module>"
+          ],
+          "tests/contract_ghost_route_test.py": [
+            "<module>"
+          ],
+          "tests/contract_ghprobe_test.py": [
+            "<module>"
+          ],
+          "tests/contract_headroom_source_test.py": [
+            "<module>"
+          ],
+          "tests/contract_ho_growth_test.py": [
+            "<module>"
+          ],
+          "tests/contract_import_error_census_test.py": [
+            "<module>"
+          ],
+          "tests/contract_import_failure_attribution_test.py": [
+            "<module>"
+          ],
+          "tests/contract_inliner_relax_test.py": [
+            "<module>"
+          ],
+          "tests/contract_install_auto_test.py": [
+            "<module>"
+          ],
+          "tests/contract_interop_test.py": [
+            "<module>"
+          ],
+          "tests/contract_is_shape_test.py": [
+            "<module>"
+          ],
+          "tests/contract_judge_test.py": [
+            "<module>"
+          ],
+          "tests/contract_knowledge_consume_test.py": [
+            "<module>"
+          ],
+          "tests/contract_learner_test.py": [
+            "<module>"
+          ],
+          "tests/contract_ledger_test.py": [
+            "<module>"
+          ],
+          "tests/contract_loader_gate_test.py": [
+            "<module>"
+          ],
+          "tests/contract_mutate_render_test.py": [
+            "<module>"
+          ],
+          "tests/contract_no_result_attribution_test.py": [
+            "<module>"
+          ],
+          "tests/contract_nogold_gap_test.py": [
+            "<module>"
+          ],
+          "tests/contract_nongression_test.py": [
+            "<module>"
+          ],
+          "tests/contract_notprobed_test.py": [
+            "<module>"
+          ],
+          "tests/contract_novelty_test.py": [
+            "<module>"
+          ],
+          "tests/contract_ops_test.py": [
+            "<module>"
+          ],
+          "tests/contract_overfit_provenance_test.py": [
+            "<module>"
+          ],
+          "tests/contract_package_load_test.py": [
+            "<module>"
+          ],
+          "tests/contract_packaging_test.py": [
+            "<module>"
+          ],
+          "tests/contract_policy_reach_test.py": [
+            "<module>"
+          ],
+          "tests/contract_portability_test.py": [
+            "<module>"
+          ],
+          "tests/contract_provenance_test.py": [
+            "<module>"
+          ],
+          "tests/contract_pycompat_test.py": [
+            "<module>"
+          ],
+          "tests/contract_raises_criteria_test.py": [
+            "<module>"
+          ],
+          "tests/contract_rea_bridge_test.py": [
+            "<module>"
+          ],
+          "tests/contract_realrepo_baseline_test.py": [
+            "<module>"
+          ],
+          "tests/contract_release_test.py": [
+            "<module>"
+          ],
+          "tests/contract_release_toml_test.py": [
+            "<module>"
+          ],
+          "tests/contract_repair_render_test.py": [
+            "<module>"
+          ],
+          "tests/contract_resume_window_test.py": [
+            "<module>"
+          ],
+          "tests/contract_root_resolve_test.py": [
+            "<module>"
+          ],
+          "tests/contract_sampling_test.py": [
+            "<module>"
+          ],
+          "tests/contract_saturation_test.py": [
+            "<module>"
+          ],
+          "tests/contract_scan_surface_test.py": [
+            "<module>"
+          ],
+          "tests/contract_scoped_commit_test.py": [
+            "<module>"
+          ],
+          "tests/contract_seeds_test.py": [
+            "<module>"
+          ],
+          "tests/contract_self_reference_probe_test.py": [
+            "<module>"
+          ],
+          "tests/contract_selfcheck_test.py": [
+            "<module>"
+          ],
+          "tests/contract_shape_ruler_test.py": [
+            "<module>"
+          ],
+          "tests/contract_srcmut_test.py": [
+            "<module>"
+          ],
+          "tests/contract_static_hygiene_test.py": [
+            "<module>"
+          ],
+          "tests/contract_store_migration_test.py": [
+            "<module>"
+          ],
+          "tests/contract_streaming_test.py": [
+            "<module>"
+          ],
+          "tests/contract_synth_gate_test.py": [
+            "<module>"
+          ],
+          "tests/contract_synth_overfit_test.py": [
+            "<module>"
+          ],
+          "tests/contract_synthesize_test.py": [
+            "<module>"
+          ],
+          "tests/contract_task_quality_test.py": [
+            "<module>"
+          ],
+          "tests/contract_time_param_test.py": [
+            "<module>"
+          ],
+          "tests/contract_traceability_test.py": [
+            "<module>"
+          ],
+          "tests/contract_truncation_census_test.py": [
+            "<module>"
+          ],
+          "tests/contract_unittest_extract_test.py": [
+            "<module>"
+          ],
+          "tests/contract_upper_bound_test.py": [
+            "<module>"
+          ],
+          "tests/contract_verifier_test.py": [
+            "<module>"
+          ],
+          "tests/contract_warmstart_test.py": [
+            "<module>"
+          ],
+          "tests/contract_world_facts_test.py": [
+            "<module>"
+          ],
+          "tests/contract_worldgen_test.py": [
+            "<module>"
+          ],
+          "tests/contract_zero_event_paths_test.py": [
+            "<module>"
+          ]
+        }
+      },
+      "extractor_selfcheck": {
+        "pos_hit": 4,
+        "pos_total": 4,
+        "neg_hit": 0,
+        "call_extractor_pos": [
+          "a"
+        ],
+        "call_extractor_neg": [],
+        "attr_form_pos": [
+          "b"
+        ],
+        "attr_form_teeth": true,
+        "call_extractor_pos_legacy": [
+          "a"
+        ]
+      },
+      "boundary": "A 账纯 AST，零沙箱、零真实 expr、零真实 commit；读取点存在 ≠ 运行时走到"
+    },
+    "B_runtime_evidence": {
+      "n_archives_scanned": 28,
+      "excluded_self_product": [
+        "default_effect_census.json"
+      ],
+      "n_all_json_in_scripts": 29,
+      "idempotent_by_explicit_exclusion": true,
+      "shapes": {
+        "scripts/arch_baseline.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "acknowledged",
+            "baseline",
+            "n_acknowledged",
+            "note",
+            "schema",
+            "written_at"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/baseline_incident.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "bootstrap",
+            "broken",
+            "caliber",
+            "falsification",
+            "gate_coverage",
+            "incidents",
+            "recovered",
+            "schema",
+            "summary"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/caliber_superseded.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "aether_extract_sha256_unchanged",
+            "archive_sha256_at_registration",
+            "archives",
+            "entries",
+            "file",
+            "new_sha256",
+            "old_sha256",
+            "readme_section",
+            "reason",
+            "registered_at",
+            "schema"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/census_attrs_40.json": {
+          "parseable": true,
+          "is_dict": false
+        },
+        "scripts/census_boltons_40.json": {
+          "parseable": true,
+          "is_dict": false
+        },
+        "scripts/census_mi_40.json": {
+          "parseable": true,
+          "is_dict": false
+        },
+        "scripts/criteria_gate_census.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "caliber",
+            "per_commit",
+            "rows",
+            "schema",
+            "summary"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": true
+        },
+        "scripts/ctx_downstream.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "caliber",
+            "rows",
+            "schema",
+            "skipped",
+            "summary"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/extract_downstream.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "caliber",
+            "form_diagnostic_rows",
+            "rows",
+            "schema",
+            "summary"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/focus_census.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "rows",
+            "schema",
+            "summary"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/focus_forced_gain.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "note",
+            "rows",
+            "schema"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/focus_reach.json": {
+          "parseable": true,
+          "is_dict": false
+        },
+        "scripts/form_boundary_census.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "accounts",
+            "baseline_health",
+            "caliber",
+            "closure",
+            "derived",
+            "falsification",
+            "schema",
+            "summary"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/form_shape_attribution.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "caliber",
+            "rows",
+            "schema",
+            "summary",
+            "unmatched"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/import_error_census.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "caliber",
+            "ie_commits",
+            "rows",
+            "schema",
+            "summary"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/import_failure_attribution.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "by_sha",
+            "caliber",
+            "rows",
+            "schema",
+            "skipped",
+            "summary"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/inliner_relax_census.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "accounts",
+            "anchor",
+            "caliber",
+            "closure",
+            "derived",
+            "schema",
+            "summary"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/is_shape_census.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "accounts",
+            "baseline_health",
+            "caliber",
+            "closure",
+            "schema",
+            "summary"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/loader_gate_census.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "accounts",
+            "baseline_health",
+            "caliber",
+            "closure",
+            "derived",
+            "falsification",
+            "positive",
+            "schema",
+            "summary"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/no_result_attribution.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "caliber",
+            "rows",
+            "schema",
+            "skipped",
+            "summary",
+            "unmatched"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/nogold_gap_census.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "accounts",
+            "anchor",
+            "caliber",
+            "closure",
+            "derived",
+            "schema",
+            "summary"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/policy_reach_census.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "accounts",
+            "anchor",
+            "caliber",
+            "closure",
+            "derived",
+            "schema",
+            "summary"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/realrepo_baseline.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "caliber",
+            "note",
+            "repos",
+            "schema"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/scan_surface_census.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "checks",
+            "closure_ok",
+            "fixture",
+            "new_surface",
+            "old_surface"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/time_param_reading.json": {
+          "parseable": true,
+          "is_dict": false
+        },
+        "scripts/truncation_census.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "caliber",
+            "rows",
+            "schema",
+            "summary"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/truthy_synth.json": {
+          "parseable": true,
+          "is_dict": true,
+          "keys": [
+            "caliber",
+            "rows",
+            "schema",
+            "summary"
+          ],
+          "has_main_product_keys": false,
+          "has_policy_field": false,
+          "has_per_commit": false
+        },
+        "scripts/upper_bound_3cases.json": {
+          "parseable": true,
+          "is_dict": false
+        }
+      },
+      "n_main_product_archives": 0,
+      "main_product_archives": [],
+      "n_archives_with_policy_field": 0,
+      "archives_with_policy_field": [],
+      "n_archives_with_per_commit": 1,
+      "archives_with_per_commit": [
+        "scripts/criteria_gate_census.json"
+      ],
+      "detector": {
+        "probe_keys": [
+          "per_commit",
+          "stats",
+          "policy"
+        ],
+        "positive_hit": true,
+        "negative_hit": false,
+        "teeth": true
+      },
+      "c189_n_run_all_calls": 2,
+      "c189_run_all_actually_called": true,
+      "c189_synthetic_source_only": true,
+      "c189_n_real_expr": 0,
+      "c189_n_real_commits": 0,
+      "c189_run_all_has_policy": false,
+      "c189_run_all_policy_touch": 0,
+      "c190_zero_sandbox": true,
+      "c191_real_expr_runs": 0,
+      "c191_real_commit_runs": 0,
+      "n_main_runtime_evidence": 0,
+      "boundary": "B 账只读磁盘存档 + AST 签名，零沙箱；0 份产物是证据 0 次，不是『默认没生效』"
+    },
+    "C_reach_by_evidence_type": {
+      "fields": [
+        "cross_scope",
+        "first_rhs",
+        "allow_unstable",
+        "no_gold_gate"
+      ],
+      "static": {
+        "reached": 4,
+        "total": 4,
+        "ratio": "4/4",
+        "evidence_type": "AST 读取点（静态，非运行）"
+      },
+      "synthetic_189": {
+        "reached": 4,
+        "total": 4,
+        "ratio": "4/4",
+        "calls": [
+          "adopt_probe",
+          "bindings_for",
+          "classify_probe",
+          "evaluate_case",
+          "has_unstable_call",
+          "inline_expr",
+          "merge_bindings"
+        ],
+        "per_field": {
+          "cross_scope": [
+            "merge_bindings"
+          ],
+          "first_rhs": [
+            "bindings_for"
+          ],
+          "allow_unstable": [
+            "evaluate_case"
+          ],
+          "no_gold_gate": [
+            "adopt_probe"
+          ]
+        },
+        "evidence_type": "零沙箱纯函数矩阵（36 行 / 6 合成 case）",
+        "n_run_all_calls": 2,
+        "run_all_has_policy": false
+      },
+      "offline_190_191": {
+        "reached": 1,
+        "total": 4,
+        "ratio": "1/4",
+        "calls": [
+          "adopt_probe",
+          "classify_probe",
+          "scoped_assertions"
+        ],
+        "per_field": {
+          "cross_scope": [],
+          "first_rhs": [],
+          "allow_unstable": [],
+          "no_gold_gate": [
+            "adopt_probe"
+          ]
+        },
+        "evidence_type": "零沙箱离线重放（135 主账）",
+        "replay_of_191_ratio": "1/4"
+      },
+      "production_main_runtime": {
+        "reached": 0,
+        "total": 4,
+        "ratio": "0/4",
+        "n_evidence": 0,
+        "evidence_type": "真实主流程运行（§183 禁令面，未触碰）"
+      },
+      "denominators_different": true,
+      "merged_into_bool": false,
+      "boundary": "四层分母不同：静态源码 / 6 合成 case / 135 主账 / 真实主流程；绝不合并"
+    },
+    "D_boundary": {
+      "policy_default": "1111",
+      "policy_strict": "0000",
+      "default_is_pure_function_reading": true,
+      "default_is_runtime_reading": false,
+      "denominators": {
+        "main": 135,
+        "form": 119,
+        "no_result": 94
+      },
+      "denominator_dual_source": {
+        "form_rows": 119,
+        "form_summary": 119,
+        "no_result_rows": 94,
+        "no_result_summary": 94
+      },
+      "denominators_kept_separate": true,
+      "superseded_total": 3,
+      "superseded_sha_matches": 3,
+      "anchor": {
+        "ok": true,
+        "repos": 3,
+        "diffs": [],
+        "caliber_diffs": []
+      },
+      "sandbox_selfcheck": {
+        "checked_own_source": true,
+        "banned": [],
+        "n_banned": 0
+      },
+      "real_expr_runs": 0,
+      "real_commit_runs": 0,
+      "f2p_runs": 0,
+      "gain_reported": 0,
+      "n_forbidden_runtime_calls": 0,
+      "boundary": "默认 1111 / --strict 0000 只在纯函数层可复算，不是主流程运行读数；不报收益"
+    }
+  },
+  "derived": {
+    "claim": "189 拍板「四条全放宽且默认生效」",
+    "evidence_types": [
+      "静态 AST 读取点",
+      "零沙箱合成矩阵",
+      "零沙箱离线重放",
+      "产品主流程运行"
+    ],
+    "static_ratio": "4/4",
+    "synthetic_ratio": "4/4",
+    "offline_ratio": "1/4",
+    "runtime_ratio": "0/4",
+    "n_main_runtime_evidence": 0,
+    "run_all_has_policy": false,
+    "n_closure": 49,
+    "n_closure_true": 49
+  },
+  "closure": {
+    "a1_four_fields": true,
+    "a2_static_readers_4of4": true,
+    "a3_resolve_policy_in_main": true,
+    "a4_only_one_production_entry": true,
+    "a5_run_all_has_no_policy": true,
+    "a6_run_all_args_are_four": true,
+    "a7_main_requires_repo": true,
+    "a8_main_guard_present": true,
+    "a9_extractor_pos_4of4": true,
+    "a10_extractor_neg_zero": true,
+    "a11_call_extractor_pos": true,
+    "a12_call_extractor_neg": true,
+    "a13_attr_form_extractor_teeth": true,
+    "a14_attribute_sites_actually_found": true,
+    "a15_call_sites_more_than_one_file": true,
+    "a16_self_measure_modules_excluded": true,
+    "b1_archives_scanned": true,
+    "b1b_self_product_excluded": true,
+    "b1c_scanned_plus_excluded": true,
+    "b2_no_main_product": true,
+    "b3_no_policy_field": true,
+    "b4_detector_has_teeth": true,
+    "b5_c189_two_run_all": true,
+    "b6_c189_actually_called": true,
+    "b7_c189_synthetic_only": true,
+    "b8_c189_zero_real": true,
+    "b9_c189_run_all_policy_touch_zero": true,
+    "b10_c190_zero_sandbox": true,
+    "b11_c191_zero_real": true,
+    "b12_main_runtime_evidence_zero": true,
+    "c1_static_4of4": true,
+    "c2_synthetic_4of4": true,
+    "c3_offline_1of4": true,
+    "c4_offline_matches_191": true,
+    "c5_runtime_zero": true,
+    "c6_four_denominators_different": true,
+    "c7_not_merged": true,
+    "c8_synthetic_calls_from_source": true,
+    "c9_offline_calls_from_source": true,
+    "d1_default_1111": true,
+    "d2_strict_0000": true,
+    "d3_default_is_pure_not_runtime": true,
+    "d4_denominators": true,
+    "d5_dual_source": true,
+    "d6_superseded_all_match": true,
+    "d7_no_sandbox_primitives": true,
+    "d8_zero_forbidden_runs": true,
+    "d9_anchor_ok": true,
+    "d10_selfcheck_own_source": true
+  },
+  "anchor": {
+    "ok": true,
+    "repos": 3,
+    "diffs": [],
+    "caliber_diffs": []
+  },
+  "summary": {
+    "verdict": "『默认生效』目前只有静态 AST 读取点 + 零沙箱合成矩阵 + 零沙箱离线重放三类证据；产品主流程运行证据 0 份。189 C 账那 2 次真跑 run_all 签名里没有 policy 参数 ⇒ 对四位开关触达 0/4。静态不得声称看到了运行（契约⑤）",
+    "scope": "证据类型边界，不是产品洞、不是『默认没生效』；不推翻 186–191、不改 189 语义、不报收益、不宣布 ④ 有效 / 无效",
+    "n_closure_true": 49,
+    "n_closure": 49
+  }
+}
