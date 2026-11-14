@@ -9499,3 +9499,131 @@ raises_other 1`）。`closure` **12/12 全 true**、`caliber` 10 项
 ③ CI 先 `bootstrap` ④ 放宽内联器四条自限
 ⑤ 放宽 / 降级 deny-modules —— **4 项一律未开工**；
 ⑤ 属安全边界，需显式审批。⑥ 已于 185 落地。
+
+### 188. ⛔⛔ **「门在装载门」首次有 119 条封闭读数：80 裸 assert 形态表 / 35 unittest 词表 / 4 raises**（2026-11-14）
+
+═══ 一、起点：187 说「纯取证面已收口」，其实是漏项 ═══
+
+186 / 187 两轮都把瓶颈改判到「门在装载门（④/②）」，但那只是从
+「`extract.py` 拒收 `assertIs`」这一条定性证据推断出来的 ——
+**装载判据本身在 119 条 form 上放行 / 拒收的分布从未量化**。
+187 末尾据此判「不需拍板的纯取证面已收口」；复核 179 存档发现
+这是**漏项**，不是新拍板项：装载门内部还有一整层没测。
+
+⛔ 更关键的是 186 的取样：179 存档 `shape=is` 有 **27** 条，产品断言名
+却是**裸 `assert a is b` 24 条 + `assertIs` 3 条**。两者在
+`extract.py` 里走的是**不同装载子层**：
+
+  · 裸 assert → `_bare_assert_parts()`（只认 `a == b`）
+  · `assertIs` → `_UNITTEST_SAME`（只收 3 个同形断言名）
+
+⇒ 186 用 **3/27（11%）** 的少数形态代表整个 `is` 格。
+
+⛔⛔ **§183 禁令原样有效**：179 的 119 条 form 下游属拍板项 ①，
+本轮不喂任何真实 `expr` 给沙箱、不跑真实 commit、不报 F2P / 收益。
+A 账逐条过的产品 `_iter_all_probes()` 只做 `ast.parse` + 静态遍历，
+**不执行任何代码**（C 账源码级自检钉死）。
+
+═══ 二、三本账（不合并成布尔，契约④） ═══
+
+| 账 | n | 做法 | 读数 |
+|---|---|---|---|
+| **A 分层** | 119 | 逐条过**产品自己的** `_iter_all_probes()`，按拒收来源落恰好一层 | **80 裸 assert 形态表 / 35 unittest 同形词表 / 4 raises 层**；`80+35+4=119` 封闭；13 实格 `shape × layer` 交叉和 119；每条探针数恰 1；零异常；119 条里零 `LOADABLE` |
+| **B 代表** | 27 | `is` 格按断言名 / 子层拆 | **裸 24 / `assertIs` 3**；186 的定性证据只覆盖 `unittest_table` 那 3 条 |
+| **C 边界** | — | 尺子自身 AST 自检 | 未 import `aether.environment`、无 `run_in_sandbox` / `eval` / `exec` 调用；真实 expr 沙箱 **0 次**、真实 commit 0、F2P / 收益读数 0、下游归因 0、135 主账触碰 0；`aether/` 未改、上游零回写 |
+
+**六组反证 + 五条正例**（`falsification` 全 true）：
+
+- `R1` 抹掉 `mapped` ⇒ 119 条全变 `LOADABLE`（分层不是恒真）；
+- `R2` 喂过滤 10 条 ⇒ 计数跟着变（`derive()` 真从 rows 派生，
+  r108 首跑 B4 的同源反证）；
+- `R3` 抹掉 `attr_product` / `shape` ⇒ 分层计数不变（不依赖预聚合字段）；
+- `R4` 空 raises 词表 ⇒ `raises_layer` 归零（该层有牙）；
+- `R5` 5 条同源正例（`assert a == b` / `assertEqual` / `chk` /
+  `assertTupleEqual` / `assertListEqual`）全部命中 `LOADABLE`
+  ⇒ 零命中格不是量具恒空；
+- `R6` 尺子源码级零沙箱。
+
+`closure` **16/16 全 true**、`caliber` 9 项只读含尺子自身、
+验锚 `OK 3/3 diffs=0`。
+
+═══ 三、`shape × layer` 交叉表（13 实格封闭） ═══
+
+| shape | bare_form_table | unittest_table | raises_layer | 合计 |
+|---|---|---|---|---|
+| `is` | 24 | 3 | 0 | 27 |
+| `truthy` | 8 | 17 | 0 | 25 |
+| `in` | 17 | 1 | 0 | 18 |
+| `chained_compare` | 15 | 0 | 0 | 15 |
+| `order` | 5 | 1 | 0 | 6 |
+| `multiset` | 0 | 6 | 0 | 6 |
+| `ne` | 6 | 0 | 0 | 6 |
+| `is_not` | 1 | 4 | 0 | 5 |
+| `not_in` | 2 | 2 | 0 | 4 |
+| `raises_match` | 0 | 0 | 3 | 3 |
+| `not_expr` | 2 | 0 | 0 | 2 |
+| `isinstance` | 0 | 1 | 0 | 1 |
+| `raises_other` | 0 | 0 | 1 | 1 |
+| **合计** | **80** | **35** | **4** | **119** |
+
+⛔ 187 的 A 账「80 条裸 assert 已是整条 bool 表达式」与本轮
+`bare_form_table=80` **同源吻合**（同一批语句，两把尺子）。
+
+═══ 四、⛔ 结论：方向不变，内部主层改判 ═══
+
+- **观察**：119 条 form 门的拒收，67.2% 落在 `_bare_assert_parts()`
+  （裸 assert 只认 `a == b`），29.4% 落在 `_UNITTEST_SAME`
+  （同形词表），3.4% 落在 raises 层。
+- **推断**：两层都属**装载侧**，故 186「门在装载门」方向不变；
+  但 186 取证用的 `assertIs` 属词表层（35/119），内部主层其实是
+  形态表（80/119）⇒ **186 的取样代表性有边界（3/27）**。
+  187 把 186 收窄到「已展开的整条 bool 表达式」，本轮再补上
+  「到底是哪个装载动作拦的」。
+- **未知 / 不测**：放宽任一子层能多出多少 F2P / 真修复，
+  **本轮零读数**；§183 禁令面不触碰。
+- ⛔⛔ **两本账分开**：本轮分母是 **119 条 form 门**（装载前就被拒），
+  与 178–180 的 **135 主账真跑**（94 `no_result` / 67–89 局部作用域）
+  是**不同分母**，绝不合并 ⇒ 本轮**不改判 ④/② 在 135 主账上的靶子**。
+  ④ 的内联器自限作用于「`criterion` 之后能不能跑」，不在本轮分母内。
+- 不宣布「扩张判据形态无用」也不宣布「有效」；`aether/` 一字节未改、
+  上游 179/186/187 存档零回写、新口径另存。
+
+═══ 五、契约、注入反证与静态四项 ═══
+
+`tests/contract_loader_gate_test.py` **45 项全绿 0 skip**
+（A 21 钉读数 / B 18 纯内存反证 / C 6 本机同源实战）。
+⛔ B 组直接喂构造数据给尺子自己的 `derive()` / `classify_probe()` /
+`static_account()`，不另写第二份判据（第 68 条）；C1 真跑产品
+`_iter_all_probes()` 复现 80/35/4，C2 静态 AST 复现 115/4/0，
+C5 用 sha256 对拍证明 `aether/extract.py` 未被改动。
+
+`/tmp/r109_falsify.py` **45 起注入反证全部恰好命中预期项**
+（基线 `FAILS=[]`、`FALSIFICATION_OK=True`、n=45 bad=0）：
+逐条把 `ck` 条件改成 `False`、保留 body 与缩进。单次完整契约
+**60.67s**（耗时全在 `require_baseline()` 的 3 仓库 census ≈59.45s）
+⇒ 45 次串行 45min 会重演 r107 的 SIGTERM(137)，沿用分层：
+阶段 1 单进程用**同源真实缓存**（真跑一次 `require_baseline()` /
+`candidate_files()`）覆盖 45 条；阶段 2 对 C 组 6 条**完整真跑**
+反证，逐条 `rc=1` 且恰好命中。
+
+⛔ **路径坑如实留痕**：事故版放 `/tmp` 跑时 cwd 不再是 `tests/`，
+`contract_portability_test` 导不进来（首次反证直接
+`ModuleNotFoundError`）。按第 99 条把契约根显式从 `__file__` 推导
+（`sys.path` 加 `ROOT/tests`），不依赖 cwd，复跑后 45 起全中。
+
+静态四项：真 3.9.6 `ast.parse(feature_version=(3,9))` 两个待提交
+`.py` OK、裸 `noqa` 0、`diff --check` rc=0、**全部待提交文件**
+（含本段 README 与 3 个 untracked）`scan_text()` 零命中，并带
+一条正例反证证明量具本身有牙。
+
+**新设施**：`scripts/probe_loader_gate.py`、
+`scripts/loader_gate_census.json`（新口径另存）、
+`tests/contract_loader_gate_test.py`（45 项）。
+
+═══ 六、拍板清单（未变） ═══
+
+本轮是**纯只读取证**，不是 ① 的扩张、也不构成新拍板项。
+① 已于 186 取证收口（未新增形态）；② 多步状态序列
+③ CI 先 `bootstrap` ④ 放宽内联器四条自限
+⑤ 放宽 / 降级 deny-modules —— **4 项一律未开工**；
+⑤ 属安全边界，需显式审批。⑥ 已于 185 落地。
