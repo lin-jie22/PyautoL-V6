@@ -1,0 +1,4562 @@
+{
+  "schema": "policy_reach_census/v1",
+  "caliber": {
+    "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+    "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+    "scripts/probe_inliner_relax.py": "94e150f006ea6be8d3e3ec9b039ee1de5f6d7837952d485220a9cb4a499156f4",
+    "scripts/probe_nogold_gap.py": "ef428eeb1bae1182be0fa5152ab62b88bea20572ed0ce10eaed6e2eb8c7082fd",
+    "scripts/probe_policy_reach.py": "13088aee616e32d2fe7a70f839e92364c59216ed2355b5a705ff63042c07de5d",
+    "scripts/inliner_relax_census.json": "4399b741b6383b8cc2238972e765f1a71c187ec35ae650f76099f12b582c3bcd",
+    "scripts/nogold_gap_census.json": "c3a588e42b16c79e11cdfaaeda4a595106a59bba2e87a950f02353b0bf71a9c9",
+    "scripts/extract_downstream.json": "896220cd2849f6740a0fc28daf6e434c7ed77445237b60f3b1288a3cf7d8d266",
+    "scripts/form_shape_attribution.json": "b536f832e4ba0fc7bc734321dae058007de4e556d6699a7ec8c010b6d7556309",
+    "scripts/no_result_attribution.json": "1feae1a5d74e830d0d609e3b507d8842d577c6a851b377c9ef205e2161446d0b",
+    "scripts/caliber_superseded.json": "77a828b6a82e3afefa83f23c21cbbab7360e091486a4f517e867a89c277265fb",
+    "scripts/realrepo_baseline.json": "0585f86b9146fe0aa203c936af2dcd576f34b3b55c27fabc59db93073558b0fb"
+  },
+  "accounts": {
+    "A_reach": {
+      "source_fields": "scripts/probe_context_gate.py::RelaxPolicy (AST)",
+      "fields": [
+        "cross_scope",
+        "first_rhs",
+        "allow_unstable",
+        "no_gold_gate"
+      ],
+      "n_fields": 4,
+      "readers": {
+        "cross_scope": [
+          "merge_bindings"
+        ],
+        "first_rhs": [
+          "bindings_for"
+        ],
+        "allow_unstable": [
+          "evaluate_case",
+          "main"
+        ],
+        "no_gold_gate": [
+          "adopt_probe"
+        ]
+      },
+      "n_fields_with_reader": 4,
+      "b190_calls": [
+        "adopt_probe",
+        "classify_probe",
+        "scoped_assertions"
+      ],
+      "b190_calls_taking_policy": [
+        "adopt_probe"
+      ],
+      "fields_read_by_b190": [
+        "no_gold_gate"
+      ],
+      "n_reachable": 1,
+      "reach_ratio": "1/4",
+      "unreachable_fields": [
+        "cross_scope",
+        "first_rhs",
+        "allow_unstable"
+      ],
+      "extractor_positive_hit": 4,
+      "extractor_positive_total": 4,
+      "extractor_negative_hit": 0,
+      "boundary": "A 账纯 AST，零沙箱、零真实 expr、零真实 commit"
+    },
+    "B_input_availability": {
+      "source": "scripts/extract_downstream.json (177 主账)",
+      "required_input_keys": [
+        "envs",
+        "test_src",
+        "unstable_runs"
+      ],
+      "n_required_keys": 3,
+      "rows": [
+        {
+          "i": 0,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 1,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 2,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 3,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 4,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 5,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 6,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 7,
+          "verdict": "diff",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 8,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 9,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 10,
+          "verdict": "diff",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 11,
+          "verdict": "import_failed",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 12,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 13,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 14,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 15,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 16,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 17,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 18,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 19,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 20,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 21,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 22,
+          "verdict": "same",
+          "gate": "unstable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 23,
+          "verdict": "no_result_both",
+          "gate": "unstable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 24,
+          "verdict": "same",
+          "gate": "unstable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 25,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 26,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 27,
+          "verdict": "diff",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 28,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 29,
+          "verdict": "diff",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 30,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 31,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 32,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 33,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 34,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 35,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 36,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 37,
+          "verdict": "import_failed",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 38,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 39,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 40,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 41,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 42,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 43,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 44,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 45,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 46,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 47,
+          "verdict": "diff",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 48,
+          "verdict": "diff",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 49,
+          "verdict": "diff",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 50,
+          "verdict": "diff",
+          "gate": "tuple",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 51,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 52,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 53,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 54,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 55,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 56,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 57,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 58,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 59,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 60,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 61,
+          "verdict": "diff",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 62,
+          "verdict": "diff",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 63,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 64,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 65,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 66,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 67,
+          "verdict": "no_result_both",
+          "gate": "tuple",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 68,
+          "verdict": "same",
+          "gate": "tuple",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 69,
+          "verdict": "no_result_both",
+          "gate": "tuple",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 70,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 71,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 72,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 73,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 74,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 75,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 76,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 77,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 78,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 79,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 80,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 81,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 82,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 83,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 84,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 85,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 86,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 87,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 88,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 89,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 90,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 91,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 92,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 93,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 94,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 95,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 96,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 97,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 98,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 99,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 100,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 101,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 102,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 103,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 104,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 105,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 106,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 107,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 108,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 109,
+          "verdict": "no_result_both",
+          "gate": "tuple",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 110,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 111,
+          "verdict": "import_failed",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 112,
+          "verdict": "import_failed",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 113,
+          "verdict": "import_failed",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 114,
+          "verdict": "import_failed",
+          "gate": "unmatched",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 115,
+          "verdict": "import_failed",
+          "gate": "unmatched",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 116,
+          "verdict": "import_failed",
+          "gate": "unmatched",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 117,
+          "verdict": "import_failed",
+          "gate": "unmatched",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 118,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 119,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 120,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 121,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 122,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 123,
+          "verdict": "same",
+          "gate": "unserializable",
+          "k": "ok_nogold",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 124,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 125,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 126,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 127,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 128,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 129,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 130,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 131,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 132,
+          "verdict": "no_result_both",
+          "gate": "tuple",
+          "k": "UNSPLITTABLE",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 133,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        },
+        {
+          "i": 134,
+          "verdict": "no_result_both",
+          "gate": "unserializable",
+          "k": "none",
+          "present": {
+            "envs": false,
+            "test_src": false,
+            "unstable_runs": false
+          },
+          "n_present": 0
+        }
+      ],
+      "n_rows": 135,
+      "n_rows_with_any_input": 0,
+      "n_rows_with_all_inputs": 0,
+      "per_key_present": {
+        "envs": 0,
+        "test_src": 0,
+        "unstable_runs": 0
+      },
+      "by_k": {
+        "UNSPLITTABLE": 41,
+        "none": 72,
+        "ok_nogold": 22
+      },
+      "by_verdict": {
+        "diff": 10,
+        "import_failed": 9,
+        "no_result_both": 94,
+        "same": 22
+      },
+      "by_k_sum": 135,
+      "by_verdict_sum": 135,
+      "cases_189": {
+        "source": "scripts/probe_inliner_relax.py::CASES (AST literal_eval)",
+        "n_cases": 6,
+        "union_keys": [
+          "cost",
+          "disc",
+          "expr",
+          "fn",
+          "gold",
+          "got_by_expr",
+          "id",
+          "limit",
+          "src",
+          "unstable_runs"
+        ],
+        "n_with_src": 6,
+        "n_with_unstable_runs": 6,
+        "archived_case_ids": [
+          "scope_leak",
+          "ambiguous_rhs",
+          "time_dep",
+          "gold_mismatch",
+          "unstable_runs",
+          "no_value"
+        ],
+        "n_archived_ids": 6,
+        "archive_has_src": 0,
+        "note": "6 个合成 case 的完整 src 只在量具源码里，189 存档只记 id"
+      },
+      "boundary": "B 账只读存档字段 + AST，零沙箱；0/135 是输入不可得，不是『没有差异』"
+    },
+    "C_rowwise_outcome": {
+      "source": "177 主账 135 条同源重放（产品 scoped_assertions/classify_probe/adopt_probe）",
+      "rows": [
+        {
+          "i": 0,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 1,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 2,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 3,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 4,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 5,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 6,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 7,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 8,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 9,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 10,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 11,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 12,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 13,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 14,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 15,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 16,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 17,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 18,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 19,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 20,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 21,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 22,
+          "k": "ok_nogold",
+          "unstable": true,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_unstable_runs",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 23,
+          "k": "UNSPLITTABLE",
+          "unstable": true,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_unstable_runs",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 24,
+          "k": "UNSPLITTABLE",
+          "unstable": true,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_unstable_runs",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 25,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 26,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 27,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 28,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 29,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 30,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 31,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 32,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 33,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 34,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 35,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 36,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 37,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 38,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 39,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 40,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 41,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 42,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 43,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 44,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 45,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 46,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 47,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": true,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": true
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": true
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 48,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": true,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": true
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": true
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 49,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 50,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": true,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": true
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": true
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 51,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 52,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 53,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 54,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 55,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 56,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 57,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 58,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 59,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 60,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 61,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": true,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": true
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": true
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 62,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": true,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": true
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": true
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 63,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 64,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 65,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 66,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 67,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 68,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 69,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 70,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 71,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 72,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 73,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 74,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 75,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 76,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 77,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 78,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 79,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 80,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 81,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 82,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 83,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 84,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 85,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 86,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 87,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 88,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 89,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 90,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 91,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 92,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 93,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 94,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 95,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 96,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 97,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 98,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 99,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 100,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 101,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 102,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 103,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 104,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 105,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 106,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 107,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 108,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 109,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 110,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 111,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 112,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 113,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 114,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 115,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 116,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 117,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 118,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 119,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 120,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 121,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 122,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 123,
+          "k": "ok_nogold",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 124,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 125,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 126,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 127,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 128,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 129,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 130,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 131,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 132,
+          "k": "UNSPLITTABLE",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 133,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        },
+        {
+          "i": 134,
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "ledger_changed": true,
+          "verified_flip": false,
+          "counts_disc_flip": false
+        }
+      ],
+      "n_rows": 135,
+      "n_ledger_changed": 135,
+      "n_verified_flip": 0,
+      "n_counts_disc_flip": 0,
+      "by_group": {
+        "UNSPLITTABLE|unstable=False|disc=False": {
+          "n": 34,
+          "ledger_changed": 34,
+          "verified_flip": 0,
+          "counts_disc_flip": 0
+        },
+        "UNSPLITTABLE|unstable=False|disc=True": {
+          "n": 5,
+          "ledger_changed": 5,
+          "verified_flip": 0,
+          "counts_disc_flip": 0
+        },
+        "UNSPLITTABLE|unstable=True|disc=False": {
+          "n": 2,
+          "ledger_changed": 2,
+          "verified_flip": 0,
+          "counts_disc_flip": 0
+        },
+        "none|unstable=False|disc=False": {
+          "n": 72,
+          "ledger_changed": 72,
+          "verified_flip": 0,
+          "counts_disc_flip": 0
+        },
+        "ok_nogold|unstable=False|disc=False": {
+          "n": 21,
+          "ledger_changed": 21,
+          "verified_flip": 0,
+          "counts_disc_flip": 0
+        },
+        "ok_nogold|unstable=True|disc=False": {
+          "n": 1,
+          "ledger_changed": 1,
+          "verified_flip": 0,
+          "counts_disc_flip": 0
+        }
+      },
+      "n_groups": 6,
+      "group_sum": 135,
+      "same_row_with_190": 135,
+      "n_190_rows": 135,
+      "flip_detector_cases": [
+        {
+          "k": "ok",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "strict_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_rescue",
+            "verified": true,
+            "counts_disc": false
+          },
+          "flips": {
+            "ledger": true,
+            "verified": false,
+            "counts_disc": false
+          },
+          "n_flips": 1
+        },
+        {
+          "k": "mismatch",
+          "unstable": false,
+          "disc": true,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_mismatch",
+            "verified": false,
+            "counts_disc": false
+          },
+          "flips": {
+            "ledger": true,
+            "verified": false,
+            "counts_disc": false
+          },
+          "n_flips": 1
+        },
+        {
+          "k": "none",
+          "unstable": false,
+          "disc": false,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_no_value",
+            "verified": false,
+            "counts_disc": false
+          },
+          "flips": {
+            "ledger": true,
+            "verified": false,
+            "counts_disc": false
+          },
+          "n_flips": 1
+        },
+        {
+          "k": "ok_nogold",
+          "unstable": true,
+          "disc": true,
+          "strict": {
+            "ledger": "rejected",
+            "verified": false,
+            "counts_disc": false
+          },
+          "relaxed": {
+            "ledger": "relaxed_unstable_runs",
+            "verified": false,
+            "counts_disc": false
+          },
+          "flips": {
+            "ledger": true,
+            "verified": false,
+            "counts_disc": false
+          },
+          "n_flips": 1
+        }
+      ],
+      "flip_detector_teeth": 4,
+      "flip_detector_total": 4,
+      "note": "逐行 verified/counts_disc 翻转 0 只说明『这一位 + 这批 k 分布』下构造必然；反证组证明探测器能检出翻转，⛔ 不外推到 4 位开关",
+      "boundary": "C 账零沙箱、零真实 expr、零真实 commit；got 只用存档已记录值"
+    },
+    "D_boundary": {
+      "policy_default": "1111",
+      "policy_strict": "0000",
+      "superseded_archives": [
+        "scripts/extract_downstream.json",
+        "scripts/import_failure_attribution.json",
+        "scripts/truthy_synth.json"
+      ],
+      "superseded_sha_matches": 3,
+      "superseded_total": 3,
+      "superseded_new_sha_on_disk": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+      "superseded_new_sha_registered": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+      "aether_extract_sha": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+      "denominators": {
+        "main_135": 135,
+        "form_119": 119,
+        "no_result_94": 94
+      },
+      "denominator_dual_source": {
+        "form_rows": 119,
+        "form_summary": 119,
+        "no_result_rows": 94,
+        "no_result_summary": 94
+      },
+      "denominators_kept_separate": true,
+      "n_forbidden_runtime_calls": 0,
+      "real_expr_runs": 0,
+      "real_commit_runs": 0,
+      "f2p_runs": 0,
+      "gain_reported": 0,
+      "sandbox_selfcheck": {
+        "banned": [],
+        "n_banned": 0,
+        "checked_own_source": true
+      },
+      "anchor": {
+        "ok": true,
+        "repos": 3,
+        "diffs": [],
+        "caliber_diffs": []
+      },
+      "boundary": "D 账只做 hash / 登记 / 分母 / 自检；不跑真实 expr、不跑真实 commit、不报收益；189/190 存档与 aether/ 零回写"
+    }
+  },
+  "derived": {
+    "reach_ratio": "1/4",
+    "unreachable_fields": [
+      "cross_scope",
+      "first_rhs",
+      "allow_unstable"
+    ],
+    "n_rows_input_unavailable": 135,
+    "n_rows_input_available": 0,
+    "c_verified_flip": 0,
+    "c_counts_disc_flip": 0,
+    "n_closure": 36,
+    "n_closure_true": 36
+  },
+  "closure": {
+    "a1_four_policy_fields": true,
+    "a2_all_fields_have_reader": true,
+    "a3_b190_calls_are_three": true,
+    "a4_only_adopt_takes_policy": true,
+    "a5_b190_reads_one_field": true,
+    "a6_reach_ratio_one_quarter": true,
+    "a7_unreachable_fields_three": true,
+    "a8_extractor_positive_4of4": true,
+    "a9_extractor_negative_zero": true,
+    "b1_main_rows_135": true,
+    "b2_required_keys_from_source": true,
+    "b3_no_row_has_all_inputs": true,
+    "b4_no_row_has_any_input": true,
+    "b5_per_key_all_zero": true,
+    "b6_by_k_closed": true,
+    "b7_by_verdict_closed": true,
+    "b8_189_cases_six": true,
+    "b9_189_cases_all_have_src": true,
+    "b10_archive_ids_only": true,
+    "c1_rows_135": true,
+    "c2_all_ledger_changed": true,
+    "c3_no_verified_flip": true,
+    "c4_no_counts_disc_flip": true,
+    "c5_groups_closed": true,
+    "c6_same_as_190_rowwise": true,
+    "c7_flip_detector_has_teeth": true,
+    "d1_default_1111": true,
+    "d2_strict_0000": true,
+    "d3_superseded_all_match": true,
+    "d4_superseded_hash_current": true,
+    "d5_denominators_separate": true,
+    "d5b_denominator_dual_source": true,
+    "d6_no_sandbox_primitives": true,
+    "d7_zero_forbidden_runs": true,
+    "d8_anchor_ok": true,
+    "d9_selfcheck_own_source": true
+  },
+  "anchor": {
+    "ok": true,
+    "repos": 3,
+    "diffs": [],
+    "caliber_diffs": []
+  },
+  "summary": {
+    "verdict": "190 的两口径只切了 RelaxPolicy 4 位中的 1 位（no_gold_gate）；另 3 位在 177 主账 135 行上所需输入 0/135 可得 ⇒ 189 的 switch_teeth 4/4 只在 6 个合成 case 上成立，不能读成『④ 在真实主账上没有新采纳』",
+    "scope": "尺子代表性边界，不是产品洞；不推翻 190、不改 189 语义、不报收益",
+    "n_closure_true": 36,
+    "n_closure": 36
+  }
+}

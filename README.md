@@ -9888,3 +9888,106 @@ spawn 子进程），不是把验锚跳过。
 ① 已取证收口、④ / ⑥ 已落地。
 ⛔ 新增一条需拍板候选：**修 `ok_nogold` 的 ledger 语义 / 补 189 反证组**
 （改判据语义，未经拍板不动）。
+
+### 191. ⛔⛔ **190 的「两口径」只切了 4 位 policy 中的 1 位；另 3 位所需的整段源码在 135 主账上 0/135 可得**（2026-11-14）
+
+═══ 一、起点：189 说「四条开关逐条有牙 4/4」，190 报「两口径 verified 60→60」 ═══
+
+189（r110）把四条自限做成 `RelaxPolicy` 四个布尔位，用
+6 策略 × 6 合成样本 = 36 行钉出 `switch_teeth 4/4`，并声明
+「低层规则仍严格 ⇒ `--strict` 逐字回 `0000`，旧读数可复算」。
+190（r111）把 177 主账 135 条逐条同源重放，报两口径
+`verified 60→60`、`counts_disc` 变化 0、`n_newly_verified=0`，
+并写明「135 行 ledger 名字全变 ≠ 新采纳」。
+
+⛔ 本轮**纯只读取证**只查一件从未量过的事：
+**190 的「两口径」到底切了几位开关**。
+
+从**产品自己的 AST** 抽四位字段与其读取函数（不手写词表）：
+
+| 位 | 字段 | 产品源码里的读取点 | 190 B 账是否触达 |
+|---|---|---|---|
+| ① | `cross_scope` | `merge_bindings` | 否 |
+| ② | `first_rhs` | `bindings_for` | 否 |
+| ③ | `allow_unstable` | `main`（主流程）/ `probe_inliner_relax.py::evaluate_case` | 否 |
+| ④ | `no_gold_gate` | `adopt_probe` | **是** |
+
+190 B 账的调用链只有 `scoped_assertions` / `classify_probe` /
+`adopt_probe`，其中**只有 `adopt_probe` 接 `policy`**，且该函数体里
+只读 `policy.no_gold_gate` ⇒ **触达 1/4 位**。
+
+⛔⛔ 分寸（本轮最要紧的一句）：**另三位在产品主流程里真的有读取点**，
+只是 190 这把**离线重放尺子**没走到 ⇒ 这是**尺子的代表性边界**，
+不是产品洞（与 190「不是产品洞」同向），也不推翻 189 的语义。
+
+═══ 二、四本账（⛔ 不合并成布尔）═══
+
+| 账 | 做法 | 封闭读数 |
+|---|---|---|
+| **A 作用点** | AST 从 `class RelaxPolicy` 抽 4 位、从两份产品/量具源码抽 `policy.<field>` 读取点、从 190 `account_b()` 抽 `CG.*` 调用链、用产品函数签名判谁接 `policy`；同一抽取器喂 4/4 正例 + 0 反例 | 4 位各有读取点；B 账 3 个调用、1 个接 policy；`fields_read_by_b190=["no_gold_gate"]`；**reach `1/4`**、unreachable 3 位；正例 `4/4` 命中 / 反例 `0` |
+| **B 可得性** | 另三位所需输入键从**产品函数签名 AST 派生**（`test_src` / `envs` / `unstable_runs`），135 行逐行查；按 `k` / `verdict` 分层；189 的 `CASES` 从量具源码 `literal_eval` | `0/135` 行具备任一输入、三键各 `0`；`by_k = UNSPLITTABLE 41 / none 72 / ok_nogold 22`、`by_verdict` 和 135 封闭；189 的 6 个合成 case `6/6` 有 `src` + `unstable_runs`，但其完整 `src` **只在量具源码里**，189 存档只记 6 个 id、`0` 个 src |
+| **C 逐行** | 135 行同源重放（`got` 只取存档已记录值，零沙箱），逐行对拍 `(ledger, verified, counts_disc)`；按 `(k, unstable, disc)` 分 6 组；与 190 B 账逐行对拍；4 类合成行注入证明翻转探测器不是死代码 | `ledger_changed 135` / `verified_flip 0` / `counts_disc_flip 0`；分组和 135；与 190 逐行一致 `135/135`；翻转探测器 `4/4` 有牙（事故版恒同 `adopt_probe` ⇒ `teeth=0`） |
+| **D 边界** | 磁盘 hash、superseded 登记、三分母双源、尺子自身 AST 自检、验锚 | 默认 `1111` / `--strict` `0000`；3 份旧存档 sha 与登记逐字一致；`135 / 119 / 94` 分开且 `rows` 与 `summary.n_rows` 双源相等；尺子无 `eval/exec/环境模块`；验锚 `OK 3/3 diffs=0`；真实 expr / commit / F2P / 收益全 0 |
+
+⛔ **C 账补的是 190 只报聚合的粒度**（r110 立的「聚合数相同 ≠
+开关恒真，要按 case 逐行对拍 outcome」）：135 行逐行改名，
+`verified` 与 `counts_disc` 逐行零翻转。但这**只说明「`no_gold_gate`
+这一位 + 这批 `k` 分布」下构造必然**；反证组证明探测器能检出翻转，
+⛔ 绝不外推到四位开关，也不读成「④ 在真实主账上没有新采纳」。
+
+═══ 三、⛔ 分寸：不是产品洞，也不是「没差异」═══
+
+1. **190 的结论方向不变，适用边界收窄**：`verified 60→60` /
+   `n_newly_verified=0` 是**一位开关**在 177 主账上的读数；
+   「两条口径覆盖四条自限」这个印象不成立。
+2. **0/135 是输入不可得，不是差异为 0**（契约⑤：缺失不得被读作
+   否定）。另三位要重放必须拿到整段 `test_src` 与两遍稳定性读数，
+   而 177 主账存档只有抽好的单条 `stmt` + `gate` 字符串。
+3. **189 的 `switch_teeth 4/4` 仍是真的，但只在 6 个合成 case 上**：
+   那 6 个 case 是唯一具备完整 `src` 的输入，与 135 条真实主账
+   **不同分母**（186 的取样代表性教训、187 的 n=6 不外推）。
+4. ⛔ **不报收益、不宣布 ④ 有效 / 无效**；`RelaxPolicy` /
+   `adopt_probe()` / `probe_context_gate.py` / 189 与 190 存档 /
+   `aether/` 一个字节未改；§183 禁令面零触碰（真实 expr、
+   真实 commit、F2P 全 0）。
+5. 要在真实主账上补出四位开关的读数，属**改判据语义**（第 34 条）
+   ⇒ 另一次需拍板，本轮不动。186–190 均不被推翻。
+
+═══ 四、契约、反证与静态四项 ═══
+
+`tests/contract_policy_reach_test.py` **A–G 59 项 + F 组 6 项
+= 65 项全绿 0 skip**。⛔ G 组是同源实算（不读存档结论字段），
+专供事故版补丁打红；F3 的 4 行实算取样**必须含「可拆 + `got`
+有记录」的一行**（i=3，22 条 `ok_nogold` 之一）。
+
+`/tmp/r112_falsify.py` 注入反证全中：阶段 1 `59/59` 逐条置
+`False` 恰好该项转红、阶段 2 `51/51` 篡改存档字段、阶段 2b
+`6/6` 事故版产品函数、阶段 3 `6/6` F 组同进程逐条撤回，
+基线完整真跑 `FAILS=[]`、`FALSIFICATION_OK=True`。
+⛔ 沿用 r109/r111 分层反证：一次真实验锚读数缓存 + 同进程跑
+F 组，不 spawn 子进程（单次契约 50–60s 全耗在 3 仓库 census）。
+
+⛔ 尺子自身 **2 次真红**如实留痕（第 34 条修尺子、不放宽断言）：
+① F3 实算行少了 `unstable` / `disc` 两个字段 ⇒ 逐字段对拍不等，
+补字段；② 反证组 3 个取样行 `got_fixed` 全为空、原本 `k` 就是
+`none` ⇒ `classify_probe` 恒返 `"none"` 的事故版在构造上改不动
+任何一行（假绿），补 i=3 后 `6/6`。两次都改尺子，没放宽断言。
+
+静态四项：真 3.9.6 `ast.parse(feature_version=(3,9))` 对 2 个
+新 `.py` 全 OK、裸 `noqa` 0、`diff --check` rc=0、A1 扫描面
+`n_scanned=347`、3 个待提交文件全在候选面且 `scan_text()` 零命中
++ 正例反证命中。`closure 36/36`、尺子重跑幂等、验锚
+`OK 3/3 diffs=0`。
+
+**新设施**：`scripts/probe_policy_reach.py`、
+`scripts/policy_reach_census.json`（口径 `v1` 另存）、
+`tests/contract_policy_reach_test.py`。
+
+═══ 五、拍板清单（未变，仍是 4 条）═══
+
+本轮是**纯只读取证**，不构成新拍板项。② 多步状态序列
+③ CI 先 `bootstrap` 再跑 H 组（需 workflow scope PAT）
+⑤ 放宽 / 降级 deny-modules（安全边界、需显式审批）
+—— **3 项一律未开工**；① 已取证收口、④ / ⑥ 已落地；
+⛔ 另有 190 留下的「修 `ok_nogold` ledger 语义 / 补 189 反证组」
+一条，合计 4 条待拍板。
