@@ -39,6 +39,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import probe_extract_downstream as ped          # noqa: E402
+import caliber_superseded as cs                  # noqa: E402
 
 SUPPORTED_MODES = ("default",)
 MIN_PYTHON = (3, 9)
@@ -83,9 +84,28 @@ def group_a():
     s = d["summary"]
     rows, form = d["rows"], d["form_diagnostic_rows"]
     ck("A1 schema 与本轮尺子一致", d.get("schema") == "extract_downstream/v1")
-    ck("A2 口径签名可读且逐字匹配磁盘",
-       ped.caliber_matches(d["caliber"], ped.caliber()) == [],
-       str(ped.caliber_matches(d["caliber"], ped.caliber())))
+    #: ⛔ r110 / README 189：量具换口径，旧存档的 caliber 走 superseded 登记。
+    #:    旧存档一个字节未改；只有「已登记且 old/new 双向逐字对上」的那一处
+    #:    差异可豁免，其余差异照旧转红（契约①）。
+    ck("A2 口径签名可读且逐字匹配磁盘（含 189 superseded 登记）",
+       cs.caliber_matches_superseded(
+           d["caliber"], ped.caliber(),
+           "scripts/extract_downstream.json") == [],
+       str(cs.caliber_matches_superseded(
+           d["caliber"], ped.caliber(),
+           "scripts/extract_downstream.json")))
+    bad = dict(d["caliber"])
+    bad["aether/extract.py"] = "X" * 64
+    ck("A2b ⛔ superseded 闸有牙：改未登记键仍报差异",
+       cs.caliber_matches_superseded(
+           bad, ped.caliber(), "scripts/extract_downstream.json")
+       == ["aether/extract.py"])
+    bad2 = dict(d["caliber"])
+    bad2["scripts/probe_context_gate.py"] = "Y" * 64
+    ck("A2c ⛔ superseded 闸有牙：登记键旧值被改也报差异",
+       cs.caliber_matches_superseded(
+           bad2, ped.caliber(), "scripts/extract_downstream.json")
+       == ["scripts/probe_context_gate.py"])
     ck("A3 主账 + form 账 = 176 的 254 条 unknown",
        len(rows) + len(form) == 254,
        "main=%d form=%d" % (len(rows), len(form)))
@@ -180,9 +200,13 @@ def group_a_synth(s: dict):
     ck("A26 schema 与 diagnostic_only 标记",
        d.get("schema") == "truthy_synth/v1"
        and d["summary"]["diagnostic_only"] is True)
-    ck("A27 口径签名仍逐字匹配磁盘",
-       ped.caliber_matches(d["caliber"], ped.caliber()) == [],
-       str(ped.caliber_matches(d["caliber"], ped.caliber())))
+    ck("A27 口径签名仍逐字匹配磁盘（含 189 superseded 登记）",
+       cs.caliber_matches_superseded(
+           d["caliber"], ped.caliber(),
+           "scripts/truthy_synth.json") == [],
+       str(cs.caliber_matches_superseded(
+           d["caliber"], ped.caliber(),
+           "scripts/truthy_synth.json")))
     ck("A28 4 个 commit 恰好覆盖 5 条 truthy F2P 判据",
        len(d["rows"]) == 4
        and sum(r["n_tests"] for r in d["rows"]) == 5

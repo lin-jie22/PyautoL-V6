@@ -9627,3 +9627,162 @@ C5 用 sha256 对拍证明 `aether/extract.py` 未被改动。
 ③ CI 先 `bootstrap` ④ 放宽内联器四条自限
 ⑤ 放宽 / 降级 deny-modules —— **4 项一律未开工**；
 ⑤ 属安全边界，需显式审批。⑥ 已于 185 落地。
+
+### 189. ⛔⛔ **用户拍板 ④：内联器四条自限全部放宽且默认生效 —— 判据语义变更，语义代价显式接受，两本账仍分开**（2026-11-14）
+
+═══ 一、拍板经过与取证：四条不是同一类东西 ═══
+
+`README.md:5750`（154）原文钉死「**每条都带反证，不许为救回率放宽**」。
+用户 2026-11-14 先拍板「放宽内联器四条自限」；便宜对照
+（`/tmp/r110_cheap.py`，纯内存、用产品自己的 `aether.extract` 函数 +
+量具自己的 `classify_probe`）得出**推翻「四条同性质」前提**的结果，
+于是做了第二次逐字对齐，用户明确选择「**四条全放宽且默认生效**」
+（不是「做成开关、默认全关」，也不是「只放宽 ①②」）。
+
+| 自限 | 性质 | 放宽后（便宜对照实测） |
+|---|---|---|
+| ① 作用域隔离 | 覆盖限制 | 跨作用域串名 ⇒ `'b'.upper()` 落到 gold `'A'` 上，假判据 |
+| ② 同名多 rhs 剔除 | 覆盖限制 | 取首个 rhs=1 ⇒ 与 gold=2 `mismatch` |
+| ③ 时间 / 随机拒收 | **判据正确性锚** | 3/3 时间族放行 ⇒ 不可复现判据 ≡ 随机判据 |
+| ④ 金标准三道验 | **判据正确性锚** | `mismatch` 被算成救回 ⇒ 154 的 **616 vs 13** 假鉴别力 |
+
+静态靶子（178 / 179 存档，只读）：94 条 `no_result` 里 **90 条是非
+`Assign` 绑定格**（loop_var 17 / unbound 23 / imported_name 22 /
+param_or_fixture 13 / with_binding 6 / unparseable 5 / self_attr 4），
+放宽①也变不出 rhs；放宽②只触及 **4 条 `ambiguous_rhs`** 且历史全
+`mismatch`。历史读数 `inlinable_rhs=0`、40 个 boltons bug 里「靠开
+上下文门变可解的真实 bug **0 个**」。119 条 form 门是**另一个分母**。
+
+⛔ **靶子极小 ≠ 语义代价小**。③④ 是判据正确性锚，放宽 ≡ 显式接受
+不可复现判据与假鉴别力进入默认路径。用户已知这层代价仍拍板 ⇒
+如实落地，不擅自降级成「开关默认全关」，也不宣布扩张有效 / 无效。
+
+═══ 二、落地面：不是删规则，是把「是否采纳」做成策略 ═══
+
+⛔ **影响面普查的一次自我纠正（如实留痕）**：起手误判「要改
+`aether/extract.py` ⇒ 12 份历史存档的 caliber 全部失配、约 10 个契约
+转红」。复核 `README.md:5835`（「内联器**没有**接进
+`realbug_import.py`」）与 `scripts/probe_context_gate.py` 的结构后收敛：
+四条自限的**定义与执行主体是量具**，产品 `aether/extract.py`
+**一字节未改**（sha256 仍是 `97420318…`），12 份旧 caliber 里这一项
+全部保住；真正被牵动的只有钉着量具 hash 的 **3 份存档**。
+
+落地方式不是把四条规则从代码里删掉（那样 154/162 的历史读数永远
+无法复现），而是新增 `RelaxPolicy`：四个布尔位，默认 `RELAXED`
+（`1111`），`--strict` 逐字回到 `0000`。`resolve_policy()` 是**唯一**
+默认入口（第 81 条：默认参数本身可能是闸的旁路）。
+
+| 位 | 放宽动作 | 落点 |
+|---|---|---|
+| ① | `merge_bindings()` 全作用域按确定序合并（`<module>` 最前、其余按名排序、后写覆盖先写） | 量具 |
+| ② | `bindings_for()` 把同作用域重复赋值删到**只剩首条**，再交给产品自己的 `collect_bindings()` | 量具；规则本体仍只有一份（F 组契约） |
+| ③ | 不再因 `has_unstable_call()` 拒收，但**仍检测并单独记账** | 量具 |
+| ④ | `adopt_probe()` 不再因「求值不了 / 两遍不稳 / 与 gold 不符」拒收，全部按 ledger 分流 | 量具 |
+
+⛔ 低层规则函数（`collect_bindings` / `inline_expr` /
+`has_unstable_call` / `classify_probe` / `gold_of`）**仍严格** ⇒
+`--strict` 可逐字复算 154 读数；「低层绿」绝不能读成「默认仍严格」。
+量具自检从 9 条扩到 **15 条（A–O）**，J–O 专门钉住策略与四条开关。
+
+═══ 三、两本账：放宽多采纳的绝不进收益账 ═══
+
+`adopt_probe()` 把每条探针分到互斥的 ledger：
+
+| ledger | 语义 | 进 `rescued_gold` / `disc_gold`？ |
+|---|---|---|
+| `strict_rescue` / `relaxed_rescue` | 语义可信 | 是（按 154 三档分开） |
+| `relaxed_no_value` | 连值都求不出 | **否** |
+| `relaxed_mismatch` | 与作者写死 expected 不符 | **否**（假鉴别力） |
+| `relaxed_unstable_runs` | 两遍不稳 / 时间依赖 | **否**（不可复现） |
+
+`scripts/inliner_relax_census.json`（口径 **v2**）A 账 = 6 个策略 ×
+6 个合成样本 = **36 行**，逐行可复算：
+
+| 策略 | 采纳 | 语义可信 | `counts_disc` | `relaxed_*` 档 | 拒收 |
+|---|---|---|---|---|---|
+| `0000`（154 严格） | 1 | 1 | 1 | 0 | 5 |
+| `1000` / `0100` / `0010` | 0 / 1 / 1 | 0 / 1 / 1 | 0 / 1 / 1 | 0 / 0 / 0 | 6 / 5 / 5 |
+| `0001` | 4 | 1 | 1 | 4 | 2 |
+| `1111`（189 默认） | **6** | **0** | **0** | **6** | **0** |
+
+两本账读数：`strict_verified_adopted=1`、
+`relaxed_adopted_total=6`、`relaxed_unverified=6`、
+`relaxed_disc_blocked=5`、`fake_disc_leaked=0`。⇒ 放宽态多采纳的
+**6 条全部语义未证**，其中 5 条即便 fixed/buggy 取值不同也被挡在收益账外。
+四条开关逐条有牙（`1000`/`0100`/`0010`/`0001` 各自与 `0000` 至少一行
+`outcome` 不同，`switch_teeth` 4/4 true）。
+
+⛔⛔ **n=6 合成样本不可外推**（187 教训）：这组数只证「放宽会放行什么、
+代价落在哪本账」，**不证 119 条真实 expr 上有任何收益**。
+
+═══ 四、口径 v2 与 superseded 登记（契约①） ═══
+
+量具 `scripts/probe_context_gate.py` 的 sha256 由 `f51908ab…` 变成
+`e471cc6e…`。三份旧存档（`extract_downstream.json`、
+`import_failure_attribution.json`、`truthy_synth.json`）的 `caliber`
+钉着旧值，且它们的契约实时对拍磁盘 hash。按「标准可读不可写」：
+
+- 旧存档**一个字节不改、不删除、不回写**，旧读数原样保留；
+- 新增 `scripts/caliber_superseded.json`：登记 old / new / 原因 /
+  归档章节，并钉住三份存档登记时的 sha256 与
+  `aether/extract.py` 的 hash；
+- `scripts/caliber_superseded.py::caliber_matches_superseded()` 只允许
+  「**已登记** 且 `old_sha256 == 存档值` 且 `new_sha256 == 磁盘值`」
+  的**那一处**差异豁免；未登记键、缺键、旧值被改、未登记存档一律
+  照旧转红（fail-closed，闸仍有牙）；
+- 三处受影响契约改用新闸并各带反证：
+  `contract_extract_downstream_test.py` A2 / A27（+ A2b / A2c）、
+  `contract_import_failure_attribution_test.py` A17；
+- ⛔ **跨口径读数不可比**：新存档 `inliner_relax_census/v2` 另存，
+  不与 154 / 177 / 180 的读数出现在同一张对比表里。
+
+═══ 五、四本账、契约、注入反证与静态四项 ═══
+
+| 账 | 内容 |
+|---|---|
+| A | 36 行策略矩阵（6 策略 × 6 合成样本，纯函数、零沙箱） |
+| B | 178 的 94 / 90 / 4 静态靶子 + 179 的 119 分母（只读，两账分开） |
+| C | 真跑 `run_all` **2 次**（纯合成源码 `f(3)` ⇒ 6 / 7），证明装置不是死代码；真实 expr **0 次** |
+| D | superseded 登记、三份旧存档未回写、`aether/extract.py` 未改、跨口径不可比 |
+
+`tests/contract_inliner_relax_test.py` **45 项全绿 0 skip**
+（A 28 钉读数 / B 11 纯内存反证 / C 6 本机实战：真沙箱、真实验锚、
+磁盘 hash 对拍、A1 扫描面、量具自检）。
+`/tmp/r110_falsify.py` 注入反证**全中**：阶段 1 对 A/B 39 条逐条把
+条件置 `False` ⇒ 恰好该项转红；阶段 2 **28 起**篡改存档字段 / 事故版
+尺子函数（含 `derive()` 喂过滤 rows 的 B4 型反证）；阶段 3 对 C 组
+6 条**完整真跑**逐条撤回条件，另有 1 次基线完整真跑 `FAILS=[]`。
+
+`tests/contract_context_gate_test.py` 新增 **F 组 7 项**：默认 `1111`、
+`--strict` `0000`、四条开关逐条有牙、⛔ `mismatch` 即便
+`disc=True` 也 `counts_disc=False`。原 B 组的绿被明确标注为
+「低层规则仍严格 / 旧口径可复算」，不是「默认仍严格」。
+
+⛔ **量具手滑如实留痕**：`RelaxPolicy` 首版用 `@dataclass`，在
+`module_from_spec` 按路径加载却没注册 `sys.modules` 时炸
+（`probe_alias_demote.py` 与契约正是这么加载量具的）⇒ 改成
+`NamedTuple`，同样不可变、同样支持默认值，且不依赖模块注册；
+3.9 语法闸与 F 组同源契约复跑全绿。
+
+`closure` **17/17 true**、验锚 `OK 3/3 diffs=0`、
+真 3.9.6 `ast.parse(feature_version=(3,9))` 对 7 个改动 `.py` 全 OK、
+裸 `noqa` 0、`diff --check` rc=0、待提交文件 `scan_text()` 零命中
+并带正例反证（⑥ 的新扫描面覆盖 untracked）。
+
+**新设施**：`scripts/caliber_superseded.py` /
+`scripts/caliber_superseded.json` / `scripts/probe_inliner_relax.py` /
+`scripts/inliner_relax_census.json` /
+`tests/contract_inliner_relax_test.py`；改动 `scripts/probe_context_gate.py`
+与 3 份历史契约。
+
+═══ 六、分寸（⛔ 最重要） ═══
+
+- 本轮**不报收益、不宣布扩张有效 / 无效**；§183 禁令面零触碰：
+  119 条真实 expr 沙箱 **0 次**、真实 commit **0 个**、F2P **0 读数**。
+- 放宽 ③④ 的语义代价是用户**显式接受**的，不是取证发现「其实没代价」。
+  两本账分开只让代价**可观测**，不是把代价消掉。
+- 178 的 94 / 179 的 119 / 177 的 135 是三个不同分母，绝不合并；
+  186 / 187 / 188 的结论不被推翻，「门在装载门」方向不变。
+- ④ 已从「未开工」改为「**已落地（带显式语义代价、两本账分开）**」；
+  ② 多步状态序列 ③ CI 先 `bootstrap` ⑤ 放宽 / 降级 deny-modules
+  —— **3 项一律未开工**，⑤ 属安全边界、需显式审批。⑥ 已于 185 落地。

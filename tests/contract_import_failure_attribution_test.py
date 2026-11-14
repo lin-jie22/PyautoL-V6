@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import probe_import_failure_attribution as ifa      # noqa: E402
+import caliber_superseded as cs                      # noqa: E402
 from aether.environment import (                    # noqa: E402
     _AUDIT_DENY_MODULES, run_in_sandbox)
 from realrepo_baseline import require_baseline       # noqa: E402
@@ -148,11 +149,16 @@ def group_a() -> None:
                b["evidence_tail_fixed"] == r["evidence_tail_fixed"] and
                b["evidence_tail_buggy"] == r["evidence_tail_buggy"]
                for b in by_sha) for r in rows))
-    ck("A17 口径签名每个文件与实际一致",
-       all(hashlib.sha256((ROOT / rel).read_bytes()).hexdigest() == h
-           for rel, h in d["caliber"].items())
+    #: ⛔ r110 / README 189：量具换口径，旧 caliber 走 superseded 登记；
+    #:    旧存档一个字节未改，未登记键的任何差异照旧转红（契约①）。
+    ck("A17 口径签名每个文件与实际一致（含 189 superseded 登记）",
+       cs.caliber_matches_superseded(
+           d["caliber"], ifa.caliber(),
+           "scripts/import_failure_attribution.json") == []
        and "scripts/probe_import_failure_attribution.py" in d["caliber"],
-       str(len(d["caliber"])))
+       str(cs.caliber_matches_superseded(
+           d["caliber"], ifa.caliber(),
+           "scripts/import_failure_attribution.json")))
     ck("A18 没有放宽 deny 的读数（同源词表大小已钉）",
        s["caliber_sizes"]["deny_modules"] == len(set(_AUDIT_DENY_MODULES))
        and s["caliber_sizes"]["stdlib_module_names"] > 0,

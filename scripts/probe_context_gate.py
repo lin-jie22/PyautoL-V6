@@ -35,7 +35,7 @@ fixed 上通过、在 buggy 上失败 ⇒ **看起来有鉴别力，其实是假
    expected 只要能 `literal_eval`，就是作者亲手写死的真值。用它对拍，
    「内联有没有改坏语义」才有答案 —— 否则「内联后能跑」什么都证明不了。
 
-═══ 内联器与它的四条自限（不许为了救回率放宽任何一条）═══
+═══ 内联器与它的四条自限（154 的原始口径）═══
 
     1. **只内联所在函数内的赋值 + 模块级赋值**（同名不同作用域不许混）；
     2. **同名有两个不同 rhs ⇒ 不内联**（循环里重复赋值 ⇒ 语义不确定）；
@@ -44,8 +44,23 @@ fixed 上通过、在 buggy 上失败 ⇒ **看起来有鉴别力，其实是假
     4. **内联后必须过三道验**：能求值 + 跑两遍稳定 + 与测试写死 expected
        一致。三条缺一不采纳（fail-closed）。
 
+154 归档原文写的是「每条都带反证，不许为救回率放宽」。⛔ 这条在
+**2026-11-14（r110 / README 189）被用户显式拍板覆盖**：「四条全放宽且
+默认生效」。本脚本按「改判据但保留可观测性」落地：
+
+    · 四条规则**没有从代码里删掉**，而是变成显式 `RelaxPolicy`；
+      默认 `RELAXED`（1111），`--strict` 逐字回到 154 口径 ⇒ 旧读数
+      仍可复算，不会出现「换了口径后历史全废」。
+    · ③④ 是判据正确性锚：放宽 ≡ 让不可复现判据 / 假鉴别力进默认路径。
+      ⇒ **两本账仍然分开**：放宽态多采纳的全部记在 `relaxed_*` 档，
+      带 `semantic_verified=False`，不进 `rescued_gold` / `disc_gold`，
+      ⛔ 不把假鉴别力当收益报（契约④）。
+    · 换口径 ⇒ 旧存档标 superseded、跨口径读数不可比（契约①）。
+      三份钉着本文件 sha256 的旧存档不回写、不删除。
+
 跑法：
     python scripts/probe_context_gate.py --repo /tmp/realrepo/boltons --limit 30
+    python scripts/probe_context_gate.py --repo /tmp/realrepo/boltons --strict
 """
 from __future__ import annotations
 
@@ -56,6 +71,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -119,6 +135,138 @@ def classify_probe(expr: str, exp_text: str, got: str | None) -> str:
     return "ok" if v == g else "mismatch"
 
 
+# ───────────── r110 / README 189：四条自限的「放宽策略」 ─────────────
+# ⛔ 用户 2026-11-14 明确拍板「四条全放宽且默认生效」。落地方式不是把四条
+#    规则从代码里删掉（那样 154/162 的历史读数永远无法复现），而是把
+#    **是否采纳**做成显式策略：同一条流水线、同一批产品函数，只换策略。
+#    · 默认 RELAXED（1111）：四条采纳条件都不再拒收；
+#    · --strict（0000）：逐字回到 154 严格口径，旧读数可复算。
+# ⛔ 两本账仍分开（契约④）：放宽态多采纳的探针全部记在 relaxed_* 档，
+#    带 semantic_verified=False ⇒ 不进 rescued_gold / disc_gold，
+#    **不许把假鉴别力当收益报**。
+#: ⛔ 不用 `@dataclass`：本文件常被 `module_from_spec` 按路径加载却没注册进
+#:    `sys.modules`，dataclasses 会查 `sys.modules[cls.__module__].__dict__`
+#:    ⇒ `AttributeError`。`NamedTuple` 同样不可变、同样支持默认值，且无此依赖。
+class RelaxPolicy(NamedTuple):
+    #: ① 合并全部分作用域绑定（不再只认本函数 + 模块级）
+    cross_scope: bool = True
+    #: ② 同名多 rhs 取首个（不再整条剔除）
+    first_rhs: bool = True
+    #: ③ 时间/随机依赖不再拒收
+    allow_unstable: bool = True
+    #: ④ 不再因「求值不了 / 两遍不稳 / 与 gold 不符」拒收
+    no_gold_gate: bool = True
+
+    def signature(self) -> str:
+        return "".join("1" if v else "0" for v in
+                       (self.cross_scope, self.first_rhs,
+                        self.allow_unstable, self.no_gold_gate))
+
+
+RELAXED = RelaxPolicy()
+STRICT = RelaxPolicy(False, False, False, False)
+
+
+def resolve_policy(strict: bool = False) -> RelaxPolicy:
+    """⛔ 唯一的默认入口（第 81 条：默认参数本身可能是闸的旁路）。"""
+    return STRICT if strict else RELAXED
+
+
+def merge_bindings(envs: dict, fn: str, policy: RelaxPolicy):
+    """⛔ 自限①：严格态 = `<module>` + 本函数；放宽态 = 全作用域按确定序合并。
+
+    `envs` 形如 `{scope: {name: rhs_ast}}`（scope 可为 `<module>` / 函数名 /
+    `file::scope`）。合并顺序钉死为：`<module>` 最前、其余按 scope 名排序、
+    后写覆盖先写 ⇒ 跨作用域串名是**可复现**的，不是随机的。
+    """
+    mod = {k: v for k, v in envs.items()
+           if k == "<module>" or k.endswith("::<module>")}
+    others = sorted(k for k in envs
+                    if k != "<module>" and not k.endswith("::<module>"))
+    b = {}
+    for v in mod.values():
+        b.update(v)
+    if not policy.cross_scope:
+        b.update(envs.get(fn, {}))
+        return b, {"cross_scope": False, "n_scopes_merged": 1}
+    for k in others:
+        b.update(envs[k])
+    return b, {"cross_scope": True,
+               "n_scopes_merged": len(others) + len(mod)}
+
+
+def bindings_for(test_src: str, policy: RelaxPolicy):
+    """⛔ 自限②：放宽态把同作用域重复赋值**删到只剩第一条**，再交给产品
+    自己的 `collect_bindings()` —— 规则本体仍只有一份（162 / F 组契约），
+    这里只做「喂进去的源码」变换，不另写绑定抽取器。
+    """
+    if not policy.first_rhs:
+        return collect_bindings(test_src), 0, "strict"
+    try:
+        tree = ast.parse(test_src)
+        n_removed = [0]
+
+        def prune(body, seen):
+            keep = []
+            for st in body:
+                if isinstance(st, (ast.Assign, ast.AnnAssign)):
+                    tgts = (st.targets if isinstance(st, ast.Assign)
+                            else [st.target])
+                    if len(tgts) == 1 and isinstance(tgts[0], ast.Name):
+                        nm = tgts[0].id
+                        if nm in seen:
+                            n_removed[0] += 1
+                            continue
+                        seen.add(nm)
+                    keep.append(st)
+                elif isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    prune(st.body, set())
+                    keep.append(st)
+                elif isinstance(st, ast.ClassDef):
+                    prune(st.body, seen)
+                    keep.append(st)
+                elif hasattr(st, "body"):
+                    prune(st.body, seen)
+                    keep.append(st)
+                else:
+                    keep.append(st)
+            body[:] = keep
+
+        prune(tree.body, set())
+        return collect_bindings(ast.unparse(tree)), n_removed[0], "first_rhs"
+    except (SyntaxError, ValueError, AttributeError):
+        return collect_bindings(test_src), 0, "prune_failed_fallback_strict"
+
+
+def adopt_probe(k: str, unstable_runs: bool,
+                policy: RelaxPolicy, disc: bool):
+    """⛔ 自限④ 的采纳判定（纯函数，供契约离线反证）。
+
+    返回 `(ledger, semantic_verified, counts_disc)`：
+
+      · `rejected`              严格态拒收（三道验任一不过）
+      · `strict_rescue`         严格态采纳，语义可信（154 的三档）
+      · `relaxed_no_value`      放宽态：求值不了，⛔ 不是探针，只是留痕
+      · `relaxed_mismatch`      放宽态：与金标准不符，⛔ 假鉴别力
+      · `relaxed_unstable_runs` 放宽态：两遍不稳定，⛔ 不可复现判据
+      · `relaxed_rescue`        放宽态：语义仍可信
+
+    ⛔ `counts_disc` 只有语义可信且真有鉴别力时为 True：
+    `mismatch` 类即便 fixed/buggy 取值不同，也绝不进 `disc_gold`。
+    """
+    if not policy.no_gold_gate:
+        if k == "none" or unstable_runs or k == "mismatch":
+            return "rejected", False, False
+        return "strict_rescue", True, bool(disc)
+    if k == "none":
+        return "relaxed_no_value", False, False
+    if k == "mismatch":
+        return "relaxed_mismatch", False, False
+    if unstable_runs:
+        return "relaxed_unstable_runs", False, False
+    return "relaxed_rescue", True, bool(disc)
+
+
 # ─────────────────────────── 主流程 ──────────────────────────────────────
 def _git(repo: Path, *args: str) -> str:
     p = subprocess.run(["git", *args], cwd=str(repo),
@@ -159,6 +307,19 @@ def selftest() -> bool:
     chk("G 硬失败", classify_probe("x", "1", None), "none")
     chk("H 软失败", classify_probe("x", "1", "2"), "mismatch")
     chk("I 通过", classify_probe("x", "1", "1"), "ok")
+    # ── r110：放宽策略自身的自检（低层规则函数仍严格，策略可切换）──
+    chk("J 默认策略 1111", resolve_policy(False).signature(), "1111")
+    chk("K --strict 策略 0000", resolve_policy(True).signature(), "0000")
+    env = {"<module>": {}, "t1": {"v": ast.Constant(value="a")},
+           "t2": {"v": ast.Constant(value="b")}}
+    bs, _ = merge_bindings(env, "t1", STRICT)
+    br, _ = merge_bindings(env, "t1", RELAXED)
+    chk("L ①严格态用本作用域", inline_expr("v.upper()", bs), "'a'.upper()")
+    chk("M ①放宽态串到 t2", inline_expr("v.upper()", br), "'b'.upper()")
+    chk("N ②严格态剔除歧义",
+        bindings_for(src2, STRICT)[0]["t"], {})
+    chk("O ②放宽态取首个 rhs",
+        inline_expr("x", bindings_for(src2, RELAXED)[0]["t"]), "1")
     return ok
 
 
@@ -167,8 +328,13 @@ def main() -> int:
     ap.add_argument("--repo", required=True)
     ap.add_argument("--limit", default="30")
     ap.add_argument("--out", default="")
+    ap.add_argument("--strict", action="store_true",
+                    help="逐字回到 154 严格口径（旧读数可复算）")
     args = ap.parse_args()
     repo = Path(args.repo).resolve()
+    policy = resolve_policy(args.strict)
+    print(f"放宽策略 signature={policy.signature()} "
+          f"({'STRICT/154 口径' if args.strict else 'RELAXED/189 默认'})")
 
     _ok = selftest()
     print(f"量具自检：{'✅ 通过' if _ok else '❌ 未通过'}")
@@ -202,7 +368,14 @@ def main() -> int:
     st = {"rescued_gold": 0, "rescued_nogold": 0, "rescued_raises": 0,
           "disc_gold": 0, "disc_nogold": 0, "disc_raises": 0,
           "rejected_time": 0, "rejected_gold": 0, "unstable": 0,
-          "total": 0, "by_kind": {}}
+          "total": 0, "by_kind": {},
+          #: ⛔ r110 第二本账：放宽态多采纳的全部在这里，⛔ 绝不并入
+          #:    rescued_* / disc_*（不把假鉴别力当收益报）。
+          "relaxed_adopted": 0, "relaxed_no_value": 0,
+          "relaxed_mismatch": 0, "relaxed_unstable_runs": 0,
+          "relaxed_unstable_expr": 0, "relaxed_rescue": 0,
+          "relaxed_disc_unverified": 0, "relaxed_pruned_assign": 0,
+          "relaxed_scopes_merged": 0}
     rows = []
     per_commit: dict = {}
     for sha, src, testfs, subj in cands:
@@ -224,8 +397,9 @@ def main() -> int:
             for act, exc, fn in scoped_raise_probes(tsrc):
                 probes.append({"kind": "raises", "expr": act, "exc": exc,
                                "fn": fn, "tf": tf})
-            for sc, b in collect_bindings(tsrc).items():
-                envs[f"{tf}::{sc}"] = b
+            b, n_pruned, _mode = bindings_for(tsrc, policy)
+            envs[tf] = b
+            st["relaxed_pruned_assign"] += n_pruned
 
         if not probes:
             rows.append({"sha": sha, "note": "没抽到断言"})
@@ -280,54 +454,78 @@ def main() -> int:
         tries = stash["none"] + stash["mismatch"]
         inlined: list = []
         for i, p in tries:
-            binds = dict(envs.get(f"{p['tf']}::<module>", {}))
-            binds.update(envs.get(f"{p['tf']}::{p['fn']}", {}))
+            binds, sflags = merge_bindings(envs.get(p["tf"], {}),
+                                           p["fn"], policy)
+            st["relaxed_scopes_merged"] += sflags["n_scopes_merged"]
             new = inline_expr(p["expr"], binds)
             if not new or new == p["expr"]:
                 continue
-            if has_unstable_call(new):
+            unstable = has_unstable_call(new)
+            if unstable and not policy.allow_unstable:
                 st["rejected_time"] += 1
                 continue
-            inlined.append((i, p, new))
+            if unstable:
+                st["relaxed_unstable_expr"] += 1
+            inlined.append((i, p, new,
+                            {"unstable_expr": unstable,
+                             "cross_scope": sflags["cross_scope"]}))
 
         disc_after = disc_before
         if inlined:
-            _ps = [p for _, p, _ in inlined]
-            _ex = [n for _, _, n in inlined]
+            _ps = [p for _, p, _, _ in inlined]
+            _ex = [n for _, _, n, _ in inlined]
             g2 = run_all(fixed, items_of(_ps, "b", _ex))
             g2b = run_all(fixed, items_of(_ps, "c", _ex))
             gb = run_all(buggy, items_of(_ps, "d", _ex))
-            for j, (i, p, new) in enumerate(inlined):
+            for j, (i, p, new, flags) in enumerate(inlined):
                 rf, rf2 = g2.get(f"b{j}"), g2b.get(f"c{j}")
                 k = judge(p, rf)
-                if k == "none":
-                    continue
-                if p["kind"] == "expect" and (
-                        rf is None or rf2 is None or rf["got"] != rf2["got"]):
-                    st["unstable"] += 1
-                    continue
-                if k == "mismatch":
-                    st["rejected_gold"] += 1
-                    continue
+                unstable_runs = bool(
+                    p["kind"] == "expect"
+                    and (rf is None or rf2 is None
+                         or rf["got"] != rf2["got"]))
                 disc = is_disc(p, rf, gb.get(f"d{j}"))
+                ledger, verified, counts_disc = adopt_probe(
+                    k, unstable_runs, policy, disc)
+                if ledger == "rejected":
+                    if k == "none":
+                        continue
+                    if unstable_runs:
+                        st["unstable"] += 1
+                    else:
+                        st["rejected_gold"] += 1
+                    continue
+                base = {"sha": sha, "kind": p["kind"], "orig": p["expr"],
+                        "inlined": new,
+                        "gold": p.get("gold") or p.get("exc"),
+                        "got": (rf or {}).get("got"),
+                        "buggy": (gb.get(f"d{j}") or {}).get("got"),
+                        "discriminating": disc,
+                        "policy": policy.signature(), "ledger": ledger,
+                        "semantic_verified": verified,
+                        "unstable_expr": flags["unstable_expr"],
+                        "cross_scope": flags["cross_scope"]}
+                if ledger.startswith("relaxed_"):
+                    st["relaxed_adopted"] += 1
+                    st[ledger] += 1
+                    if not verified and disc:
+                        st["relaxed_disc_unverified"] += 1
+                    if not verified:
+                        rows.append(base)
+                        continue
                 #: ⛔ 三档分开记：金标准对拍过的 / 无金标准的 / raises 类的
                 if p["kind"] == "raises":
                     st["rescued_raises"] += 1
-                    if disc:
+                    if counts_disc:
                         st["disc_raises"] += 1
                 else:
                     key = "gold" if k == "ok" else "nogold"
                     st[f"rescued_{key}"] += 1
-                    if disc:
+                    if counts_disc:
                         st[f"disc_{key}"] += 1
-                if disc:
+                if counts_disc:
                     disc_after += 1
-                rows.append({"sha": sha, "kind": p["kind"], "orig": p["expr"],
-                             "inlined": new,
-                             "gold": p.get("gold") or p.get("exc"),
-                             "got": (rf or {}).get("got"),
-                             "buggy": (gb.get(f"d{j}") or {}).get("got"),
-                             "discriminating": disc})
+                rows.append(base)
 
         per_commit[sha] = {"before": disc_before, "after": disc_after,
                            "probes": len(probes),
@@ -363,6 +561,19 @@ def main() -> int:
           f"   ⛔ 语义由'抛对异常'保证，无法金标准对拍")
     print(f"  拒收：时间/随机依赖 {st['rejected_time']}、"
           f"与金标准不符 {st['rejected_gold']}、两次运行不一致 {st['unstable']}")
+    print(f"\n{'=' * 76}\n⛔ 第二本账：放宽态额外采纳（policy={policy.signature()}）"
+          f"\n{'=' * 76}")
+    print(f"  额外采纳合计 {st['relaxed_adopted']}："
+          f"求值不了 {st['relaxed_no_value']} / "
+          f"与金标准不符 {st['relaxed_mismatch']} / "
+          f"两遍不稳 {st['relaxed_unstable_runs']} / "
+          f"语义仍可信 {st['relaxed_rescue']}")
+    print(f"  时间/随机依赖被放行 {st['relaxed_unstable_expr']}；"
+          f"歧义赋值删到首条 {st['relaxed_pruned_assign']}；"
+          f"合并作用域次数 {st['relaxed_scopes_merged']}")
+    print(f"  ⛔ 其中 fixed/buggy 取值不同但**语义未证**的 "
+          f"{st['relaxed_disc_unverified']} 条 ⇒ 假鉴别力，"
+          f"绝不并入 disc_gold / 收益账（契约④）")
 
     #: ⛔ 真正决定方向的读数：**commit 级**。一条判据变多不算数，
     #:    「本来 0 条有鉴别力（⇒ 这个 bug 进不了 V6）变成 ≥1 条」才算。
@@ -392,7 +603,8 @@ def main() -> int:
 
     if args.out:
         Path(args.out).write_text(
-            json.dumps({"tally": tally, "stats": st, "per_commit": per_commit,
+            json.dumps({"policy": policy.signature(), "tally": tally,
+                        "stats": st, "per_commit": per_commit,
                         "rows": rows}, ensure_ascii=False, indent=2),
             encoding="utf-8")
         print(f"\n明细已写入 {args.out}")

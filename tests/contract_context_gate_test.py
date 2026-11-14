@@ -15,6 +15,13 @@ README 153 记了三道**串联**的门：形态门 / 判据门 / 上下文门�
     commit 级 0 → ≥1 条鉴别力的只有 4 个，而那 4 个**形态门全是
     structural** ⇒ 三道门串联 ⇒ **没有一个真实 bug 靠开上下文门变可解**。
 
+⛔⛔ **r110 / README 189 的状态更新（2026-11-14）**：用户显式拍板
+「四条全放宽且默认生效」，覆盖上面「不许为救回率放宽」的原始约束。
+落地方式不是删规则，而是把采纳条件做成 `RelaxPolicy`：默认 `1111`，
+`--strict` 回到 `0000`。⇒ 本契约 A–E 组钉的是**低层规则函数仍严格**
+（这是旧读数可复算的前提）；F 组钉的是**默认策略确已放宽**、两本账
+仍分开、且四条开关逐条有牙。⛔ 不要把 B 组的绿读成「默认仍严格」。
+
 ⛔ 这份契约不是"锁住一个已上线的能力"，而是**锁住一把已经校准过的尺子**：
 
     · 内联器将来若被接进导入器，救回率会被拿去当收益报 —— 而实测证明
@@ -40,6 +47,7 @@ README 153 记了三道**串联**的门：形态门 / 判据门 / 上下文门�
 跑法（离线、秒级，不依赖任何 /tmp 下的真实仓库）：
     python tests/contract_context_gate_test.py
 """
+import ast
 import importlib.util
 import sys
 from pathlib import Path
@@ -186,13 +194,44 @@ def main() -> int:
     print("\n== E 组：量具自检可复现 ==")
     ck("E1 selftest() 全绿", CG.selftest() is True)
 
+    print("\n== F 组：⛔ r110 默认放宽策略 + 四条开关逐条有牙 ==")
+    ck("F1 默认策略 1111（四条全放宽且默认生效）",
+       CG.resolve_policy(False).signature() == "1111")
+    ck("F2 --strict 策略 0000（154 口径可复算）",
+       CG.resolve_policy(True).signature() == "0000")
+    env = {"<module>": {}, "t1": {"v": ast.Constant(value="a")},
+           "t2": {"v": ast.Constant(value="b")}}
+    bs, _ = CG.merge_bindings(env, "t1", CG.STRICT)
+    br, _ = CG.merge_bindings(env, "t1", CG.RELAXED)
+    ck("F3 ①严格态用本作用域 vs 放宽态串到 t2",
+       CG.inline_expr("v.upper()", bs) == "'a'.upper()"
+       and CG.inline_expr("v.upper()", br) == "'b'.upper()")
+    amb = "def t():\n    x = 1\n    x = 2\n    chk(x, 2)\n"
+    ck("F4 ②严格剔除歧义 vs 放宽取首个 rhs",
+       CG.bindings_for(amb, CG.STRICT)[0]["t"] == {}
+       and CG.inline_expr("x", CG.bindings_for(amb, CG.RELAXED)[0]["t"])
+       == "1")
+    ck("F5 ③低层拒收仍严格（放宽只是**不采纳拒绝动作**）",
+       CG.has_unstable_call("date.today()") is True
+       and CG.STRICT.allow_unstable is False
+       and CG.RELAXED.allow_unstable is True)
+    ck("F6 ④严格态 mismatch 拒收 / 放宽态另账且语义未证",
+       CG.adopt_probe("mismatch", False, CG.STRICT, True)
+       == ("rejected", False, False)
+       and CG.adopt_probe("mismatch", False, CG.RELAXED, True)
+       == ("relaxed_mismatch", False, False))
+    ck("F7 ⛔ 假鉴别力绝不进收益账：mismatch 即便 disc=True 也 counts_disc=False",
+       CG.adopt_probe("mismatch", False, CG.RELAXED, True)[2] is False
+       and CG.adopt_probe("ok", False, CG.RELAXED, True)[2] is True)
+
     print("=" * 74)
     if FAILS:
         print(f"❌ {len(FAILS)} 项未通过：")
         for f in FAILS:
             print("  ✗", f)
         return 1
-    print("✅ 内联器四条自限在位，且『能求值』与『有鉴别力』是分开的两个数")
+    print("✅ 低层四条规则仍严格（旧口径可复算）；默认策略已放宽 1111；"
+          "『能求值』与『有鉴别力』仍是分开的两个数")
     return 0
 
 

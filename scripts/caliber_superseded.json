@@ -1,0 +1,46 @@
+{
+  "schema": "caliber_superseded/v1",
+  "registered_at": "2026-11-14",
+  "readme_section": "189",
+  "reason": "用户拍板「放宽内联器四条自限且默认生效」；量具 scripts/probe_context_gate.py 换口径，旧 caliber 标 superseded，旧存档不回写不删除",
+  "file": "scripts/probe_context_gate.py",
+  "old_sha256": "f51908ab750c3e175f8e6e1ec35581a994208e50837869750c8c62696940b5ca",
+  "new_sha256": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+  "archives": [
+    "scripts/extract_downstream.json",
+    "scripts/import_failure_attribution.json",
+    "scripts/truthy_synth.json"
+  ],
+  "archive_sha256_at_registration": {
+    "scripts/extract_downstream.json": "896220cd2849f6740a0fc28daf6e434c7ed77445237b60f3b1288a3cf7d8d266",
+    "scripts/import_failure_attribution.json": "77d0d182bbeb69d5af176482c29e6fe00bcf3ddc2fdc53a5409589a37d0352c6",
+    "scripts/truthy_synth.json": "d526ee4292b874b6df0ee25ade10604ecbf9f96d9e356ba2574e9bf6f8987250"
+  },
+  "aether_extract_sha256_unchanged": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+  "entries": [
+    {
+      "archive": "scripts/extract_downstream.json",
+      "file": "scripts/probe_context_gate.py",
+      "old_sha256": "f51908ab750c3e175f8e6e1ec35581a994208e50837869750c8c62696940b5ca",
+      "new_sha256": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+      "old_reading_unchanged": true,
+      "reason": "r110 / README 189 放宽策略默认生效"
+    },
+    {
+      "archive": "scripts/import_failure_attribution.json",
+      "file": "scripts/probe_context_gate.py",
+      "old_sha256": "f51908ab750c3e175f8e6e1ec35581a994208e50837869750c8c62696940b5ca",
+      "new_sha256": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+      "old_reading_unchanged": true,
+      "reason": "r110 / README 189 放宽策略默认生效"
+    },
+    {
+      "archive": "scripts/truthy_synth.json",
+      "file": "scripts/probe_context_gate.py",
+      "old_sha256": "f51908ab750c3e175f8e6e1ec35581a994208e50837869750c8c62696940b5ca",
+      "new_sha256": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+      "old_reading_unchanged": true,
+      "reason": "r110 / README 189 放宽策略默认生效"
+    }
+  ]
+}
