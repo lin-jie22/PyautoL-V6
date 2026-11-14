@@ -9786,3 +9786,105 @@ param_or_fixture 13 / with_binding 6 / unparseable 5 / self_attr 4），
 - ④ 已从「未开工」改为「**已落地（带显式语义代价、两本账分开）**」；
   ② 多步状态序列 ③ CI 先 `bootstrap` ⑤ 放宽 / 降级 deny-modules
   —— **3 项一律未开工**，⑤ 属安全边界、需显式审批。⑥ 已于 185 落地。
+
+### 190. ⛔⛔ **189 的两本账只测了 3/4 个 `k` 值：缺的 `ok_nogold` 恰是 135 主账上唯一非 `none` 的 `k`**（2026-11-14）
+
+═══ 一、起点：189 说「有牙 / 可复算」，但只在合成样本上测过 ═══
+
+189 把四条自限全放宽并默认生效，用 6 策略 × 6 合成样本 = 36 行
+钉出 `fake_disc_leaked=0`、`switch_teeth 4/4`，并声明「低层规则仍严格
+⇒ `--strict` 可逐字复算 154」。⛔ 本轮**纯只读取证**先查一个从未
+量过的东西：产品 `classify_probe()` 到底有几个返回值、189 的反证组
+覆盖了几个。
+
+从**产品自己的 AST** 抽出（不手写词表，契约⑥同源）共 **4** 个 `k`：
+
+| `k` | 语义 | 154 的对应档 |
+|---|---|---|
+| `none` | 求值不了 | 硬失败 |
+| `ok_nogold` | 能求值、无法对拍 | **无金标准可对拍（语义未证）293 条** |
+| `ok` | 与作者写死 expected 一致 | 过了金标准对拍 247 条 |
+| `mismatch` | 与 expected 不符 | 拒收 123 条（假鉴别力） |
+
+⛔ 189 的 36 行里只出现 `ok` / `mismatch` / `none` ⇒ **覆盖 3/4**，
+`ok_nogold` 从未进过反证组。而 `adopt_probe()` 只把 `none` 与
+`mismatch` 判为语义未证，`ok_nogold` 一律 `semantic_verified=True`
+⇒ 与 154 三档里明写「**语义未证**」的那 293 条命名不自洽。
+
+⛔⛔ **更关键的交叉**：把 177 主账 135 条逐条同源重放后，真实 `k`
+分布是 `UNSPLITTABLE 41 / none 72 / ok_nogold 22` —— `ok` 与
+`mismatch` **各 0 条**。即 189 合成反证组与真实主账在 `k` 值上
+**唯一交集是 `none`**；真实数据里唯一非 `none` 的 `k` 恰好是
+没被测过的那一格（187 教训：n=6 合成样本不可外推，第 115 条：
+单次读数 ≠ 结构必然）。
+
+═══ 二、四本账（⛔ 不合并成布尔）═══
+
+| 账 | 做法 | 封闭读数 |
+|---|---|---|
+| **A 覆盖** | AST 抽 4 个 `k` × 189 A 账 36 行 × `0000`/`1111` × `disc` 两档 = 16 行全枚举；4/4 正例反证 | 覆盖 `3/4`、缺 `["ok_nogold"]`；该格两口径都 `verified=True`，`1111` 下 ledger = `relaxed_rescue` |
+| **B 重放** | 135 条逐条走产品 `scoped_assertions()` → `classify_probe()` → `adopt_probe()`；`got` **只取存档已记录值**，零沙箱 | 可拆 94 / 不可拆 41（其中 9 条是 §184 的 `call[:240]` 截断伪格）；`got` 有记录 32；22 条 `ok_nogold` 全为 `gold_not_literal` |
+| **C 主流程** | 源码级 AST + 事故版变体 | 主流程 `key = "gold" if k == "ok" else "nogold"` ⇒ `ok_nogold` 进 `rescued_nogold` / `disc_nogold`，**不进 `disc_gold`** |
+| **D 边界** | 磁盘 hash 对拍、三分母、禁令面 | `aether/extract.py` 未改、189 存档零回写、135 / 119 / 94 三个分母分开、119 form 全 `unmeasurable`、真实 expr / commit / F2P / 收益全 0 |
+
+**两口径逐行 ledger 对拍（B 账）**：
+
+| 口径 | `rejected` / `relaxed_no_value` | `strict_rescue` / `relaxed_rescue` | `relaxed_unstable_runs` | verified 行数 |
+|---|---|---|---|---|
+| `0000` | 75 | 60 | 0 | **60** |
+| `1111` | 72 | 60 | 3 | **60** |
+
+⛔ **135 行的 ledger 名字全部变了，但那不是「新采纳」**：
+`n_newly_verified_by_relax=0`、`n_row_counts_disc_changed=0`。
+3 条 unstable 行（nogold 1 + 不可拆 2）在两口径下**都未证**，
+与其余 `ok_nogold` 的「两口径都判 verified=True」是**两层**，
+绝不合并成一个布尔（这正是本轮修尺子时抓到的 3 次真红）。
+
+═══ 三、⛔ 分寸：这不是产品洞 ═══
+
+`adopt_probe()` 的 `semantic_verified` 与 154 三档**命名冲突**，
+但主流程随后按 `k` 分到 `nogold` 档 ⇒ 假鉴别力**没有**被报成
+`disc_gold`。⇒ 准确结论是：
+
+1. 189 的**离线反证组**少一格 `k` 值；`fake_disc_leaked=0` 只在那
+   3 个合成 `k` 上成立，**不外推**到 135 主账的 `ok_nogold` 分布；
+2. 189 的 `semantic_verified` 字段与 154 的「语义未证」档语义不自洽；
+3. ⛔ **不是产品有 bug**，也不宣布「④ 放宽后收益变好 / 变坏」——
+   本轮零 F2P、零收益读数。
+
+⛔⛔ **本轮一个字节都没改 189 已拍板的语义**：`adopt_probe()` /
+`probe_context_gate.py` / `inliner_relax_census.json` 全部未动。
+给 `adopt_probe` 补 `ok_nogold` 分支、或给 189 反证组补样本，
+都属于**改判据语义**（第 34 条）⇒ **另一次需拍板的产品口径变更**，
+不擅自开工。
+
+═══ 四、契约、反证与静态四项 ═══
+
+`tests/contract_nogold_gap_test.py` **58 项 A/B + 6 项 C 全绿 0 skip**
+（B39–B41 是同源实算：用产品函数重算 3 行存档并逐字段对拍，
+使事故版补丁有牙）。`/tmp/r111_falsify.py` 注入反证全中：
+阶段 1 `58/58` 逐条置 `False` 恰好该项转红、阶段 2 `55/55`
+篡改存档字段、阶段 2b `4/4` 事故版产品函数（含 B4 型「喂过滤
+rows」同源反证）、阶段 3 `6/6` C 组完整真跑逐条撤回，
+基线 `FAILS=[]`、`FALSIFICATION_OK=True`。
+⛔ 单次契约 52s 全耗在 `require_baseline()` 的 3 仓库 census ⇒
+沿用 r109 分层反证（一次真实验锚读数缓存、同进程跑 C 组、不
+spawn 子进程），不是把验锚跳过。
+
+`closure` **23/23 true**、验锚 `OK 3/3 diffs=0`、真 3.9.6
+`ast.parse(feature_version=(3,9))` 对 2 个新 `.py` 全 OK、
+裸 `noqa` 0、`diff --check` rc=0、待提交文件 `scan_text()` 零命中
+并带正例反证（C5 同时证明 3 个新文件都在 A1 候选面）。
+
+**新设施**：`scripts/probe_nogold_gap.py`、
+`scripts/nogold_gap_census.json`（口径 `v1` 另存）、
+`tests/contract_nogold_gap_test.py`。
+
+═══ 五、拍板清单（未变，另加一条）═══
+
+本轮是**纯只读取证**，不构成新拍板项、不推翻 186 / 187 / 188 / 189。
+② 多步状态序列 ③ CI 先 `bootstrap` ⑤ 放宽 / 降级 deny-modules
+—— **3 项一律未开工**（⑤ 属安全边界、需显式审批）；
+① 已取证收口、④ / ⑥ 已落地。
+⛔ 新增一条需拍板候选：**修 `ok_nogold` 的 ledger 语义 / 补 189 反证组**
+（改判据语义，未经拍板不动）。
