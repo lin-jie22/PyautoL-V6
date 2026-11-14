@@ -1,0 +1,1499 @@
+{
+ "schema": "form_boundary_census_v1",
+ "caliber": {
+  "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+  "aether/environment.py": "ee35fe9d77361fc807bf8a4d26839020c76eafd266eb23a90bc008577b5c2d38",
+  "scripts/probe_form_shape_attribution.py": "dd1d7673292462dd92bce68785558b5c6f7ff748ed8b08e7cab4f2c85c874a77",
+  "scripts/probe_extract_downstream.py": "1897a4a0dbdc497f554c50503541da3b1ea54bdf95bbf3c80bb4569477efaa10",
+  "scripts/form_shape_attribution.json": "b536f832e4ba0fc7bc734321dae058007de4e556d6699a7ec8c010b6d7556309",
+  "scripts/extract_downstream.json": "896220cd2849f6740a0fc28daf6e434c7ed77445237b60f3b1288a3cf7d8d266",
+  "scripts/realrepo_baseline.json": "0585f86b9146fe0aa203c936af2dcd576f34b3b55c27fabc59db93073558b0fb",
+  "scripts/probe_is_shape.py": "fde7f8f7754c925c94f4e457df11ee022be714a6c4cd9a46dfe5079d1a1b47e4",
+  "scripts/is_shape_census.json": "6e70b5dc96ba12f2dd537c131fda05c09b3141b4f0c96ab689e326c0af5a00e0",
+  "scripts/probe_form_boundary.py": "2fce0eb95862792f477b750da23ce1f6bd10ebf9882a24c5d0a9aa4ecf60f256"
+ },
+ "baseline_health": {
+  "ok": true,
+  "diffs": [],
+  "caliber_diffs": []
+ },
+ "accounts": {
+  "A_static_form": {
+   "rows": [
+    {
+     "i": 1,
+     "shape": "truthy",
+     "attr_product": "assertTrue",
+     "expr": "self.assertTrue(stream._rolled)",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 2,
+     "shape": "truthy",
+     "attr_product": "assert",
+     "expr": "Stats(data).format_histogram()",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 3,
+     "shape": "order",
+     "attr_product": "assert",
+     "expr": "cab <= complement('a')",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 4,
+     "shape": "not_expr",
+     "attr_product": "assert",
+     "expr": "not complement('a') <= cab",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 5,
+     "shape": "order",
+     "attr_product": "assert",
+     "expr": "cab <= cab",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 6,
+     "shape": "order",
+     "attr_product": "assert",
+     "expr": "complement('a') >= cab",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 7,
+     "shape": "order",
+     "attr_product": "assert",
+     "expr": "cab >= cab",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 8,
+     "shape": "truthy",
+     "attr_product": "assert",
+     "expr": "tail",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 9,
+     "shape": "in",
+     "attr_product": "assert",
+     "expr": "'fileutils.py' in basenames",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 10,
+     "shape": "in",
+     "attr_product": "assert",
+     "expr": "4 in x",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 11,
+     "shape": "truthy",
+     "attr_product": "assert",
+     "expr": "isinstance(x[1:4], IndexedSet)",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 12,
+     "shape": "order",
+     "attr_product": "assert",
+     "expr": "len(bl.lists) > 1",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 13,
+     "shape": "in",
+     "attr_product": "assert",
+     "expr": "'fileutils.py' in _to_baseless_list(iter_find_files(BOLTONS_PATH, patterns=['*.py']))",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 14,
+     "shape": "in",
+     "attr_product": "assert",
+     "expr": "'fileutils.py' in _to_baseless_list(iter_find_files(boltons_parent, patterns=['*.py']))",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 15,
+     "shape": "not_in",
+     "attr_product": "assert",
+     "expr": "'fileutils.py' not in _to_baseless_list(iter_find_files(boltons_parent, patterns=['*.py'], max_depth=0))",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 16,
+     "shape": "chained_compare",
+     "attr_product": "assert",
+     "expr": "f(21) == f_copy(21) == 42",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 17,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "OMD().popall('', None) is None",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 18,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "e_omd.popall(1, None) is None",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 19,
+     "shape": "not_expr",
+     "attr_product": "assert",
+     "expr": "not NOT_SET",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 20,
+     "shape": "truthy",
+     "attr_product": "assert",
+     "expr": "pickle.dumps(NOT_SET)",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 21,
+     "shape": "raises_match",
+     "attr_product": "raises",
+     "expr": "fd |= fd",
+     "class": "stmt_raises",
+     "ast_kind": "stmt",
+     "sandbox_run": false
+    },
+    {
+     "i": 22,
+     "shape": "in",
+     "attr_product": "assert",
+     "expr": "chunked(b'123', 2) in (['12', '3'], [b'12', b'3'])",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 23,
+     "shape": "chained_compare",
+     "attr_product": "assert",
+     "expr": "len(oto) == len(oto.inv) == 1",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 24,
+     "shape": "chained_compare",
+     "attr_product": "assert",
+     "expr": "len(oto) == len(oto.inv) == 1",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 25,
+     "shape": "chained_compare",
+     "attr_product": "assert",
+     "expr": "len(oto) == len(oto.inv) == 1",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 26,
+     "shape": "truthy",
+     "attr_product": "assertFalse",
+     "expr": "self.assertFalse(allowed)",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 27,
+     "shape": "not_in",
+     "attr_product": "assertNotIn",
+     "expr": "self.assertNotIn(10, D)",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 28,
+     "shape": "truthy",
+     "attr_product": "assertTrue",
+     "expr": "self.assertTrue(s)",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 29,
+     "shape": "truthy",
+     "attr_product": "assertFalse",
+     "expr": "self.assertFalse(s)",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 30,
+     "shape": "truthy",
+     "attr_product": "assertTrue",
+     "expr": "self.assertTrue(s)",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 31,
+     "shape": "truthy",
+     "attr_product": "assertFalse",
+     "expr": "self.assertFalse(s)",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 32,
+     "shape": "in",
+     "attr_product": "assertIn",
+     "expr": "self.assertIn(v, r)",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 33,
+     "shape": "not_in",
+     "attr_product": "assertNotIn",
+     "expr": "self.assertNotIn(v, r)",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 34,
+     "shape": "isinstance",
+     "attr_product": "assertIsInstance",
+     "expr": "self.assertIsInstance(alias, types.GenericAlias)",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 35,
+     "shape": "is",
+     "attr_product": "assertIs",
+     "expr": "self.assertIs(alias.__origin__, mi.peekable)",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 36,
+     "shape": "truthy",
+     "attr_product": "assertTrue",
+     "expr": "self.assertTrue(mi.exactly_n(repeat(True, 100), 100))",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 37,
+     "shape": "truthy",
+     "attr_product": "assertTrue",
+     "expr": "self.assertTrue(mi.exactly_n(repeat(False, 100), 100, predicate=not_))",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 38,
+     "shape": "truthy",
+     "attr_product": "assertFalse",
+     "expr": "self.assertFalse(mi.exactly_n([True], -10))",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 39,
+     "shape": "truthy",
+     "attr_product": "assertFalse",
+     "expr": "self.assertFalse(mi.exactly_n([], -1))",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 40,
+     "shape": "truthy",
+     "attr_product": "assertFalse",
+     "expr": "self.assertFalse(mi.exactly_n([], -10))",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 41,
+     "shape": "truthy",
+     "attr_product": "assertFalse",
+     "expr": "self.assertFalse(mi.exactly_n([True], 0))",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 42,
+     "shape": "truthy",
+     "attr_product": "assertTrue",
+     "expr": "self.assertTrue(isinstance(r, Iterable))",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 43,
+     "shape": "truthy",
+     "attr_product": "assertFalse",
+     "expr": "self.assertFalse(isinstance(r, Iterator))",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 44,
+     "shape": "truthy",
+     "attr_product": "assertTrue",
+     "expr": "self.assertTrue(isinstance(r, Sequence))",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 45,
+     "shape": "truthy",
+     "attr_product": "assertTrue",
+     "expr": "self.assertTrue(isinstance(r, Hashable))",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 46,
+     "shape": "truthy",
+     "attr_product": "assertTrue",
+     "expr": "self.assertTrue(all((list(mi.loops(n)) == [None] * n for n in range(-10, 10))))",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 47,
+     "shape": "multiset",
+     "attr_product": "assertCountEqual",
+     "expr": "self.assertCountEqual(actual, expected)",
+     "class": "multiset",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 48,
+     "shape": "multiset",
+     "attr_product": "assertCountEqual",
+     "expr": "self.assertCountEqual(actual, expected)",
+     "class": "multiset",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 49,
+     "shape": "multiset",
+     "attr_product": "assertCountEqual",
+     "expr": "self.assertCountEqual(actual, expected)",
+     "class": "multiset",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 50,
+     "shape": "multiset",
+     "attr_product": "assertCountEqual",
+     "expr": "self.assertCountEqual(actual, expected)",
+     "class": "multiset",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 51,
+     "shape": "multiset",
+     "attr_product": "assertCountEqual",
+     "expr": "self.assertCountEqual(actual, expected)",
+     "class": "multiset",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 52,
+     "shape": "multiset",
+     "attr_product": "assertCountEqual",
+     "expr": "self.assertCountEqual(actual, expected)",
+     "class": "multiset",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 53,
+     "shape": "is",
+     "attr_product": "assertIs",
+     "expr": "self.assertIs(prefix[0], iterables[0][0])",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 54,
+     "shape": "is",
+     "attr_product": "assertIs",
+     "expr": "self.assertIs(prefix[1], iterables[0][1])",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 55,
+     "shape": "is_not",
+     "attr_product": "assertIsNot",
+     "expr": "self.assertIsNot(prefix[0], iterables[1][0])",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 56,
+     "shape": "is_not",
+     "attr_product": "assertIsNot",
+     "expr": "self.assertIsNot(prefix[1], iterables[1][1])",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 57,
+     "shape": "is_not",
+     "attr_product": "assertIsNot",
+     "expr": "self.assertIsNot(prefix[0], iterables[2][0])",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 58,
+     "shape": "is_not",
+     "attr_product": "assertIsNot",
+     "expr": "self.assertIsNot(prefix[1], iterables[2][1])",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 59,
+     "shape": "order",
+     "attr_product": "assertLessEqual",
+     "expr": "self.assertLessEqual(i, n * k + n * n)",
+     "class": "needs_rewrite",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 60,
+     "shape": "not_in",
+     "attr_product": "assert",
+     "expr": "'cls_var' not in attr.fields_dict(C)",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 61,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "_config._run_validators is True",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 62,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "_config._run_validators is False",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 63,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "_config._run_validators is False",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 64,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "_config._run_validators is False",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 65,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "_config._run_validators is True",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 66,
+     "shape": "raises_match",
+     "attr_product": "raises",
+     "expr": "frozen.x = 2",
+     "class": "stmt_raises",
+     "ast_kind": "stmt",
+     "sandbox_run": false
+    },
+    {
+     "i": 67,
+     "shape": "chained_compare",
+     "attr_product": "assert",
+     "expr": "e.value.msg == e.value.args[0] == \"can't set attribute\"",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 68,
+     "shape": "raises_match",
+     "attr_product": "raises",
+     "expr": "del frozen.x",
+     "class": "stmt_raises",
+     "ast_kind": "stmt",
+     "sandbox_run": false
+    },
+    {
+     "i": 69,
+     "shape": "chained_compare",
+     "attr_product": "assert",
+     "expr": "e.value.msg == e.value.args[0] == \"can't set attribute\"",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 70,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "f.alias_is_default is True",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 71,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "f.alias_is_default is False",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 72,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "f.alias_is_default is True",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 73,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "f.alias_is_default is False",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 74,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "f.alias_is_default is False",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 75,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "fields['auto'].alias_is_default is True",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 76,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "fields['_private_auto'].alias_is_default is True",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 77,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "fields['explicit'].alias_is_default is False",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 78,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "fields['_matches_default'].alias_is_default is False",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 79,
+     "shape": "chained_compare",
+     "attr_product": "assert",
+     "expr": "200 == g_val1 == inst.val1",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 80,
+     "shape": "chained_compare",
+     "attr_product": "assert",
+     "expr": "200 == g_val2 == inst.val2",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 81,
+     "shape": "chained_compare",
+     "attr_product": "assert",
+     "expr": "200 == g_val3 == inst.val3",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 82,
+     "shape": "chained_compare",
+     "attr_product": "assert",
+     "expr": "200 == g_val4 == inst.val4",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 83,
+     "shape": "chained_compare",
+     "attr_product": "assert",
+     "expr": "200 == g_val5 == inst.val5",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 84,
+     "shape": "chained_compare",
+     "attr_product": "assert",
+     "expr": "200 == g_val6 == inst.val6",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 85,
+     "shape": "chained_compare",
+     "attr_product": "assert",
+     "expr": "3 == val == inst.kw_and_default",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 86,
+     "shape": "raises_other",
+     "attr_product": "raises",
+     "expr": "raise MyException()",
+     "class": "stmt_raises",
+     "ast_kind": "stmt",
+     "sandbox_run": false
+    },
+    {
+     "i": 87,
+     "shape": "truthy",
+     "attr_product": "assert",
+     "expr": "isinstance(ei.value, MyException)",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 88,
+     "shape": "in",
+     "attr_product": "assert",
+     "expr": "'_setattr = _cached_setattr_get(self)' in src",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 89,
+     "shape": "in",
+     "attr_product": "assert",
+     "expr": "\"_setattr('x', x)\" in src",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 90,
+     "shape": "in",
+     "attr_product": "assert",
+     "expr": "\"_setattr('y', y)\" in src",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 91,
+     "shape": "ne",
+     "attr_product": "assert",
+     "expr": "hash(D('1')) != hash(D(1))",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 92,
+     "shape": "is_not",
+     "attr_product": "assert",
+     "expr": "Child.x is not OverridesX.x",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 93,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "Child.x is HasXSlot.x",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 94,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "ox.x is None",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 95,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "str is attr.fields(C).y.type",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 96,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "None is attr.fields(C).z.type",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 97,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "int is attr.fields(C).x.type",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 98,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "str is attr.fields(C).y.type",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 99,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "None is attr.fields(C).z.type",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 100,
+     "shape": "in",
+     "attr_product": "assert",
+     "expr": "instance_of.__name__ in validator_module.__all__",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 101,
+     "shape": "in",
+     "attr_product": "assert",
+     "expr": "and_.__name__ in validator_module.__all__",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 102,
+     "shape": "in",
+     "attr_product": "assert",
+     "expr": "provides.__name__ in validator_module.__all__",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 103,
+     "shape": "in",
+     "attr_product": "assert",
+     "expr": "optional.__name__ in validator_module.__all__",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 104,
+     "shape": "in",
+     "attr_product": "assert",
+     "expr": "in_.__name__ in validator_module.__all__",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 105,
+     "shape": "in",
+     "attr_product": "assert",
+     "expr": "deep_iterable.__name__ in validator_module.__all__",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 106,
+     "shape": "in",
+     "attr_product": "assert",
+     "expr": "deep_mapping.__name__ in validator_module.__all__",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 107,
+     "shape": "in",
+     "attr_product": "assert",
+     "expr": "is_callable.__name__ in validator_module.__all__",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 108,
+     "shape": "chained_compare",
+     "attr_product": "assert",
+     "expr": "'42' == rv.__module__ == fake_meth.__module__",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 109,
+     "shape": "chained_compare",
+     "attr_product": "assert",
+     "expr": "'23' == rv.__qualname__ == fake_meth.__qualname__",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 110,
+     "shape": "truthy",
+     "attr_product": "assert",
+     "expr": "repr(C(1)).startswith('<tests.test_make.C object at 0x')",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 111,
+     "shape": "truthy",
+     "attr_product": "assert",
+     "expr": "C.__attrs_attrs__",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 112,
+     "shape": "truthy",
+     "attr_product": "assert",
+     "expr": "m.startswith(\"'a' must be <{type} 'int'>\".format(type=TYPE))",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 113,
+     "shape": "ne",
+     "attr_product": "assert",
+     "expr": "C(1) != C(2)",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 114,
+     "shape": "ne",
+     "attr_product": "assert",
+     "expr": "hash(C(1)) != hash(C(2))",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 115,
+     "shape": "ne",
+     "attr_product": "assert",
+     "expr": "C(1) != C(1)",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 116,
+     "shape": "ne",
+     "attr_product": "assert",
+     "expr": "hash(C(1)) != hash(C(1))",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 117,
+     "shape": "in",
+     "attr_product": "assert",
+     "expr": "e.value.args[0] in (\"'C' objects are unhashable\", \"unhashable type: 'C'\")",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 118,
+     "shape": "ne",
+     "attr_product": "assert",
+     "expr": "sentinel != meth",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    },
+    {
+     "i": 119,
+     "shape": "is",
+     "attr_product": "assert",
+     "expr": "meth is None",
+     "class": "bare_bool_expr",
+     "ast_kind": "expr",
+     "sandbox_run": false
+    }
+   ],
+   "n_rows": 119,
+   "by_class": {
+    "needs_rewrite": 29,
+    "bare_bool_expr": 80,
+    "stmt_raises": 4,
+    "multiset": 6
+   },
+   "by_shape": {
+    "truthy": 25,
+    "order": 6,
+    "not_expr": 2,
+    "in": 18,
+    "not_in": 4,
+    "chained_compare": 15,
+    "is": 27,
+    "raises_match": 3,
+    "isinstance": 1,
+    "multiset": 6,
+    "is_not": 5,
+    "raises_other": 1,
+    "ne": 6
+   },
+   "n_shapes": 13,
+   "ast_kind": {
+    "expr": 115,
+    "stmt": 4,
+    "unparseable": 0
+   },
+   "note": "纯静态 AST；119 条真实 expr 一律不喂沙箱（§183 禁令）。bare_bool_expr 只是形态上已是整条 bool 表达式，仍依赖测试局部作用域，绝不等于可跑出 F2P。"
+  },
+  "B_synth_eval": {
+   "rows": [
+    {
+     "shape": "is",
+     "src": "V = None\n",
+     "call": "V is None",
+     "want": true,
+     "got": true,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "is_not",
+     "src": "W = object()\nV = None\n",
+     "call": "V is not W",
+     "want": true,
+     "got": true,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "truthy",
+     "src": "V = [1]\n",
+     "call": "V",
+     "want": true,
+     "got": true,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "in",
+     "src": "V = [1, 2]\n",
+     "call": "2 in V",
+     "want": true,
+     "got": true,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "not_in",
+     "src": "V = [9]\n",
+     "call": "2 not in V",
+     "want": true,
+     "got": true,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "chained_compare",
+     "src": "V = 2\n",
+     "call": "1 < V < 3",
+     "want": true,
+     "got": true,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "order",
+     "src": "V = 1\n",
+     "call": "V <= 2",
+     "want": true,
+     "got": true,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "ne",
+     "src": "V = 1\n",
+     "call": "V != 2",
+     "want": true,
+     "got": true,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "not_expr",
+     "src": "V = []\n",
+     "call": "not V",
+     "want": true,
+     "got": true,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "isinstance",
+     "src": "V = 1\n",
+     "call": "isinstance(V, int)",
+     "want": true,
+     "got": true,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "is",
+     "src": "V = 1\n",
+     "call": "V is None",
+     "want": false,
+     "got": false,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "truthy",
+     "src": "V = []\n",
+     "call": "V",
+     "want": false,
+     "got": false,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "in",
+     "src": "V = [9]\n",
+     "call": "2 in V",
+     "want": false,
+     "got": false,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "chained_compare",
+     "src": "V = 0\n",
+     "call": "1 < V < 3",
+     "want": false,
+     "got": false,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "order",
+     "src": "V = 3\n",
+     "call": "V <= 2",
+     "want": false,
+     "got": false,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "ne",
+     "src": "V = 2\n",
+     "call": "V != 2",
+     "want": false,
+     "got": false,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "not_expr",
+     "src": "V = [1]\n",
+     "call": "not V",
+     "want": false,
+     "got": false,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "isinstance",
+     "src": "V = 'x'\n",
+     "call": "isinstance(V, int)",
+     "want": false,
+     "got": false,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "is_not",
+     "src": "W = object()\nV = W\n",
+     "call": "V is not W",
+     "want": false,
+     "got": false,
+     "import_error": "",
+     "eval_ok": true
+    },
+    {
+     "shape": "not_in",
+     "src": "V = [2]\n",
+     "call": "2 not in V",
+     "want": false,
+     "got": false,
+     "import_error": "",
+     "eval_ok": true
+    }
+   ],
+   "n_rows": 20,
+   "n_ok": 20,
+   "note": "求值账：`passed == bool(eval)` 是同义反复，只证沙箱忠实求值。"
+  },
+  "C_synth_discriminate": {
+   "rows": [
+    {
+     "shape": "is",
+     "call": "V is None",
+     "passed_fixed": true,
+     "passed_buggy": false,
+     "local_fixed": true,
+     "local_buggy": false,
+     "import_error_fixed": "",
+     "import_error_buggy": "",
+     "eval_ok": true,
+     "f2p_synth": true
+    },
+    {
+     "shape": "is_not",
+     "call": "V is not W",
+     "passed_fixed": true,
+     "passed_buggy": false,
+     "local_fixed": true,
+     "local_buggy": false,
+     "import_error_fixed": "",
+     "import_error_buggy": "",
+     "eval_ok": true,
+     "f2p_synth": true
+    },
+    {
+     "shape": "truthy",
+     "call": "V",
+     "passed_fixed": true,
+     "passed_buggy": false,
+     "local_fixed": true,
+     "local_buggy": false,
+     "import_error_fixed": "",
+     "import_error_buggy": "",
+     "eval_ok": true,
+     "f2p_synth": true
+    },
+    {
+     "shape": "in",
+     "call": "2 in V",
+     "passed_fixed": true,
+     "passed_buggy": false,
+     "local_fixed": true,
+     "local_buggy": false,
+     "import_error_fixed": "",
+     "import_error_buggy": "",
+     "eval_ok": true,
+     "f2p_synth": true
+    },
+    {
+     "shape": "not_in",
+     "call": "2 not in V",
+     "passed_fixed": true,
+     "passed_buggy": false,
+     "local_fixed": true,
+     "local_buggy": false,
+     "import_error_fixed": "",
+     "import_error_buggy": "",
+     "eval_ok": true,
+     "f2p_synth": true
+    },
+    {
+     "shape": "chained_compare",
+     "call": "1 < V < 3",
+     "passed_fixed": true,
+     "passed_buggy": false,
+     "local_fixed": true,
+     "local_buggy": false,
+     "import_error_fixed": "",
+     "import_error_buggy": "",
+     "eval_ok": true,
+     "f2p_synth": true
+    },
+    {
+     "shape": "order",
+     "call": "V <= 2",
+     "passed_fixed": true,
+     "passed_buggy": false,
+     "local_fixed": true,
+     "local_buggy": false,
+     "import_error_fixed": "",
+     "import_error_buggy": "",
+     "eval_ok": true,
+     "f2p_synth": true
+    },
+    {
+     "shape": "ne",
+     "call": "V != 2",
+     "passed_fixed": true,
+     "passed_buggy": false,
+     "local_fixed": true,
+     "local_buggy": false,
+     "import_error_fixed": "",
+     "import_error_buggy": "",
+     "eval_ok": true,
+     "f2p_synth": true
+    },
+    {
+     "shape": "not_expr",
+     "call": "not V",
+     "passed_fixed": true,
+     "passed_buggy": false,
+     "local_fixed": true,
+     "local_buggy": false,
+     "import_error_fixed": "",
+     "import_error_buggy": "",
+     "eval_ok": true,
+     "f2p_synth": true
+    },
+    {
+     "shape": "isinstance",
+     "call": "isinstance(V, int)",
+     "passed_fixed": true,
+     "passed_buggy": false,
+     "local_fixed": true,
+     "local_buggy": false,
+     "import_error_fixed": "",
+     "import_error_buggy": "",
+     "eval_ok": true,
+     "f2p_synth": true
+    }
+   ],
+   "n_rows": 10,
+   "n_eval_ok": 10,
+   "n_f2p": 10,
+   "note": "鉴别账：同一表达式、两段自造源码。⛔ 源码差异是构造的，不是真实 commit 收益；只用来证「形态不构成结构性障碍」。"
+  },
+  "D_183_boundary": {
+   "n_real_expr_sandbox_runs": 0,
+   "reports_f2p_on_real_expr": false,
+   "reports_downstream_attribution": false,
+   "note": "§183：179 的 119 条 form 下游属拍板项 ①；本轮零沙箱、零收益读数。"
+  }
+ },
+ "falsification": {
+  "r1_same_src_f2p": 0,
+  "r2_const_eval_ok": 10,
+  "r2_const_f2p": 0,
+  "r3_reversed_correct": 0,
+  "n_shapes": 10,
+  "r1_ok": true,
+  "r2_ok": true,
+  "r3_ok": true
+ },
+ "derived": {
+  "n_static": 119,
+  "n_shapes": 13,
+  "bare": 80,
+  "rewrite": 29,
+  "multiset": 6,
+  "stmt": 4,
+  "n_expr": 115,
+  "n_stmt": 4,
+  "n_eval_ok": 20,
+  "n_eval_rows": 20,
+  "n_f2p": 10,
+  "n_disc_rows": 10,
+  "n_sandbox_on_real_expr": 0
+ },
+ "closure": {
+  "eq_denominator": true,
+  "eq_shapes": true,
+  "eq_class_split": true,
+  "eq_ast_split": true,
+  "eq_stmt_is_raises": true,
+  "eq_eval": true,
+  "eq_disc": true,
+  "eq_eval_not_discriminate": true,
+  "eq_no_real_sandbox": true,
+  "eq_caliber_self": true,
+  "eq_baseline": true,
+  "eq_four_accounts": true
+ },
+ "summary": {
+  "n_form_rows": 119,
+  "n_shapes": 13,
+  "n_bare_bool_expr": 80,
+  "n_needs_rewrite": 29,
+  "n_multiset": 6,
+  "n_stmt_raises": 4,
+  "n_eval_ok": 20,
+  "n_f2p_synth": 10,
+  "all_checks": true,
+  "conclusion": "判据层对 10 种 bool 表达式形态无结构性障碍；但「求值判对」≠「鉴别力」，且 4 条 raises 连表达式都不是。186 的结论适用于已展开的整条 bool 表达式，不外推到 119 条真实 expr。",
+  "not_said": "不宣布扩张判据形态无用 / 有效；不报 119 条下游归因；不改 aether/ 一字节；其余 4 项拍板未开工。"
+ }
+}
