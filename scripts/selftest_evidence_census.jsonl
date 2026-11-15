@@ -1,0 +1,300 @@
+{
+  "schema": "selftest_evidence_census/v1",
+  "caliber": {
+    "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+    "aether/check.py": "88cc4c09ed9293dc881c0f77993666edf1e217292740b0ba88f55f90d9804c82",
+    "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+    "scripts/probe_default_effect.py": "881318647f769036f321a0dfb5f7ececa1d4279355ee27027e2f342ccfd0d9f3",
+    "scripts/probe_zero_discrimination.py": "149d6fced0f3d8c52665d402d333eee528df7bab069824b6095dabef2b0650a4",
+    "scripts/probe_inliner_relax.py": "94e150f006ea6be8d3e3ec9b039ee1de5f6d7837952d485220a9cb4a499156f4",
+    "scripts/probe_nogold_gap.py": "ef428eeb1bae1182be0fa5152ab62b88bea20572ed0ce10eaed6e2eb8c7082fd",
+    "scripts/probe_policy_reach.py": "13088aee616e32d2fe7a70f839e92364c59216ed2355b5a705ff63042c07de5d",
+    "scripts/caliber_superseded.py": "7714d621447a572f5166fe25880f0ddbaa67cfb529d357119e6fd5efffbdff6e",
+    "scripts/probe_selftest_evidence.py": "9dfee7ae70920b96ec8e71633959623c29f7506b42886492d786a70f60632afd",
+    "tests/contract_context_gate_test.py": "4b7721d4de44b5e291101ae743f2ccbe548bd540eab1defdd5490c3540e9ef21",
+    "tests/contract_inliner_relax_test.py": "9c1f9c126055da0f30576e144ee0213804b52783e816d6f76cc986c7f3401792",
+    "tests/contract_default_effect_test.py": "83e15d7478bd9e4bbc085fa91974c8df6cf9e6f62dc1f28b09f2a5513d56e8c3",
+    "tests/contract_zero_discrimination_test.py": "f536bb50d1a281eff223129a9a585b5299ddf4b24550ad4bd79cd1d214afc993",
+    "scripts/default_effect_census.json": "c08618edfeb38c98e002839e907c49ecf66ce87c69a51a7d8ceb7f2d7c8a5d8d",
+    "scripts/zero_discrimination_census.json": "c9c528f8ce3f85bcb97ec42d86b3c77c73aa3e24d0292bc06da1b6a9cc7736dc",
+    "scripts/inliner_relax_census.json": "4399b741b6383b8cc2238972e765f1a71c187ec35ae650f76099f12b582c3bcd",
+    "scripts/nogold_gap_census.json": "c3a588e42b16c79e11cdfaaeda4a595106a59bba2e87a950f02353b0bf71a9c9",
+    "scripts/policy_reach_census.json": "d58b3356c3d31266576650feaffe2c7d5687193f87b67f24f62592b797946205",
+    "scripts/extract_downstream.json": "896220cd2849f6740a0fc28daf6e434c7ed77445237b60f3b1288a3cf7d8d266",
+    "scripts/form_shape_attribution.json": "b536f832e4ba0fc7bc734321dae058007de4e556d6699a7ec8c010b6d7556309",
+    "scripts/no_result_attribution.json": "1feae1a5d74e830d0d609e3b507d8842d577c6a851b377c9ef205e2161446d0b",
+    "scripts/caliber_superseded.json": "77a828b6a82e3afefa83f23c21cbbab7360e091486a4f517e867a89c277265fb",
+    "scripts/realrepo_baseline.json": "0585f86b9146fe0aa203c936af2dcd576f34b3b55c27fabc59db93073558b0fb"
+  },
+  "accounts": {
+    "A_call_site_strata": {
+      "source_192_archive": "scripts/default_effect_census.json::A_entry_points.resolve_policy_calls",
+      "n_call_sites_192": 5,
+      "call_site_files": [
+        "scripts/probe_context_gate.py",
+        "scripts/probe_inliner_relax.py",
+        "scripts/probe_policy_reach.py",
+        "tests/contract_context_gate_test.py",
+        "tests/contract_inliner_relax_test.py"
+      ],
+      "discover_glob": {
+        "pattern": "contract_*_test.py",
+        "source": "aether/check.py::discover (AST)",
+        "pos_hit": true,
+        "neg_hit": true,
+        "teeth": true
+      },
+      "contract_files_true_run": [
+        "tests/contract_context_gate_test.py",
+        "tests/contract_inliner_relax_test.py"
+      ],
+      "n_contract_files_true_run": 2,
+      "offline_ruler_files": [
+        "scripts/probe_inliner_relax.py",
+        "scripts/probe_policy_reach.py"
+      ],
+      "n_offline_ruler_files": 2,
+      "product_files": [
+        "scripts/probe_context_gate.py"
+      ],
+      "n_product_files": 1,
+      "product_functions": {
+        "scripts/probe_context_gate.py": [
+          "main",
+          "selftest"
+        ]
+      },
+      "product_main_unrun": true,
+      "product_selftest_run_via_E1": true,
+      "selftest_covered_calls": [
+        "Constant",
+        "bindings_for",
+        "bool",
+        "chk",
+        "classify_probe",
+        "collect_bindings",
+        "has_unstable_call",
+        "inline_expr",
+        "merge_bindings",
+        "print",
+        "resolve_policy",
+        "scoped_assertions",
+        "signature",
+        "sorted"
+      ],
+      "selftest_covers_adopt_probe": false,
+      "main_policy_sinks": {
+        "sinks": [
+          "adopt_probe",
+          "bindings_for",
+          "merge_bindings"
+        ],
+        "n_sinks": 3,
+        "run_all_args": [
+          "source",
+          "items",
+          "timeout",
+          "pkg"
+        ],
+        "run_all_has_policy": false
+      },
+      "a192_boundary": "A 账纯 AST，零沙箱、零真实 expr、零真实 commit；读取点存在 ≠ 运行时走到",
+      "runtime_call_site_files_now": [
+        "scripts/probe_context_gate.py",
+        "scripts/probe_inliner_relax.py",
+        "scripts/probe_policy_reach.py",
+        "tests/contract_context_gate_test.py",
+        "tests/contract_inliner_relax_test.py"
+      ],
+      "n_runtime_call_site_files_now": 5,
+      "denominator_unchanged": true,
+      "self_modules_not_in_denominator": true,
+      "verdict": "192 把 5 个调用点全归静态 A 账并写『读取点存在 ≠ 运行时走到』；但其中 2 个是 `tests/contract_*_test.py`，由 aether/check.py 发现、每次全量验收都真跑 ⇒ 判词不能一概而论"
+    },
+    "B_runtime_readouts": {
+      "ast_call_counts_by_function": {
+        "scripts/probe_context_gate.py::selftest": 2,
+        "scripts/probe_context_gate.py::main": 1,
+        "tests/contract_context_gate_test.py::main": 2,
+        "tests/contract_inliner_relax_test.py::group_c": 2,
+        "scripts/probe_inliner_relax.py::measure": 2,
+        "scripts/probe_policy_reach.py::account_d": 2
+      },
+      "n_selftest_ast": 2,
+      "n_selftest_runtime_counter": 2,
+      "ast_runtime_match": true,
+      "selftest_eval_account": {
+        "ok": true,
+        "n_assertion_lines": 15,
+        "n_pass_marks": 15,
+        "n_fail_marks": 0
+      },
+      "n_resolve_policy_per_full_check_lower_bound": 6,
+      "n_contract_runs_per_full_check": 2,
+      "verdict": "每次全量验收里 `resolve_policy()` 至少真实运行 6 次（selftest J/K + 2 个验收契约），且 `CG.selftest()` 15 条断言真跑 ⇒ 这是 192 四层里没有的第五类证据：验收契约真跑产品模块",
+      "merged_into_bool": false
+    },
+    "C_discrimination": {
+      "evaluation_account": {
+        "selftest_ok": true,
+        "n_assertion_lines": 15,
+        "n_pass_marks": 15
+      },
+      "accidents": {
+        "A_strict_broken": {
+          "selftest_ok": false,
+          "n_fail_marks": 1,
+          "red_lines": [
+            "✗ 自检K --strict 策略 0000: 期望 '0000'                       实得 '"
+          ],
+          "description": "恒返 RELAXED ⇒ --strict 失效，默认态不变"
+        },
+        "B_default_0000": {
+          "selftest_ok": false,
+          "n_fail_marks": 1,
+          "red_lines": [
+            "✗ 自检J 默认策略 1111: 期望 '1111'                       实得 '0000'"
+          ],
+          "description": "默认态被改成 STRICT（正例，必须打红）"
+        },
+        "C_adopt_probe_ignores_policy": {
+          "selftest_ok": true,
+          "n_fail_marks": 0,
+          "red_lines": [],
+          "description": "采纳链四位开关失效"
+        },
+        "D_bindings_for_ignores_policy": {
+          "selftest_ok": false,
+          "n_fail_marks": 1,
+          "red_lines": [
+            "✗ 自检O ②放宽态取首个 rhs: 期望 '1'                          实得 None"
+          ],
+          "description": "主流程 policy 唯一实参去向被忽略"
+        }
+      },
+      "caught": [
+        "A_strict_broken",
+        "B_default_0000",
+        "D_bindings_for_ignores_policy"
+      ],
+      "n_caught": 3,
+      "blind": [
+        "C_adopt_probe_ignores_policy"
+      ],
+      "n_blind": 1,
+      "positive_has_teeth": true,
+      "adoption_chain_blind": true,
+      "discriminates_adoption_chain": false,
+      "verdict": "求值账 15/15 全绿，但鉴别账 3/4 事故能打红：默认签名被改 / --strict 失效 / bindings_for 忽略 policy 都有牙；⛔ 唯一恒绿是 adopt_probe 忽略 policy ⇒ 第五类证据不能证明『默认生效』，缺口精确在采纳链",
+      "merged_into_bool": false,
+      "boundary": "求值判对 ≠ 鉴别力（第 187 条）；found=True ≠ 修好（第 161 条）；补第五类证据格后 192 结论方向仍成立"
+    },
+    "D_boundary": {
+      "policy_default": "1111",
+      "policy_strict": "0000",
+      "verdict_192_unchanged": true,
+      "not_a_product_hole": true,
+      "aether_rewritten": false,
+      "archives_189_193_rewritten": false,
+      "b192_archive_rewritten": false,
+      "denominators": {
+        "main": 135,
+        "form": 119,
+        "no_result": 94
+      },
+      "denominator_dual_source": {
+        "form_rows": 119,
+        "form_summary": 119,
+        "no_result_rows": 94,
+        "no_result_summary": 94
+      },
+      "superseded_total": 3,
+      "superseded_sha_matches": 3,
+      "superseded_diffs": [],
+      "sandbox_selfcheck": {
+        "checked_own_source": true,
+        "n_banned": 0,
+        "banned": [],
+        "n_own_resolve_policy_ast_calls": 0,
+        "no_new_denominator_call_site": true
+      },
+      "n_forbidden_runtime_calls": 0,
+      "real_expr_runs": 0,
+      "real_commit_runs": 0,
+      "main_repo_runs": 0,
+      "f2p_runs": 0,
+      "gain_reported": 0,
+      "section183_untouched": true,
+      "boundary": "不推翻 192（主流程 main() 运行证据 0 份仍成立）；补第五类证据格、收窄 192 A 账判词与 193『须碰 §183』口径；不是产品洞、不是『默认生效已被证明』；不报收益"
+    }
+  },
+  "derived": {
+    "claim": "192 四类证据分层的第五类：验收契约每次全量真跑产品模块",
+    "n_192_call_sites": 5,
+    "n_contract_files_true_run": 2,
+    "n_resolve_policy_per_full_check": 6,
+    "n_accidents_caught": 3,
+    "n_accidents_blind": 1,
+    "adoption_chain_blind": true,
+    "n_closure": 44,
+    "n_closure_true": 44
+  },
+  "closure": {
+    "a1_192_five_call_sites": true,
+    "a2_glob_from_check_source": true,
+    "a3_glob_extractor_teeth": true,
+    "a4_two_contract_files_true_run": true,
+    "a5_two_offline_rulers": true,
+    "a6_one_product_file": true,
+    "a7_selftest_run_via_E1": true,
+    "a8_product_main_unrun": true,
+    "a9_selftest_no_adopt_probe": true,
+    "a10_main_policy_sinks": true,
+    "a11_run_all_no_policy": true,
+    "a12_denominator_unchanged": true,
+    "a13_self_out_of_denominator": true,
+    "b1_ast_runtime_match": true,
+    "b2_selftest_2_calls": true,
+    "b3_eval_all_green": true,
+    "b4_eval_15_assertions": true,
+    "b5_per_full_lower_bound": true,
+    "b6_two_contract_runs": true,
+    "b7_not_merged": true,
+    "c1_baseline_green": true,
+    "c2_strict_broken_caught": true,
+    "c3_default_0000_caught": true,
+    "c4_positive_has_teeth": true,
+    "c5_adopt_probe_blind": true,
+    "c6_no_adoption_discrimination": true,
+    "c7_n_caught": true,
+    "c8_n_blind": true,
+    "c8b_only_adoption_chain_blind": true,
+    "c9_not_merged": true,
+    "d1_default_1111": true,
+    "d2_strict_0000": true,
+    "d3_verdict_192_unchanged": true,
+    "d4_not_a_product_hole": true,
+    "d5_no_archive_rewrites": true,
+    "d6_denominators": true,
+    "d7_dual_source": true,
+    "d8_superseded_all_match": true,
+    "d9_no_sandbox_primitives": true,
+    "d10_no_new_denominator_site": true,
+    "d11_zero_forbidden_runs": true,
+    "d12_section183": true,
+    "d13_anchor_ok": true,
+    "d14_selfcheck_own_source": true
+  },
+  "anchor": {
+    "ok": true,
+    "repos": 3,
+    "diffs": [],
+    "caliber_diffs": []
+  },
+  "summary": {
+    "verdict": "192 把 5 个 resolve_policy 调用点全归静态 A 账并写『读取点存在 ≠ 运行时走到』；其中 2 个是 tests/contract_*_test.py，由 check.py::discover 发现、每次全量验收真跑，selftest() 被 E1 真调用 ⇒ 每次全量至少 4 次真实运行。这是四层之外第五类证据格。",
+    "scope": "⛔ 但补上这一格仍不能证明『默认生效』：selftest() 的 J/K 只比 signature 字符串，A–O 15 条不覆盖 adopt_probe；事故反证默认 0000 / --strict 失效会打红 J/K，adopt_probe 忽略 policy 恒绿 ⇒ 缺口精确在采纳链。不推翻 192 结论方向（main() 运行证据 0 份仍成立），只收窄 192 A 账判词与 193『须碰 §183』口径；不是产品洞、不报收益、§183 零触碰",
+    "n_closure_true": 44,
+    "n_closure": 44
+  }
+}

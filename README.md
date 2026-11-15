@@ -10298,3 +10298,152 @@ status / rc 零差异**；共享耗时 `1468.02s` vs r113 `2378.78s`
 ⛔ 另有 190 留下的「修 `ok_nogold` ledger 语义 / 补 189 反证组」
 一条，合计 4 条待拍板。⛔ 补产品主流程运行证据须跑
 `main() --repo`、碰 §183 禁令面，需**取证面显式拍板**。
+
+### 194. ⛔⛔ **192 的四类证据分层漏了第五类：验收契约每次全量都真跑 `resolve_policy`；但补上后仍不能证明「默认生效」**（2026-11-15）
+
+═══ 一、起点：192 把 5 个调用点全归静态 A 账 ═══
+
+192（r113）把 189「默认生效」拆成四层 reach：静态 AST
+`4/4` / 零沙箱合成 `4/4` / 零沙箱离线 `1/4` /
+**产品主流程运行 `0/4`（证据 0 份）**。A 账记了
+`resolve_policy` 的 **5 个调用点文件**，boundary 逐字写
+「A 账纯 AST，零沙箱、零真实 expr、零真实 commit；
+**读取点存在 ≠ 运行时走到**」。193（r114）进一步把
+「补主流程运行证据」判为须跑 `main() --repo`、碰 §183。
+
+⛔ 本轮**纯只读取证**只量一件从未量过的事：
+**那 5 个调用点里，有没有在每次全量验收里真实运行过的？**
+若有，它属于哪一类证据、能证明什么、**不能**证明什么。
+
+便宜对照（全部 AST / 存档同源，零沙箱、零真实 commit）：
+
+| 检查 | 实测 | 192 隐含假设 |
+|---|---|---|
+| 契约发现 | `aether/check.py::discover()` 用 `glob("contract_*_test.py")` | 调用点一律按静态读取点处理 |
+| 5 点分层 | **2 个就是 `tests/contract_*_test.py`** | 未区分「会被全量真跑」 |
+| 验收读数 | `contract_context_gate_test.py` `0.22s pass`、`contract_inliner_relax_test.py` `57.46s pass`（r114 全量） | 「运行时没走到」 |
+| 产品自检 | `contract_context_gate_test.py::E1` 真跑 `CG.selftest()`；`selftest()` 内 J/K 各真跑一次 `resolve_policy` | 未计入 |
+| 每次全量 | `resolve_policy()` **至少 6 次真实运行**（selftest 2 + 两契约各 2） | 四层里没有这一格 |
+
+⇒ 第 187 条「求值判对 ≠ 鉴别力」的自指版：
+**补证据格之前，先问它有没有牙**。`selftest()` 的 J/K
+只比 `signature()` 字符串，A–O **15 条里没有一条**调
+`adopt_probe`；而 191 认定主流程里唯一接 policy 的那位
+恰是 `adopt_probe`。
+
+═══ 二、四本账（⛔ 不合并成布尔）═══
+
+| 账 | 做法 | 封闭读数 |
+|---|---|---|
+| **A 调用点分层** | 双源：192 存档 `resolve_policy_calls` 5 文件 + `check.py::discover()` glob 从源码 AST 抽（正例 / 反例有牙）；产品 `main()` 里 `policy` 的实参去向、`selftest()` 覆盖的函数集合同源 AST 抽 | `2 验收契约真跑 / 2 离线尺子 / 1 产品`（`main` 未跑、`selftest` 被 E1 真跑）；`main()` 把 policy 传给 `adopt_probe` / `bindings_for` / `merge_bindings` **3 处**，`run_all` 签名无 policy；`selftest()` 覆盖集**不含 `adopt_probe`**；分母仍 `5`、本轮新模块不在内 |
+| **B 运行读数** | AST 按函数数 `resolve_policy` 调用；F 组计数器 wrapper **真跑** `CG.selftest()` 与 AST 对拍 | 产品 `selftest` 2 / `main` 1（未跑）/ 两契约各 2 / 两离线尺子各 2；计数器实跑 `2 == AST 2`；求值账 `15/15` 全绿；**每次全量 ≥6 次真实运行**；求值账与鉴别账分开 |
+| **C 鉴别力** | 4 类事故版用 `setattr` 挂到 `CG`，逐个真跑 `selftest()` 看是否打红 | `A --strict 失效` → K 打红｜`B 默认 0000` → J 打红（**正例有牙**）｜`D bindings_for 忽略 policy` → O 打红｜⛔ **`C adopt_probe 忽略 policy` → `selftest()` 仍 True、恒绿** ⇒ `3 打红 / 1 恒绿`，`discriminates_adoption_chain=False` |
+| **D 边界** | 策略签名取常量、三分母双源、superseded、验锚、自身沙箱自检、分母漂移自检 | 默认 `1111` / `--strict` `0000` 只在纯函数层可复算；`135/119/94` 双源；superseded `3/3`；验锚 `OK 3/3 diffs=0`；尺子零 `eval/exec`、零 `resolve_policy` AST 调用点；真实 expr / commit / `main() --repo` / F2P / 收益全 0 |
+
+⛔ **本轮新文件一个 `resolve_policy(...)` 调用点都不新增**：
+192 尺子 `resolve_policy_calls_all()` 按全仓 AST 数该函数
+调用点、`SELF_MEASURE_MODULES` 只白名单排除自身 2 模块；
+r114 首跑红已证新文件多写一处就会令 192 契约 F3/F6 分母
+漂移。故一律用 `getattr(CG, "RELAXED")` 常量与
+`setattr(CG, "resolve_policy", ...)` 事故版挂载达成语义等价，
+`closure` 里 `a12/a13/d10` 三条钉死分母仍 `5`。
+
+═══ 三、⛔ 分寸：补一格，不翻案 ═══
+
+1. **192 的结论方向不变**：「产品主流程 `main()` 运行证据
+   0 份」仍成立（189–193 确实没跑 `main() --repo`）。
+   第五类证据是「**验收契约真跑产品模块**」，不是主流程。
+2. **收窄 192 A 账判词**：「读取点存在 ≠ 运行时走到」不能
+   一概而论——5 个调用点里 2 个由 `check.py::discover()`
+   发现、每次全量真跑；产品 `selftest()` 被 `E1` 间接真跑。
+   静态判词只对未进验收面的 3 个成立。
+3. **收窄 193 口径**：「补运行证据须碰 §183」应限定为
+   「补 `main()` **采纳链**运行证据」；`resolve_policy` 层级的
+   运行证据**已有**、不需要 `--repo`、不碰 §183。
+4. ⛔ **第五类证据不能证明「默认生效」**（本轮核心）：
+   求值账 `15/15` 全绿，但鉴别账唯一恒绿恰是
+   `adopt_probe` 忽略 policy ⇒ 缺口精确定位在**采纳链**；
+   `selftest()` 的 J/K 只验签名，契约 F 组用的是合成常量
+   `STRICT`/`RELAXED`，都没有覆盖
+   「`main()` 里 `resolve_policy(args.strict)` 的结果传到
+   `adopt_probe`」这条链。
+5. **不是产品洞**：`selftest()` / 契约的设计本身无错；
+   缺口在**证据类型分层漏了一格**与**该格的鉴别力边界**。
+   也不是「默认没生效」。
+6. ⛔ **不推翻 186–193、不改 189–193 语义 / 存档、不报收益、
+   不宣布 ④ 有效 / 无效**；`aether/` 与 189–193 存档零回写、
+   §183 禁令面零触碰。补采纳链运行证据仍须拍板。
+
+═══ 四、契约、反证与静态四项 ═══
+
+`tests/contract_selftest_evidence_test.py` **A–E 100 项 +
+F 组 6 项 = 106 项全绿 0 skip**。⛔ F3 同源实算
+（`live_recompute()` 不读存档结论字段）专供事故版打红；
+F4 真跑 `selftest()` 计数器 + 默认态事故版打红；
+F6 一次真实验锚 + `closure 44/44` + 分母仍 5。
+
+`/tmp/r115_falsify.py` 分层反证全中：阶段 1 `100/100`
+逐条置 `False` 恰好该项转红、阶段 2 `105/105` 篡改存档字段、
+阶段 2b `8/8` 事故版函数（均令 `live_recompute()` 有差异）、
+阶段 3 `6/6` F 组同进程逐条撤回且**每项恰好只红自身**
+（F2/F4 用计数器 wrapper 避免连带相邻项），基线完整真跑
+`FAILS=[]`、`FALSIFICATION_OK=True BAD=[]`。沿用一次真实验锚
+读数缓存 + 同进程 F 组，不 spawn 子进程。
+
+⛔ 尺子 / 契约自身 **3 类真红**如实留痕（第 34 条：修尺子、
+不放宽断言）：① 首跑 `40/43`：superseded 首版误拿本尺子
+24 键 `caliber` 去对拍 192 存档 14 键 ⇒ 多出的 10 键全成假
+diff，改按 r114 口径逐份对拍 `archive_sha256_at_registration`
+⇒ `3/3`；② 事故个数写死 `2/2`，实测 `bindings_for` 忽略
+policy 会打红 selftest 的 O ⇒ `3 打红 / 1 恒绿`，并把
+`main_policy_sinks` 与运行次数钉成具体读数；③ 反证
+`stage2 103/105`：B/D 事故的 `n_fail_marks` 无人断言 ⇒ 补
+`C12b / C16b`（反证取样覆盖缺口），复跑 `105/105`。
+
+静态四项：真 3.9.6 `ast.parse(feature_version=(3,9))` 对 2 个
+新 `.py` 全 OK、裸 `noqa` 0、`git diff --check` rc=0、A1
+候选面 `356`（`n_scanned=354`）、4 个待交付文件（含
+`README.md`）全在候选面且 `scan_text()` 零命中 + 正例反证
+命中 1。`closure 44/44`、尺子重跑 sha 幂等（`a4921a65…`）、
+验锚 `OK 3/3 diffs=0`。⛔ 改名只令存档
+`caliber/scripts/probe_selftest_evidence.py` 一项 hash 变化
+（尺子源码只改了 `OUT`），**其余全部字段逐字不变** ⇒ 四本账
+读数零改动。
+
+⛔ **全量首跑真红 1 项（非产品洞）**：首跑
+`126 pass / 1 fail`、`ok=False`、`exit_code=1`，唯一红是
+上游 `contract_zero_discrimination_test.py::F3`；单跑复现
+`rc=1` ⇒ 排除 shim / 环境性。逐字段对拍只有
+`scan_coverage` 漂移：实测 `0.0234` vs 193 存档 `0.0227`。
+根因：193 尺子 `json_inventory()` 用
+`len(scripts/*.json) / len(全仓 *.json)` 算覆盖率却把它
+钉成常量；本轮新增 `scripts/selftest_evidence_census.json`
+令分母 `1280→1281`、分子 `29→30` ⇒ `30/1281 = 0.0234`。
+⛔ 处置**不改 193 尺子 / 契约 / 存档**（口径变更需拍板）：
+本轮存档改名 `selftest_evidence_census.jsonl`（内容仍是
+单个 JSON 对象、与历轮存档逐字同构；`candidate_files()`
+只取 `tracked ∪ untracked`、不按扩展名过滤 ⇒ A1 候选面
+不变），分子分母恢复 `29/1280 = 0.0227`。本轮尺子 `OUT`、
+契约 `ARCH / PENDING` 同步；`CALIBER_FILES` 本就不含自身
+存档（D20）、反证脚本无路径字面量 ⇒ 零额外改动。记为
+**已知开口**：「193 把动态扫描面覆盖率钉成常量 ⇒ 此后
+每轮新增 `scripts/*.json` 都会触发 F3 红」，不并入 4 条
+拍板清单、不改判据、不报收益。单跑复核：193 契约
+`rc=0`（`F3` 由 FAIL 转 PASS、`A–E 111 + F 6` 全绿）、
+本轮契约 `rc=0`（`106` 项全绿），`json_inventory()`
+实测 `1280 / 29 / 0.0227` 与 193 存档一致。
+
+**新设施**：`scripts/probe_selftest_evidence.py`、
+`scripts/selftest_evidence_census.jsonl`（口径
+`selftest_evidence_census/v1` 另存）、
+`tests/contract_selftest_evidence_test.py`。
+
+═══ 五、拍板清单（未变，仍是 4 条）═══
+
+本轮是**纯只读取证**，不构成新拍板项。② 多步状态序列
+③ CI 先 `bootstrap` 再跑 H 组（需 workflow scope PAT）
+⑤ 放宽 / 降级 deny-modules（安全边界、需显式审批）
+—— **3 项一律未开工**；① 已取证收口、④ / ⑥ 已落地；
+⛔ 另有 190 留下的「修 `ok_nogold` ledger 语义 / 补 189 反证组」
+一条，合计 4 条待拍板。⛔ 补**采纳链**运行证据须跑
+`main() --repo`、碰 §183 禁令面，需**取证面显式拍板**。
