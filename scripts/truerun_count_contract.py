@@ -47,7 +47,7 @@ ARCH = ROOT / "scripts" / "truerun_count_census.jsonl"
 SELF_ARCHIVE_NAME = ARCH.name
 PENDING = ["README.md", "scripts/probe_truerun_count.py",
            "scripts/truerun_count_census.jsonl",
-           "tests/contract_truerun_count_test.py"]
+           "scripts/truerun_count_contract.py"]
 C1 = ptc.C1
 C2 = ptc.C2
 CG_SRC = ptc.CG_SRC

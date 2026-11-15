@@ -394,7 +394,7 @@
         "no_new_denominator_call_site": true,
         "own_resolve_policy_call_sites": {
           "scripts/probe_truerun_count.py": 0,
-          "tests/contract_truerun_count_test.py": 0
+          "scripts/truerun_count_contract.py": 0
         },
         "positive_extractor_has_teeth": true,
         "positive_n": 3,

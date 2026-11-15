@@ -10862,7 +10862,7 @@ sha256；验锚 `OK 3/3 diffs=0`；192 的 5 个调用点文件
 双源对拍 `5==5`，本轮两个新 `.py` 零 `resolve_policy`
 AST 调用点；`coverage_scripts 0.0227` 未漂移（新存档用
 `.jsonl` 绕开 r115 已登记开口）；§183 五项零。
-`closure 47/47`，存档 sha `891dc4c658ede8f7` 幂等。
+`closure 47/47`，存档 sha `dfc751c37a735bfb` 幂等（改名后重生成）。
 
 ═══ 三、结论（收窄，不翻案）═══
 
@@ -10882,10 +10882,10 @@ AST 调用点；`coverage_scripts 0.0227` 未漂移（新存档用
 
 三件套：`scripts/probe_truerun_count.py`、
 `scripts/truerun_count_census.jsonl`（`truerun_count_census/v1`）、
-`tests/contract_truerun_count_test.py`（r116/r117 同构 `ck`
+`scripts/truerun_count_contract.py`（r116/r117 同构 `ck`
 合规形态：`run_c()` 内嵌 `def ck(name, cond, detail)` +
 `fails.append` + `return fails`，`main()` 用
-`allbad = bad + fbad`）。
+`allbad = bad + fbad`）。⛔ 产物闸**有意放在 `scripts/`**，不进 `aether.check::discover()` 的 `contract_*_test.py` 扫描面，原因见第六段。
 
 单跑复核：`closure 47/47`、存档 sha 幂等、验锚 `OK 3/3`；
 契约 **A–E 154 条 + F 组 6 条**全绿（F1 20 对同源实算 +
@@ -10944,3 +10944,37 @@ F1 加 5 项同源实算对拍（不把动态量钉成常量），
 ③ CI 先 `bootstrap` 再跑 H 组 ⑤ 放宽 / 降级 deny-modules
 ＋ 190 留下的 `ok_nogold` ledger 语义 / 189 反证组补样本），
 一律未开工；① 已取证收口、④ / ⑥ 已落地。
+
+
+═══ 六、全量首跑真红：r117 动态分母开口（不改判据，改名绕开）═══
+
+提交 `ddbe46d` 后的全量首跑（脱管 env、只 unset `PYTHONPATH`）
+为 **`129/130` 真红 1 项**：`contract_signature_impostor_test.py`
+（r117 契约）`FAIL F3`，本轮新契约 `pass`。按产物逐字段定位：
+F3 用 `probe_signature_impostor.py::contract_surface()` 对拍
+全仓 `tests/contract_*_test.py` 的 `n_files` / `per_file`
+快照，r117 存档钉的是当时的 **127 份**；本轮新增第 128 份
+契约必然令两者漂移 ⇒ 与 r115 已登记的
+「`coverage_scripts` 把动态量钉成常量」**同型**，是上游尺子的
+**动态分母开口**，不是产品洞、不是本轮读数失真。
+
+⛔ 按历轮「改名归档出扫描面（零删除可逆）而非改判据」
+（r114 同型）处理：`git mv
+tests/contract_truerun_count_test.py
+scripts/truerun_count_contract.py`，同步 `SELF_CONTRACT` /
+`PENDING` / 反证脚本 import；复核 `aether.check::discover()`
+与 r117 `contract_surface()` **双双回到 127**、
+`truerun` 均不在两者结果里，r117 契约 F3 转绿（单跑
+`A–E 132 + F 6` 全绿）。**未改 189–197 任何判据 / 尺子 /
+存档口径**；重生成 r118 存档 `closure 47/47`、sha
+`dfc751c37a735bfb` 幂等，r118 契约 `A–E 154 + F 6` 全绿，
+反证两段重跑 `FALSIFICATION_OK_A=True` /
+`FALSIFICATION_OK_B=True`（`154/154` 条件撤回、
+380 叶子 `UNREG=0`、`6/6` 事故补丁、`6/6` F 组撤回、
+静态四项全通过）。
+
+⛔ **代价如实登记**：r118 产物闸不在 `aether.check::discover()`
+发现面 ⇒ 全量不再为它 +1 分母，它的运行时证据是**单跑复核**
+而非全量链路。修 r117 F3 的「全仓契约快照」判据口径属
+**另一次拍板**（改判据语义），本轮不擅自开工，记为**新开口**、
+不并入原有 4 条待拍板清单。

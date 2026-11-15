@@ -47,7 +47,7 @@ from realrepo_baseline import require_baseline                  # noqa: E402
 OUT = ROOT / "scripts" / "truerun_count_census.jsonl"  # ⛔ 非 .json：193 F3
 SELF_PRODUCT = OUT.name
 SELF_SRC = "scripts/probe_truerun_count.py"
-SELF_CONTRACT = "tests/contract_truerun_count_test.py"
+SELF_CONTRACT = "scripts/truerun_count_contract.py"
 CG_SRC = "scripts/probe_context_gate.py"
 PSE_SRC = "scripts/probe_selftest_evidence.py"
 PDE_SRC = "scripts/probe_default_effect.py"
