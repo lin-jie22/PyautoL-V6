@@ -10102,3 +10102,199 @@ SIGTERM(137)，单独重跑给足 timeout ⇒ 106 全绿（环境性，非产品
 一条，合计 4 条待拍板。⛔ 补产品主流程运行证据须跑
 `main() --repo`、碰 §183 禁令面，属**取证面授权**而非改判据
 语义；未经显式拍板一律不跑，不并入上述 4 条。
+
+### 193. ⛔⛔ **192 的「运行证据 0 份」是判据自锁下的构造必然：`0/28` 不具鉴别力**（2026-11-14）
+
+═══ 一、起点：192 的 B 账把「没跑过」操作化成了「磁盘上没找到」 ═══
+
+192（r113）把 189「默认生效」拆成四层 reach，报「产品主流程运行
+证据 0 份」。其中 **B 账**在 `scripts/*.json`（29 份排除自身产物
+后 28 份）里找含 `per_commit / stats / policy` 三键的
+`main() --out` 产物，读数 `0/28`，并用手写正例证明探测器「有牙」。
+
+⛔ 本轮**纯只读取证**只量一件从未量过的事：
+**那个 `0` 能不能区分「主流程没跑」与「主流程跑了但产物没落进扫描面」**。
+
+便宜对照（全部 AST / 存档同源，零沙箱、零真实 commit）：
+
+| 检查 | 产品源码实际 | 192 B 账隐含假设 |
+|---|---|---|
+| 写盘键 | `main()` 写 **5 键** `policy/tally/stats/per_commit/rows` | 探测器 3 键（**子集 ⇒ 形态能命中，不是错配**） |
+| 是否写盘 | `--out` 默认 `""`，写盘包在 `if args.out:` 里 ⇒ **默认不写盘** | 隐含「跑过就会留 JSON」 |
+| 写盘路径 | `Path(args.out)`，由调用者任意给定 | 只 glob `scripts/*.json` |
+| 扫描面 | 全仓 `.json` **1280** 份 | `scripts/` **29** 份，覆盖 `2.27%` |
+
+反事实：把产品真实 5 键产物放 `/tmp`，192 的 `archive_shape()`
+**能识别**（`has_main_product_keys=True`），但 `scripts/*.json`
+glob **看不到** ⇒ B 账仍报 0。
+
+⛔⛔ 分寸：`0/28` 不是「没跑过」的独立证据，而是**判据自锁下的
+构造必然**（第 122 条、第 66 条）。第 133 条「零命中先证查询能
+命中」的深层版是——正例必须与**被测对象真实形态 + 真实可达路径**
+同源，否则「有牙」只证明探测器认得自己造的字串。
+
+═══ 二、四本账（⛔ 不合并成布尔）═══
+
+| 账 | 做法 | 封闭读数 |
+|---|---|---|
+| **A 产品形态** | AST 从 `main()` 抽 `write_text(json.dumps({...}))` 的键、`--out` 默认、`if args.out` guard、`Path(args.out)` 目标；从 192 尺子源码 AST 抽 `MAIN_PRODUCT_KEYS` 与 `fake` 正例键（不手写词表） | 产品 5 键 / 探测器 3 键、覆盖 `3/5`、缺 `tally, rows`；`out_default=""`、guard True、target `args.out`；正例是**字面量**而非产品 AST 派生；抽取器 `4/4` 正例 + `0` 反例 + 属性形式有牙 |
+| **B 扫描面** | 全仓 `*.json` 分层，显式排除 `.git/node_modules/__pycache__` 与**自身产物**（幂等）；glob 口径从 192 `account_b()` 函数体 AST 抽、排除项双源读 192 存档 | `1280 = scripts 29 + data/rea 1197 + 其他 54`；覆盖 `0.0227`；192 B 账扫 28 份；⛔ 54 份非 scripts 非 rea 的 JSON 全在 glob 之外 |
+| **C 反事实** | 四世界喂**同一个 192 判据**（`archive_shape()` + `scripts/*.json` 路径谓词）；产物用产品 AST 抽的 5 键构造（值全 `None`，只看顶层键），W2 是**虚拟路径**、不真写 V6 | `W0 0 / W1 0 / W2 1 / W3 0`；3 个零世界里 **2 个是「已运行」** ⇒ `discriminates=False`；W2 命中 1 证明探测器有牙，但**牙只在路径落进 `scripts/` 时才咬得到** |
+| **D 边界** | 策略签名、三分母双源、superseded、验锚、自身沙箱自检 | 默认 `1111` / `--strict` `0000` 只在纯函数层可复算；`135 / 119 / 94` 双源相等；superseded `3/3`；验锚 `OK 3/3 diffs=0`；尺子零 `eval/exec`；真实 expr / commit / F2P / 收益全 0 |
+
+C 账四世界（⛔ 同一个 `0` 兼容多种真值）：
+
+| 世界 | 真值 | B 账命中 |
+|---|---|---|
+| W0 未运行 | 没跑 | `0` |
+| W1 已运行、`--out` 写到仓库外 | **已跑** | `0` |
+| W2 已运行、`--out` 写到 `scripts/` | **已跑** | **`1`** |
+| W3 已运行但没传 `--out`（默认不写盘） | **已跑** | `0` |
+
+═══ 三、⛔ 分寸：收窄证据支撑，不推翻结论方向 ═══
+
+1. **192 的结论方向不变**：「产品主流程运行证据 0 份」仍成立
+   （189 / 190 / 191 三轮确实没跑 `main()`）。但撑住它的应是
+   **A 账**（唯一入口 `main()` + `--repo` required + §183 禁令面）
+   与 **C 账**（runtime 层无调用链），**不是 B 账的磁盘零命中**。
+2. **不是产品洞**：`main()` 的 `--out` 设计本身无错；缺口在
+   **量具的零命中判据**。也不是「默认没生效」。
+3. **形态不是错配**：3 键是 5 键的子集，产品真实产物能被识别；
+   问题在**可选写盘 + 路径自由度 + 扫描面**三者叠加。
+4. `0/28` 是「该面内没有该类产物」，不是「运行证据为 0」的完备
+   枚举；缺产物 / 缺键按契约⑤记「不适用」，不读成零命中。
+5. ⛔ **不推翻 186–192、不改 189–192 语义 / 存档、不报收益、
+   不宣布 ④ 有效 / 无效**；`aether/` 与 189–192 存档零回写，
+   §183 禁令面零触碰。补主流程运行证据须跑 `main() --repo`，
+   属**取证面授权**、需显式拍板。
+
+═══ 四、契约、反证与静态四项 ═══
+
+`tests/contract_zero_discrimination_test.py` **A–E 111 项 +
+F 组 6 项 = 117 项全绿 0 skip**。⛔ F3 同源实算（不读存档结论
+字段）专供事故版打红；F4 事故版恒 False 谓词 ⇒ W2 归零、探测器
+牙齿翻转；F5 产品真实形态能识别但路径不在 glob（证明 `0` 不是
+恒空）；F6 一次真实验锚读数 + 尺子同源重算 + `closure 47/47`
++ A1 四文件纳入。
+
+`/tmp/r114_falsify.py` 分层反证全中：阶段 1 `111/111` 逐条置
+`False` 恰好该项转红、阶段 2 `127/127` 篡改存档字段、阶段 2b
+`8/8` 事故版产品 / 尺子函数（均打红 F3 同源实算）、阶段 3
+`6/6` F 组同进程逐条撤回，基线完整真跑 `FAILS=[]`、
+`FALSIFICATION_OK=True BAD=[]`。沿用一次真实验锚读数缓存 +
+同进程 F 组，不 spawn 子进程。
+
+⛔ 尺子 / 契约自身 **3 类真红**如实留痕（第 34 条：修尺子、
+不放宽断言）：
+① 首跑 `41/46`：`glob_pattern_in()` 全文件找第一个 `glob`，
+抓到 192 **A 账**的 `glob("**/*.py")` ⇒ 路径谓词恒 False、
+W2 误判 0；改限定在 192 `account_b()` 函数体，并新增
+`glob_extractor_selfcheck()` 正例 / 反例 ⇒ 复跑 `47/47`。
+② 反证首跑 `stage2=125/127`：W0/W3 的 `rel` 字段**无人断言**
+⇒ 篡改打不红，补 `C32`；`stage2b=7/8`：契约与尺子各自
+`_load` 了 `probe_default_effect.py`，是**两个模块实例**，
+事故版 `archive_shape` 补丁打在错误实例上 ⇒ F3 恒绿；改为
+复用 `pzd.PDE` 同一实例。
+③ 反证 F4/F5 撤回补丁初版会连带打红相邻 F 项（不「恰好」）
+⇒ F4 改计数器 wrapper（只让第 2 次 `account_c` 返回事故值）、
+F5 改撤回 `scan_text`，`6/6` 恰好命中。
+
+⛔ **首次全量验收 `125/126`（1 fail）与恢复**（如实留痕，
+不是产品洞）：`contract_default_effect_test.py`（r113 契约）
+F3/F6 真红、`same=False`。根因**不是环境**：本轮新尺子
+`account_d()` 写了 `CG.resolve_policy(False/True).signature()`，
+而 192 尺子 `resolve_policy_calls_all()` 按全仓 AST 数该函数
+调用点、`SELF_MEASURE_MODULES` 只白名单排除自身 2 模块 ⇒
+调用点文件数 `5→6` 漂移，192 A 账同源实算 / 幂等对拍双双转红。
+按「⛔ 不改上游尺子（口径变更需拍板）」，**不改已提交的
+192 尺子 / 存档 / 契约**，只把本轮 D 账改为直接取
+`CG.RELAXED` / `CG.STRICT`（`resolve_policy()` 本就恒返这两个
+常量，语义逐字等价）⇒ `len(rpc)` 回到 `5`、192 存档零回写，
+单独重跑 r113 契约 `106/106`、F3/F6 恢复 PASS。
+⛔ 另：验收后 `/tmp/realrepo` 三仓库 `.git/HEAD` 等文件缺失
+（§181「基线三破」类已知环境事故，目录 mtime 与验收结束吻合；
+非本轮产品改动），尺子 fail-closed **拒绝出读数** ⇒ 首轮
+`closure / idem` 是旧存档的假读数，已作废；按「真实事故先
+取证再恢复」用 `bootstrap --repo` 逐个重建（clone 后 checkout
+到锚钉死 head、重建前验签、失败不替换现网），`verify` 恢复
+`OK 3/3 diffs=0`、旧损坏基线另存备份，
+`scripts/realrepo_baseline.json` 零回写。⛔ 本地恢复设施
+≠ ③「CI 先 bootstrap 再跑 H 组」拍板项。恢复后尺子正式重跑
+`rc=0` 写出新存档、`closure 47/47`、sha 幂等 `c9c528f8…`；
+契约 117 项、反证四阶段、静态四项**全部重跑全绿** ⇒ 才第二次
+启动全量验收。
+
+⛔ **二次全量验收 `125/126`（1 fail）与环境恢复**（如实留痕）：
+这次是 `contract_baseline_incident_test.py` 的 **C3/C4** 真红
+（`54 pass / 2 fail`），C1/C2/C5 全绿、验锚仍 `OK 3/3`。
+根因：本轮 3 次 `bootstrap` 把旧基线 `mv` 成新的
+`*_broken_20261115_*` 骨架，而 §181 契约 C3 把「真实破坏态
+骨架**恰好 3 份**」钉成快照判据，`find_broken_skeletons()`
+扫 `<tempdir>/realrepo_bootstrap_*/*_broken_*` ⇒ 本机变 6 份
+（3 份 `2026-11-10` 历史物证 + 3 份本轮新增）⇒ 判据对外部
+残留敏感而转红。**不是产品洞、不是本轮取证结论有误**。
+按「⛔ 不改上游尺子（口径变更需拍板）」不改该契约 / 存档，
+只把本轮新增 3 份**改名归档**到
+`r114_bootstrap_20261115_archive/`（零删除、原样保留、可逆），
+扫描面恢复恰好 3 份历史物证；单独重跑该契约 `56/56` 全绿、
+C3/C4 恢复 PASS、验锚 `OK 3/3 diffs=0`。
+⛔ C3「恰好 N 份」对后续 bootstrap 残留**结构脆弱**，记为
+已知开口（同 §181「骨架易失」），本轮**未改判据**。
+⇒ 才第三次启动全量验收。
+
+⛔ **三次全量验收 `103 pass / 23 fail` 与沙箱 shim 脱管**（如实
+留痕，环境性、非产品洞）：这次是**大范围同时红**（前两次各 1
+个 fail），23 个 fail 几乎全与 r114 无关，共同根因一条报错：
+`PermissionError: Brokered host mkdir requires an available
+runtime file rule`（`shim/sitecustomize.py::_brokered_os_mkdir`）。
+后台验收进程树拿不到 broker runtime file rule ⇒ `os.mkdir` /
+`tempfile.mkdtemp` 被 shim 接管后集体崩溃，依赖临时目录的契约
+连带转红（`contract_agent_test.py` 那类 `reward=0` 是同一根因，
+`undeclared_modes=7` 亦为崩溃连带）。**便宜对照**：当前交互会话
+单独重跑 `contract_backup_test.py` / `contract_auth_test.py`
+都 `rc=0` 全绿 ⇒ 不是代码退化、不是 r114 改动。
+按 `longrunning-python-service-ops` §1「沙箱 shim 劫持子进程」
+取**最小改动**脱管：只从 `PYTHONPATH` 摘掉 shim 路径（其余环境
+变量 / PATH **原样保留**），实测 `sitecustomize_loaded=False`、
+`mkdtemp` 原生成功、崩溃契约转绿、stderr 无 shim 栈；
+`check.py:302` 用 `subprocess.run(...)` 不传 `env` ⇒ 清洗传导到
+全部契约子进程。⛔ 不改产品 / 判据 / 存档；是否动了判据读数，
+由下面的**同源对拍**实证，不靠声明。
+
+⛔ **四次全量验收（脱管）全绿**：`126/126 pass`、
+`ok=True`、`exit_code=0`、err 仅 `PROCESS_EXIT=0`；新契约真跑
+`58.97s`、总 `1526.99s`。与 r113 同源对拍 **125 个共享脚本
+status / rc 零差异**；共享耗时 `1468.02s` vs r113 `2378.78s`
+（`0.617×`，脱管后 shim 不再逐子进程拦截 ⇒ 环境差异、**非产品
+退化**）。`undeclared_modes` `6→7` 多出的 1 项就是新契约本身
+（与历轮 is_shape / form_boundary / loader_gate 同理；
+`check.py:443` 的 `ok` 只看 `FAIL==0 / not all_skipped`，
+不受该项影响）。前三跑红产物 `/tmp/r114_check_first.json`、
+`/tmp/r114_check.json`、`/tmp/r114_check_final.json` 均留证。
+⛔ **四次才收口**：三次红依次是「上游尺子分母漂移」（本轮
+新文件引入）、「bootstrap 残留污染快照判据」（环境恢复连带）、
+「后台 spawn 的 shim 劫持」（环境），**没有一次是产品洞或
+本轮取证结论有误**；每次都先取证、再最小可逆恢复、复验全绿
+后才重跑。
+
+静态四项：真 3.9.6 `ast.parse(feature_version=(3,9))` 对 2 个
+新 `.py` 全 OK、裸 `noqa` 0、`git diff --check` rc=0、A1 扫描面
+`n_scanned=351` / 候选面 `353`、4 个待交付文件（含 `README.md`）
+全在候选面且 `scan_text()` 零命中 + 正例反证命中 1。
+`closure 47/47`、尺子重跑 sha 幂等（`c9c528f8…`）、验锚
+`OK 3/3 diffs=0`。
+
+**新设施**：`scripts/probe_zero_discrimination.py`、
+`scripts/zero_discrimination_census.json`（口径
+`zero_discrimination_census/v1` 另存）、
+`tests/contract_zero_discrimination_test.py`。
+
+═══ 五、拍板清单（未变，仍是 4 条）═══
+
+本轮是**纯只读取证**，不构成新拍板项。② 多步状态序列
+③ CI 先 `bootstrap` 再跑 H 组（需 workflow scope PAT）
+⑤ 放宽 / 降级 deny-modules（安全边界、需显式审批）
+—— **3 项一律未开工**；① 已取证收口、④ / ⑥ 已落地；
+⛔ 另有 190 留下的「修 `ok_nogold` ledger 语义 / 补 189 反证组」
+一条，合计 4 条待拍板。⛔ 补产品主流程运行证据须跑
+`main() --repo`、碰 §183 禁令面，需**取证面显式拍板**。

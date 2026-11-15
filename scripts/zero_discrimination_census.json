@@ -1,0 +1,394 @@
+{
+  "schema": "zero_discrimination_census/v1",
+  "caliber": {
+    "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+    "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+    "scripts/probe_default_effect.py": "881318647f769036f321a0dfb5f7ececa1d4279355ee27027e2f342ccfd0d9f3",
+    "scripts/probe_zero_discrimination.py": "149d6fced0f3d8c52665d402d333eee528df7bab069824b6095dabef2b0650a4",
+    "scripts/probe_inliner_relax.py": "94e150f006ea6be8d3e3ec9b039ee1de5f6d7837952d485220a9cb4a499156f4",
+    "scripts/probe_nogold_gap.py": "ef428eeb1bae1182be0fa5152ab62b88bea20572ed0ce10eaed6e2eb8c7082fd",
+    "scripts/probe_policy_reach.py": "13088aee616e32d2fe7a70f839e92364c59216ed2355b5a705ff63042c07de5d",
+    "scripts/default_effect_census.json": "c08618edfeb38c98e002839e907c49ecf66ce87c69a51a7d8ceb7f2d7c8a5d8d",
+    "scripts/inliner_relax_census.json": "4399b741b6383b8cc2238972e765f1a71c187ec35ae650f76099f12b582c3bcd",
+    "scripts/nogold_gap_census.json": "c3a588e42b16c79e11cdfaaeda4a595106a59bba2e87a950f02353b0bf71a9c9",
+    "scripts/policy_reach_census.json": "d58b3356c3d31266576650feaffe2c7d5687193f87b67f24f62592b797946205",
+    "scripts/extract_downstream.json": "896220cd2849f6740a0fc28daf6e434c7ed77445237b60f3b1288a3cf7d8d266",
+    "scripts/form_shape_attribution.json": "b536f832e4ba0fc7bc734321dae058007de4e556d6699a7ec8c010b6d7556309",
+    "scripts/no_result_attribution.json": "1feae1a5d74e830d0d609e3b507d8842d577c6a851b377c9ef205e2161446d0b",
+    "scripts/caliber_superseded.json": "77a828b6a82e3afefa83f23c21cbbab7360e091486a4f517e867a89c277265fb",
+    "scripts/realrepo_baseline.json": "0585f86b9146fe0aa203c936af2dcd576f34b3b55c27fabc59db93073558b0fb"
+  },
+  "accounts": {
+    "A_product_shape": {
+      "product_out_keys": [
+        "policy",
+        "tally",
+        "stats",
+        "per_commit",
+        "rows"
+      ],
+      "n_product_out_keys": 5,
+      "out_default": "",
+      "writes_only_if_out": true,
+      "out_target": "args.out",
+      "out_path_unconstrained": true,
+      "detector_keys": [
+        "per_commit",
+        "stats",
+        "policy"
+      ],
+      "n_detector_keys": 3,
+      "detector_is_subset": true,
+      "key_coverage": "3/5",
+      "detector_missing_keys": [
+        "rows",
+        "tally"
+      ],
+      "detector_positive_keys": [
+        "policy",
+        "stats",
+        "per_commit",
+        "rows"
+      ],
+      "detector_positive_from_product_ast": false,
+      "detector_positive_is_literal": true,
+      "extractor_selfcheck": {
+        "pos_cases": [
+          [
+            "a"
+          ],
+          [
+            "policy"
+          ],
+          [
+            "x",
+            "y",
+            "z",
+            "w"
+          ],
+          [
+            "policy",
+            "tally",
+            "stats",
+            "per_commit",
+            "rows"
+          ]
+        ],
+        "pos_hit": 4,
+        "neg_hit": 0,
+        "attr_form_teeth": true
+      },
+      "boundary": "探测器形态是产品真实 5 键的子集 ⇒ 形态并非错配；问题在路径与可选写盘"
+    },
+    "B_scan_surface": {
+      "n_all_json_in_repo": 1280,
+      "excluded_self_product": [
+        "zero_discrimination_census.json"
+      ],
+      "n_scripts_json": 29,
+      "n_rea_evidence": 1197,
+      "n_other_json": 54,
+      "other_dirs_top": [
+        [
+          "docs",
+          23
+        ],
+        [
+          "data",
+          7
+        ],
+        [
+          ".",
+          2
+        ],
+        [
+          "supervisor",
+          2
+        ],
+        [
+          "backups/backup-20261018-141740",
+          2
+        ],
+        [
+          "backups/backup-20261015-204416",
+          2
+        ],
+        [
+          "tasks",
+          1
+        ],
+        [
+          "data/seed/data",
+          1
+        ],
+        [
+          "tasks/token",
+          1
+        ],
+        [
+          "tasks/shlex",
+          1
+        ],
+        [
+          "tasks/stateflow",
+          1
+        ],
+        [
+          "tasks/core",
+          1
+        ]
+      ],
+      "coverage_scripts": 0.0227,
+      "b192_glob_root": "scripts",
+      "b192_glob_pattern": "*.json",
+      "b192_n_scanned": 28,
+      "b192_excluded": [
+        "default_effect_census.json"
+      ],
+      "b192_scanned_from_archive": true,
+      "idempotent_by_explicit_exclusion": true,
+      "boundary": "192 只扫 scripts/*.json；--out 可写任意路径，合法输出位置不在该面内",
+      "scan_contract": {
+        "root": "scripts",
+        "pattern": "*.json",
+        "glob_source_function": "account_b",
+        "glob_extractor_selfcheck": {
+          "pos": "*.json",
+          "neg": "",
+          "teeth": true
+        },
+        "excluded": [
+          "default_effect_census.json"
+        ],
+        "keys": [
+          "per_commit",
+          "stats",
+          "policy"
+        ]
+      }
+    },
+    "C_counterfactual": {
+      "worlds": {
+        "W0_no_run": {
+          "truth": "主流程未运行",
+          "rel": null,
+          "shape_available": false,
+          "shape": {
+            "parseable": false,
+            "is_dict": false,
+            "applicable": false
+          },
+          "in_scripts": false,
+          "b_hits": 0
+        },
+        "W1_ran_out_tmp": {
+          "truth": "主流程已运行，--out 写到仓库外临时路径",
+          "rel": "tmp/main_out.json",
+          "shape_available": true,
+          "shape": {
+            "parseable": true,
+            "is_dict": true,
+            "keys": [
+              "per_commit",
+              "policy",
+              "rows",
+              "stats",
+              "tally"
+            ],
+            "has_main_product_keys": true,
+            "has_policy_field": true,
+            "has_per_commit": true
+          },
+          "in_scripts": false,
+          "b_hits": 0
+        },
+        "W2_ran_out_scripts": {
+          "truth": "主流程已运行，--out 写到 scripts/",
+          "rel": "scripts/main_out.json",
+          "shape_available": true,
+          "shape": {
+            "parseable": true,
+            "is_dict": true,
+            "keys": [
+              "per_commit",
+              "policy",
+              "rows",
+              "stats",
+              "tally"
+            ],
+            "has_main_product_keys": true,
+            "has_policy_field": true,
+            "has_per_commit": true
+          },
+          "in_scripts": true,
+          "b_hits": 1
+        },
+        "W3_ran_no_out": {
+          "truth": "主流程已运行，但未传 --out（默认不写盘）",
+          "rel": null,
+          "shape_available": false,
+          "shape": {
+            "parseable": false,
+            "is_dict": false,
+            "applicable": false
+          },
+          "in_scripts": false,
+          "b_hits": 0
+        }
+      },
+      "product_shape_recognised": true,
+      "product_shape_keys": [
+        "per_commit",
+        "policy",
+        "rows",
+        "stats",
+        "tally"
+      ],
+      "zero_worlds": [
+        "W0_no_run",
+        "W1_ran_out_tmp",
+        "W3_ran_no_out"
+      ],
+      "n_zero_worlds": 3,
+      "n_zero_worlds_with_run": 2,
+      "ran_zero_worlds": [
+        "W1_ran_out_tmp",
+        "W3_ran_no_out"
+      ],
+      "discriminates": false,
+      "detector_teeth_on_w2": true,
+      "b192_original_hits": 0,
+      "zero_is_constructive_necessity": true,
+      "denominators_different": false,
+      "merged_into_bool": false,
+      "boundary": "同一个 0 同时兼容「没跑」与「跑了但没写盘到 scripts/」⇒ 零命中是判据自锁下的构造必然，不能作为运行证据 0 份的独立证据"
+    },
+    "D_boundary": {
+      "policy_default": "1111",
+      "policy_strict": "0000",
+      "verdict_192_unchanged": true,
+      "support_moved_to": [
+        "A 唯一入口 + --repo required + §183 禁令面",
+        "C runtime 层无调用链"
+      ],
+      "not_a_product_hole": true,
+      "not_default_disabled": true,
+      "b192_archive_rewritten": false,
+      "archives_189_192_rewritten": false,
+      "aether_rewritten": false,
+      "denominators": {
+        "main": 135,
+        "form": 119,
+        "no_result": 94
+      },
+      "denominator_dual_source": {
+        "form_rows": 119,
+        "form_summary": 119,
+        "no_result_rows": 94,
+        "no_result_summary": 94
+      },
+      "denominators_kept_separate": true,
+      "superseded_total": 3,
+      "superseded_sha_matches": 3,
+      "anchor": {
+        "ok": true,
+        "repos": 3,
+        "diffs": [],
+        "caliber_diffs": []
+      },
+      "sandbox_selfcheck": {
+        "checked_own_source": true,
+        "banned": [],
+        "n_banned": 0
+      },
+      "real_expr_runs": 0,
+      "real_commit_runs": 0,
+      "f2p_runs": 0,
+      "gain_reported": 0,
+      "n_forbidden_runtime_calls": 0,
+      "boundary": "不推翻 192 结论方向、不报收益；补主流程运行证据属 §183 禁令面，需拍板"
+    }
+  },
+  "derived": {
+    "claim": "192 B 账『运行证据 0 份』的零命中判据",
+    "product_out_keys": [
+      "policy",
+      "tally",
+      "stats",
+      "per_commit",
+      "rows"
+    ],
+    "detector_keys": [
+      "per_commit",
+      "stats",
+      "policy"
+    ],
+    "key_coverage": "3/5",
+    "scan_coverage": 0.0227,
+    "n_zero_worlds_with_run": 2,
+    "discriminates": false,
+    "n_closure": 47,
+    "n_closure_true": 47
+  },
+  "closure": {
+    "a1_product_out_keys_five": true,
+    "a2_out_default_empty": true,
+    "a3_write_guarded_by_out": true,
+    "a4_out_path_unconstrained": true,
+    "a5_detector_keys_three": true,
+    "a6_detector_is_subset": true,
+    "a7_key_coverage_3of5": true,
+    "a8_missing_keys": true,
+    "a9_detector_positive_is_literal": true,
+    "a10_detector_positive_not_from_ast": true,
+    "a11_extractor_pos_4of4": true,
+    "a12_extractor_neg_zero": true,
+    "a13_attr_form_teeth": true,
+    "b1_all_json_nonzero": true,
+    "b2_self_product_excluded": true,
+    "b3_scripts_plus_rea_plus_other": true,
+    "b4_coverage_small": true,
+    "b5_b192_scanned_from_archive": true,
+    "b6_b192_n_scanned": true,
+    "b7_glob_from_source": true,
+    "b8_scan_keys_from_source": true,
+    "b9_glob_extractor_teeth": true,
+    "c1_product_shape_recognised": true,
+    "c2_product_shape_has_five_keys": true,
+    "c3_w0_zero": true,
+    "c4_w1_zero": true,
+    "c5_w2_one": true,
+    "c6_w3_zero": true,
+    "c7_w1_out_of_scripts": true,
+    "c8_n_zero_worlds": true,
+    "c9_two_zero_worlds_ran": true,
+    "c10_discriminates_false": true,
+    "c11_detector_teeth_on_w2": true,
+    "c12_zero_is_constructive_necessity": true,
+    "c13_not_merged": true,
+    "d1_default_1111": true,
+    "d2_strict_0000": true,
+    "d3_verdict_192_unchanged": true,
+    "d4_not_a_product_hole": true,
+    "d5_no_archive_rewrites": true,
+    "d6_denominators": true,
+    "d7_dual_source": true,
+    "d8_superseded_all_match": true,
+    "d9_no_sandbox_primitives": true,
+    "d10_zero_forbidden_runs": true,
+    "d11_anchor_ok": true,
+    "d12_selfcheck_own_source": true
+  },
+  "anchor": {
+    "ok": true,
+    "repos": 3,
+    "diffs": [],
+    "caliber_diffs": []
+  },
+  "summary": {
+    "verdict": "192 B 账的 0/28 在『主流程已运行但 --out 未写盘 / 写到 scripts/ 之外』的反事实下仍为 0 ⇒ 判据自锁下的构造必然，不具鉴别力；产品真实写盘是 5 键、--out 默认空、路径任意，而扫描面只覆盖 scripts/ 的 29/1280",
+    "scope": "不推翻 192 结论方向（主流程运行证据 0 份仍成立），只把支撑点从 B 账磁盘零命中移到 A 账唯一入口 + C 账 runtime 无调用链；不是产品洞、不是『默认没生效』；不报收益、§183 零触碰",
+    "n_closure_true": 47,
+    "n_closure": 47
+  }
+}
