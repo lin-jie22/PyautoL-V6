@@ -1,0 +1,464 @@
+{
+  "schema": "policy_binding_census/v1",
+  "caliber": {
+    "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+    "aether/check.py": "88cc4c09ed9293dc881c0f77993666edf1e217292740b0ba88f55f90d9804c82",
+    "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+    "scripts/probe_selftest_evidence.py": "9dfee7ae70920b96ec8e71633959623c29f7506b42886492d786a70f60632afd",
+    "scripts/probe_default_effect.py": "881318647f769036f321a0dfb5f7ececa1d4279355ee27027e2f342ccfd0d9f3",
+    "scripts/probe_zero_discrimination.py": "149d6fced0f3d8c52665d402d333eee528df7bab069824b6095dabef2b0650a4",
+    "scripts/probe_inliner_relax.py": "94e150f006ea6be8d3e3ec9b039ee1de5f6d7837952d485220a9cb4a499156f4",
+    "scripts/probe_nogold_gap.py": "ef428eeb1bae1182be0fa5152ab62b88bea20572ed0ce10eaed6e2eb8c7082fd",
+    "scripts/probe_policy_reach.py": "13088aee616e32d2fe7a70f839e92364c59216ed2355b5a705ff63042c07de5d",
+    "scripts/caliber_superseded.py": "7714d621447a572f5166fe25880f0ddbaa67cfb529d357119e6fd5efffbdff6e",
+    "tests/contract_context_gate_test.py": "4b7721d4de44b5e291101ae743f2ccbe548bd540eab1defdd5490c3540e9ef21",
+    "tests/contract_default_effect_test.py": "83e15d7478bd9e4bbc085fa91974c8df6cf9e6f62dc1f28b09f2a5513d56e8c3",
+    "tests/contract_zero_discrimination_test.py": "f536bb50d1a281eff223129a9a585b5299ddf4b24550ad4bd79cd1d214afc993",
+    "tests/contract_selftest_evidence_test.py": "899c957d9f36b1d8acc067a756e2cb47a243f4dd043a79cea1c8a383ab1ac3b2",
+    "scripts/probe_policy_binding.py": "94e2ff98ac90328b8ff76b13a24a0682723d631ef41018cf3da7fba8ed75a313",
+    "scripts/default_effect_census.json": "c08618edfeb38c98e002839e907c49ecf66ce87c69a51a7d8ceb7f2d7c8a5d8d",
+    "scripts/zero_discrimination_census.json": "c9c528f8ce3f85bcb97ec42d86b3c77c73aa3e24d0292bc06da1b6a9cc7736dc",
+    "scripts/selftest_evidence_census.jsonl": "a4921a6548e3efb3270b2de6a69b478aa6a48afa621719cd5b0ed0a6bd4d185b",
+    "scripts/inliner_relax_census.json": "4399b741b6383b8cc2238972e765f1a71c187ec35ae650f76099f12b582c3bcd",
+    "scripts/nogold_gap_census.json": "c3a588e42b16c79e11cdfaaeda4a595106a59bba2e87a950f02353b0bf71a9c9",
+    "scripts/policy_reach_census.json": "d58b3356c3d31266576650feaffe2c7d5687193f87b67f24f62592b797946205",
+    "scripts/extract_downstream.json": "896220cd2849f6740a0fc28daf6e434c7ed77445237b60f3b1288a3cf7d8d266",
+    "scripts/form_shape_attribution.json": "b536f832e4ba0fc7bc734321dae058007de4e556d6699a7ec8c010b6d7556309",
+    "scripts/no_result_attribution.json": "1feae1a5d74e830d0d609e3b507d8842d577c6a851b377c9ef205e2161446d0b",
+    "scripts/caliber_superseded.json": "77a828b6a82e3afefa83f23c21cbbab7360e091486a4f517e867a89c277265fb",
+    "scripts/realrepo_baseline.json": "0585f86b9146fe0aa203c936af2dcd576f34b3b55c27fabc59db93073558b0fb"
+  },
+  "accounts": {
+    "A_call_site_strata": {
+      "policy_fields": [
+        "cross_scope",
+        "first_rhs",
+        "allow_unstable",
+        "no_gold_gate"
+      ],
+      "n_fields": 4,
+      "field_reads": {
+        "cross_scope": [
+          {
+            "fn": "merge_bindings",
+            "line": 189
+          }
+        ],
+        "first_rhs": [
+          {
+            "fn": "bindings_for",
+            "line": 203
+          }
+        ],
+        "allow_unstable": [
+          {
+            "fn": "main",
+            "line": 464
+          }
+        ],
+        "no_gold_gate": [
+          {
+            "fn": "adopt_probe",
+            "line": 257
+          }
+        ]
+      },
+      "n_field_reads": 4,
+      "field_read_functions": [
+        "adopt_probe",
+        "bindings_for",
+        "main",
+        "merge_bindings"
+      ],
+      "selftest_called_functions": [
+        "bindings_for",
+        "bool",
+        "chk",
+        "classify_probe",
+        "collect_bindings",
+        "has_unstable_call",
+        "inline_expr",
+        "merge_bindings",
+        "print",
+        "resolve_policy",
+        "scoped_assertions",
+        "sorted"
+      ],
+      "selftest_covered_field_functions": [
+        "bindings_for",
+        "merge_bindings"
+      ],
+      "selftest_uncovered_field_functions": [
+        "adopt_probe",
+        "main"
+      ],
+      "n_selftest_covered_fields": 2,
+      "main_policy_sinks": {
+        "sinks": [
+          "adopt_probe",
+          "bindings_for",
+          "merge_bindings"
+        ],
+        "n_sinks": 3,
+        "run_all_args": [
+          "source",
+          "items",
+          "timeout",
+          "pkg"
+        ],
+        "run_all_has_policy": false,
+        "source": "scripts/probe_context_gate.py::main (AST)"
+      },
+      "accident_194": {
+        "targets": [
+          "resolve_policy",
+          "resolve_policy",
+          "adopt_probe",
+          "bindings_for"
+        ],
+        "n_targets": 4,
+        "source": "scripts/probe_selftest_evidence.py::account_c (AST)",
+        "pos_hit": true,
+        "neg_hit": true,
+        "teeth": true,
+        "pos_n": 3,
+        "neg_n": 0
+      },
+      "sinks_covered_by_194": [
+        "adopt_probe",
+        "bindings_for"
+      ],
+      "n_sinks_covered_by_194": 2,
+      "sinks_covered_this_round": [
+        "adopt_probe",
+        "bindings_for",
+        "merge_bindings"
+      ],
+      "n_sinks_covered_this_round": 3,
+      "coverage_ratio_194": "2/3",
+      "coverage_ratio_this": "3/3",
+      "n_call_sites_192_from_archive": 5,
+      "merged_into_bool": false,
+      "boundary": "A 账纯 AST：读取点存在 ≠ 运行时走到；194 事故 patch 目标由其尺子 AST 同源抽取，不手写词表"
+    },
+    "B_runtime_readouts": {
+      "evaluation_account": {
+        "selftest_ok": true,
+        "n_resolve_policy_actual": 2,
+        "signatures_seen": [
+          "1111",
+          "0000"
+        ],
+        "n_assertion_lines": 15,
+        "n_pass_marks": 15,
+        "n_fail_marks": 0,
+        "source": "CG.selftest() 真跑 + setattr 计数器"
+      },
+      "policy_object_flow": {
+        "n_resolve_policy_ast": 2,
+        "rp_lines": [
+          311,
+          312
+        ],
+        "n_flowed_into_others": 0,
+        "flowed_lines": [],
+        "n_attribute_only": 2,
+        "attribute_only_lines": [
+          311,
+          312
+        ],
+        "n_hardcoded_constants": 4,
+        "hardcoded_lines": [
+          315,
+          316,
+          320,
+          322
+        ],
+        "only_signature_attribute": true,
+        "source": "scripts/probe_context_gate.py::selftest (AST)"
+      },
+      "accidents": {
+        "accidents": {
+          "A_strict_broken": {
+            "selftest_ok": false,
+            "n_fail_marks": 1,
+            "red_lines": [
+              "✗ 自检K --strict 策略 0000: 期望 '0000'                       实得 '1111'"
+            ],
+            "target": "resolve_policy",
+            "description": "恒返 RELAXED ⇒ --strict 失效"
+          },
+          "B_default_0000": {
+            "selftest_ok": false,
+            "n_fail_marks": 1,
+            "red_lines": [
+              "✗ 自检J 默认策略 1111: 期望 '1111'                       实得 '0000'"
+            ],
+            "target": "resolve_policy",
+            "description": "默认态被改成 STRICT（正例，必须打红）"
+          },
+          "C_adopt_probe_ignores_policy": {
+            "selftest_ok": true,
+            "n_fail_marks": 0,
+            "red_lines": [],
+            "target": "adopt_probe",
+            "description": "采纳链四位开关失效"
+          },
+          "D_bindings_for_ignores_policy": {
+            "selftest_ok": false,
+            "n_fail_marks": 1,
+            "red_lines": [
+              "✗ 自检O ②放宽态取首个 rhs: 期望 '1'                          实得 None"
+            ],
+            "target": "bindings_for",
+            "description": "first_rhs 位被忽略"
+          },
+          "E_merge_bindings_ignores_policy": {
+            "selftest_ok": false,
+            "n_fail_marks": 2,
+            "red_lines": [
+              "✗ 自检L ①严格态用本作用域: 期望 \"'a'.upper()\"                实得 None",
+              "✗ 自检M ①放宽态串到 t2: 期望 \"'b'.upper()\"                实得 None"
+            ],
+            "target": "merge_bindings",
+            "description": "本轮新补：cross_scope 位被忽略"
+          }
+        },
+        "caught": [
+          "A_strict_broken",
+          "B_default_0000",
+          "D_bindings_for_ignores_policy",
+          "E_merge_bindings_ignores_policy"
+        ],
+        "n_caught": 4,
+        "blind": [
+          "C_adopt_probe_ignores_policy"
+        ],
+        "n_blind": 1,
+        "orig4": [
+          "A_strict_broken",
+          "B_default_0000",
+          "C_adopt_probe_ignores_policy",
+          "D_bindings_for_ignores_policy"
+        ],
+        "orig4_caught": [
+          "A_strict_broken",
+          "B_default_0000",
+          "D_bindings_for_ignores_policy"
+        ],
+        "orig4_blind": [
+          "C_adopt_probe_ignores_policy"
+        ],
+        "positive_has_teeth": true,
+        "new_sink_caught": true,
+        "still_only_adopt_blind": true,
+        "merged_into_bool": false
+      },
+      "n194_per_full_lower_bound": 6,
+      "n194_selftest_ast": 2,
+      "ast_runtime_match": true,
+      "verdict": "每次全量 ≥6 次真跑是求值账：`resolve_policy` 返回对象在 selftest 内 0 次流入其它断言，L/M/N/O 传 4 处硬编码常量 ⇒ 真跑次数不触达默认 policy 对象的消费链",
+      "merged_into_bool": false
+    },
+    "C_discrimination": {
+      "counterfactual": {
+        "worlds": {
+          "W0_present": {
+            "n_flowed": 0,
+            "default_intact": true,
+            "ran_selftest": true,
+            "synthetic": false,
+            "description": "现状：selftest 每次全量真跑，默认 1111"
+          },
+          "W1_default_broken": {
+            "n_flowed": 0,
+            "default_intact": false,
+            "ran_selftest": true,
+            "synthetic": false,
+            "description": "事故版默认签名 0000：J 打红，但流入仍 0（真跑过）"
+          },
+          "W2_injected_binding": {
+            "n_flowed": 1,
+            "default_intact": true,
+            "ran_selftest": true,
+            "synthetic": true,
+            "description": "合成：给 selftest 补一条把默认对象传入低层函数的断言"
+          },
+          "W3_main_ran": {
+            "n_flowed": 0,
+            "default_intact": true,
+            "ran_selftest": true,
+            "synthetic": true,
+            "description": "合成：main() 真跑过（不真跑，碰 §183）；selftest 函数体未变"
+          }
+        },
+        "zero_worlds": [
+          "W0_present",
+          "W1_default_broken",
+          "W3_main_ran"
+        ],
+        "n_zero_worlds": 3,
+        "ran_zero_worlds": [
+          "W0_present",
+          "W1_default_broken",
+          "W3_main_ran"
+        ],
+        "n_ran_zero_worlds": 3,
+        "intact_values_in_zero": [
+          true,
+          false,
+          true
+        ],
+        "positive_has_teeth": true,
+        "n_natural_positive_worlds": 0,
+        "discriminates": false,
+        "verdict": "3 个零世界里 3 个都已运行、且默认态既有完好又有被破坏 ⇒ 0 次流入是 selftest 职责（只测低层函数 + 签名）的构造必然，不具鉴别力：既不能据此说『默认没生效』，也不能说『默认生效』",
+        "boundary": "W2/W3 为合成反事实，非产品真跑；main() --repo 零次"
+      },
+      "accident_coverage_194": "2/3",
+      "accident_coverage_this": "3/3",
+      "new_sink_caught": true,
+      "still_only_adopt_blind": true,
+      "positive_has_teeth": true,
+      "verdict": "194『唯一恒绿』只在被选中的 4 类事故内成立；补第 3 个 sink 后它打红，故须报覆盖比 2/3→3/3。第五类 ≥6 次真跑是求值账，『0 次流入』经反事实检验不具鉴别力 ⇒ 194 方向不翻案，只把『缺口精确在采纳链』收窄为『缺口在默认 policy 对象 → 主流程消费链的绑定证据』",
+      "merged_into_bool": false
+    },
+    "D_boundary": {
+      "policy_default": "1111",
+      "policy_strict": "0000",
+      "denominators": {
+        "main": 135,
+        "form": 119,
+        "no_result": 94
+      },
+      "denominator_dual_source": {
+        "main_rows": 135,
+        "main_summary": 135,
+        "form_rows": 119,
+        "form_summary": 119,
+        "no_result_rows": 94,
+        "no_result_summary": 94
+      },
+      "denominators_all_distinct": true,
+      "superseded_total": 3,
+      "superseded_diffs": [],
+      "superseded_sha_matches": 3,
+      "sandbox_selfcheck": {
+        "own_resolve_policy_call_sites": {
+          "scripts/probe_policy_binding.py": 0,
+          "tests/contract_policy_binding_test.py": 0
+        },
+        "no_new_denominator_call_site": true,
+        "positive_extractor_has_teeth": true,
+        "positive_n": 3,
+        "coverage_scripts_live": 0.0227,
+        "coverage_scripts_saved": 0.0227,
+        "coverage_unchanged": true,
+        "self_archive_suffix": ".jsonl",
+        "self_archive_not_json": true,
+        "checked_own_source": true,
+        "n_banned": 0
+      },
+      "n_call_sites_192_from_archive": 5,
+      "n_own_modules_checked": 2,
+      "verdict_194_unchanged": true,
+      "not_a_product_hole": true,
+      "b192_archive_rewritten": false,
+      "archives_189_194_rewritten": false,
+      "aether_rewritten": false,
+      "real_expr_runs": 0,
+      "real_commit_runs": 0,
+      "main_repo_runs": 0,
+      "f2p_runs": 0,
+      "gain_reported": 0,
+      "section183_untouched": true,
+      "anchor": {
+        "ok": true,
+        "repos": 3,
+        "diffs": [],
+        "caliber_diffs": []
+      },
+      "boundary": "不改上游尺子 / 存档 / 判据；r115 已登记开口『193 动态覆盖率钉常量』本轮以非 .json 存档绕开，不改 193；补采纳链运行证据仍须跑 main() --repo 碰 §183 ⇒ 需取证面显式拍板"
+    }
+  },
+  "derived": {
+    "claim": "194 鉴别账覆盖比 2/3 + 第五类真跑是求值账（0 次流入）",
+    "accident_coverage_194": "2/3",
+    "accident_coverage_this": "3/3",
+    "n_selftest_covered_policy_fields": 2,
+    "n_resolve_policy_real_per_selftest": 2,
+    "n_policy_object_flows": 0,
+    "n_accidents_caught": 4,
+    "n_accidents_blind": 1,
+    "zero_flow_discriminates": false,
+    "n_closure": 53,
+    "n_closure_true": 53
+  },
+  "closure": {
+    "a1_four_fields": true,
+    "a2_four_read_sites": true,
+    "a3_read_functions": true,
+    "a4_three_sinks": true,
+    "a5_run_all_no_policy": true,
+    "a6_selftest_covers_2": true,
+    "a7_selftest_misses_2": true,
+    "a8_194_targets_ast_teeth": true,
+    "a9_194_covers_2of3": true,
+    "a10_this_covers_3of3": true,
+    "a11_denominator_192_stable": true,
+    "a12_not_merged": true,
+    "b1_ast_runtime_match": true,
+    "b2_two_real_calls": true,
+    "b3_eval_15_green": true,
+    "b4_flow_zero": true,
+    "b5_only_signature": true,
+    "b6_hardcoded_four": true,
+    "b7_five_accidents": true,
+    "b8_four_caught": true,
+    "b9_one_blind": true,
+    "b10_only_adopt_blind": true,
+    "b11_new_sink_caught": true,
+    "b12_orig4_reproduced": true,
+    "b13_positive_teeth": true,
+    "b14_per_full_6": true,
+    "b15_not_merged": true,
+    "c1_four_worlds": true,
+    "c2_three_zero": true,
+    "c3_all_zero_ran": true,
+    "c4_intact_mixed": true,
+    "c5_no_discrimination": true,
+    "c6_positive_world_has_teeth": true,
+    "c7_synthetic_marked": true,
+    "c8_coverage_194": true,
+    "c9_coverage_this": true,
+    "c10_both_positives": true,
+    "c11_194_direction_kept": true,
+    "c12_not_merged": true,
+    "d1_default_1111": true,
+    "d2_strict_0000": true,
+    "d3_denominators": true,
+    "d4_dual_source": true,
+    "d5_all_distinct": true,
+    "d6_superseded": true,
+    "d7_no_new_call_site": true,
+    "d8_extractor_teeth": true,
+    "d9_coverage_unchanged": true,
+    "d10_archive_not_json": true,
+    "d11_zero_forbidden_runs": true,
+    "d12_no_rewrites": true,
+    "d13_section183": true,
+    "d14_anchor_ok": true
+  },
+  "anchor": {
+    "ok": true,
+    "repos": 3,
+    "diffs": [],
+    "caliber_diffs": []
+  },
+  "summary": {
+    "verdict": "194 的『唯一恒绿』只在其选中的 4 类事故内成立：main() 有 3 个 policy sinks，194 只 patch 了 2/3 个；补 merge_bindings 忽略 policy ⇒ selftest 打红 L/M。且 selftest 内 resolve_policy 返回对象 0 次流入其它断言（J/K 只取 signature，L/M/N/O 传 4 处硬编码常量）⇒ 第五类『每次全量 ≥6 次真跑』是纯求值账",
+    "scope": "⛔ 反事实四世界证明『0 次流入』是 selftest 职责的构造必然、不具鉴别力：3 个零世界全已运行、默认态既有完好又有被破坏。故不据此说『默认没生效』，也不说『默认生效』；194 方向不翻案，只补覆盖比 2/3→3/3、selftest 覆盖 2/4 位开关，并把『缺口精确在采纳链』收窄为『缺口在默认 policy 对象 → 主流程消费链的绑定证据』。不是产品洞、不报收益、§183 零触碰",
+    "n_closure_true": 53,
+    "n_closure": 53
+  }
+}

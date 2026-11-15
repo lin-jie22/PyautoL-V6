@@ -10447,3 +10447,167 @@ policy 会打红 selftest 的 O ⇒ `3 打红 / 1 恒绿`，并把
 ⛔ 另有 190 留下的「修 `ok_nogold` ledger 语义 / 补 189 反证组」
 一条，合计 4 条待拍板。⛔ 补**采纳链**运行证据须跑
 `main() --repo`、碰 §183 禁令面，需**取证面显式拍板**。
+
+### 195. ⛔⛔ **194 的「唯一恒绿」只在选中的 4 类事故内成立；第五类「≥6 次真跑」是求值账，`0 次流入` 是构造必然**（2026-11-15）
+
+═══ 一、起点：194 的鉴别账没有报覆盖比 ═══
+
+194（r115）补上第五类证据「验收契约每次全量真跑产品模块」：
+`check.py::discover()` 的 `glob("contract_*_test.py")` 收进
+2 个含 `resolve_policy` 调用点的契约，`E1` 真跑 `CG.selftest()`、
+J/K 各真跑一次 ⇒ **每次全量 ≥6 次真实运行**。C 账用
+**4 类事故版**真跑 `selftest()`，得 `3 打红 / 1 恒绿`，
+唯一恒绿是 `adopt_probe` 忽略 policy ⇒ 判词「缺口精确定位在
+采纳链」。
+
+⛔ 本轮**纯只读取证**只量一件从未量过的事：
+**那 4 类事故、以及那 ≥6 次真跑，到底覆盖了默认 policy 对象
+的多少条消费链？**
+
+便宜对照（纯 AST / 零沙箱同源重放，零真实 expr、零真实 commit）：
+
+| 检查 | 实测 | 194 隐含假设 |
+|---|---|---|
+| 4 位开关读取点 | `cross_scope`→`merge_bindings`(189)、`first_rhs`→`bindings_for`(203)、`allow_unstable`→`main`(464)、`no_gold_gate`→`adopt_probe`(257) | 4 类事故等价于 4 位开关 |
+| `main()` 的 policy sinks | **`adopt_probe` / `bindings_for` / `merge_bindings` 共 3 个** | 只 patch 了前 2 个 |
+| 补第 3 个 sink | `merge_bindings` 忽略 policy ⇒ `selftest()` **打红 L/M 2 条** | 「唯一恒绿」被当作全局结论 |
+| 默认对象去向 | `resolve_policy()` 2 个调用点的返回对象 **0 次**流入其它断言（J/K 只取 `.signature()`）；L/M/N/O 传 **4 处硬编码** `STRICT`/`RELAXED`（315/316/320/322） | ≥6 次真跑被当成「已消费」 |
+
+⇒ 锚定契约④「暴露量 ≠ 使用量」的自指版：**真跑次数是曝光量，
+不是「默认 policy 对象被消费」**。且按 193 的教训，
+「0 次」必须先证伪它是不是判据自锁下的构造必然，才能下判。
+
+═══ 二、四本账（⛔ 不合并成布尔）═══
+
+| 账 | 做法 | 封闭读数 |
+|---|---|---|
+| **A 调用点分层** | 字段表从 `RelaxPolicy._fields` 同源取；`policy.<field>` 读取点、`main()` 里以 `policy` 为实参的调用点、`selftest()` 直接调用集、194 事故的 `_selftest_with("...")` 第一参数一律 AST 抽（正例 3 命中 / 反例 0 有牙） | 4 位 / 4 读取函数 / **3 sinks**；`selftest()` 只覆盖 `bindings_for` + `merge_bindings`（**2/4**），未覆盖 `adopt_probe` + `main`；194 事故覆盖 **2/3** sinks，本轮补 `merge_bindings` 后 **3/3**；192 分母仍 `5`，本轮 2 个新 `.py` 的 `resolve_policy` 调用点 **0** |
+| **B 运行读数** | `setattr` 计数器 wrapper **真跑** `CG.selftest()`（不新增 AST 调用点）；5 类事故版逐个真跑；父节点类型判定返回对象去向 | 实跑 `2 == AST 2 == 194 存档 2`；求值账 `15/15` 全绿；`n_flowed_into_others = 0`（2 个 rp 的父节点都是 `ast.Attribute`）；硬编码常量 4 处；**4 打红 / 1 恒绿**，原 4 类逐字复现 194，新补 `E_merge_bindings` 打红 L/M ⇒ 唯一恒绿仍是 `adopt_probe` |
+| **C 鉴别力** | 反事实四世界 × 「0 次流入」+ 事故正例 | `W0` 现状(0/完好/已跑)、`W1` 默认 0000(0/**破坏**/已跑)、`W2` 补绑定断言(**1**/完好/合成)、`W3` main 真跑(0/完好/合成)；**3 个零世界全部已运行、默认态既有完好又有破坏、零自然正例** ⇒ `discriminates=False`；正例有牙（W2=1 且 `B_default_0000` 打红） |
+| **D 边界** | 策略签名取常量、三分母双源、superseded、验锚、`caliber` 与磁盘同源实算、自身沙箱自检 | 默认 `1111` / `--strict` `0000`；`135/119/94` 双源且互异；superseded `3/3`；验锚 `OK 3/3 diffs=0`；`caliber` 26 键逐键等于磁盘 sha；193 `json_inventory()` 实测 `1280/29/0.0227` 与存档一致；真实 expr / commit / `main() --repo` / F2P / 收益全 0 |
+
+⛔ **本轮新文件一个 `resolve_policy(...)` 调用点都不新增**：
+192 尺子 `resolve_policy_calls_all()` 按全仓 AST 数该函数
+调用点、`SELF_MEASURE_MODULES` 只白名单排除自身 2 模块
+（r114 首跑红已证多写一处即令 192 契约 F3/F6 分母漂移）。
+故一律用 `getattr(CG, "RELAXED")` 常量与
+`setattr(CG, "resolve_policy", ...)` 计数器 / 事故版挂载
+达成语义等价，`D` 账自检 2 文件读数皆为 0、分母仍 `5`。
+
+═══ 三、结论（收窄，不翻案）═══
+
+1. **194「唯一恒绿」只是「被选中的 4 类事故」里的唯一**，
+不是「3 个 policy sinks 里唯一」：补 `merge_bindings` 忽略
+policy 会打红 L/M。反证组覆盖比须报 **2/3 → 3/3**；
+`selftest()` 对 4 位开关读取函数也只覆盖 **2/4**
+（`allow_unstable` 在 `main`、`no_gold_gate` 在 `adopt_probe`
+均未被直接覆盖）。与 189「只测 3/4 个 k」同型：
+⛔ 声称反证组有牙，先查覆盖了被测对象的几个返回值。
+2. **第五类「每次全量 ≥6 次真实运行」是求值账**：J/K 只比
+`signature()` 字符串，返回对象 0 次流入其它断言；L/M/N/O
+传硬编码常量 ⇒ 默认 policy 对象从未流过 `selftest()` 的
+4 条策略断言。按契约④，**真跑次数是曝光量，不是使用量**。
+3. ⛔ **但「0 次流入」经反事实四世界检验是构造必然、不具
+鉴别力**：3 个零世界全已运行、默认态既有完好又有被破坏，
+唯一非零世界是人为补断言的合成世界（无自然正例）。
+⇒ 既**不能**据此说「默认没生效」，也**不能**说「默认生效」；
+不把 0 当证据（193 同款）。
+
+⇒ 194 方向**不翻案**（`main()` 主流程运行证据 0 份仍成立、
+缺口仍指向采纳链），只把判词从「缺口精确定位在采纳链」
+收窄为「**缺口在默认 policy 对象 → 主流程消费链的绑定证据**」，
+并补上覆盖比与证据类型边界。**不是产品洞、不报收益**；
+`aether/` 与 189–194 尺子 / 存档 / 契约零回写、§183 零触碰。
+
+═══ 四、设施 / 契约 / 反证 / 静态四项 ═══
+
+**新设施**：`scripts/probe_policy_binding.py`、
+`scripts/policy_binding_census.jsonl`（口径
+`policy_binding_census/v1` 另存）、
+`tests/contract_policy_binding_test.py`。
+`closure 53/53`、尺子重跑 sha 幂等（`a18e88b5…`）、
+验锚 `OK 3/3 diffs=0`。契约 **A–E 162 项 + F 组 6 项 = 168
+全绿、0 skip**；F3 用 `live_recompute()` 不读存档结论字段、
+19 项同源实算逐字段对拍，F5 A1 四文件纳入候选面。
+
+注入反证 `FALSIFICATION_OK=True BAD=[]`：阶段 1
+`162/162` 条 A–E 条件逐条置 `False` 恰好命中；阶段 2
+全 **273** 个叶子字段逐一篡改，`264` 命中、`9` 个 MISS
+全是事故 / 世界的 `description` 说明性留证文本，按契约⑥
+「断言行为、不断言注释」**登记豁免**（`UNREG=0`）；
+阶段 2b `8/8` 事故版函数补丁均令 `live_recompute()` 有差异；
+阶段 3 `6/6` F 组同进程逐条撤回且**每项恰好只红自身**，
+基线完整真跑 `FAILS=[]`。沿用一次真实验锚读数缓存 +
+同进程分层反证，不 spawn 子进程。
+
+⛔ 尺子 / 契约 / 反证自身 **4 类真红**如实留痕（第 34 条：
+修尺子、不放宽断言）：① 尺子首跑 `47/53`——
+`policy_object_flow()` 深搜把 `.signature()` 里的 rp 误判成
+流入 `chk` 得 `2` 而非 `0`，改按**直接父节点**判定；
+`denominators()` 误读顶层 `n_main`（实际在 `rows` /
+`summary.n_main`），改 194 同源双源 ⇒ `52/53`
+（余 `--no-anchor` 预期项）；② `anchor.repos` 首版存了
+三仓库读数 dict，改成数量 `3/3` 与历轮同构；③ 契约首跑
+2 红：`E10` 要求 verdict 含字面 `2/3` ⇒ 尺子把覆盖比写进
+verdict；`F5` 用绝对路径比对 `candidate_files()` 返回的
+相对路径 ⇒ 改 r115 同款；④ 反证首跑 `stage2 71 MISS`
+（`caliber` 26 个只断言数量/格式、事故逐行 outcome 与
+四世界逐字段无人断言）⇒ 补 `D37` caliber 与磁盘同源实算、
+`A28–A32 / B36–B44 / C27–C31 / E16–E17` 共 23 条，
+conditions `139→162`；`stage2b` 事故补丁返回空 dict 令
+`live_recompute()` KeyError ⇒ 补保留 5 键真实形态；
+`stage3` 只找到 `5/6`（F3 的 key 带 `%d` 是 `BinOp`，
+AST 抽取器只认常量）⇒ 契约把数量移进断言值、key 固定
+常量 ⇒ `6/6`。
+
+静态四项：真 3.9.6 `ast.parse(feature_version=(3,9))`
+对 2 个新 `.py` 全 OK、裸 `noqa` 0、`git diff --check`
+rc=0、A1 候选面 `359`、4 个待交付文件（含 `README.md`）
+全在候选面且 `scan_text()` 零命中 + 正例反证有牙。
+
+⛔ **全量首跑真红 1 项（非产品洞、非判据洞）**：首跑
+`127 pass / 1 fail`、`ok=False`、`exit_code=1`（128 runs），
+唯一红是上游 `contract_assert_wiring_test.py`（`A2`
+定位不到 `ck` 条件位 / `A4` 无法核条件位 / `B1`
+失败不落地，3 红同源）；单跑复现 `rc=1` ⇒ 排除 shim /
+环境性；与 r115 二次全量对拍 127 个共享脚本仅此 1 项
+`status/rc` 有差异。根因：**本轮新契约漏了上游静态闸
+要求的合规写法** —— 该闸扫全部 `contract_*_test.py`，
+要求文件内可定位到 `def ck(name, cond, detail)`
+（条件位按形参名 `ok` / `cond` 定位）、用
+`fails.append(...)` 记账、且退出码路径引用该失败列表；
+r115 契约以 `run_c()` 内嵌 `ck` + `return fails` 满足，
+本轮首版写成 `C["F1 ..."] = expr` 字典收集 ⇒ 被判
+「找不到 def ck(...)」。⛔ 处置**不改上游闸**：本轮契约
+`run_c()` 改 r115 同构（内嵌 `ck` + `fails.append` +
+`return fails`），`main()` 用 `allbad = bad + fbad`
+决定退出码；反证阶段 3 抽取器同步从 Subscript 赋值
+改为 `ck()` 调用（撤回第 2 个实参）。`CALIBER_FILES`
+不含本轮契约 ⇒ 存档 sha `a18e88b5…` 逐字不变、
+`closure 53/53`、验锚 `OK 3/3 diffs=0`；四本账读数
+零改动。单跑复核：上游闸 `15/15` 全绿、本轮契约
+`A–E 162 + F 6 = 168` 全绿、反证
+`FALSIFICATION_OK=True BAD=[]`、静态四项全通过。
+⛔ 新跨轮规则：**新契约必须先过
+`contract_assert_wiring_test.py` 的 `ck` 合规形态**；
+且本机 grep 是 toybox BRE、`\b` 不是词边界 ⇒ 判
+「有没有 `ck`」要用 AST / `grep -E 'def ck\('`，
+别用 `\bck\b`（本次首查即因此漏报 r115 契约的 `ck`）。
+
+═══ 五、边界 / 开口 / 拍板清单 ═══
+
+⛔ **r115 已登记开口本轮预防性绕开、未触发**：193
+`coverage_scripts` 把动态量钉成常量 ⇒ 每轮新增
+`scripts/*.json` 都会触发 F3 红。本轮新存档直接用
+`.jsonl`（内容仍是单个 JSON 对象、与历轮存档逐字同构；
+`candidate_files()` 不按扩展名过滤 ⇒ A1 候选面不变），
+实测 `json_inventory()` `1280/29/0.0227` 与 193 存档一致，
+193 契约单跑 `rc=0`（`A–E 111 + F 6` 全绿）。**不改 193
+判据**，开口仍登记、不并入拍板清单。
+
+⛔ 补**采纳链 / 默认对象消费链**的运行证据仍须跑
+`main() --repo`、碰 §183 禁令面 ⇒ 需**取证面显式拍板**；
+本轮零触碰。拍板清单未变，合计 **4 条**（② 多步状态序列
+③ CI 先 `bootstrap` 再跑 H 组 ⑤ 放宽 / 降级 deny-modules
+＋ 190 留下的 `ok_nogold` ledger 语义 / 189 反证组补样本），
+一律未开工；① 已取证收口、④ / ⑥ 已落地。
