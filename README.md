@@ -10978,3 +10978,36 @@ scripts/truerun_count_contract.py`，同步 `SELF_CONTRACT` /
 而非全量链路。修 r117 F3 的「全仓契约快照」判据口径属
 **另一次拍板**（改判据语义），本轮不擅自开工，记为**新开口**、
 不并入原有 4 条待拍板清单。
+
+
+═══ 七、第二次全量验收收口：按产物判定 `129/129` 全绿 ═══
+
+改名收口提交 `c77dbb9` 后重跑全量（同样脱管 env、只 unset
+`PYTHONPATH`、`jobs 2`）。⛔ 后台通知 `exit code 0` **不作判据**
+（历轮纪律：通知不是验收读数，也不是用户批准），一律按
+`/tmp/r118_full2.json` 产物判定：
+
+| 项 | 读数 |
+|---|---|
+| `counts` | `pass 129 / fail 0 / skip 0 / timeout 0 / error 0` |
+| `n_scripts` / `n_runs` / `jobs` | `127` / `129` / `2` |
+| `ok` / `exit_code` | `True` / `0` |
+| `status` / `rc` | `{'pass': 129}` / `{0: 129}` |
+| 非 `pass` 项 | `0`（`n_bad 0`、`bad=[]`） |
+| `/tmp/r118_full2.rc` | `exit=0` / `done` |
+
+⛔ 首跑 `129/130` 的唯一红项
+`contract_signature_impostor_test.py::F3` 已随改名转绿，二次全量
+**129 项全 pass**；`undeclared_modes` 仍 **10 份且不含 `truerun`**
+（产物闸在 `scripts/`，不进 `discover()` 面）⇒ 第六段登记的
+代价在全量读数里得到确认，**不是「多跑出一个绿」**，也不是
+r118 产物闸进入了全量链路。
+
+该次全量对应的 `HEAD == origin/main == c77dbb9`、
+`git status --porcelain` 空、`git diff --check rc=0`；提交后
+验锚 `ok=True repos=3 diffs=[] caliber_diffs=[]`。本轮提交链
+`e17c00d → ddbe46d → c77dbb9`（+ 本段归档提交）。⛔ 第六、七段
+都只留痕全量读数，**未改动 189–197 任何判据 / 尺子 / 存档口径**，
+也不构成「默认生效」的新证据；缺口仍是「默认 policy 对象 →
+主流程消费链的绑定证据」，补该证据须跑 `main() --repo` 碰 §183
+⇒ 需取证面显式拍板。
