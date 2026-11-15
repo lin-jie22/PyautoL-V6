@@ -10778,3 +10778,169 @@ r116 对照 `128/128`、`n_scripts 126` ⇒ 分母 +1 仅来自
 ③ CI 先 `bootstrap` 再跑 H 组 ⑤ 放宽 / 降级 deny-modules
 ＋ 190 留下的 `ok_nogold` ledger 语义 / 189 反证组补样本），
 一律未开工；① 已取证收口、④ / ⑥ 已落地。
+
+
+### 197. ⛔⛔ **194 的「每次全量 ≥6 次真跑」是静态 AST 外推的曝光量：runner 运行时实算是 8 次，`selftest()` 第二入口被漏算**（2026-11-15）
+
+═══ 一、起点：第五类证据的「次数」从未被运行时计数 ═══
+
+194（§194）把「验收契约真跑产品模块」列为第五类证据，B 账写
+「每次全量验收里 `resolve_policy()` 至少真实运行 6 次」。
+逐字复现其公式（`scripts/probe_selftest_evidence.py::account_b()`）：
+
+```
+per_full = selftest AST 2 + contract_context_gate_test.py::main AST 2
+           + contract_inliner_relax_test.py::group_c AST 2 = 6
+```
+
+三项全是**函数体内的 AST 调用点数**。194 只对其中的
+`CG.selftest()` 做过一次运行时计数器对拍（`ast_runtime_match=True`，
+同进程直接调），另 4 个调用点从未在 runner 上下文被计数；
+`n_contract_runs_per_full_check = 2` 是 `account_b()` 里的
+**字面常量**（同源 AST 实证）。195 沿用「≥6 次真跑」并判它是
+求值账，196 判第五类证据只验签名字符串 —— 两轮针对的都是
+真跑**内容**的鉴别力，没有回头量「次数」这个数本身。
+
+⛔ 本轮纯只读取证：不跑真实 expr、不跑真实 commit、不跑
+`main() --repo`、不报收益，§183 零触碰，产品与 189–196 的
+尺子 / 存档 / 判据 / 契约一字节未改。
+
+═══ 二、四本账（⛔ 不合并成布尔）═══
+
+**A 静态外推面（同源复现）**：用 194 自己的
+`ast_call_counts()` 抽取器得 6 项、公式三项逐字 2/2/2，
+`recomputed 6 == 存档 6`。全仓 7 个 `resolve_policy` AST
+调用点里 **2 个位于 `and` 短路链的非首元素**
+（`contract_inliner_relax_test.py::group_c` 的 298 / 299 行，
+C6 = `CG.selftest() is True and ...`）。两份契约各有 1 个
+`selftest()` 真跑入口（195 / 297 行），**194 只算了 1 个**。
+同源 AST 另证 `account_b()` 内 `setprofile` / `runpy` /
+`subprocess` 计数全 0、只有 1 次 `run_selftest_counted()`
+⇒ 194 的运行账是**单函数求值账**。
+
+**B 运行时计数面（runner 同构）**：driver 用
+`sys.executable -B -c <driver>`、`cwd=ROOT`、
+`runpy.run_path(script, run_name="__main__")` +
+`sys.setprofile` 逐帧抓 `probe_context_gate.py::resolve_policy`
+的 `call` 事件，按 `caller_file / caller_name / caller_line`
+归因；再与原样 `python3 -B <script>` 对拍 **rc 与 stdout
+逐字一致**（两份契约 `rc_identical=True`、
+`stdout_identical=True`）。实测：
+
+| 契约 | 运行时次数 | 归因 |
+|---|---|---|
+| `contract_context_gate_test.py` | **4** | `selftest` 内 2（311/312）+ `main` 2（199/201） |
+| `contract_inliner_relax_test.py` | **4** | `selftest` 内 2（311/312）+ `group_c` 2（298/299） |
+| 合计 | **8** | 产品 `selftest` 帧 4、契约直接调用 4 |
+
+`8 - 6 = 2`，差的 2 次正好是 `selftest()` 被**两份**契约各真跑
+一次、而 194 只算一次（4 个 `selftest` 帧 vs 计入 2 个）。
+`aether/check.py::declared_modes` 同源读数：两份契约都只声明
+`("default",)`、`supports_e2e=False` ⇒ 各跑 1 次，与 194 的
+硬编码 2 双源对拍一致（全量 `n_runs 129 = 127 default +
+1 e2e + 1 cross-language`，这 2 个额外模式与本层无关）。
+
+**C 鉴别力面（注入反证有牙）**：
+① **短路事故**：在真实 `main()` 路径上把 `CG.selftest` 换成
+「真跑原版但返回 `False`」的 wrapper（验锚用替身，避免重活），
+C6 的 `and` 链短路 ⇒ 第二份契约 **4→2**（只剩 `selftest` 内
+2 帧）、`FAILS=1`。AST 里 7 个调用点一个没少，运行时少了 2 次
+⇒ 「AST 调用点存在 ≠ 运行到」是实测，不是推断。
+② **签名事故**：把 `resolve_policy` 换成恒返 `STRICT` 的
+包装，第一份契约打红 2 条、**次数仍 4** ⇒ 次数账与鉴别力账
+可分离（包装后 caller 全成 `<lambda>`，故该事故只比次数、
+不比归因，如实标注）。
+③ **反事实四世界**：W0 现状 6/8、W1 只跑 C1 4/4、
+W2 只跑 C2 4/4、W3 短路事故 6/6（前为静态、后为运行时）。
+W0 与 W3 **静态同为 6 而运行时 8≠6** ⇒ 静态数对短路事故
+零鉴别力；本轮无零次世界，「零世界全已运行」记**不适用**、
+不拿空集合恒真当证据；8>6 是自然运行时读数，不是构造必然的 0。
+
+**D 边界**：三分母 135 / 119 / 94 双源相等且不合并；
+`superseded` 逐键磁盘 hash 零差异；`caliber` 28 份逐键
+sha256；验锚 `OK 3/3 diffs=0`；192 的 5 个调用点文件
+双源对拍 `5==5`，本轮两个新 `.py` 零 `resolve_policy`
+AST 调用点；`coverage_scripts 0.0227` 未漂移（新存档用
+`.jsonl` 绕开 r115 已登记开口）；§183 五项零。
+`closure 47/47`，存档 sha `891dc4c658ede8f7` 幂等。
+
+═══ 三、结论（收窄，不翻案）═══
+
+⛔ **6 是保守下界、字面仍成立（8 ≥ 6）**，故 194 / 195 / 196
+方向不翻案：它们质疑的是第五类证据的**内容**（求值账、只比
+`signature()` 字符串），本轮质疑的是**次数口径**。
+本轮把它从「静态 AST 调用点数外推的曝光量」收窄为
+「runner 同构上下文里 `sys.setprofile` 实算的使用量 = 8」，
+并给出短路事故证明这两者在异常态会分叉。
+
+既不说「默认没生效」，也不说「默认生效」；不是产品洞、
+不报收益。第五类证据的缺口仍是「默认 policy 对象 → 主流程
+消费链的绑定证据」，补该证据须跑 `main() --repo` 碰 §183
+⇒ 需取证面显式拍板。
+
+═══ 四、设施 / 契约 / 反证 / 静态四项 ═══
+
+三件套：`scripts/probe_truerun_count.py`、
+`scripts/truerun_count_census.jsonl`（`truerun_count_census/v1`）、
+`tests/contract_truerun_count_test.py`（r116/r117 同构 `ck`
+合规形态：`run_c()` 内嵌 `def ck(name, cond, detail)` +
+`fails.append` + `return fails`，`main()` 用
+`allbad = bad + fbad`）。
+
+单跑复核：`closure 47/47`、存档 sha 幂等、验锚 `OK 3/3`；
+契约 **A–E 154 条 + F 组 6 条**全绿（F1 20 对同源实算 +
+caliber 逐键磁盘 hash、F2 契约进程内真跑 C1 driver 逐帧对拍、
+F3 两类事故同源真跑、F4 反事实四世界逐值重算、F5 A1、
+F6 验锚 / closure / 192 分母 / 存档后缀）；上游
+`contract_assert_wiring_test.py` `15/15`、193 契约
+`A–E 111 + F 6` 全绿、`coverage_scripts 0.0227` 未漂移。
+
+注入反证（⛔ 拆两段独立进程，避免单进程 spawn 累积被宿主
+回收）：阶段 1 `154/154` 条 A–E 条件逐条置 `False` 恰好
+命中自身；阶段 2 全 **380** 个叶子逐一篡改，`366` 命中、
+`14` 个说明性文本 / `caliber` 单键按契约⑥登记豁免、
+**`UNREG=0`**；阶段 2b `6/6` 事故版函数补丁令
+`live_recompute()` 有差异；阶段 3 `6/6` F 组同进程逐条撤回
+且每项恰好只红自身；阶段 4 静态四项（真 3.9.6
+`ast.parse(feature_version=(3,9))` 对 2 个新 `.py` 全 OK、
+裸 `noqa` 0、`git diff --check rc=0`、A1 四文件
+`scan_text` 零命中 + 正例有牙）全通过。
+`FALSIFICATION_OK_A=True`、`FALSIFICATION_OK_B=True`。
+
+⛔ 尺子 / 契约 / 反证自身 **5 类真红**如实留痕（第 34 条：
+修尺子、不放宽断言）：① 尺子首跑 `43/46` —— 反事实判据误把
+「不同契约子集的静态值」要求恒定（W1/W2 本就是 4）、
+空集合 `all([])` 恒真被当成「零世界全已运行」的证据 ⇒
+改为「存在静态同而运行时不同的世界对」+ 显式
+`zero_worlds_not_applicable`；② 修后 `46/47`（余
+`--no-anchor` 预期项）、带验锚 `47/47`；③ 契约首跑
+`A16` / `E18` 红 —— 194 的 `account_b()` 里**零**直接
+`selftest` 调用（只有 `run_selftest_counted()`）、verdict
+文本没有「静态」二字 ⇒ 断言逐字对准真实读数
+（`2+2+2=6` / `8 次` / `setprofile`）；④ 反证首跑
+`SIGTERM(137)`：单进程里阶段 2b + 阶段 3 累计 spawn 数十次
+driver ⇒ 拆 A/B 两段独立进程；⑤ 阶段 2 首轮 **52 个 UNREG
+MISS** 全是行为读数未断言 ⇒ 补 **14 条** A–E 条件 +
+F1 加 5 项同源实算对拍（不把动态量钉成常量），
+`MISS→0`；阶段 2b 的事故假 dict 缺新键当场补齐形态。
+
+═══ 五、边界 / 开口 / 拍板清单 ═══
+
+⛔ r115 已登记开口本轮预防性绕开、未触发：193
+`coverage_scripts` 把动态量钉成常量 ⇒ 每轮新增
+`scripts/*.json` 都会触发 F3 红。本轮新存档直接用
+`.jsonl`（内容仍是单个 JSON 对象；`candidate_files()`
+不按扩展名过滤 ⇒ A1 候选面不变）。**不改 193 判据**，
+开口仍登记、不并入拍板清单。
+
+⛔ B 账的 driver 用 `runpy.run_path` 复现 runner 的
+`subprocess` 执行；两份契约的 rc / stdout 与原样执行逐字
+一致作为同构对拍，但**不等于**把 `aether.check` 整条
+全量链路重跑了一遍。签名事故下 `caller` 归因退化为
+`<lambda>`，已在 C 账标注「只比次数、不比归因」。
+补**采纳链 / 默认对象消费链**的运行证据仍须跑
+`main() --repo`、碰 §183 禁令面 ⇒ 需**取证面显式拍板**；
+本轮零触碰。拍板清单未变，合计 **4 条**（② 多步状态序列
+③ CI 先 `bootstrap` 再跑 H 组 ⑤ 放宽 / 降级 deny-modules
+＋ 190 留下的 `ok_nogold` ledger 语义 / 189 反证组补样本），
+一律未开工；① 已取证收口、④ / ⑥ 已落地。

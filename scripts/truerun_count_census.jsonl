@@ -1,0 +1,521 @@
+{
+  "accounts": {
+    "A_static_extrapolation": {
+      "ast_call_counts_194": {
+        "scripts/probe_context_gate.py::main": 1,
+        "scripts/probe_context_gate.py::selftest": 2,
+        "scripts/probe_inliner_relax.py::measure": 2,
+        "scripts/probe_policy_reach.py::account_d": 2,
+        "tests/contract_context_gate_test.py::main": 2,
+        "tests/contract_inliner_relax_test.py::group_c": 2
+      },
+      "call_sites": [
+        {
+          "func": "main",
+          "lineno": 335,
+          "rel": "scripts/probe_context_gate.py",
+          "short_circuit": false
+        },
+        {
+          "func": "selftest",
+          "lineno": 311,
+          "rel": "scripts/probe_context_gate.py",
+          "short_circuit": false
+        },
+        {
+          "func": "selftest",
+          "lineno": 312,
+          "rel": "scripts/probe_context_gate.py",
+          "short_circuit": false
+        },
+        {
+          "func": "main",
+          "lineno": 199,
+          "rel": "tests/contract_context_gate_test.py",
+          "short_circuit": false
+        },
+        {
+          "func": "main",
+          "lineno": 201,
+          "rel": "tests/contract_context_gate_test.py",
+          "short_circuit": false
+        },
+        {
+          "func": "group_c",
+          "lineno": 298,
+          "rel": "tests/contract_inliner_relax_test.py",
+          "short_circuit": true
+        },
+        {
+          "func": "group_c",
+          "lineno": 299,
+          "rel": "tests/contract_inliner_relax_test.py",
+          "short_circuit": true
+        }
+      ],
+      "contract_runs_is_hardcoded_constant": true,
+      "contract_runs_saved": 2,
+      "counter_scope": {
+        "n_resolve_policy_runtime_counter": 1,
+        "n_runpy_run_path": 0,
+        "n_selftest_calls": 0,
+        "n_setprofile": 0,
+        "n_subprocess_run": 0,
+        "source": "scripts/probe_selftest_evidence.py::account_b (AST)"
+      },
+      "dual_source_match": true,
+      "formula_terms": {
+        "scripts/probe_context_gate.py::selftest": 2,
+        "tests/contract_context_gate_test.py::main": 2,
+        "tests/contract_inliner_relax_test.py::group_c": 2
+      },
+      "merged_into_bool": false,
+      "n_call_sites": 7,
+      "n_selftest_entries": 2,
+      "n_selftest_entries_counted_by_194": 1,
+      "n_short_circuit_sites": 2,
+      "recomputed_lower_bound": 6,
+      "runtime_paired_only": "CG.selftest() 单次调用（194 B 账 ast_runtime_match）",
+      "runtime_paired_value": true,
+      "runtime_unpaired_call_sites": 4,
+      "saved_lower_bound": 6,
+      "selftest_entries": [
+        {
+          "lineno": 195,
+          "rel": "tests/contract_context_gate_test.py"
+        },
+        {
+          "lineno": 297,
+          "rel": "tests/contract_inliner_relax_test.py"
+        }
+      ],
+      "short_circuit_sites": [
+        {
+          "func": "group_c",
+          "lineno": 298,
+          "rel": "tests/contract_inliner_relax_test.py",
+          "short_circuit": true
+        },
+        {
+          "func": "group_c",
+          "lineno": 299,
+          "rel": "tests/contract_inliner_relax_test.py",
+          "short_circuit": true
+        }
+      ],
+      "source": "scripts/probe_selftest_evidence.py::ast_call_counts + scripts/selftest_evidence_census.jsonl"
+    },
+    "B_runtime_counter": {
+      "all_rc_identical": true,
+      "all_stdout_identical": true,
+      "driver": "sys.setprofile + runpy.run_path, runner 同构（sys.executable -B / cwd=ROOT）",
+      "gap": 2,
+      "gap_explained_by_second_selftest_entry": true,
+      "lower_bound_still_holds": true,
+      "merged_into_bool": false,
+      "n_194_lower_bound": 6,
+      "n_product_selftest_frames_counted_by_194": 2,
+      "n_product_selftest_frames_total": 4,
+      "n_total_runtime": 8,
+      "per_contract": {
+        "tests/contract_context_gate_test.py": {
+          "by_caller": {
+            "main": 2,
+            "selftest": 2
+          },
+          "by_origin": {
+            "contract": 2,
+            "product_selftest": 2
+          },
+          "driver_err": "",
+          "driver_ok": true,
+          "driver_rc": 0,
+          "hits": [
+            {
+              "caller": "selftest",
+              "in_product": true,
+              "line": 311
+            },
+            {
+              "caller": "selftest",
+              "in_product": true,
+              "line": 312
+            },
+            {
+              "caller": "main",
+              "in_product": false,
+              "line": 199
+            },
+            {
+              "caller": "main",
+              "in_product": false,
+              "line": 201
+            }
+          ],
+          "n_runtime": 4,
+          "plain_rc": 0,
+          "rc_identical": true,
+          "stdout_identical": true
+        },
+        "tests/contract_inliner_relax_test.py": {
+          "by_caller": {
+            "group_c": 2,
+            "selftest": 2
+          },
+          "by_origin": {
+            "contract": 2,
+            "product_selftest": 2
+          },
+          "driver_err": "",
+          "driver_ok": true,
+          "driver_rc": 0,
+          "hits": [
+            {
+              "caller": "selftest",
+              "in_product": true,
+              "line": 311
+            },
+            {
+              "caller": "selftest",
+              "in_product": true,
+              "line": 312
+            },
+            {
+              "caller": "group_c",
+              "in_product": false,
+              "line": 298
+            },
+            {
+              "caller": "group_c",
+              "in_product": false,
+              "line": 299
+            }
+          ],
+          "n_runtime": 4,
+          "plain_rc": 0,
+          "rc_identical": true,
+          "stdout_identical": true
+        }
+      }
+    },
+    "C_discrimination": {
+      "count_unchanged_under_signature_accident": true,
+      "count_vs_discrimination_two_ledgers": true,
+      "counterfactual": {
+        "accident_static_unchanged": true,
+        "all_zero_worlds_ran": true,
+        "n_same_static_diff_runtime_pairs": 1,
+        "n_zero_worlds": 0,
+        "natural_runtime_exceeds_static": true,
+        "only_synthetic_world": [
+          "W3_short_circuit"
+        ],
+        "runtime_values": [
+          4,
+          6,
+          8
+        ],
+        "same_static_diff_runtime_pairs": [
+          [
+            "W0_baseline",
+            "W3_short_circuit"
+          ]
+        ],
+        "static_has_no_discrimination": true,
+        "static_values": [
+          4,
+          6
+        ],
+        "worlds": {
+          "W0_baseline": {
+            "description": "两份契约按 default 各跑一次（194 外推口径）",
+            "ran": true,
+            "runtime": 8,
+            "static": 6,
+            "synthetic": false
+          },
+          "W1_only_c1": {
+            "description": "只跑 contract_context_gate_test.py",
+            "ran": true,
+            "runtime": 4,
+            "static": 4,
+            "synthetic": false
+          },
+          "W2_only_c2": {
+            "description": "只跑 contract_inliner_relax_test.py",
+            "ran": true,
+            "runtime": 4,
+            "static": 4,
+            "synthetic": false
+          },
+          "W3_short_circuit": {
+            "description": "事故版：selftest 真跑但返回 False ⇒ C6 and 链短路",
+            "ran": true,
+            "runtime": 6,
+            "static": 6,
+            "synthetic": true
+          }
+        },
+        "zero_worlds_not_applicable": true
+      },
+      "discriminates": true,
+      "merged_into_bool": false,
+      "short_circuit": {
+        "by_caller": {
+          "selftest": 2
+        },
+        "call_sites_unchanged": 7,
+        "driver_err": "",
+        "driver_ok": true,
+        "hits": [
+          {
+            "caller": "selftest",
+            "in_product": true,
+            "line": 311
+          },
+          {
+            "caller": "selftest",
+            "in_product": true,
+            "line": 312
+          }
+        ],
+        "main_rc": 1,
+        "n_baseline": 4,
+        "n_fails": 1,
+        "n_runtime": 2
+      },
+      "short_circuit_teeth": true,
+      "signature_accident_caught": true,
+      "signature_broken": {
+        "by_caller": {
+          "<lambda>": 4
+        },
+        "driver_err": "",
+        "driver_ok": true,
+        "main_rc": 1,
+        "n_baseline": 4,
+        "n_fails": 2,
+        "n_runtime": 4
+      }
+    },
+    "D_boundary": {
+      "anchor": {
+        "caliber_diffs": [],
+        "diffs": [],
+        "ok": true,
+        "repos": 3
+      },
+      "caliber_disk": {
+        "aether/check.py": "88cc4c09ed9293dc881c0f77993666edf1e217292740b0ba88f55f90d9804c82",
+        "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+        "scripts/caliber_superseded.json": "77a828b6a82e3afefa83f23c21cbbab7360e091486a4f517e867a89c277265fb",
+        "scripts/caliber_superseded.py": "7714d621447a572f5166fe25880f0ddbaa67cfb529d357119e6fd5efffbdff6e",
+        "scripts/default_effect_census.json": "c08618edfeb38c98e002839e907c49ecf66ce87c69a51a7d8ceb7f2d7c8a5d8d",
+        "scripts/extract_downstream.json": "896220cd2849f6740a0fc28daf6e434c7ed77445237b60f3b1288a3cf7d8d266",
+        "scripts/form_shape_attribution.json": "b536f832e4ba0fc7bc734321dae058007de4e556d6699a7ec8c010b6d7556309",
+        "scripts/inliner_relax_census.json": "4399b741b6383b8cc2238972e765f1a71c187ec35ae650f76099f12b582c3bcd",
+        "scripts/no_result_attribution.json": "1feae1a5d74e830d0d609e3b507d8842d577c6a851b377c9ef205e2161446d0b",
+        "scripts/policy_binding_census.jsonl": "a18e88b55b68111211e350522eee542300f53ca444b48f0734ea8b4e9b671129",
+        "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+        "scripts/probe_default_effect.py": "881318647f769036f321a0dfb5f7ececa1d4279355ee27027e2f342ccfd0d9f3",
+        "scripts/probe_inliner_relax.py": "94e150f006ea6be8d3e3ec9b039ee1de5f6d7837952d485220a9cb4a499156f4",
+        "scripts/probe_policy_binding.py": "94e2ff98ac90328b8ff76b13a24a0682723d631ef41018cf3da7fba8ed75a313",
+        "scripts/probe_selftest_evidence.py": "9dfee7ae70920b96ec8e71633959623c29f7506b42886492d786a70f60632afd",
+        "scripts/probe_signature_impostor.py": "34c67950ddb8d4da453363f7b90353bc08061d9e0d407f3420a0dae0f97dc1eb",
+        "scripts/probe_zero_discrimination.py": "149d6fced0f3d8c52665d402d333eee528df7bab069824b6095dabef2b0650a4",
+        "scripts/selftest_evidence_census.jsonl": "a4921a6548e3efb3270b2de6a69b478aa6a48afa621719cd5b0ed0a6bd4d185b",
+        "scripts/signature_impostor_census.jsonl": "f92904a41a5447987da2fbe0ad802548a319fb3b288944d14ead634186ef5efd",
+        "scripts/zero_discrimination_census.json": "c9c528f8ce3f85bcb97ec42d86b3c77c73aa3e24d0292bc06da1b6a9cc7736dc",
+        "tests/contract_context_gate_test.py": "4b7721d4de44b5e291101ae743f2ccbe548bd540eab1defdd5490c3540e9ef21",
+        "tests/contract_default_effect_test.py": "83e15d7478bd9e4bbc085fa91974c8df6cf9e6f62dc1f28b09f2a5513d56e8c3",
+        "tests/contract_inliner_relax_test.py": "9c1f9c126055da0f30576e144ee0213804b52783e816d6f76cc986c7f3401792",
+        "tests/contract_policy_binding_test.py": "c7e96584f9570b3019b681f7cdc84cebb612423ce39999c1594fa475162c31b4",
+        "tests/contract_portability_test.py": "42a7291fae447a801c23fd557d210e0fd836e60e96d9713a941eef85a1326cb5",
+        "tests/contract_selftest_evidence_test.py": "899c957d9f36b1d8acc067a756e2cb47a243f4dd043a79cea1c8a383ab1ac3b2",
+        "tests/contract_signature_impostor_test.py": "76e3452a368e49917689875b8c783c4e4f37ff2261616ffc0bb3413b20f9d327",
+        "tests/contract_zero_discrimination_test.py": "f536bb50d1a281eff223129a9a585b5299ddf4b24550ad4bd79cd1d214afc993"
+      },
+      "denominator_dual_source": {
+        "all_distinct": true,
+        "dual_source": {
+          "form_rows": 119,
+          "form_summary": 119,
+          "main_rows": 135,
+          "main_summary": 135,
+          "no_result_rows": 94,
+          "no_result_summary": 94
+        },
+        "form": 119,
+        "main": 135,
+        "no_result": 94
+      },
+      "gain_rows_reported": 0,
+      "merged_into_bool": false,
+      "product_files_modified": 0,
+      "real_commit_run": 0,
+      "real_expr_run": 0,
+      "runner_modes": {
+        "all_default_only": true,
+        "dual_source_match": true,
+        "n_runs_implied": 2,
+        "n_runs_saved_194": 2,
+        "per_contract": {
+          "tests/contract_context_gate_test.py": {
+            "exclusive": false,
+            "min_python": [
+              3,
+              9
+            ],
+            "modes": [
+              "default"
+            ],
+            "supports_e2e": false
+          },
+          "tests/contract_inliner_relax_test.py": {
+            "exclusive": false,
+            "min_python": [
+              3,
+              9
+            ],
+            "modes": [
+              "default"
+            ],
+            "supports_e2e": false
+          }
+        },
+        "source": "aether/check.py::declared_modes/supports_e2e/is_exclusive"
+      },
+      "sandbox_selfcheck": {
+        "checked_own_source": true,
+        "coverage_scripts_live": 0.0227,
+        "coverage_scripts_saved": 0.0227,
+        "coverage_unchanged": true,
+        "n_banned": 0,
+        "no_new_denominator_call_site": true,
+        "own_resolve_policy_call_sites": {
+          "scripts/probe_truerun_count.py": 0,
+          "tests/contract_truerun_count_test.py": 0
+        },
+        "positive_extractor_has_teeth": true,
+        "positive_n": 3,
+        "self_archive_not_json": true,
+        "self_archive_suffix": ".jsonl"
+      },
+      "section_183_touched": false,
+      "superseded": {
+        "all_match": true,
+        "diffs": [],
+        "n_registered": 3
+      }
+    }
+  },
+  "anchor": {
+    "caliber_diffs": [],
+    "diffs": [],
+    "ok": true,
+    "repos": 3
+  },
+  "caliber": {
+    "aether/check.py": "88cc4c09ed9293dc881c0f77993666edf1e217292740b0ba88f55f90d9804c82",
+    "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+    "scripts/caliber_superseded.json": "77a828b6a82e3afefa83f23c21cbbab7360e091486a4f517e867a89c277265fb",
+    "scripts/caliber_superseded.py": "7714d621447a572f5166fe25880f0ddbaa67cfb529d357119e6fd5efffbdff6e",
+    "scripts/default_effect_census.json": "c08618edfeb38c98e002839e907c49ecf66ce87c69a51a7d8ceb7f2d7c8a5d8d",
+    "scripts/extract_downstream.json": "896220cd2849f6740a0fc28daf6e434c7ed77445237b60f3b1288a3cf7d8d266",
+    "scripts/form_shape_attribution.json": "b536f832e4ba0fc7bc734321dae058007de4e556d6699a7ec8c010b6d7556309",
+    "scripts/inliner_relax_census.json": "4399b741b6383b8cc2238972e765f1a71c187ec35ae650f76099f12b582c3bcd",
+    "scripts/no_result_attribution.json": "1feae1a5d74e830d0d609e3b507d8842d577c6a851b377c9ef205e2161446d0b",
+    "scripts/policy_binding_census.jsonl": "a18e88b55b68111211e350522eee542300f53ca444b48f0734ea8b4e9b671129",
+    "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+    "scripts/probe_default_effect.py": "881318647f769036f321a0dfb5f7ececa1d4279355ee27027e2f342ccfd0d9f3",
+    "scripts/probe_inliner_relax.py": "94e150f006ea6be8d3e3ec9b039ee1de5f6d7837952d485220a9cb4a499156f4",
+    "scripts/probe_policy_binding.py": "94e2ff98ac90328b8ff76b13a24a0682723d631ef41018cf3da7fba8ed75a313",
+    "scripts/probe_selftest_evidence.py": "9dfee7ae70920b96ec8e71633959623c29f7506b42886492d786a70f60632afd",
+    "scripts/probe_signature_impostor.py": "34c67950ddb8d4da453363f7b90353bc08061d9e0d407f3420a0dae0f97dc1eb",
+    "scripts/probe_zero_discrimination.py": "149d6fced0f3d8c52665d402d333eee528df7bab069824b6095dabef2b0650a4",
+    "scripts/selftest_evidence_census.jsonl": "a4921a6548e3efb3270b2de6a69b478aa6a48afa621719cd5b0ed0a6bd4d185b",
+    "scripts/signature_impostor_census.jsonl": "f92904a41a5447987da2fbe0ad802548a319fb3b288944d14ead634186ef5efd",
+    "scripts/zero_discrimination_census.json": "c9c528f8ce3f85bcb97ec42d86b3c77c73aa3e24d0292bc06da1b6a9cc7736dc",
+    "tests/contract_context_gate_test.py": "4b7721d4de44b5e291101ae743f2ccbe548bd540eab1defdd5490c3540e9ef21",
+    "tests/contract_default_effect_test.py": "83e15d7478bd9e4bbc085fa91974c8df6cf9e6f62dc1f28b09f2a5513d56e8c3",
+    "tests/contract_inliner_relax_test.py": "9c1f9c126055da0f30576e144ee0213804b52783e816d6f76cc986c7f3401792",
+    "tests/contract_policy_binding_test.py": "c7e96584f9570b3019b681f7cdc84cebb612423ce39999c1594fa475162c31b4",
+    "tests/contract_portability_test.py": "42a7291fae447a801c23fd557d210e0fd836e60e96d9713a941eef85a1326cb5",
+    "tests/contract_selftest_evidence_test.py": "899c957d9f36b1d8acc067a756e2cb47a243f4dd043a79cea1c8a383ab1ac3b2",
+    "tests/contract_signature_impostor_test.py": "76e3452a368e49917689875b8c783c4e4f37ff2261616ffc0bb3413b20f9d327",
+    "tests/contract_zero_discrimination_test.py": "f536bb50d1a281eff223129a9a585b5299ddf4b24550ad4bd79cd1d214afc993"
+  },
+  "closure": {
+    "a10_selftest_counted_once": true,
+    "a1_194_formula_recomputed": true,
+    "a2_194_dual_source": true,
+    "a3_194_terms_2_2_2": true,
+    "a4_194_runtime_paired_only_selftest": true,
+    "a5_194_unpaired_call_sites_4": true,
+    "a6_194_contract_runs_hardcoded": true,
+    "a7_call_sites_total": true,
+    "a8_short_circuit_sites": true,
+    "a9_selftest_entries_2": true,
+    "b10_drivers_ok": true,
+    "b1_total_runtime_8": true,
+    "b2_each_contract_4": true,
+    "b3_each_contract_2_plus_2": true,
+    "b4_gap_2": true,
+    "b5_lower_bound_holds": true,
+    "b6_gap_explained": true,
+    "b7_selftest_frames_4_vs_2": true,
+    "b8_all_rc_identical": true,
+    "b9_all_stdout_identical": true,
+    "c10_static_no_discrimination": true,
+    "c11_runtime_values_vary": true,
+    "c12_zero_worlds_not_applicable": true,
+    "c13_natural_positive_and_one_synthetic": true,
+    "c14_discriminates": true,
+    "c1_short_circuit_driver_ok": true,
+    "c2_short_circuit_4_to_2": true,
+    "c3_short_circuit_only_selftest_frames": true,
+    "c4_short_circuit_teeth": true,
+    "c5_short_circuit_call_sites_unchanged": true,
+    "c6_signature_driver_ok": true,
+    "c7_signature_count_unchanged": true,
+    "c8_signature_accident_caught": true,
+    "c9_two_ledgers": true,
+    "d10_caliber_hash_shape": true,
+    "d11_section183_untouched": true,
+    "d12_anchor_ok": true,
+    "d13_counter_scope_single_function": true,
+    "d1_three_denominators": true,
+    "d2_dual_source_equal": true,
+    "d3_superseded_all_match": true,
+    "d4_no_new_call_site": true,
+    "d5_extractor_has_teeth": true,
+    "d6_coverage_unchanged": true,
+    "d7_archive_not_json": true,
+    "d8_runner_all_default_only": true,
+    "d9_runner_dual_source": true
+  },
+  "derived": {
+    "claim": "194 的『每次全量 ≥6 次真跑』是静态 AST 调用点数外推的曝光量；真实 runner 上下文里是 8 次运行时调用",
+    "gap": 2,
+    "lower_bound_still_holds": true,
+    "n_194_static_lower_bound": 6,
+    "n_closure": 47,
+    "n_closure_true": 47,
+    "n_runtime_total": 8,
+    "n_same_static_diff_runtime_pairs": 1,
+    "n_selftest_entries": 2,
+    "n_selftest_entries_counted_by_194": 1,
+    "n_short_circuit_sites": 2,
+    "natural_runtime_exceeds_static": true,
+    "runtime_counter_has_teeth": true,
+    "short_circuit_runtime_drop": 2,
+    "static_has_no_discrimination": true
+  },
+  "schema": "truerun_count_census/v1",
+  "summary": {
+    "n_closure": 47,
+    "n_closure_true": 47,
+    "scope": "⛔ 6 是**保守下界**、字面仍成立（8 ≥ 6），故 194/195/196 的方向不翻案：195『≥6 次真跑是求值账』与 196『第五类证据只验签名字符串』针对的是真跑**内容**的鉴别力，不是次数。本轮把次数口径从静态外推的曝光量收窄为运行时实算的使用量。反事实四世界（现状 6/8、只跑 C1 4/4、只跑 C2 4/4、短路事故 6/6）里W0 与 W3 静态同为 6 而运行时 8≠6 ⇒ 静态数对短路事故零鉴别力；本轮无零次世界，故『零世界全已运行』记**不适用**、不拿空集当证据。8>6 是自然运行时读数，不是构造必然的 0。不是产品洞、不报收益、§183 零触碰；补采纳链运行证据仍须拍板",
+    "verdict": "194 的『每次全量至少 6 次真跑 resolve_policy』把函数体内 AST 调用点数当成运行次数：复现其公式 2+2+2=6，其中只有 selftest() 单次调用做过运行时计数器对拍，另 4 个调用点从未 在 runner 上下文被计数。用 sys.setprofile 在 runner 同构上下文 真跑两份验收契约，各得 4 次（selftest 内 2 + 各自 2），合计 8 次；差的 2 次来自 selftest() 被两份契约各真跑一次而 194 只算一次。短路事故（selftest 真跑但返回 False）令第二份契约 4→2，证明『AST 调用点存在 ≠ 运行到』；签名事故令断言打红而次数不变，证明次数账与鉴别力账是两本账"
+  }
+}
