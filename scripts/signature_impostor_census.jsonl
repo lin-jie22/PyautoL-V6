@@ -1,0 +1,1529 @@
+{
+  "schema": "signature_impostor_census/v1",
+  "caliber": {
+    "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+    "aether/check.py": "88cc4c09ed9293dc881c0f77993666edf1e217292740b0ba88f55f90d9804c82",
+    "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+    "scripts/probe_default_effect.py": "881318647f769036f321a0dfb5f7ececa1d4279355ee27027e2f342ccfd0d9f3",
+    "scripts/probe_selftest_evidence.py": "9dfee7ae70920b96ec8e71633959623c29f7506b42886492d786a70f60632afd",
+    "scripts/probe_policy_binding.py": "94e2ff98ac90328b8ff76b13a24a0682723d631ef41018cf3da7fba8ed75a313",
+    "scripts/probe_zero_discrimination.py": "149d6fced0f3d8c52665d402d333eee528df7bab069824b6095dabef2b0650a4",
+    "scripts/probe_inliner_relax.py": "94e150f006ea6be8d3e3ec9b039ee1de5f6d7837952d485220a9cb4a499156f4",
+    "scripts/probe_nogold_gap.py": "ef428eeb1bae1182be0fa5152ab62b88bea20572ed0ce10eaed6e2eb8c7082fd",
+    "scripts/probe_policy_reach.py": "13088aee616e32d2fe7a70f839e92364c59216ed2355b5a705ff63042c07de5d",
+    "scripts/caliber_superseded.py": "7714d621447a572f5166fe25880f0ddbaa67cfb529d357119e6fd5efffbdff6e",
+    "tests/contract_context_gate_test.py": "4b7721d4de44b5e291101ae743f2ccbe548bd540eab1defdd5490c3540e9ef21",
+    "tests/contract_default_effect_test.py": "83e15d7478bd9e4bbc085fa91974c8df6cf9e6f62dc1f28b09f2a5513d56e8c3",
+    "tests/contract_zero_discrimination_test.py": "f536bb50d1a281eff223129a9a585b5299ddf4b24550ad4bd79cd1d214afc993",
+    "tests/contract_selftest_evidence_test.py": "899c957d9f36b1d8acc067a756e2cb47a243f4dd043a79cea1c8a383ab1ac3b2",
+    "tests/contract_policy_binding_test.py": "c7e96584f9570b3019b681f7cdc84cebb612423ce39999c1594fa475162c31b4",
+    "scripts/probe_signature_impostor.py": "34c67950ddb8d4da453363f7b90353bc08061d9e0d407f3420a0dae0f97dc1eb",
+    "scripts/default_effect_census.json": "c08618edfeb38c98e002839e907c49ecf66ce87c69a51a7d8ceb7f2d7c8a5d8d",
+    "scripts/zero_discrimination_census.json": "c9c528f8ce3f85bcb97ec42d86b3c77c73aa3e24d0292bc06da1b6a9cc7736dc",
+    "scripts/selftest_evidence_census.jsonl": "a4921a6548e3efb3270b2de6a69b478aa6a48afa621719cd5b0ed0a6bd4d185b",
+    "scripts/policy_binding_census.jsonl": "a18e88b55b68111211e350522eee542300f53ca444b48f0734ea8b4e9b671129",
+    "scripts/inliner_relax_census.json": "4399b741b6383b8cc2238972e765f1a71c187ec35ae650f76099f12b582c3bcd",
+    "scripts/nogold_gap_census.json": "c3a588e42b16c79e11cdfaaeda4a595106a59bba2e87a950f02353b0bf71a9c9",
+    "scripts/policy_reach_census.json": "d58b3356c3d31266576650feaffe2c7d5687193f87b67f24f62592b797946205",
+    "scripts/extract_downstream.json": "896220cd2849f6740a0fc28daf6e434c7ed77445237b60f3b1288a3cf7d8d266",
+    "scripts/form_shape_attribution.json": "b536f832e4ba0fc7bc734321dae058007de4e556d6699a7ec8c010b6d7556309",
+    "scripts/no_result_attribution.json": "1feae1a5d74e830d0d609e3b507d8842d577c6a851b377c9ef205e2161446d0b",
+    "scripts/caliber_superseded.json": "77a828b6a82e3afefa83f23c21cbbab7360e091486a4f517e867a89c277265fb"
+  },
+  "accounts": {
+    "A_assertion_surface": {
+      "policy_fields": [
+        "cross_scope",
+        "first_rhs",
+        "allow_unstable",
+        "no_gold_gate"
+      ],
+      "n_fields": 4,
+      "selftest": {
+        "n_assertions": 15,
+        "kinds": {
+          "field_level": 0,
+          "signature_string": 2,
+          "hardcoded_constant": 4,
+          "other": 9
+        },
+        "labels": [
+          "A",
+          "B",
+          "C",
+          "D",
+          "E",
+          "F",
+          "G",
+          "H",
+          "I",
+          "J",
+          "K",
+          "L",
+          "M",
+          "N",
+          "O"
+        ],
+        "n_policy_related": 6,
+        "n_field_level": 0,
+        "field_sources": {
+          "constant": 0,
+          "default_object": 0,
+          "other": 0
+        },
+        "n_field_level_on_default_object": 0,
+        "local_const_names": [
+          "_",
+          "br",
+          "bs"
+        ],
+        "source": "scripts/probe_context_gate.py::selftest (AST)"
+      },
+      "contracts": {
+        "n_files": 127,
+        "n_field_level": 1,
+        "n_field_level_on_default_object": 0,
+        "n_field_level_on_constant": 2,
+        "n_signature_string": 2,
+        "n_hardcoded_constant": 0,
+        "per_file": {
+          "tests/contract_agent_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 25,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_aging_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 29,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_alias_demote_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 41,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_allthin_denominator_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 25,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_archive_reseed_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 16,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_archive_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 38,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_assert_wiring_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 15,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_auth_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 19,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_auto_probes_class_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 15,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_autonomy_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 27,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_backup_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 38,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_baseline_incident_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 47,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_baseline_leak_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 11,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_boulders_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 38,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_boundary_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 37,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_caliber_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 35,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_caps_candidate_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 68,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_causality_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 37,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_ceiling_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 109,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_check_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 47,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_checkpoint_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 46,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_cleanup_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 52,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_cli_help_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 8,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_commit_verdict_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 14,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_console_render_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 30,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_consolidation_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 19,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_context_gate_test.py": {
+            "field_level": 1,
+            "signature_string": 2,
+            "hardcoded_constant": 0,
+            "other": 26,
+            "fs_constant": 2,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_criteria_gate_census_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 48,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_ctx_downstream_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 45,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_default_effect_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 6,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_difficulty_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 49,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_discover_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 18,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_embedding_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 40,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_entrypoints_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 50,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_env_docs_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 8,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_env_roles_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 14,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_evidence_granularity_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 19,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_evolution_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 71,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_experience_loop_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 39,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_extract_downstream_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 63,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_fallback_reachability_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 8,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_focus_census_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 25,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_focus_reach_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 18,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_form_boundary_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 45,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_form_shape_attribution_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 45,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_gate_attribution_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 29,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_gate_discrimination_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 11,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_generalization_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 46,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_genome_source_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 21,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_ghost_route_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 19,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_ghprobe_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 30,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_headroom_source_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 25,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_ho_growth_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 31,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_import_error_census_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 48,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_import_failure_attribution_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 47,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_inliner_relax_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 2,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_install_auto_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 42,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_interop_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 59,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_is_shape_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 45,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_judge_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 41,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_knowledge_consume_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 22,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_learner_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 18,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_ledger_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 45,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_literal_repair_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 12,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_llm_supply_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 26,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_loader_gate_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 45,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_logging_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 19,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_mutate_render_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 30,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_no_result_attribution_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 70,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_nogold_gap_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 6,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_nongression_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 31,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_notprobed_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 14,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_novelty_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 27,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_observability_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 32,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_ops_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 24,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_overfit_provenance_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 30,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_package_load_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 31,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_packaging_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 20,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_policy_binding_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 6,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_policy_reach_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 6,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_portability_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 36,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_proposer_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 50,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_provenance_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 16,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_pruning_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 23,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_pycompat_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 10,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_raises_criteria_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 20,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_rea_bridge_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 69,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_realrepo_baseline_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 22,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_release_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 11,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_release_toml_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 5,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_repair_render_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 14,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_repro_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 13,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_resume_window_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 18,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_root_resolve_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 32,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_route_chain_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 34,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_sampling_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 27,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_sandbox_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 45,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_saturation_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 18,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_scan_surface_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 27,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_scoped_commit_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 25,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_seeds_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 30,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_self_reference_probe_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 25,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_selfcheck_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 31,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_selftest_evidence_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 6,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_serve_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 71,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_shape_ruler_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 8,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_signature_impostor_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 6,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_srcmut_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 72,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_static_hygiene_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 10,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_store_migration_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 11,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_streaming_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 70,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_swb_real_tasks_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 23,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_synth_gate_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 15,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_synth_overfit_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 22,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_synthesize_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 26,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_task_quality_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 29,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_time_param_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 12,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_traceability_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 37,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_truncation_census_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 51,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_unittest_extract_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 52,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_upper_bound_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 18,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_verifier_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 29,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_warmstart_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 25,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_world_facts_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 26,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_worldgen_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 24,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_zero_discrimination_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 6,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          },
+          "tests/contract_zero_event_paths_test.py": {
+            "field_level": 0,
+            "signature_string": 0,
+            "hardcoded_constant": 0,
+            "other": 27,
+            "fs_constant": 0,
+            "fs_default_object": 0,
+            "fs_other": 0
+          }
+        },
+        "source": "tests/contract_*_test.py (AST)"
+      },
+      "extractor_teeth": {
+        "positive": "field_level",
+        "negative": "signature_string",
+        "default_object_positive": true,
+        "constant_positive": true,
+        "teeth": true
+      },
+      "rp_call_sites": {
+        "live": [
+          "scripts/probe_context_gate.py",
+          "scripts/probe_inliner_relax.py",
+          "scripts/probe_policy_reach.py",
+          "tests/contract_context_gate_test.py",
+          "tests/contract_inliner_relax_test.py"
+        ],
+        "n_live": 5,
+        "archive": [
+          "scripts/probe_context_gate.py",
+          "scripts/probe_inliner_relax.py",
+          "scripts/probe_policy_reach.py",
+          "tests/contract_context_gate_test.py",
+          "tests/contract_inliner_relax_test.py"
+        ],
+        "n_archive": 5,
+        "match": true,
+        "source": "scripts/default_effect_census.json (192 archive)"
+      },
+      "n_field_level_total": 1,
+      "n_field_level_on_default_object_total": 0,
+      "merged_into_bool": false
+    },
+    "B_runtime_readouts": {
+      "baseline": {
+        "selftest_ok": true,
+        "n_assertion_lines": 15,
+        "n_fail_marks": 0,
+        "fail_labels": []
+      },
+      "n_resolve_policy_actual": 2,
+      "impostor": {
+        "selftest_ok": true,
+        "n_assertion_lines": 15,
+        "n_fail_marks": 0,
+        "fail_labels": []
+      },
+      "signature_replay": {
+        "got": [
+          "1111",
+          "0000"
+        ],
+        "want": [
+          "1111",
+          "0000"
+        ],
+        "n": 2,
+        "n_green": 2
+      },
+      "impostor_fields": {
+        "cross_scope": false,
+        "first_rhs": false,
+        "allow_unstable": false,
+        "no_gold_gate": false
+      },
+      "impostor_signature": "1111",
+      "impostor_all_fields_false": true,
+      "signature_broken": {
+        "selftest_ok": false,
+        "n_assertion_lines": 15,
+        "n_fail_marks": 1,
+        "fail_labels": [
+          "✗ 自检J 默认策略 1"
+        ]
+      },
+      "adopt_probe_blind": {
+        "selftest_ok": true,
+        "n_assertion_lines": 15,
+        "n_fail_marks": 0,
+        "fail_labels": []
+      },
+      "positive_has_teeth": true,
+      "all_green_under_impostor": true,
+      "merged_into_bool": false
+    },
+    "C_discrimination": {
+      "counterfactual": {
+        "worlds": {
+          "W0_intact": {
+            "description": "现状：默认对象 1111、签名 1111、断言面字段级 0 条",
+            "default_fields_intact": true,
+            "signature_correct": true,
+            "n_field_level_assertions": 0,
+            "ran": true,
+            "synthetic": false,
+            "n_fail_marks": 0
+          },
+          "W1_impostor": {
+            "description": "事故：签名 1111 正确、4 位字段全 False、断言面不变",
+            "default_fields_intact": false,
+            "signature_correct": true,
+            "n_field_level_assertions": 0,
+            "ran": true,
+            "synthetic": false,
+            "n_fail_marks": 0
+          },
+          "W2_signature_broken": {
+            "description": "对照：签名 0000 错误（194 B 事故同型）",
+            "default_fields_intact": false,
+            "signature_correct": false,
+            "n_field_level_assertions": 0,
+            "ran": true,
+            "synthetic": false,
+            "n_fail_marks": 1
+          },
+          "W3_synthetic_field_assertion": {
+            "description": "合成：人为补一条字段级断言（零沙箱同源重放）",
+            "default_fields_intact": false,
+            "signature_correct": true,
+            "n_field_level_assertions": 1,
+            "ran": false,
+            "synthetic": true,
+            "n_fail_marks": 1
+          }
+        },
+        "n_worlds": 4,
+        "zero_assertion_worlds": [
+          "W0_intact",
+          "W1_impostor"
+        ],
+        "n_zero_worlds": 2,
+        "n_ran_zero_worlds": 2,
+        "intact_values_in_zero": [
+          "False",
+          "True"
+        ],
+        "intact_mixed": true,
+        "no_natural_field_positive": true,
+        "discriminates": false,
+        "zero_field_assertion_structural": true,
+        "positive_has_teeth": true,
+        "synthetic_marked": true
+      },
+      "discriminates": false,
+      "constructurally_necessary": true,
+      "positive_has_teeth": true,
+      "verdict": "第五类证据与 selftest 断言面对『默认对象 4 位字段语义』零鉴别力，且这是『断言面无指向默认对象的字段级断言』的构造必然 ⇒ 不据此说『默认没生效』，也不说『默认生效』",
+      "direction_194_195_kept": true,
+      "not_a_product_hole": true,
+      "merged_into_bool": false
+    },
+    "D_boundary": {
+      "policy_default": "1111",
+      "policy_strict": "0000",
+      "denominators": {
+        "main": 135,
+        "form": 119,
+        "no_result": 94
+      },
+      "denominator_dual_source": {
+        "main_rows": 135,
+        "main_summary": 135,
+        "form_rows": 119,
+        "form_summary": 119,
+        "no_result_rows": 94,
+        "no_result_summary": 94
+      },
+      "denominators_all_distinct": true,
+      "superseded_total": 3,
+      "superseded_diffs": [],
+      "superseded_sha_matches": 3,
+      "sandbox_selfcheck": {
+        "own_resolve_policy_call_sites": {
+          "scripts/probe_signature_impostor.py": 0,
+          "tests/contract_signature_impostor_test.py": 0
+        },
+        "no_new_denominator_call_site": true,
+        "positive_extractor_has_teeth": true,
+        "positive_n": 3,
+        "coverage_scripts_live": 0.0227,
+        "coverage_scripts_saved": 0.0227,
+        "coverage_unchanged": true,
+        "self_archive_suffix": ".jsonl",
+        "self_archive_not_json": true,
+        "checked_own_source": true,
+        "n_banned": 0
+      },
+      "n_call_sites_192_from_archive": 5,
+      "n_closure_195": 53,
+      "verdict_194_195_unchanged": true,
+      "b192_archive_rewritten": false,
+      "archives_189_195_rewritten": false,
+      "aether_rewritten": false,
+      "real_expr_runs": 0,
+      "real_commit_runs": 0,
+      "main_repo_runs": 0,
+      "f2p_runs": 0,
+      "gain_reported": 0,
+      "section183_untouched": true,
+      "anchor": {
+        "ok": true,
+        "repos": 3,
+        "diffs": [],
+        "caliber_diffs": []
+      },
+      "boundary": "不改上游尺子 / 存档 / 判据；r115 已登记开口『193 动态覆盖率钉常量』本轮以非 .json 存档绕开；补采纳链运行证据仍须跑 main() --repo 碰 §183 ⇒ 需取证面显式拍板"
+    }
+  },
+  "derived": {
+    "claim": "第五类证据与 selftest 断言面只验 signature 字符串，对默认对象 4 位字段语义零鉴别力",
+    "n_selftest_assertions": 15,
+    "n_selftest_field_level": 0,
+    "n_contract_field_level": 1,
+    "n_contract_default_field_level": 0,
+    "n_contract_constant_field_level": 2,
+    "n_default_field_level_total": 0,
+    "n_contract_signature": 2,
+    "n_fail_marks_under_impostor": 0,
+    "impostor_signature": "1111",
+    "impostor_fields": {
+      "cross_scope": false,
+      "first_rhs": false,
+      "allow_unstable": false,
+      "no_gold_gate": false
+    },
+    "discriminates": false,
+    "n_closure": 52,
+    "n_closure_true": 52
+  },
+  "closure": {
+    "a1_four_fields": true,
+    "a2_extractor_teeth": true,
+    "a3_15_assertions": true,
+    "a4_selftest_signature_2": true,
+    "a5_selftest_hardcoded_4": true,
+    "a6_selftest_other_9": true,
+    "a7_selftest_field_zero": true,
+    "a8_selftest_policy_related_6": true,
+    "a9_contract_default_field_zero": true,
+    "a10_contract_signature_positive": true,
+    "a10b_contract_constant_field_positive": true,
+    "a11_total_default_field_zero": true,
+    "a12_rp_sites_match": true,
+    "a13_not_merged": true,
+    "b1_baseline_15_green": true,
+    "b2_two_real_calls": true,
+    "b3_impostor_15_green": true,
+    "b4_signature_replay_2_green": true,
+    "b5_impostor_fields_all_false": true,
+    "b6_impostor_signature_1111": true,
+    "b7_all_green_under_impostor": true,
+    "b8_signature_broken_red": true,
+    "b9_adopt_blind_green": true,
+    "b10_positive_has_teeth": true,
+    "b11_not_merged": true,
+    "c1_four_worlds": true,
+    "c2_two_zero_worlds": true,
+    "c3_all_zero_ran": true,
+    "c4_intact_mixed": true,
+    "c5_no_discrimination": true,
+    "c6_structural": true,
+    "c7_positive_world_has_teeth": true,
+    "c8_synthetic_marked": true,
+    "c9_constructurally_necessary": true,
+    "c10_direction_kept": true,
+    "c11_not_product_hole": true,
+    "c12_not_merged": true,
+    "d1_default_1111": true,
+    "d2_strict_0000": true,
+    "d3_denominators": true,
+    "d4_dual_source": true,
+    "d5_all_distinct": true,
+    "d6_superseded": true,
+    "d7_no_new_call_site": true,
+    "d8_extractor_teeth": true,
+    "d9_coverage_unchanged": true,
+    "d10_archive_not_json": true,
+    "d11_zero_forbidden_runs": true,
+    "d12_no_rewrites": true,
+    "d13_section183": true,
+    "d14_anchor_ok": true,
+    "d15_195_closure_53": true
+  },
+  "anchor": {
+    "ok": true,
+    "repos": 3,
+    "diffs": [],
+    "caliber_diffs": []
+  },
+  "summary": {
+    "verdict": "194/195 的 5 类事故从未覆盖『签名正确、字段语义错误』：15 条 selftest 断言中 J/K 只比 signature 字符串、L/M/N/O 由 4 处硬编码常量驱动；全仓契约条件位有 1 条字段级断言（CG.STRICT.allow_unstable），但指向默认对象的字段级断言 0 条。注入 Impostor（4 位全 False、signature 逐字正确）后 selftest 15/15 全绿、签名条件 2/2 全绿 ⇒ 第五类证据只能证明签名字符串，不能证明 4 位字段语义；对照『签名破坏』事故打红，证明反证组本身有牙",
+    "scope": "⛔ 反事实四世界证明该零鉴别力是『断言面无指向默认对象的字段级断言』的构造必然：2 个零世界全已运行、默认态既有完好又有被破坏、唯一打红的正例是人为补断言的合成世界。故不据此说『默认没生效』，也不说『默认生效』；194/195 方向不翻案，只补证据强度边界（第五类证据 = 签名字符串层）。不是产品洞、不报收益、§183 零触碰",
+    "n_closure_true": 52,
+    "n_closure": 52
+  }
+}
