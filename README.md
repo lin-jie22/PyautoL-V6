@@ -10747,6 +10747,19 @@ rc=0、A1 候选面四文件（含 `README.md`）`scan_text()`
 193 契约单跑 `A–E 111 + F 6` 全绿、`coverage_scripts`
 `0.0227` 未漂移。
 
+⛔ **全量验收首跑全绿（提交后按产物判）**：脱管 env
+（只 unset `PYTHONPATH`）跑
+`python3 -m aether.check --json -j 2` ⇒ `ok=True`、
+`exit_code=0`、`counts pass=129 / fail=0 / skip=0 /
+timeout=0 / error=0`、`n_scripts 127`、`n_runs 129`、
+`jobs 2`；本轮新契约单跑 `46.95s` 全绿（`A–E 132 + F 6`）。
+r116 对照 `128/128`、`n_scripts 126` ⇒ 分母 +1 仅来自
+本轮新增的 1 份契约。⛔ 后台任务通知的 `exit code 0`
+**不作通过判据**，一律按 `/tmp/r117_full.json` 产物判
+（r114 已证通知可报 0 而实际收口三次红）。
+提交后复核：验锚 `OK 3/3 diffs=0`、`HEAD == origin/main`、
+工作区干净；拍板清单未变。
+
 ═══ 五、边界 / 开口 / 拍板清单 ═══
 
 ⛔ **r115 已登记开口本轮预防性绕开、未触发**：193
