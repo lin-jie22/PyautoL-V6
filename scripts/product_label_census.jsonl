@@ -1,0 +1,352 @@
+{
+  "accounts": {
+    "A_definition_layer": {
+      "call_files_in_aether": [],
+      "call_files_live": [
+        "scripts/probe_context_gate.py",
+        "scripts/probe_inliner_relax.py",
+        "scripts/probe_policy_reach.py",
+        "tests/contract_context_gate_test.py",
+        "tests/contract_inliner_relax_test.py"
+      ],
+      "call_files_saved": [
+        "scripts/probe_context_gate.py",
+        "scripts/probe_inliner_relax.py",
+        "scripts/probe_policy_reach.py",
+        "tests/contract_context_gate_test.py",
+        "tests/contract_inliner_relax_test.py"
+      ],
+      "definition_in_aether": [],
+      "definition_in_gauge": [
+        {
+          "file": "scripts/probe_context_gate.py",
+          "line": 170
+        }
+      ],
+      "definition_sites": [
+        {
+          "file": "scripts/probe_context_gate.py",
+          "line": 170
+        }
+      ],
+      "dual_source_match": true,
+      "merged_into_bool": false,
+      "n_call_files_in_aether": 0,
+      "n_call_files_live": 5,
+      "n_call_files_saved": 5,
+      "n_definition_in_aether": 0,
+      "n_definition_sites": 1,
+      "product_extract_sha256": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+      "product_sha_matches_189": true,
+      "product_unchanged_anchor_lines": [
+        9666
+      ],
+      "product_unchanged_anchor_present": true
+    },
+    "B_frame_attribution": {
+      "all_rc_stdout_identical": true,
+      "by_layer_total": {
+        "contract_tests": 4,
+        "gauge_scripts": 4
+      },
+      "label_matches_saved": true,
+      "merged_into_bool": false,
+      "n_contract_frames": 4,
+      "n_gauge_frames": 4,
+      "n_live_old_label_true": 4,
+      "n_product_aether_frames": 0,
+      "n_saved_in_product_true": 4,
+      "n_total_runtime": 8,
+      "old_true_are_all_gauge": true,
+      "per_contract": {
+        "tests/contract_context_gate_test.py": {
+          "by_layer": {
+            "contract_tests": 2,
+            "gauge_scripts": 2
+          },
+          "by_old_label": {
+            "false": 2,
+            "true": 2
+          },
+          "driver_ok": true,
+          "driver_rc": 0,
+          "frames": [
+            {
+              "caller": "selftest",
+              "layer": "gauge_scripts",
+              "line": 311,
+              "old_in_product": true,
+              "rel": "scripts/probe_context_gate.py"
+            },
+            {
+              "caller": "selftest",
+              "layer": "gauge_scripts",
+              "line": 312,
+              "old_in_product": true,
+              "rel": "scripts/probe_context_gate.py"
+            },
+            {
+              "caller": "main",
+              "layer": "contract_tests",
+              "line": 199,
+              "old_in_product": false,
+              "rel": "tests/contract_context_gate_test.py"
+            },
+            {
+              "caller": "main",
+              "layer": "contract_tests",
+              "line": 201,
+              "old_in_product": false,
+              "rel": "tests/contract_context_gate_test.py"
+            }
+          ],
+          "n_runtime": 4,
+          "plain_rc": 0,
+          "rc_identical": true,
+          "stdout_identical": true
+        },
+        "tests/contract_inliner_relax_test.py": {
+          "by_layer": {
+            "contract_tests": 2,
+            "gauge_scripts": 2
+          },
+          "by_old_label": {
+            "false": 2,
+            "true": 2
+          },
+          "driver_ok": true,
+          "driver_rc": 0,
+          "frames": [
+            {
+              "caller": "selftest",
+              "layer": "gauge_scripts",
+              "line": 311,
+              "old_in_product": true,
+              "rel": "scripts/probe_context_gate.py"
+            },
+            {
+              "caller": "selftest",
+              "layer": "gauge_scripts",
+              "line": 312,
+              "old_in_product": true,
+              "rel": "scripts/probe_context_gate.py"
+            },
+            {
+              "caller": "group_c",
+              "layer": "contract_tests",
+              "line": 298,
+              "old_in_product": false,
+              "rel": "tests/contract_inliner_relax_test.py"
+            },
+            {
+              "caller": "group_c",
+              "layer": "contract_tests",
+              "line": 299,
+              "old_in_product": false,
+              "rel": "tests/contract_inliner_relax_test.py"
+            }
+          ],
+          "n_runtime": 4,
+          "plain_rc": 0,
+          "rc_identical": true,
+          "stdout_identical": true
+        }
+      },
+      "product_frame_never_labeled": true,
+      "saved_total_8": true
+    },
+    "C_discrimination": {
+      "counterfactual": {
+        "distinct_layers": 3,
+        "n_product_unrecognized": 1,
+        "n_product_worlds": 1,
+        "old_label_flips_on_filename": true,
+        "old_label_values": [
+          true,
+          false,
+          false,
+          true
+        ],
+        "product_unrecognized_has_teeth": true,
+        "product_world_not_recognized": true,
+        "worlds": {
+          "W0_gauge": {
+            "layer": "gauge_scripts",
+            "old_in_product": true,
+            "rel": "scripts/probe_context_gate.py"
+          },
+          "W1_contract": {
+            "layer": "contract_tests",
+            "old_in_product": false,
+            "rel": "tests/contract_context_gate_test.py"
+          },
+          "W2_product": {
+            "layer": "product_aether",
+            "old_in_product": false,
+            "rel": "aether/extract.py"
+          },
+          "W3_gauge_suffix": {
+            "layer": "gauge_scripts",
+            "old_in_product": true,
+            "rel": "scripts/probe_context_gate.py.fake"
+          }
+        }
+      },
+      "discriminates": true,
+      "gauge_positive_has_teeth": true,
+      "n_product_unrecognized": 1,
+      "n_product_worlds": 1,
+      "old_label_ignores_definition_domain": true,
+      "product_unrecognized_has_teeth": true,
+      "product_world_is_positive_not_vacuous": true,
+      "saved_label_is_gauge_not_product": true,
+      "two_ledgers_separate": true
+    },
+    "D_boundary": {
+      "anchor": {
+        "caliber_diffs": [],
+        "diffs": [],
+        "ok": true,
+        "repos": 3
+      },
+      "caliber_disk": {
+        "aether/check.py": "88cc4c09ed9293dc881c0f77993666edf1e217292740b0ba88f55f90d9804c82",
+        "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+        "scripts/default_effect_census.json": "c08618edfeb38c98e002839e907c49ecf66ce87c69a51a7d8ceb7f2d7c8a5d8d",
+        "scripts/inliner_relax_census.json": "4399b741b6383b8cc2238972e765f1a71c187ec35ae650f76099f12b582c3bcd",
+        "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+        "scripts/probe_default_effect.py": "881318647f769036f321a0dfb5f7ececa1d4279355ee27027e2f342ccfd0d9f3",
+        "scripts/probe_inliner_relax.py": "94e150f006ea6be8d3e3ec9b039ee1de5f6d7837952d485220a9cb4a499156f4",
+        "scripts/probe_policy_reach.py": "13088aee616e32d2fe7a70f839e92364c59216ed2355b5a705ff63042c07de5d",
+        "scripts/probe_selftest_evidence.py": "9dfee7ae70920b96ec8e71633959623c29f7506b42886492d786a70f60632afd",
+        "scripts/probe_truerun_count.py": "ca728265ce966eb2ddfcf0a3916b18b23a44ab69e43e62d5d913224d5f1fea26",
+        "scripts/probe_zero_discrimination.py": "149d6fced0f3d8c52665d402d333eee528df7bab069824b6095dabef2b0650a4",
+        "scripts/selftest_evidence_census.jsonl": "a4921a6548e3efb3270b2de6a69b478aa6a48afa621719cd5b0ed0a6bd4d185b",
+        "scripts/truerun_count_census.jsonl": "dfc751c37a735bfbddbc1321e6dca910c0050bee6cb36e9148b46a46fa604022",
+        "tests/contract_context_gate_test.py": "4b7721d4de44b5e291101ae743f2ccbe548bd540eab1defdd5490c3540e9ef21",
+        "tests/contract_default_effect_test.py": "83e15d7478bd9e4bbc085fa91974c8df6cf9e6f62dc1f28b09f2a5513d56e8c3",
+        "tests/contract_inliner_relax_test.py": "9c1f9c126055da0f30576e144ee0213804b52783e816d6f76cc986c7f3401792",
+        "tests/contract_selftest_evidence_test.py": "899c957d9f36b1d8acc067a756e2cb47a243f4dd043a79cea1c8a383ab1ac3b2"
+      },
+      "denominator_dual_source": {
+        "all_distinct": true,
+        "dual_source": {
+          "form_rows": 119,
+          "form_summary": 119,
+          "main_rows": 135,
+          "main_summary": 135,
+          "no_result_rows": 94,
+          "no_result_summary": 94
+        },
+        "form": 119,
+        "main": 135,
+        "no_result": 94
+      },
+      "gain_rows_reported": 0,
+      "merged_into_bool": false,
+      "product_files_modified": 0,
+      "real_commit_run": 0,
+      "real_expr_run": 0,
+      "section_183_touched": false,
+      "selfcheck": {
+        "coverage_live": 0.0227,
+        "coverage_saved": 0.0227,
+        "coverage_unchanged": true,
+        "no_new_denominator_call_site": true,
+        "own_call_sites": {
+          "scripts/probe_product_label.py": 0,
+          "scripts/product_label_contract.py": 0
+        },
+        "positive_extractor_has_teeth": true,
+        "positive_n": 3,
+        "self_archive_not_json": true,
+        "self_archive_suffix": ".jsonl"
+      },
+      "superseded": {
+        "all_match": true,
+        "diffs": [],
+        "n_registered": 3
+      }
+    }
+  },
+  "anchor": {
+    "caliber_diffs": [],
+    "diffs": [],
+    "ok": true,
+    "repos": 3
+  },
+  "caliber": {
+    "aether/check.py": "88cc4c09ed9293dc881c0f77993666edf1e217292740b0ba88f55f90d9804c82",
+    "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+    "scripts/default_effect_census.json": "c08618edfeb38c98e002839e907c49ecf66ce87c69a51a7d8ceb7f2d7c8a5d8d",
+    "scripts/inliner_relax_census.json": "4399b741b6383b8cc2238972e765f1a71c187ec35ae650f76099f12b582c3bcd",
+    "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+    "scripts/probe_default_effect.py": "881318647f769036f321a0dfb5f7ececa1d4279355ee27027e2f342ccfd0d9f3",
+    "scripts/probe_inliner_relax.py": "94e150f006ea6be8d3e3ec9b039ee1de5f6d7837952d485220a9cb4a499156f4",
+    "scripts/probe_policy_reach.py": "13088aee616e32d2fe7a70f839e92364c59216ed2355b5a705ff63042c07de5d",
+    "scripts/probe_selftest_evidence.py": "9dfee7ae70920b96ec8e71633959623c29f7506b42886492d786a70f60632afd",
+    "scripts/probe_truerun_count.py": "ca728265ce966eb2ddfcf0a3916b18b23a44ab69e43e62d5d913224d5f1fea26",
+    "scripts/probe_zero_discrimination.py": "149d6fced0f3d8c52665d402d333eee528df7bab069824b6095dabef2b0650a4",
+    "scripts/selftest_evidence_census.jsonl": "a4921a6548e3efb3270b2de6a69b478aa6a48afa621719cd5b0ed0a6bd4d185b",
+    "scripts/truerun_count_census.jsonl": "dfc751c37a735bfbddbc1321e6dca910c0050bee6cb36e9148b46a46fa604022",
+    "tests/contract_context_gate_test.py": "4b7721d4de44b5e291101ae743f2ccbe548bd540eab1defdd5490c3540e9ef21",
+    "tests/contract_default_effect_test.py": "83e15d7478bd9e4bbc085fa91974c8df6cf9e6f62dc1f28b09f2a5513d56e8c3",
+    "tests/contract_inliner_relax_test.py": "9c1f9c126055da0f30576e144ee0213804b52783e816d6f76cc986c7f3401792",
+    "tests/contract_selftest_evidence_test.py": "899c957d9f36b1d8acc067a756e2cb47a243f4dd043a79cea1c8a383ab1ac3b2"
+  },
+  "closure": {
+    "a1_definition_unique": true,
+    "a2_definition_in_gauge": true,
+    "a3_no_definition_in_aether": true,
+    "a4_no_call_in_aether": true,
+    "a5_denominator_stable_5": true,
+    "a6_product_sha_unchanged": true,
+    "a7_product_anchor_present": true,
+    "b10_runner_identical": true,
+    "b1_total_8": true,
+    "b2_saved_total_matches": true,
+    "b3_gauge_frames_4": true,
+    "b4_product_frames_0": true,
+    "b5_contract_frames_4": true,
+    "b6_old_label_4": true,
+    "b7_old_label_matches_saved": true,
+    "b8_old_true_are_gauge": true,
+    "b9_product_never_labeled": true,
+    "c1_gauge_positive": true,
+    "c2_label_is_gauge": true,
+    "c3_label_ignores_domain": true,
+    "c4_two_ledgers": true,
+    "c5_zero_worlds_not_vacuous": true,
+    "c6_discriminates": true,
+    "d1_three_denominators": true,
+    "d1b_denominator_dual_source": true,
+    "d2_superseded_all_match": true,
+    "d3_no_new_call_site": true,
+    "d4_extractor_has_teeth": true,
+    "d5_coverage_unchanged": true,
+    "d6_archive_not_json": true,
+    "d7_caliber_hash_shape": true,
+    "d8_section183_untouched": true,
+    "d9_anchor_ok": true
+  },
+  "derived": {
+    "claim": "第五类证据的『验收契约真跑产品模块』标签是量具自证：resolve_policy 定义唯一落在 scripts/ 量具，aether/ 产品包零定义零调用；8 帧里 4 帧被 r118 标 in_product=true，真实 caller 全是量具 selftest，产品包内帧数 = 0",
+    "label_is_gauge": true,
+    "n_call_files_product": 0,
+    "n_closure": 33,
+    "n_closure_true": 33,
+    "n_definition_in_product": 0,
+    "n_definition_sites": 1,
+    "n_gauge_frames": 4,
+    "n_label_true": 4,
+    "n_product_frames": 0,
+    "n_runtime_total": 8
+  },
+  "schema": "product_label_census/v1",
+  "summary": {
+    "n_closure": 33,
+    "n_closure_true": 33,
+    "scope": "⛔ 不翻案 194–197：第五类证据确实存在、8 次次数账成立、签名鉴别力有限——本轮只收窄『产品模块』这个标签：它是量具自证，不是产品包代码执行。不是产品洞（量具自检跑自己的 policy 是设计使然，§189 已明示四条自限主体是量具），不报收益、不说默认生效/不生效，§183 零触碰。缺口仍是『默认 policy 对象→主流程消费链』的绑定证据，补它须拍板。",
+    "verdict": "§194/195/197 说的『验收契约每次全量真跑产品模块』里的『产品模块』措辞，实测指向的是量具 scripts/probe_context_gate.py：resolve_policy 定义点全仓唯一且落在量具，aether/ 产品包零定义、零调用、extract.py sha 仍是 §189 的 97420318…。runner 同构 driver 真跑两契约各 4 帧，按 caller_file 真实归因：量具 selftest 4 帧、契约自身 4 帧、产品包 0 帧；r118 存档的 4 帧 in_product=true 逐帧就是量具帧。注入反例证明该判据只认文件名子串 （改后缀即翻转、换成 aether 路径仍 false），对『真正产品帧』零识别力。"
+  }
+}
