@@ -1,0 +1,1010 @@
+{
+  "caliber": {
+    "aether/check.py": "88cc4c09ed9293dc881c0f77993666edf1e217292740b0ba88f55f90d9804c82",
+    "scripts/probe_full_run_ledger.py": "0ba39e1aa92fe3cd45292a8fd3e96d9785ae27b1be7e2d591275208091814ce8",
+    "scripts/probe_tail_selfreport.py": "bc95e492ec1d6bde4c33f38d0e2e85400bd7f0350436a0dae41850bfb3fbdb1c",
+    "scripts/probe_frameword_caliber.py": "3a800387dc6ac46924e717bd7a8c5ad05a0fa93cb6f81b48ff28540b537fadd2",
+    "scripts/probe_obs_surface.py": "6684ff766c663ace7951df2a482c2a036819ed9127ef9302dd166f2d70bb4c48",
+    "scripts/probe_stub_gate.py": "6d39d84331441040c3e4ff804afba2cd16dd33eb95b48012e3c8f936593996bf",
+    "scripts/probe_truerun_count.py": "ca728265ce966eb2ddfcf0a3916b18b23a44ab69e43e62d5d913224d5f1fea26",
+    "scripts/caliber_superseded.json": "77a828b6a82e3afefa83f23c21cbbab7360e091486a4f517e867a89c277265fb",
+    "scripts/frameword_caliber_census.jsonl": "9eb2ab76f7348aac04725dc177f36dc17d79ac7b6cf3a3cfdcd8f59d25a096f7",
+    "scripts/tail_selfreport_census.jsonl": "a3d9430444bfe6c99a91eda1197d7c09758f04c2eff6ed75ba33d4082bf532a9",
+    "scripts/obs_surface_census.jsonl": "a9be43929f15173741e60bad860bc780e4c4b6759b06a19637e361bdd1b908e3",
+    "scripts/obs_surface_stdout.jsonl": "a41627895500a93b39c219a545ccd0af8995c3b716e9b711dc93fd5aec9babcb"
+  },
+  "accounts": {
+    "A_field_def": {
+      "run_class_found": true,
+      "to_dict_found": true,
+      "dataclass_fields": [
+        "script",
+        "mode",
+        "status",
+        "rc",
+        "seconds",
+        "reason",
+        "tail"
+      ],
+      "to_dict_keys": [
+        "script",
+        "mode",
+        "status",
+        "rc",
+        "seconds",
+        "reason",
+        "tail"
+      ],
+      "n_to_dict_keys": 7,
+      "tail_is_one_field": true,
+      "script_is_string_field": true,
+      "tail_not_only_surface": true,
+      "surface_definition": "run 级字符串面 = script/tail（to_dict）；顶层列表面 = undeclared_modes/e2e_not_supported（产物实测）"
+    },
+    "B_four_surfaces": {
+      "per_run": {
+        "r117": {
+          "n_runs": 129,
+          "n_pass": 129,
+          "tail": {
+            "contract_knowledge_consume_test.py": [
+              "hit"
+            ],
+            "contract_sampling_test.py": [
+              "depth"
+            ],
+            "contract_serve_test.py": [
+              "resolve"
+            ]
+          },
+          "script": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          },
+          "undeclared_modes": {
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ]
+          },
+          "e2e_not_supported": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          }
+        },
+        "r118": {
+          "n_runs": 130,
+          "n_pass": 129,
+          "tail": {
+            "contract_knowledge_consume_test.py": [
+              "hit"
+            ],
+            "contract_sampling_test.py": [
+              "depth"
+            ],
+            "contract_serve_test.py": [
+              "resolve"
+            ],
+            "contract_signature_impostor_test.py": [
+              "selftest"
+            ]
+          },
+          "script": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          },
+          "undeclared_modes": {
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ]
+          },
+          "e2e_not_supported": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          }
+        },
+        "r118b": {
+          "n_runs": 129,
+          "n_pass": 129,
+          "tail": {
+            "contract_knowledge_consume_test.py": [
+              "hit"
+            ],
+            "contract_sampling_test.py": [
+              "depth"
+            ],
+            "contract_serve_test.py": [
+              "resolve"
+            ]
+          },
+          "script": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          },
+          "undeclared_modes": {
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ]
+          },
+          "e2e_not_supported": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          }
+        },
+        "r119": {
+          "n_runs": 129,
+          "n_pass": 129,
+          "tail": {
+            "contract_knowledge_consume_test.py": [
+              "hit"
+            ],
+            "contract_sampling_test.py": [
+              "depth"
+            ],
+            "contract_serve_test.py": [
+              "resolve"
+            ]
+          },
+          "script": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          },
+          "undeclared_modes": {
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ]
+          },
+          "e2e_not_supported": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          }
+        },
+        "r120": {
+          "n_runs": 129,
+          "n_pass": 129,
+          "tail": {
+            "contract_knowledge_consume_test.py": [
+              "hit"
+            ],
+            "contract_sampling_test.py": [
+              "depth"
+            ],
+            "contract_serve_test.py": [
+              "resolve"
+            ]
+          },
+          "script": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          },
+          "undeclared_modes": {
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ]
+          },
+          "e2e_not_supported": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          }
+        },
+        "r121": {
+          "n_runs": 129,
+          "n_pass": 129,
+          "tail": {
+            "contract_knowledge_consume_test.py": [
+              "hit"
+            ],
+            "contract_sampling_test.py": [
+              "depth"
+            ],
+            "contract_serve_test.py": [
+              "resolve"
+            ]
+          },
+          "script": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          },
+          "undeclared_modes": {
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ]
+          },
+          "e2e_not_supported": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          }
+        },
+        "r122": {
+          "n_runs": 129,
+          "n_pass": 129,
+          "tail": {
+            "contract_knowledge_consume_test.py": [
+              "hit"
+            ],
+            "contract_sampling_test.py": [
+              "depth"
+            ],
+            "contract_serve_test.py": [
+              "resolve"
+            ]
+          },
+          "script": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          },
+          "undeclared_modes": {
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ]
+          },
+          "e2e_not_supported": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          }
+        },
+        "r123": {
+          "n_runs": 129,
+          "n_pass": 129,
+          "tail": {
+            "contract_knowledge_consume_test.py": [
+              "hit"
+            ],
+            "contract_sampling_test.py": [
+              "depth"
+            ],
+            "contract_serve_test.py": [
+              "resolve"
+            ]
+          },
+          "script": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          },
+          "undeclared_modes": {
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ]
+          },
+          "e2e_not_supported": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          }
+        },
+        "r124": {
+          "n_runs": 129,
+          "n_pass": 129,
+          "tail": {
+            "contract_knowledge_consume_test.py": [
+              "hit"
+            ],
+            "contract_sampling_test.py": [
+              "depth"
+            ],
+            "contract_serve_test.py": [
+              "resolve"
+            ]
+          },
+          "script": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          },
+          "undeclared_modes": {
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ]
+          },
+          "e2e_not_supported": {
+            "contract_root_resolve_test.py": [
+              "resolve"
+            ],
+            "contract_selftest_evidence_test.py": [
+              "selftest"
+            ],
+            "contract_traceability_test.py": [
+              "trace"
+            ]
+          }
+        }
+      },
+      "fields": [
+        "tail",
+        "script",
+        "undeclared_modes",
+        "e2e_not_supported"
+      ],
+      "clean_tag": "r124",
+      "n_tail_clean": 3,
+      "n_script_clean": 3,
+      "n_undeclared_clean": 1,
+      "n_e2e_clean": 3,
+      "meta_signatures": {
+        "r117": [
+          [
+            [
+              "contract_root_resolve_test.py",
+              [
+                "resolve"
+              ]
+            ],
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ],
+            [
+              "contract_traceability_test.py",
+              [
+                "trace"
+              ]
+            ]
+          ],
+          [
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ]
+          ],
+          [
+            [
+              "contract_root_resolve_test.py",
+              [
+                "resolve"
+              ]
+            ],
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ],
+            [
+              "contract_traceability_test.py",
+              [
+                "trace"
+              ]
+            ]
+          ]
+        ],
+        "r118b": [
+          [
+            [
+              "contract_root_resolve_test.py",
+              [
+                "resolve"
+              ]
+            ],
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ],
+            [
+              "contract_traceability_test.py",
+              [
+                "trace"
+              ]
+            ]
+          ],
+          [
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ]
+          ],
+          [
+            [
+              "contract_root_resolve_test.py",
+              [
+                "resolve"
+              ]
+            ],
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ],
+            [
+              "contract_traceability_test.py",
+              [
+                "trace"
+              ]
+            ]
+          ]
+        ],
+        "r119": [
+          [
+            [
+              "contract_root_resolve_test.py",
+              [
+                "resolve"
+              ]
+            ],
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ],
+            [
+              "contract_traceability_test.py",
+              [
+                "trace"
+              ]
+            ]
+          ],
+          [
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ]
+          ],
+          [
+            [
+              "contract_root_resolve_test.py",
+              [
+                "resolve"
+              ]
+            ],
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ],
+            [
+              "contract_traceability_test.py",
+              [
+                "trace"
+              ]
+            ]
+          ]
+        ],
+        "r120": [
+          [
+            [
+              "contract_root_resolve_test.py",
+              [
+                "resolve"
+              ]
+            ],
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ],
+            [
+              "contract_traceability_test.py",
+              [
+                "trace"
+              ]
+            ]
+          ],
+          [
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ]
+          ],
+          [
+            [
+              "contract_root_resolve_test.py",
+              [
+                "resolve"
+              ]
+            ],
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ],
+            [
+              "contract_traceability_test.py",
+              [
+                "trace"
+              ]
+            ]
+          ]
+        ],
+        "r121": [
+          [
+            [
+              "contract_root_resolve_test.py",
+              [
+                "resolve"
+              ]
+            ],
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ],
+            [
+              "contract_traceability_test.py",
+              [
+                "trace"
+              ]
+            ]
+          ],
+          [
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ]
+          ],
+          [
+            [
+              "contract_root_resolve_test.py",
+              [
+                "resolve"
+              ]
+            ],
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ],
+            [
+              "contract_traceability_test.py",
+              [
+                "trace"
+              ]
+            ]
+          ]
+        ],
+        "r122": [
+          [
+            [
+              "contract_root_resolve_test.py",
+              [
+                "resolve"
+              ]
+            ],
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ],
+            [
+              "contract_traceability_test.py",
+              [
+                "trace"
+              ]
+            ]
+          ],
+          [
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ]
+          ],
+          [
+            [
+              "contract_root_resolve_test.py",
+              [
+                "resolve"
+              ]
+            ],
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ],
+            [
+              "contract_traceability_test.py",
+              [
+                "trace"
+              ]
+            ]
+          ]
+        ],
+        "r123": [
+          [
+            [
+              "contract_root_resolve_test.py",
+              [
+                "resolve"
+              ]
+            ],
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ],
+            [
+              "contract_traceability_test.py",
+              [
+                "trace"
+              ]
+            ]
+          ],
+          [
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ]
+          ],
+          [
+            [
+              "contract_root_resolve_test.py",
+              [
+                "resolve"
+              ]
+            ],
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ],
+            [
+              "contract_traceability_test.py",
+              [
+                "trace"
+              ]
+            ]
+          ]
+        ],
+        "r124": [
+          [
+            [
+              "contract_root_resolve_test.py",
+              [
+                "resolve"
+              ]
+            ],
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ],
+            [
+              "contract_traceability_test.py",
+              [
+                "trace"
+              ]
+            ]
+          ],
+          [
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ]
+          ],
+          [
+            [
+              "contract_root_resolve_test.py",
+              [
+                "resolve"
+              ]
+            ],
+            [
+              "contract_selftest_evidence_test.py",
+              [
+                "selftest"
+              ]
+            ],
+            [
+              "contract_traceability_test.py",
+              [
+                "trace"
+              ]
+            ]
+          ]
+        ]
+      },
+      "meta_stable_across_clean_runs": true,
+      "n_clean_runs": 8,
+      "tail_counts": {
+        "r117": 3,
+        "r118": 4,
+        "r118b": 3,
+        "r119": 3,
+        "r120": 3,
+        "r121": 3,
+        "r122": 3,
+        "r123": 3,
+        "r124": 3
+      },
+      "clean_tail_is_three": true,
+      "red_tail_is_four": true,
+      "field_surface_matters": true
+    },
+    "C_attribution": {
+      "provenance": {
+        "script": [
+          {
+            "surface": "script",
+            "string": "contract_root_resolve_test.py",
+            "frame_key": "resolve",
+            "is_substring_of_script_name": true,
+            "is_contract_filename": true
+          },
+          {
+            "surface": "script",
+            "string": "contract_selftest_evidence_test.py",
+            "frame_key": "selftest",
+            "is_substring_of_script_name": true,
+            "is_contract_filename": true
+          },
+          {
+            "surface": "script",
+            "string": "contract_traceability_test.py",
+            "frame_key": "trace",
+            "is_substring_of_script_name": true,
+            "is_contract_filename": true
+          }
+        ],
+        "undeclared_modes": [
+          {
+            "surface": "undeclared_modes",
+            "string": "contract_selftest_evidence_test.py",
+            "frame_key": "selftest",
+            "is_substring_of_script_name": true,
+            "is_contract_filename": true
+          }
+        ],
+        "e2e_not_supported": [
+          {
+            "surface": "e2e_not_supported",
+            "string": "contract_root_resolve_test.py",
+            "frame_key": "resolve",
+            "is_substring_of_script_name": true,
+            "is_contract_filename": true
+          },
+          {
+            "surface": "e2e_not_supported",
+            "string": "contract_selftest_evidence_test.py",
+            "frame_key": "selftest",
+            "is_substring_of_script_name": true,
+            "is_contract_filename": true
+          },
+          {
+            "surface": "e2e_not_supported",
+            "string": "contract_traceability_test.py",
+            "frame_key": "trace",
+            "is_substring_of_script_name": true,
+            "is_contract_filename": true
+          }
+        ]
+      },
+      "n_meta_hit_rows": 7,
+      "all_meta_hits_are_filename_constants": true,
+      "tail_hit_scripts": [
+        "contract_knowledge_consume_test.py",
+        "contract_sampling_test.py",
+        "contract_serve_test.py"
+      ],
+      "meta_hit_scripts": [
+        "contract_root_resolve_test.py",
+        "contract_selftest_evidence_test.py",
+        "contract_traceability_test.py"
+      ],
+      "tail_and_meta_scripts_disjoint": true,
+      "meta_hits_not_runtime_output": true,
+      "meta_hits_not_selfreport": true,
+      "four_surfaces_not_merged": true,
+      "merged_into_bool": false,
+      "hit_not_runtime_evidence": true,
+      "not_overturn_199_201_202_203_124": true
+    },
+    "D_boundary": {
+      "denominator_dual_source": {
+        "main": 135,
+        "form": 119,
+        "no_result": 94,
+        "dual_source": {
+          "main_rows": 135,
+          "main_summary": 135,
+          "form_rows": 119,
+          "form_summary": 119,
+          "no_result_rows": 94,
+          "no_result_summary": 94
+        },
+        "all_distinct": true
+      },
+      "superseded": {
+        "n_registered": 3,
+        "diffs": [],
+        "all_match": true
+      },
+      "anchor": {
+        "ok": true,
+        "repos": 3,
+        "diffs": [],
+        "caliber_diffs": []
+      },
+      "selfcheck": {
+        "new_files_resolve_policy_calls": 0,
+        "scripts_json_dynamic_denominator": []
+      },
+      "section_183_touched": false,
+      "real_expr_run": 0,
+      "real_commit_run": 0,
+      "main_repo_run": 0,
+      "gain_rows_reported": 0,
+      "product_files_modified": 0,
+      "scope_narrowing_only": true,
+      "direction_199_203_unchanged": true
+    }
+  },
+  "closure": {
+    "a1_run_class_found": true,
+    "a2_to_dict_found": true,
+    "a3_seven_to_dict_keys": true,
+    "a4_tail_not_only_surface": true,
+    "b1_nine_products": true,
+    "b2_tail_clean_three": true,
+    "b3_red_tail_four": true,
+    "b4_meta_stable_across_clean": true,
+    "b5_four_fields": true,
+    "b6_field_surface_matters": true,
+    "c1_meta_rows_nonzero": true,
+    "c2_meta_are_filename_constants": true,
+    "c3_tail_meta_disjoint": true,
+    "c4_meta_not_runtime_output": true,
+    "c5_meta_not_selfreport": true,
+    "c6_four_surfaces_not_merged": true,
+    "c7_not_overturn": true,
+    "d1_denominator_dual_source": true,
+    "d2_superseded_all_match": true,
+    "d3_anchor_ok": true,
+    "d4_no_new_resolve_calls": true,
+    "d5_no_dynamic_json_denominator": true,
+    "d6_section183_zero": true,
+    "d7_scope_narrowing_only": true
+  },
+  "derived": {
+    "n_closure": 24,
+    "n_closure_true": 24,
+    "n_tail_clean": 3,
+    "n_script_clean": 3,
+    "n_meta_hit_rows": 7,
+    "field_surface_matters": true
+  }
+}

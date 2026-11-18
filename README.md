@@ -11838,3 +11838,106 @@ caliber_diffs=[]`；`HEAD == origin/main == a7d5ec8`，工作区干净。
 与 §197–202 同代价：产物闸放 `scripts/`、存档 `.jsonl`，不进
 `discover()` 面、全量不为它 +1，运行时证据是单跑复核（§五）。
 全量链 `…→d9aff79→9a2f6ff(r123)→a7d5ec8(r124)` 连续收口。
+
+### 204. ⛔ **「帧词命中数」依赖第五个正交口径——字段选择面：产物 `runs[].tail` vs 元数据字段（`script` / `undeclared_modes` / `e2e_not_supported`）。九份全量产物实证：tail 面干净轮恒 3 条（r118 红轮 4 条），元数据三面跨 8 个干净轮恒定命中 7 条——且全部溯源到契约文件名常量（比 self-report 文案更弱的一类，连运行输出都不是）；两组命中脚本完全不重合**（2026-11-18）
+
+═══ 一、起点：五轮命中数全在 `runs[].tail` 一个字段面上量过 ═══
+
+199/201/202/203/r123/r124 一路把「帧词命中」收窄到可复现读数：作用域 2/129、
+全体 3 条 self-report、子串 vs 词边界差恒 1、stdout 全文 vs tail 截断。但五轮
+**全部只扫 `runs[].tail` 一个字段面**。产物 JSON 的 `Run.to_dict()` 固定 7 字段
+（AST 实证 `script/mode/status/rc/seconds/reason/tail`）里，`script` 是字符串字段；
+顶层还有 `undeclared_modes` / `e2e_not_supported` 两个契约名列表字段。
+这些元数据字段面**从没对同源 FRAME_KEYS 做过命中扫描**。
+
+本轮只量一件从未量过的事：**同一份产物，换一个字符串字段面扫，同源 FRAME_KEYS
+的命中数和命中类别变不变？** 便宜对照（单跑预扫一份）即见 `runs[].script` 里
+`contract_root_resolve_test.py` 命中 `resolve`、`contract_selftest_evidence_test.py`
+命中 `selftest`、`contract_traceability_test.py` 命中 `trace`——这些是**文件名常量**，
+不是契约 stdout 里的任何文案。
+
+| 检查 | 实测 |
+|---|---|
+| 字段面定义（AST） | `Run.to_dict()` 7 字段，`tail` 只是其一；`script` 同为字符串面 |
+| 四字段面 | tail / script / undeclared_modes / e2e_not_supported |
+| tail 面命中 | 干净轮恒 3、r118 红轮 4（与前五轮一致） |
+| 元数据面命中 | 跨 8 个干净轮恒定 7 条，全是契约文件名常量 |
+| 与前四口径关系 | 正交：作用域 / 匹配方式 / 观测面 / 字段选择面，四本独立 |
+
+⇒ skill 契约⑤「局部观测不得声称全貌」的产物侧第五个实例：
+「产物里帧词命中数 3」只在 tail 面成立，换元数据面读数不同、类别更弱。
+⛔ 本轮纯只读取证：读 /tmp 现成产物 JSON、零契约单跑 / spawn、零 F2P / 收益、§183 零触碰。
+
+═══ 二、四本账（⛔ 不合并成布尔）═══
+
+**A 字段面定义层**：AST 实证 `Run.to_dict()` 的 7 个 key 与 dataclass 字段；
+`tail_not_only_surface = "tail" in keys and "script" in keys`。顶层两个列表面
+由 B 账从产物实测（非 AST）。证明 tail 只是多个字符串面之一。
+
+**B 四面对拍层**：9 份全量产物（r117–r124，含 r118 红轮）逐面扫同源 FRAME_KEYS：
+
+| 字段面 | 干净轮(r124)命中 | 稳定性 |
+|---|---|---|
+| `runs[].tail` | knowledge_consume=hit / sampling=depth / serve=resolve（3 条） | 干净轮恒 3、r118 红轮 4（多 signature_impostor selftest） |
+| `runs[].script` | root_resolve=resolve / selftest_evidence=selftest / traceability=trace（3 条） | 跨 8 干净轮恒定 |
+| 顶层 `undeclared_modes` | selftest_evidence=selftest（1 条） | 跨 8 干净轮恒定 |
+| 顶层 `e2e_not_supported` | root_resolve=resolve / selftest_evidence=selftest / traceability=trace（3 条） | 跨 8 干净轮恒定 |
+
+元数据三面合计 7 条命中，跨 8 个干净轮签名逐字一致；`field_surface_matters=True`。
+
+**C 归因层（命中类别）**：元数据面 7 条命中逐条溯源——全部是契约文件名子串
+（`w in name.lower()` 且 `name` 形如 `contract_*.py`），`all_meta_hits_are_filename_constants=True`。
+**关键**：tail 面命中脚本 {knowledge_consume, sampling, serve} 与元数据面命中脚本
+{root_resolve, selftest_evidence, traceability} **完全不重合**（disjoint）——这是两组不同契约，
+不是同一批契约的两种口径。元数据面命中是**文件名常量**，既非 runner 运行帧、
+也非契约 stdout 的 self-report 文案，比 §201 的 self-report 更弱一类。
+命中数四个面**四本分开记**，不合并成布尔。
+
+**D 边界层**：三分母 `135/119/94` 双源（复用 r121 同源）；superseded 逐键磁盘
+hash 全匹配；验锚 `OK 3/3 diffs=0`；192 分母闸——本轮两个新文件
+`resolve_policy(...)` AST 调用点均 **0**；193 `coverage_scripts` 未漂移
+（新存档 `.jsonl`、契约在 `scripts/`、无新 `scripts/*.json`）；§183 五项全 0。
+
+═══ 三、结论（收窄口径，不翻案）═══
+
+⛔ **199/200/201/202/203/r124 方向一条不改**：tail 面 3 条仍全是 self-report 文案、
+非运行证据，产物零帧字段结构必然，作用域 2/129、子串命中 3、词边界 2、tail 截断
+——本轮一条不翻。只增加一件事：把「帧词命中数」显式化为**依赖字段选择面**的读数
+——tail 面与元数据面不是同一本账；元数据面命中是契约文件名常量，比 self-report
+更弱，连运行输出都不是，两组命中脚本完全不重合。
+既不说默认生效也不说没生效，**不报收益**。
+缺口不变：「默认 policy 对象 → 主流程消费链」绑定证据仍须跑 `main() --repo`
+碰 §183 ⇒ 需取证面显式拍板。
+⛔ 不推翻 189–203、不改任何判据 / 尺子 / 存档口径、`aether/` 零回写。
+
+═══ 四、设施 / 契约 / 反证 / 静态四项 ═══
+
+两件新设施 + 一份存档：`scripts/probe_field_surface.py`（纯只读、读 9 份现成产物）、
+`scripts/field_surface_census.jsonl`（存档，读现成产物无需原始证据副本）、
+`scripts/field_surface_contract.py`（r116–r124 同构 `ck` 合规形态；
+⛔ 有意放 `scripts/`、不进 `aether.check::discover()` 面）。
+
+单跑：`closure 24/24`；契约 **A–D 24 条**（A4+B6+C7+D7）+ F 组全绿；
+九份产物逐面 scan 与 8 干净轮元数据签名全复现。
+
+反证（拆 A/B 两段独立进程，避免 spawn 累积 `SIGTERM(137)`）：
+A 段 `24/24` 条件逐条撤回恰好命中自身、`24/24` 定向叶子篡改令条件翻转、
+`3/3` 事故补丁（A 字段定义 / B 四面对拍 / C+D 归因边界）多条件同时打红；
+B 段 `21/21` F 组撤回（注入 `R125_WITHDRAW=F` 得 `F_bad=21`）、
+静态四项（真 3.9.6 parse 两文件、裸 `noqa` 0、`git diff --check rc=0`、
+A1 扫描面 discover 仍 127 不含 field_surface + 正例 127 contract 可见）全通过、验锚同源。
+`FALSIFICATION_OK_A=True` / `FALSIFICATION_OK_B=True`。
+
+═══ 五、边界 / 开口 / 拍板清单 ═══
+
+⛔ r115 / r117 已登记的两个动态分母开口本轮预防性绕开、未触发：
+193 `coverage_scripts` 钉常量（新存档 `.jsonl`、无新 `scripts/*.json`）；
+r117 `contract_surface()` 全仓契约快照钉死 127 份（产物闸放 `scripts/`、
+不进 discover 面；实测 discover 仍 127、不含 field_surface）。
+代价与 §197–203 相同：**本产物闸不在全量发现面，全量不为它 +1，
+运行时证据是单跑复核**；修这两处判据口径属另一次拍板，不擅自开工。
+
+拍板清单未变，合计 **4 条**（② 多步状态序列、③ CI 先 `bootstrap`
+再跑 H 组、⑤ 放宽 / 降级 deny-modules、190 留下的 `ok_nogold`
+ledger 语义 / 189 反证组补样本），一律未开工；r118 新开口「修 r117
+F3 全仓契约快照判据口径」单列、不并入。① 已取证收口、④ / ⑥ 已落地。
