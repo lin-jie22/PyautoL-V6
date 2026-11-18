@@ -11157,3 +11157,119 @@ A1 四文件 `in_surface 4/4`、`scan_hits 0`、正例有牙；
 拍板清单与边界未变，见第五段：本轮仍是纯只读取证 +
 归档，§183 零触碰、未改 189–197 任何判据 / 尺子 / 存档口径、
 不报收益、不构成「默认生效」的新证据。
+
+### 199. ⛔⛔ **「每次全量真跑 ≥6/8 次 `resolve_policy`」是跨轮全称断言：四份全量产物零帧级字段，帧证据只在两份静态存档里，验帧契约不在发现面——「每次」从未被产物层核过**（2026-11-18）
+
+═══ 一、起点：全称词「每次」的读数来源从未被核 ═══
+
+194（r115）把「验收契约**每次全量**真跑 `resolve_policy` ≥6 次」
+补成第五类证据；197（r118）把 6 收窄为 runner 实算 8
+（`selftest()` 第二入口）；198（r119）把「真跑产品模块」收窄为
+量具 self-test（产品帧 0）。⛔ 三处的读数都是**单轮**的：
+194 引 r114 一次的 `0.22s / 57.46s pass`；197/198 是 driver
+在 HEAD 源码上对拍一次。全称词「每次」从未跨轮产物核过。
+
+便宜对照（全部只读存档 / JSON / AST，零沙箱、零 commit）：
+
+| 检查 | 实测 |
+|---|---|
+| 四份全量产物 | `r117 / r118 / r118_full2 / r119` 的 `runs` 元素字段集合**完全一致** |
+| 字段并集 | `script / mode / status / rc / seconds / reason / tail`——**零帧级字段** |
+| 两契约读数 | `context_gate` / `inliner_relax` 四份全 `status=pass, rc=0`（只证退出码，不含调用帧） |
+| 帧证据所在 | 只在 `truerun_count_census.jsonl`（8 帧 / 短路 4→2 / 签名事故）与 `product_label_census.jsonl`（产品帧 0）两份**静态存档** |
+| 验帧契约发现面 | `truerun_count_contract.py` / `product_label_contract.py` 放 `scripts/`，**不在** `discover()` 127 面内 |
+| 帧存档 mtime | 早于对应全量产物（存档在跑全量前生成） |
+
+⇒ 契约⑦的「标准可读不可被被测改写」同型：`status=pass` 是**退出码证词**，
+不是**帧数证词**；拿它当「每次真跑」的证据等于拿门铃响证明屋里有人。
+
+═══ 二、四本账（⛔ 不合并成布尔）═══
+
+**A 产物层字段普查**：四份产物 `runs` 元素逐份抽字段集合，
+`field_union == [mode, rc, reason, script, seconds, status, tail]`；
+帧词表 `frame/prof/hit/call/trace/resolve/selftest/caller/depth/payload`
+命中 **0**；两契约四份全 `pass / rc=0` 且每份都在、tail 无帧词。
+⛔ `status ∈ {pass,fail}` 是退出码语义，不是帧账。
+
+**B 存档层归因**：帧级证据逐键定位到两份 `.jsonl` 静态存档
+（都含 `closure` + `accounts` + 帧词）；mtime 早于对应全量产物
+（`r118 < r118_full2`、`r119 < r119_full`）；`discover()` live 重算
+127 面里**验帧契约 0 份**、`context_gate / inliner_relax /
+selftest_evidence` 契约 3 份都在。`n_full_runs_sampled=4`。
+
+**C 鉴别力（注入反例）**：复用 r118 已实测短路事故
+（selftest 真跑但返回 False ⇒ 帧 **4→2**，`main_rc=1`、`n_fails=1`、
+`short_circuit_teeth=True`），构造三世界按 `status` 对拍：
+W0 真全量 `status=pass` / 静态帧 8、W1 换成不跑 policy 的替身
+`status=pass` / 静态帧 **0**、W2 短路 `status=fail` / 静态帧 2。
+W0/W1 **同 status 不同帧** ⇒ 产物层 `frame_from_artifact=None`
+对三者皆然 ⇒ **零鉴别力**：若某轮契约被替换，产物 `pass` 认不出。
+⛔ 静态帧存档才看得到帧数——次数账 / 鉴别账分开，不合并成布尔。
+
+**D 边界**：三分母 `135/119/94` 双源（rows 长度 == summary）；
+superseded 逐键磁盘 hash 全匹配；验锚 `OK 3/3 diffs=0`；
+192 分母仍 5、新文件零 `resolve_policy` AST 调用点、正例抽取器有牙；
+193 `coverage_scripts` 未漂移（新存档 `.jsonl` 绕开已登记开口）；
+§183 五项（真实 expr / commit / `main() --repo` / F2P / 收益）全 0。
+
+═══ 三、结论（收窄「每次」的证据来源，不翻案）═══
+
+⛔ **194/197/198 方向不变**：第五类证据确实存在、8 次次数账成立、
+签名鉴别力有限、产品帧 0 均保持。本轮只收窄「每次」这个全称词的
+**证据来源**：产物层零帧证据 ⇒ 「每次全量 ≥6/8 次真跑」不是从
+全量产物读出来的，而是**单轮 driver 对拍 + 静态存档外推**到所有轮次。
+
+这不是产品洞：产物 JSON 的设计本就是记录 `status / rc / seconds`
+（退出码与耗时），从未承诺记帧；把「每次真跑」当产物层已证事实
+才是口径混淆。⛔ 也不等于「没真跑」——r117–r119 两契约确实每份
+都 pass、静态存档确实记了 8 帧；只是**产物层不可核**，且对
+「换无 policy 替身仍 pass」零鉴别力。
+
+既不说默认生效，也不说默认没生效，**不报收益**。缺口不变：
+「默认 policy 对象 → 主流程消费链」的绑定证据仍须跑 `main() --repo`
+碰 §183 ⇒ 需取证面显式拍板。⛔ 不推翻 189–198、不改任何判据 /
+尺子 / 存档口径、`aether/` 零回写。
+
+═══ 四、设施 / 契约 / 反证 / 静态四项 ═══
+
+三件套：`scripts/probe_full_run_ledger.py`、
+`scripts/full_run_ledger_census.jsonl`（`full_run_ledger_census/v1`）、
+`scripts/full_run_ledger_contract.py`（r116–r119 同构 `ck` 合规形态；
+⛔ 有意放 `scripts/`、不进 `aether.check::discover()` 面，理由与代价
+见 §198 第五段）。
+
+单跑：`closure 29/29`、存档 sha `68d14bc9dda19ee2`；契约
+**A–E 19 条 + F 组**全绿；上游 `contract_assert_wiring_test.py`
+`15/15` 确认形态合规。
+
+注入反证（拆 A/B 两段独立进程，避免 spawn 累积 `SIGTERM(137)`）：
+A 段 `19/19` 条件逐条撤回恰好命中自身、`18/18` 定向叶子篡改令
+条件翻转、`3/3` 事故补丁（A 账三结论 / C 账三结论 / discover 面
+塞回验帧契约）多条件同时打红、基线真跑 `fails=[]`；
+B 段 `6/6` F 组撤回、静态四项（真 3.9.6 parse、裸 `noqa` 0、
+`git diff --check rc=0`、A1 四文件零命中 + 正例有牙）全通过、验锚同源。
+`FALSIFICATION_OK_A=True` / `FALSIFICATION_OK_B=True`。
+
+⛔ 尺子 / 契约自身 **3 类真红**如实留痕（第 34 条：修尺子、不放宽断言）：
+① 契约 `CONDITIONS` 常数误写 25，实测条件 19（A6+B6+C6+SELF1）⇒ 改常量；
+② F6 断言 closure 键名误写 `d1b_denominator_dual_source`，实测
+`d1b_dual_source` ⇒ 逐字对准；
+③ F4 caliber 逐键 hash 红：`CALIBER_FILES` 把 `truerun_count_census.jsonl`
+写了两次（字面 + 变量），19 项去重后 18 ⇒ 删重复项，存档 18 键零漂移。
+⛔ 反证 A 段事故补丁两度写错：先篡改深层叶子（conditions 读的是结论字段、
+不传深层），再误用尺子 closure 键 `A7` 当契约条件名 ⇒ 改打结论字段组合、
+用契约真实条件名，`FALSIFICATION_OK_A` 才转 True。
+
+═══ 五、边界 / 开口 / 拍板清单 ═══
+
+⛔ r115 / r117 已登记的两个动态分母开口本轮预防性绕开、未触发：
+193 `coverage_scripts` 钉常量（新存档 `.jsonl`）；r117
+`contract_surface()` 全仓契约快照钉死 127 份（产物闸放 `scripts/`、
+不进 discover 面）。代价与 §197/198 相同：**本产物闸不在全量发现面，
+全量不为它 +1，运行时证据是单跑复核**；修这两处判据口径属
+另一次拍板，不擅自开工。
+
+拍板清单未变，合计 **4 条**（② 多步状态序列、③ CI 先 `bootstrap`
+再跑 H 组、⑤ 放宽 / 降级 deny-modules、190 留下的 `ok_nogold`
+ledger 语义 / 189 反证组补样本），一律未开工；r118 新开口「修 r117
+F3 全仓契约快照判据口径」单列、不并入。① 已取证收口、④ / ⑥ 已落地。

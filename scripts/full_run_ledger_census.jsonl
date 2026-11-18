@@ -1,0 +1,418 @@
+{
+  "accounts": {
+    "A_artifact_layer": {
+      "all_field_sets_identical": true,
+      "all_frame_fields_zero": true,
+      "field_union": [
+        "mode",
+        "rc",
+        "reason",
+        "script",
+        "seconds",
+        "status",
+        "tail"
+      ],
+      "n_available": 4,
+      "per_run": {
+        "r117": {
+          "available": true,
+          "counts": {
+            "error": 0,
+            "fail": 0,
+            "pass": 129,
+            "skip": 0,
+            "timeout": 0
+          },
+          "exit_code": 0,
+          "frame_fields": [],
+          "n_field_sets": 1,
+          "n_runs": 129,
+          "ok": true,
+          "path": "/tmp/r117_full.json",
+          "sha256": "062a44d1d1b887a19cccbabb1d6f0fa7b793f73b07d36cb5956f9f975081840c",
+          "two_contracts": {
+            "contract_context_gate_test.py": {
+              "rc": 0,
+              "seconds": 0.15,
+              "status": "pass",
+              "tail_has_frame_word": false
+            },
+            "contract_inliner_relax_test.py": {
+              "rc": 0,
+              "seconds": 45.39,
+              "status": "pass",
+              "tail_has_frame_word": false
+            }
+          },
+          "undeclared_has_verify_contract": false,
+          "undeclared_modes_n": 10,
+          "union_fields": [
+            "mode",
+            "rc",
+            "reason",
+            "script",
+            "seconds",
+            "status",
+            "tail"
+          ]
+        },
+        "r118": {
+          "available": true,
+          "counts": {
+            "error": 0,
+            "fail": 1,
+            "pass": 129,
+            "skip": 0,
+            "timeout": 0
+          },
+          "exit_code": 1,
+          "frame_fields": [],
+          "n_field_sets": 1,
+          "n_runs": 130,
+          "ok": false,
+          "path": "/tmp/r118_full.json",
+          "sha256": "84bee094f9f179621de29dd8ae484c69bcf674f424e23c4a2dd740468939e0b1",
+          "two_contracts": {
+            "contract_context_gate_test.py": {
+              "rc": 0,
+              "seconds": 0.17,
+              "status": "pass",
+              "tail_has_frame_word": false
+            },
+            "contract_inliner_relax_test.py": {
+              "rc": 0,
+              "seconds": 54.42,
+              "status": "pass",
+              "tail_has_frame_word": false
+            }
+          },
+          "undeclared_has_verify_contract": false,
+          "undeclared_modes_n": 11,
+          "union_fields": [
+            "mode",
+            "rc",
+            "reason",
+            "script",
+            "seconds",
+            "status",
+            "tail"
+          ]
+        },
+        "r118b": {
+          "available": true,
+          "counts": {
+            "error": 0,
+            "fail": 0,
+            "pass": 129,
+            "skip": 0,
+            "timeout": 0
+          },
+          "exit_code": 0,
+          "frame_fields": [],
+          "n_field_sets": 1,
+          "n_runs": 129,
+          "ok": true,
+          "path": "/tmp/r118_full2.json",
+          "sha256": "0a67b928bb8ff842c361d4666278340318b21e94235361bfb0dd4b8ae3b18ce0",
+          "two_contracts": {
+            "contract_context_gate_test.py": {
+              "rc": 0,
+              "seconds": 0.16,
+              "status": "pass",
+              "tail_has_frame_word": false
+            },
+            "contract_inliner_relax_test.py": {
+              "rc": 0,
+              "seconds": 45.74,
+              "status": "pass",
+              "tail_has_frame_word": false
+            }
+          },
+          "undeclared_has_verify_contract": false,
+          "undeclared_modes_n": 10,
+          "union_fields": [
+            "mode",
+            "rc",
+            "reason",
+            "script",
+            "seconds",
+            "status",
+            "tail"
+          ]
+        },
+        "r119": {
+          "available": true,
+          "counts": {
+            "error": 0,
+            "fail": 0,
+            "pass": 129,
+            "skip": 0,
+            "timeout": 0
+          },
+          "exit_code": 0,
+          "frame_fields": [],
+          "n_field_sets": 1,
+          "n_runs": 129,
+          "ok": true,
+          "path": "/tmp/r119_full.json",
+          "sha256": "2d424bc299310d76fac27090382641d8ca358fce1f1ec0af1b116ef26f8b2587",
+          "two_contracts": {
+            "contract_context_gate_test.py": {
+              "rc": 0,
+              "seconds": 0.2,
+              "status": "pass",
+              "tail_has_frame_word": false
+            },
+            "contract_inliner_relax_test.py": {
+              "rc": 0,
+              "seconds": 53.27,
+              "status": "pass",
+              "tail_has_frame_word": false
+            }
+          },
+          "undeclared_has_verify_contract": false,
+          "undeclared_modes_n": 10,
+          "union_fields": [
+            "mode",
+            "rc",
+            "reason",
+            "script",
+            "seconds",
+            "status",
+            "tail"
+          ]
+        }
+      },
+      "status_not_frame_ledger": true,
+      "tail_frame_word_zero": true,
+      "two_contracts_all_pass": true,
+      "two_contracts_present_everywhere": true
+    },
+    "B_archive_layer": {
+      "archive_has_frame_evidence": true,
+      "archive_layer": {
+        "scripts/product_label_census.jsonl": {
+          "available": true,
+          "frame_words": [
+            "call",
+            "caller",
+            "frame",
+            "resolve",
+            "selftest"
+          ],
+          "has_accounts": true,
+          "has_closure": true,
+          "has_frame_words": true,
+          "mtime_epoch": 1794937684.3070831,
+          "sha256": "7658e921d57246fa17bf799757d20d3ba78604324ab6a1a456ebd84e12e92b4c"
+        },
+        "scripts/truerun_count_census.jsonl": {
+          "available": true,
+          "frame_words": [
+            "call",
+            "caller",
+            "frame",
+            "hit",
+            "prof",
+            "resolve",
+            "selftest"
+          ],
+          "has_accounts": true,
+          "has_closure": true,
+          "has_frame_words": true,
+          "mtime_epoch": 1794760336.9514406,
+          "sha256": "dfc751c37a735bfbddbc1321e6dca910c0050bee6cb36e9148b46a46fa604022"
+        }
+      },
+      "archive_mtime_earlier_than_full": {
+        "r118_archive_before_r118b_full": true,
+        "r119_archive_before_r119_full": true
+      },
+      "claim_is_cross_run_universal": true,
+      "discover_contracts_present": [
+        "contract_context_gate_test.py",
+        "contract_inliner_relax_test.py",
+        "contract_selftest_evidence_test.py"
+      ],
+      "n_discover": 127,
+      "n_full_runs_sampled": 4,
+      "verify_contracts_absent_from_discover": true,
+      "verify_contracts_in_discover": []
+    },
+    "C_discrimination": {
+      "accident_frames_drop_2": true,
+      "artifact_frame_zero_discrimination": true,
+      "count_vs_discrimination_two_ledgers": true,
+      "merged_into_bool": false,
+      "same_status_diff_frame": true,
+      "short_circuit_accident": {
+        "driver_ok": true,
+        "frames_drop": 2,
+        "main_rc": 1,
+        "n_baseline": 4,
+        "n_fails": 1,
+        "n_runtime": 2,
+        "teeth": true
+      },
+      "static_archive_sees_frame": true,
+      "worlds": {
+        "W0_real_full": {
+          "frame_field_readable": false,
+          "frame_from_artifact": null,
+          "frame_from_static_archive": 8,
+          "status": "pass"
+        },
+        "W1_no_policy_stub_pass": {
+          "frame_field_readable": false,
+          "frame_from_artifact": null,
+          "frame_from_static_archive": 0,
+          "status": "pass"
+        },
+        "W2_short_circuit": {
+          "frame_field_readable": false,
+          "frame_from_artifact": null,
+          "frame_from_static_archive": 2,
+          "status": "fail"
+        }
+      }
+    },
+    "D_boundary": {
+      "anchor": {
+        "caliber_diffs": [],
+        "diffs": [],
+        "ok": true,
+        "repos": 3
+      },
+      "caliber_disk": {
+        "aether/check.py": "88cc4c09ed9293dc881c0f77993666edf1e217292740b0ba88f55f90d9804c82",
+        "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+        "scripts/default_effect_census.json": "c08618edfeb38c98e002839e907c49ecf66ce87c69a51a7d8ceb7f2d7c8a5d8d",
+        "scripts/inliner_relax_census.json": "4399b741b6383b8cc2238972e765f1a71c187ec35ae650f76099f12b582c3bcd",
+        "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+        "scripts/probe_default_effect.py": "881318647f769036f321a0dfb5f7ececa1d4279355ee27027e2f342ccfd0d9f3",
+        "scripts/probe_product_label.py": "2863d5965da2ad23af7debe574ff67505103a64ccbd14a08947ef3d0fa4de5da",
+        "scripts/probe_selftest_evidence.py": "9dfee7ae70920b96ec8e71633959623c29f7506b42886492d786a70f60632afd",
+        "scripts/probe_truerun_count.py": "ca728265ce966eb2ddfcf0a3916b18b23a44ab69e43e62d5d913224d5f1fea26",
+        "scripts/probe_zero_discrimination.py": "149d6fced0f3d8c52665d402d333eee528df7bab069824b6095dabef2b0650a4",
+        "scripts/product_label_census.jsonl": "7658e921d57246fa17bf799757d20d3ba78604324ab6a1a456ebd84e12e92b4c",
+        "scripts/selftest_evidence_census.jsonl": "a4921a6548e3efb3270b2de6a69b478aa6a48afa621719cd5b0ed0a6bd4d185b",
+        "scripts/truerun_count_census.jsonl": "dfc751c37a735bfbddbc1321e6dca910c0050bee6cb36e9148b46a46fa604022",
+        "tests/contract_context_gate_test.py": "4b7721d4de44b5e291101ae743f2ccbe548bd540eab1defdd5490c3540e9ef21",
+        "tests/contract_default_effect_test.py": "83e15d7478bd9e4bbc085fa91974c8df6cf9e6f62dc1f28b09f2a5513d56e8c3",
+        "tests/contract_inliner_relax_test.py": "9c1f9c126055da0f30576e144ee0213804b52783e816d6f76cc986c7f3401792",
+        "tests/contract_selftest_evidence_test.py": "899c957d9f36b1d8acc067a756e2cb47a243f4dd043a79cea1c8a383ab1ac3b2",
+        "tests/contract_signature_impostor_test.py": "76e3452a368e49917689875b8c783c4e4f37ff2261616ffc0bb3413b20f9d327"
+      },
+      "denominator_dual_source": {
+        "all_distinct": true,
+        "dual_source": {
+          "form_rows": 119,
+          "form_summary": 119,
+          "main_rows": 135,
+          "main_summary": 135,
+          "no_result_rows": 94,
+          "no_result_summary": 94
+        },
+        "form": 119,
+        "main": 135,
+        "no_result": 94
+      },
+      "gain_rows_reported": 0,
+      "merged_into_bool": false,
+      "product_files_modified": 0,
+      "real_commit_run": 0,
+      "real_expr_run": 0,
+      "section_183_touched": false,
+      "selfcheck": {
+        "new_contract_in_scripts_not_tests": true,
+        "no_new_denominator_call_site": true,
+        "own_call_sites": {
+          "scripts/probe_full_run_ledger.py": 0
+        },
+        "positive_extractor_has_teeth": true,
+        "positive_n": 3,
+        "self_archive_not_json": true,
+        "self_archive_suffix": ".jsonl"
+      },
+      "superseded": {
+        "all_match": true,
+        "diffs": [],
+        "n_registered": 3
+      }
+    }
+  },
+  "anchor": {
+    "caliber_diffs": [],
+    "diffs": [],
+    "ok": true,
+    "repos": 3
+  },
+  "caliber": {
+    "aether/check.py": "88cc4c09ed9293dc881c0f77993666edf1e217292740b0ba88f55f90d9804c82",
+    "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+    "scripts/default_effect_census.json": "c08618edfeb38c98e002839e907c49ecf66ce87c69a51a7d8ceb7f2d7c8a5d8d",
+    "scripts/inliner_relax_census.json": "4399b741b6383b8cc2238972e765f1a71c187ec35ae650f76099f12b582c3bcd",
+    "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+    "scripts/probe_default_effect.py": "881318647f769036f321a0dfb5f7ececa1d4279355ee27027e2f342ccfd0d9f3",
+    "scripts/probe_product_label.py": "2863d5965da2ad23af7debe574ff67505103a64ccbd14a08947ef3d0fa4de5da",
+    "scripts/probe_selftest_evidence.py": "9dfee7ae70920b96ec8e71633959623c29f7506b42886492d786a70f60632afd",
+    "scripts/probe_truerun_count.py": "ca728265ce966eb2ddfcf0a3916b18b23a44ab69e43e62d5d913224d5f1fea26",
+    "scripts/probe_zero_discrimination.py": "149d6fced0f3d8c52665d402d333eee528df7bab069824b6095dabef2b0650a4",
+    "scripts/product_label_census.jsonl": "7658e921d57246fa17bf799757d20d3ba78604324ab6a1a456ebd84e12e92b4c",
+    "scripts/selftest_evidence_census.jsonl": "a4921a6548e3efb3270b2de6a69b478aa6a48afa621719cd5b0ed0a6bd4d185b",
+    "scripts/truerun_count_census.jsonl": "dfc751c37a735bfbddbc1321e6dca910c0050bee6cb36e9148b46a46fa604022",
+    "tests/contract_context_gate_test.py": "4b7721d4de44b5e291101ae743f2ccbe548bd540eab1defdd5490c3540e9ef21",
+    "tests/contract_default_effect_test.py": "83e15d7478bd9e4bbc085fa91974c8df6cf9e6f62dc1f28b09f2a5513d56e8c3",
+    "tests/contract_inliner_relax_test.py": "9c1f9c126055da0f30576e144ee0213804b52783e816d6f76cc986c7f3401792",
+    "tests/contract_selftest_evidence_test.py": "899c957d9f36b1d8acc067a756e2cb47a243f4dd043a79cea1c8a383ab1ac3b2",
+    "tests/contract_signature_impostor_test.py": "76e3452a368e49917689875b8c783c4e4f37ff2261616ffc0bb3413b20f9d327"
+  },
+  "closure": {
+    "a1_four_artifacts_available": true,
+    "a2_field_sets_identical": true,
+    "a3_frame_fields_zero": true,
+    "a4_two_contracts_pass": true,
+    "a5_two_contracts_present_everywhere": true,
+    "a6_tail_frame_word_zero": true,
+    "a7_status_not_frame": true,
+    "b1_frame_evidence_in_archives": true,
+    "b2_archive_mtime_earlier": true,
+    "b3_verify_absent_from_discover": true,
+    "b4_discover_contracts_present": true,
+    "b5_cross_run_universal": true,
+    "b6_four_runs_sampled": true,
+    "c1_accident_frames_drop_2": true,
+    "c2_same_status_diff_frame": true,
+    "c3_artifact_zero_discrimination": true,
+    "c4_static_sees_frame": true,
+    "c5_two_ledgers_separate": true,
+    "c6_not_merged": true,
+    "d1_three_denominators": true,
+    "d1b_dual_source": true,
+    "d2_superseded": true,
+    "d3_anchor_ok": true,
+    "d4_no_new_call_site": true,
+    "d5_positive_teeth": true,
+    "d6_jsonl_suffix": true,
+    "d7_contract_in_scripts": true,
+    "d8_section183_zero": true,
+    "d9_not_merged": true
+  },
+  "derived": {
+    "artifact_frame_fields": 0,
+    "artifact_frame_zero_discrimination": true,
+    "claim": "「每次全量真跑 ≥6/8 次 resolve_policy」是跨轮全称断言，但四份全量产物零帧级字段，帧证据只在两份静态存档里，验帧契约不在 discover 面：产物层从未核过『每次』",
+    "n_artifacts": 4,
+    "n_closure": 29,
+    "n_closure_true": 29,
+    "n_frame_archives": 2,
+    "verify_contracts_in_discover": 0
+  },
+  "schema": "full_run_ledger_census/v1",
+  "summary": {
+    "n_closure": 29,
+    "n_closure_true": 29,
+    "scope": "⛔ 不翻案 194–198：第五类证据存在、8 次次数账成立、产品帧 0 均保持；只收窄『每次』这个全称词的证据来源——产物层零帧证据，不是『没真跑』也不是产品洞，不报收益、不说默认生效/不生效，§183 零触碰。缺口仍是『默认 policy 对象→主流程消费链』绑定证据，补它须拍板。",
+    "verdict": "四份全量产物（r117/r118/r118b/r119）的 runs 元素字段集合完全一致且零帧级字段，两契约 status=pass/rc=0 只证整体退出码；帧级证据（8 次、短路 4→2、签名事故、产品帧 0）只在 r118/r119 两份静态存档里，且其 mtime 早于对应全量；验帧契约放 scripts/ 不在 discover 面。故 194/197/198 的『每次全量真跑』全称靠单轮 driver 对拍 + 静态存档外推，产物层不可核、对『换无 policy 替身仍 pass』零鉴别力。"
+  }
+}
