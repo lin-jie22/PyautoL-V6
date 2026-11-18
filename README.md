@@ -11826,3 +11826,15 @@ r117 `contract_surface()` 全仓契约快照钉死 127 份（产物闸放 `scrip
 再跑 H 组、⑤ 放宽 / 降级 deny-modules、190 留下的 `ok_nogold`
 ledger 语义 / 189 反证组补样本），一律未开工；r118 新开口「修 r117
 F3 全仓契约快照判据口径」单列、不并入。① 已取证收口、④ / ⑥ 已落地。
+
+═══ 六、全量收口（r124，2026-11-18）═══
+
+`a7d5ec8` 首跑即全绿：`ok=True`、`counts pass=129/fail=0/skip=0/
+timeout=0/error=0`、`runs` 129 条 status 全 `pass`（派生 `n_bad=0`，
+顶层无该字段）、`n_runs=129`、`n_scripts=127`、`jobs=2`、`exit_code=0`、
+stderr 空。`undeclared_modes` 10 条（与 r119–r123 同一组，不含本轮
+`obs_surface` 产物闸）。验锚同源 `ok=True repos=3 diffs=[]
+caliber_diffs=[]`；`HEAD == origin/main == a7d5ec8`，工作区干净。
+与 §197–202 同代价：产物闸放 `scripts/`、存档 `.jsonl`，不进
+`discover()` 面、全量不为它 +1，运行时证据是单跑复核（§五）。
+全量链 `…→d9aff79→9a2f6ff(r123)→a7d5ec8(r124)` 连续收口。
