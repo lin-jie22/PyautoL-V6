@@ -1,0 +1,258 @@
+{
+  "accounts": {
+    "A_schema_structural": {
+      "ast_live_identical": true,
+      "field_set_fixed": true,
+      "frame_fields_in_schema": [],
+      "n_fields": 7,
+      "one_pass_branches": {
+        "found": true,
+        "pass_assigns": [],
+        "profile_calls_in_one": 0,
+        "rc_zero_checks": 2
+      },
+      "pass_solely_rc_zero": true,
+      "to_dict_keys_ast": [
+        "mode",
+        "rc",
+        "reason",
+        "script",
+        "seconds",
+        "status",
+        "tail"
+      ],
+      "to_dict_keys_live": [
+        "mode",
+        "rc",
+        "reason",
+        "script",
+        "seconds",
+        "status",
+        "tail"
+      ],
+      "zero_frame_is_structural": true
+    },
+    "B_measured_stubs": {
+      "all_stubs_pass": true,
+      "all_stubs_zero_frame": true,
+      "measured_sentinel_buried_in_tail": true,
+      "measured_sentinel_visible_in_tail": true,
+      "stub_exit0": {
+        "fields": [
+          "mode",
+          "rc",
+          "reason",
+          "script",
+          "seconds",
+          "status",
+          "tail"
+        ],
+        "frame_fields": [],
+        "rc": 0,
+        "status": "pass",
+        "tail_has_sentinel": true,
+        "tail_preview": "stub: no policy, no assertions\nSTUB_SENTINEL_DID_NOT_RUN_POLICY"
+      },
+      "stub_sha256": {
+        "/tmp/r121_stub_exit0.py": "8e5f7b4e339be8567ea09c9e322ea4e3c9c1bdf42ceffe2440d1e29d4d58b1f5",
+        "/tmp/r121_stub_tailflood2.py": "f2ef3dfef69e4013c2076a0bf3877afefcdfb28b29f9f392221306f4e8dccca0"
+      },
+      "stub_tail_flood": {
+        "fields": [
+          "mode",
+          "rc",
+          "reason",
+          "script",
+          "seconds",
+          "status",
+          "tail"
+        ],
+        "frame_fields": [],
+        "rc": 0,
+        "status": "pass",
+        "tail_has_sentinel": false,
+        "tail_preview": "filler 56: ordinary stub output, no policy call\nfiller 57: ordinary stub output, no policy call\nfiller 58: ordinary stub"
+      },
+      "stub_tail_keep": {
+        "fields": [
+          "mode",
+          "rc",
+          "reason",
+          "script",
+          "seconds",
+          "status",
+          "tail"
+        ],
+        "frame_fields": [],
+        "rc": 0,
+        "status": "pass",
+        "tail_has_sentinel": true,
+        "tail_preview": "stub: no policy, no assertions\nSTUB_SENTINEL_DID_NOT_RUN_POLICY"
+      },
+      "summarize_sentinel_buried_in_tail": true,
+      "summarize_sentinel_visible_in_tail": true
+    },
+    "C_discrimination": {
+      "artifact_blind_to_tail_text": true,
+      "claim": "§199 的四份产物零帧是产品 Run.to_dict() 结构必然（非抽样巧合）；r120 的 W1『替身仍 pass』由存档手填假设升级为实测成立；连 stdout self-report 都可能被 tail 截断淹没 ⇒ 产物层零鉴别力。",
+      "count_vs_discrimination_two_ledgers": true,
+      "measured_w1_status": "pass",
+      "merged_into_bool": false,
+      "r120_w1_archive_frame": 0,
+      "r120_w1_status_from_archive": "pass",
+      "static_archive_sees_frame": true,
+      "tail_text_varies_visible_vs_buried": true,
+      "w1_assumption_confirmed_by_measurement": true
+    },
+    "D_boundary": {
+      "anchor": {
+        "caliber_diffs": [],
+        "diffs": [],
+        "ok": true,
+        "repos": 3
+      },
+      "caliber_disk": {
+        "aether/check.py": "88cc4c09ed9293dc881c0f77993666edf1e217292740b0ba88f55f90d9804c82",
+        "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+        "scripts/default_effect_census.json": "c08618edfeb38c98e002839e907c49ecf66ce87c69a51a7d8ceb7f2d7c8a5d8d",
+        "scripts/full_run_ledger_census.jsonl": "68d14bc9dda19ee2952ae0b63cb49372467181e3518101935420a466b7ed280c",
+        "scripts/inliner_relax_census.json": "4399b741b6383b8cc2238972e765f1a71c187ec35ae650f76099f12b582c3bcd",
+        "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+        "scripts/probe_default_effect.py": "881318647f769036f321a0dfb5f7ececa1d4279355ee27027e2f342ccfd0d9f3",
+        "scripts/probe_full_run_ledger.py": "0ba39e1aa92fe3cd45292a8fd3e96d9785ae27b1be7e2d591275208091814ce8",
+        "scripts/probe_product_label.py": "2863d5965da2ad23af7debe574ff67505103a64ccbd14a08947ef3d0fa4de5da",
+        "scripts/probe_selftest_evidence.py": "9dfee7ae70920b96ec8e71633959623c29f7506b42886492d786a70f60632afd",
+        "scripts/probe_truerun_count.py": "ca728265ce966eb2ddfcf0a3916b18b23a44ab69e43e62d5d913224d5f1fea26",
+        "scripts/probe_zero_discrimination.py": "149d6fced0f3d8c52665d402d333eee528df7bab069824b6095dabef2b0650a4",
+        "scripts/product_label_census.jsonl": "7658e921d57246fa17bf799757d20d3ba78604324ab6a1a456ebd84e12e92b4c",
+        "scripts/selftest_evidence_census.jsonl": "a4921a6548e3efb3270b2de6a69b478aa6a48afa621719cd5b0ed0a6bd4d185b",
+        "scripts/truerun_count_census.jsonl": "dfc751c37a735bfbddbc1321e6dca910c0050bee6cb36e9148b46a46fa604022",
+        "tests/contract_context_gate_test.py": "4b7721d4de44b5e291101ae743f2ccbe548bd540eab1defdd5490c3540e9ef21",
+        "tests/contract_default_effect_test.py": "83e15d7478bd9e4bbc085fa91974c8df6cf9e6f62dc1f28b09f2a5513d56e8c3",
+        "tests/contract_inliner_relax_test.py": "9c1f9c126055da0f30576e144ee0213804b52783e816d6f76cc986c7f3401792",
+        "tests/contract_selftest_evidence_test.py": "899c957d9f36b1d8acc067a756e2cb47a243f4dd043a79cea1c8a383ab1ac3b2",
+        "tests/contract_signature_impostor_test.py": "76e3452a368e49917689875b8c783c4e4f37ff2261616ffc0bb3413b20f9d327"
+      },
+      "denominator_dual_source": {
+        "all_distinct": true,
+        "dual_source": {
+          "form_rows": 119,
+          "form_summary": 119,
+          "main_rows": 135,
+          "main_summary": 135,
+          "no_result_rows": 94,
+          "no_result_summary": 94
+        },
+        "form": 119,
+        "main": 135,
+        "no_result": 94
+      },
+      "gain_rows_reported": 0,
+      "merged_into_bool": false,
+      "product_files_modified": 0,
+      "r120_archive_available": true,
+      "r120_w1_status_from_archive": "pass",
+      "real_commit_run": 0,
+      "real_expr_run": 0,
+      "section_183_touched": false,
+      "selfcheck": {
+        "new_contract_in_scripts_not_tests": true,
+        "no_new_denominator_call_site": true,
+        "own_call_sites": {
+          "scripts/probe_stub_gate.py": 0
+        },
+        "positive_extractor_has_teeth": true,
+        "positive_n": 3,
+        "self_archive_not_json": true,
+        "self_archive_suffix": ".jsonl"
+      },
+      "superseded": {
+        "all_match": true,
+        "diffs": [],
+        "n_registered": 3
+      }
+    }
+  },
+  "anchor": {
+    "caliber_diffs": [],
+    "diffs": [],
+    "ok": true,
+    "repos": 3
+  },
+  "caliber": {
+    "aether/check.py": "88cc4c09ed9293dc881c0f77993666edf1e217292740b0ba88f55f90d9804c82",
+    "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+    "scripts/default_effect_census.json": "c08618edfeb38c98e002839e907c49ecf66ce87c69a51a7d8ceb7f2d7c8a5d8d",
+    "scripts/full_run_ledger_census.jsonl": "68d14bc9dda19ee2952ae0b63cb49372467181e3518101935420a466b7ed280c",
+    "scripts/inliner_relax_census.json": "4399b741b6383b8cc2238972e765f1a71c187ec35ae650f76099f12b582c3bcd",
+    "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+    "scripts/probe_default_effect.py": "881318647f769036f321a0dfb5f7ececa1d4279355ee27027e2f342ccfd0d9f3",
+    "scripts/probe_full_run_ledger.py": "0ba39e1aa92fe3cd45292a8fd3e96d9785ae27b1be7e2d591275208091814ce8",
+    "scripts/probe_product_label.py": "2863d5965da2ad23af7debe574ff67505103a64ccbd14a08947ef3d0fa4de5da",
+    "scripts/probe_selftest_evidence.py": "9dfee7ae70920b96ec8e71633959623c29f7506b42886492d786a70f60632afd",
+    "scripts/probe_truerun_count.py": "ca728265ce966eb2ddfcf0a3916b18b23a44ab69e43e62d5d913224d5f1fea26",
+    "scripts/probe_zero_discrimination.py": "149d6fced0f3d8c52665d402d333eee528df7bab069824b6095dabef2b0650a4",
+    "scripts/product_label_census.jsonl": "7658e921d57246fa17bf799757d20d3ba78604324ab6a1a456ebd84e12e92b4c",
+    "scripts/selftest_evidence_census.jsonl": "a4921a6548e3efb3270b2de6a69b478aa6a48afa621719cd5b0ed0a6bd4d185b",
+    "scripts/truerun_count_census.jsonl": "dfc751c37a735bfbddbc1321e6dca910c0050bee6cb36e9148b46a46fa604022",
+    "tests/contract_context_gate_test.py": "4b7721d4de44b5e291101ae743f2ccbe548bd540eab1defdd5490c3540e9ef21",
+    "tests/contract_default_effect_test.py": "83e15d7478bd9e4bbc085fa91974c8df6cf9e6f62dc1f28b09f2a5513d56e8c3",
+    "tests/contract_inliner_relax_test.py": "9c1f9c126055da0f30576e144ee0213804b52783e816d6f76cc986c7f3401792",
+    "tests/contract_selftest_evidence_test.py": "899c957d9f36b1d8acc067a756e2cb47a243f4dd043a79cea1c8a383ab1ac3b2",
+    "tests/contract_signature_impostor_test.py": "76e3452a368e49917689875b8c783c4e4f37ff2261616ffc0bb3413b20f9d327"
+  },
+  "closure": {
+    "a1_to_dict_ast_live_identical": true,
+    "a2_field_set_fixed_seven": true,
+    "a3_zero_frame_structural": true,
+    "a4_pass_solely_rc_zero": true,
+    "a5_no_profile_in_one": true,
+    "b1_all_stubs_pass": true,
+    "b2_all_stubs_zero_frame": true,
+    "b3_stub_field_set_fixed": true,
+    "b4_sentinel_visible_when_kept": true,
+    "b5_sentinel_buried_when_flooded": true,
+    "c1_w1_from_archive_pass": true,
+    "c2_w1_measured_pass": true,
+    "c3_assumption_confirmed": true,
+    "c4_tail_text_varies": true,
+    "c5_artifact_blind_tail": true,
+    "c6_two_ledgers_separate": true,
+    "c7_not_merged": true,
+    "d10_not_merged": true,
+    "d1_three_denominators": true,
+    "d1b_dual_source": true,
+    "d2_superseded": true,
+    "d3_anchor_ok": true,
+    "d4_no_new_call_site": true,
+    "d5_positive_teeth": true,
+    "d6_jsonl_suffix": true,
+    "d7_contract_in_scripts": true,
+    "d8_r120_archive_available": true,
+    "d9_section183_zero": true
+  },
+  "derived": {
+    "claim": "§199『四份产物零帧』是 Run.to_dict() 结构必然（非抽样）；r120『替身仍 pass』由手填假设升级为实测；tail 会淹没 stdout 留痕 ⇒ 产物层零鉴别力。",
+    "n_closure": 28,
+    "n_closure_true": 28,
+    "n_structural_frame_fields": 0,
+    "n_stubs_pass": 3,
+    "to_dict_fields": [
+      "mode",
+      "rc",
+      "reason",
+      "script",
+      "seconds",
+      "status",
+      "tail"
+    ],
+    "w1_assumption_confirmed": true
+  },
+  "schema": "stub_gate_census/v1",
+  "summary": {
+    "n_closure": 28,
+    "n_closure_true": 28,
+    "scope": "⛔ 不翻案 194–199：第五类证据存在、8 次次数账、产品帧 0、四份产物零帧字段均保持；只收窄这两条结论的**证据来源**——抽样观察升级为结构必然、手填假设升级为实测成立。非产品洞、不报收益、不说默认生效/不生效、§183 零触碰。缺口仍是『默认 policy 对象→主流程消费链』绑定证据，补它须拍板。",
+    "verdict": "Run.to_dict() 字段集固定 7 项（script/mode/status/rc/seconds/reason/tail），零帧字段是产品代码结构必然，非 §199 的四份抽样巧合；_one() 唯一 pass 判据是 returncode==0、无 profile 出口。实测三个 exit-0 空壳契约（零 policy 调用/零断言）全部 status=pass、零帧字段 ⇒ r120 W1『替身仍 pass』从存档手填假设升级为实测成立；sentinel 放末行可见、放头部被 _summarize_out 成功态末 4 行淹没，产物层两种都零帧字段 ⇒ 连 stdout self-report 都不可靠。"
+  }
+}
