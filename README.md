@@ -11438,3 +11438,118 @@ r118 那样改名移出扫描面。
 拍板清单与边界未变，见第五段：本轮仍是纯只读取证 +
 归档，§183 零触碰、未改 189–199 任何判据 / 尺子 / 存档口径、
 不报收益、不构成「默认生效」的新证据。
+
+### 201. ⛔ **§199「tail 帧词命中 0」的作用域只覆盖 C1/C2 两份验收契约（2/129），首次普查全体 129 份 tail 命中 3 条、全是契约 self-report 文案而非运行证据**（2026-11-18）
+
+═══ 一、起点：一条无作用域限定的读数从没被推广到全体 ═══
+
+199（r120）A 账写「帧词表 `frame/prof/hit/call/trace/resolve/selftest/
+caller/depth/payload` 命中 **0**；两契约四份全 `pass/rc=0` 且每份都在、
+tail 无帧词」。源码核对发现：`probe_full_run_ledger.py::account_a` 的
+`tail_frame_word_zero` 断言只遍历 `if s in (C1, C2)`——**作用域是 2/129**，
+后半句「两契约 tail 无帧词」明确，但前半句「帧词表命中 0」无作用域限定，
+容易被读成「全量产物 tail 零帧词」。200（r121）把「产物零帧字段」升级为
+`Run.to_dict()` 结构必然（7 字段），同样只做了 schema 结构侧 + 合成 sentinel
+输入输出侧，**从未对真实全量产物的 tail 文本做过全体普查**。
+
+本轮只量一件从未量过的事：**六份全量产物（r117–r121）的 129 份 `tail`
+文本里，同源 FRAME_KEYS 到底命中几条？命中的是不是契约自报文案？**
+
+便宜对照（全部只读产物 JSON / 源码 AST，零沙箱、零真实 expr / commit）：
+
+| 检查 | 实测 |
+|---|---|
+| §199 断言作用域（AST 实证） | `account_a` 里 `if s in (C1, C2)` 唯一谓词，lineno 158，常量 C1=`contract_context_gate_test.py`、C2=`contract_inliner_relax_test.py` ⇒ 作用域 **2/129** |
+| 六份产物 tail 字段 | 每份 runs=129（r118 首跑 130、fail=1 单列），tail 全为 str、长度 72–332 |
+| 同源帧词表命中 | 复用 `probe_full_run_ledger.FRAME_KEYS`（不另写词表，skill 契约⑥同源），干净轮恒 **3 条**（r118 red 多 1 条 signature_impostor 的 selftest），跨 5 轮稳定 |
+| 三条命中逐条对回源码 | `knowledge_consume`(hit)/`sampling`(depth)/`serve`(resolve) 命中词都在各自契约的 `PASS ...` 文案里 ⇒ self-report |
+
+⇒ 第 85 条「叫 applied ≠ 做了」、skill 契约⑤「静态不得声称看到了运行」的
+产物侧实例：tail 里的 `policy`/`resolve` 字样是契约**打印的文案**，
+不是 runner 记的帧、不是「默认生效」的运行证据。
+⛔ 本轮纯只读取证：零真实 expr / commit / `main() --repo`、零 F2P / 收益，§183 零触碰。
+
+═══ 二、四本账（⛔ 不合并成布尔）═══
+
+**A 作用域层**：从 `probe_full_run_ledger.py` 源码 AST 抽 `account_a` 的作用域谓词，
+实证唯一 `if s in (C1, C2)`（lineno 158）、常量解析为两份验收契约 ⇒ §199 的
+`tail_frame_word_zero` 覆盖 2/129。不是文本猜测，是 AST 结构实证。
+
+**B 全体命中层**：六份产物逐份逐条扫 `runs[].tail`，用同源 FRAME_KEYS：
+
+| 产物 | runs | 帧词命中 | signature |
+|---|---|---|---|
+| r117 / r118b / r119 / r120 / r121（干净轮） | 各 129 | 各 3 | knowledge_consume(hit) + sampling(depth) + serve(resolve) |
+| r118 首跑（red，fail=1） | 130 | 4 | 上三条 + signature_impostor(selftest) |
+
+干净轮命中 signature 跨 5 份**完全一致**；c1c2（两验收契约）命中 **0**，
+非 c1c2 命中 19（六轮累计 6×3+1）。命中稳定可归因，不是动态分母。
+
+**C 归因层（self-report，非运行证据）**：三条命中逐条对回契约源码，
+命中词都在 `PASS ...` 文案里（`word_in_pass_text=True`）；runner 只按
+`p.returncode == 0` 记账（§200 实测）、产物 `Run.to_dict()` 无帧字段（结构必然）。
+⇒ tail 文本账与帧运行账**两本分开记、分开报**：命中 ≠ 运行证据，
+若把 `policy`/`resolve` 字样当「默认生效的运行证据」，就重犯 §192 的类型混淆。
+⛔ 这是作用域收窄 + 首次全体普查，不是新鉴别力、不是产品洞。
+
+**D 边界层**：三分母 `135/119/94` 双源（rows 长度 == summary，复用 r121 同源）；
+superseded 逐键磁盘 hash 全匹配；验锚 `OK 3/3 diffs=0`；192 分母闸——本轮两个
+新文件 `resolve_policy(...)` AST 调用点均 **0**；193 `coverage_scripts` 未漂移
+（新存档 `.jsonl`、不新增 `scripts/*.json`）；§183 五项（真实 expr / commit /
+`main() --repo` / F2P / 收益）全 0。
+
+═══ 三、结论（收窄作用域，不翻案）═══
+
+⛔ **199/200 方向不变**：两验收契约 tail 无帧词成立（c1c2 命中 0）、
+产物零帧字段结构必然成立（7 字段、无 profile 出口）。本轮只做两件事：
+
+1. §199「帧词表命中 0」的**作用域显式化**：从无限定读数收窄为
+   **2/129（仅 C1/C2 两验收契约）**，源码 AST 实证。
+2. 首次给出**全体 129 份 tail 的帧词命中读数**：干净轮恒 **3 条**，
+   逐条都是契约 self-report 文案，非运行证据。
+
+这不是产品洞、不是新鉴别力，也不等于「帧词命中就说明 default 生效」——
+恰恰相反：命中词是文案，拿它当运行证据就是口径混淆（skill 契约⑤）。
+既不说默认生效，也不说默认没生效，**不报收益**。缺口不变：「默认 policy
+对象 → 主流程消费链」的绑定证据仍须跑 `main() --repo` 碰 §183 ⇒ 需取证面显式拍板。
+⛔ 不推翻 189–200、不改任何判据 / 尺子 / 存档口径、`aether/` 零回写。
+
+═══ 四、设施 / 契约 / 反证 / 静态四项 ═══
+
+三件套：`scripts/probe_tail_selfreport.py`、
+`scripts/tail_selfreport_census.jsonl`（存档 sha `b02fcbb6…`）、
+`scripts/tail_selfreport_contract.py`（r116–r121 同构 `ck` 合规形态；
+⛔ 有意放 `scripts/`、不进 `aether.check::discover()` 面，理由与代价
+见 §198 第五段）。
+
+单跑：`closure 23/23`；契约 **A–E 17 条 + F 组**全绿（16 条 F 断言、
+F2 逐份重扫六份产物）。
+
+注入反证（拆 A/B 两段独立进程，避免 spawn 累积 `SIGTERM(137)`）：
+A 段 `17/17` 条件逐条撤回恰好命中自身、`16/16` 定向叶子篡改令条件翻转、
+`3/3` 事故补丁（A 作用域 / B 命中 / C 归因）多条件同时打红；
+B 段 `16/16` F 组撤回、静态四项（真 3.9.6 parse、裸 `noqa` 0、
+`git diff --check rc=0`、A1 四文件零命中 + 正例有牙）全通过、验锚同源。
+`FALSIFICATION_OK_A=True` / `FALSIFICATION_OK_B=True`。
+
+⛔ 尺子自身 **1 类真红**如实留痕（第 34 条：修尺子、不放宽断言）：
+首跑 `closure 19/23`，红 `b2_all_runs_129` / `d1_denominator_dual_source` /
+`d2_superseded_all_match` / `d5_no_dynamic_json_denominator`——前两项是
+量具把 r118 首跑 130 runs 当全体 129、三分母口径猜错；后两项是 CALIBER_FILES
+重复计 `probe_full_run_ledger.py` 两次（19 vs 18，r120 同型坑）。
+修法：b2 改为「干净轮 129 + r118 red 130 单列」、三分母/superseded/selfcheck
+复用 r121 同源实现、CALIBER 去重，**不放宽断言**，重生成 `23/23`。
+
+═══ 五、边界 / 开口 / 拍板清单 ═══
+
+⛔ r115 / r117 已登记的两个动态分母开口本轮预防性绕开、未触发：
+193 `coverage_scripts` 钉常量（新存档 `.jsonl`、无新 `scripts/*.json`）；
+r117 `contract_surface()` 全仓契约快照钉死 127 份（产物闸放 `scripts/`、
+不进 discover 面；实测 discover 仍 127、不含 tail_selfreport）。
+代价与 §197–200 相同：**本产物闸不在全量发现面，全量不为它 +1，
+运行时证据是单跑复核**；修这两处判据口径属另一次拍板，不擅自开工。
+
+拍板清单未变，合计 **4 条**（② 多步状态序列、③ CI 先 `bootstrap`
+再跑 H 组、⑤ 放宽 / 降级 deny-modules、190 留下的 `ok_nogold`
+ledger 语义 / 189 反证组补样本），一律未开工；r118 新开口「修 r117
+F3 全仓契约快照判据口径」单列、不并入。① 已取证收口、④ / ⑥ 已落地。

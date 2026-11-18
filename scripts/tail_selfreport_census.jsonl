@@ -1,0 +1,639 @@
+{
+  "caliber": {
+    "aether/check.py": "88cc4c09ed9293dc881c0f77993666edf1e217292740b0ba88f55f90d9804c82",
+    "scripts/probe_full_run_ledger.py": "0ba39e1aa92fe3cd45292a8fd3e96d9785ae27b1be7e2d591275208091814ce8",
+    "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+    "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+    "scripts/probe_default_effect.py": "881318647f769036f321a0dfb5f7ececa1d4279355ee27027e2f342ccfd0d9f3",
+    "scripts/probe_truerun_count.py": "ca728265ce966eb2ddfcf0a3916b18b23a44ab69e43e62d5d913224d5f1fea26",
+    "scripts/probe_product_label.py": "2863d5965da2ad23af7debe574ff67505103a64ccbd14a08947ef3d0fa4de5da",
+    "scripts/probe_stub_gate.py": "6d39d84331441040c3e4ff804afba2cd16dd33eb95b48012e3c8f936593996bf",
+    "scripts/full_run_ledger_census.jsonl": "68d14bc9dda19ee2952ae0b63cb49372467181e3518101935420a466b7ed280c",
+    "scripts/truerun_count_census.jsonl": "dfc751c37a735bfbddbc1321e6dca910c0050bee6cb36e9148b46a46fa604022",
+    "scripts/product_label_census.jsonl": "7658e921d57246fa17bf799757d20d3ba78604324ab6a1a456ebd84e12e92b4c",
+    "scripts/stub_gate_census.jsonl": "33fee8def401d77cd2625414618884dbab3ad7e0a05a098ae28ba5c3f2102d1f",
+    "tests/contract_context_gate_test.py": "4b7721d4de44b5e291101ae743f2ccbe548bd540eab1defdd5490c3540e9ef21",
+    "tests/contract_inliner_relax_test.py": "9c1f9c126055da0f30576e144ee0213804b52783e816d6f76cc986c7f3401792",
+    "tests/contract_knowledge_consume_test.py": "d83129653656a9c05e9f373df6696da013b2691003037be1127ffa4d476ff952",
+    "tests/contract_sampling_test.py": "7cd83d4399e3569a0144d67fa9865a58b7417071e44278c4f2bdcfcfcf9e26e7",
+    "tests/contract_serve_test.py": "be755a258ed2c9e43c3fc44b5dcc2bdb10e55b34f8980ab90b0c1274a0a814e4",
+    "tests/contract_default_effect_test.py": "83e15d7478bd9e4bbc085fa91974c8df6cf9e6f62dc1f28b09f2a5513d56e8c3"
+  },
+  "accounts": {
+    "A_scope": {
+      "ledger_tail_assertion_scope": {
+        "constants": {
+          "C1": "contract_context_gate_test.py",
+          "C2": "contract_inliner_relax_test.py"
+        },
+        "scope_predicates": [
+          {
+            "const_names": [
+              "C1",
+              "C2"
+            ],
+            "values": [
+              "contract_context_gate_test.py",
+              "contract_inliner_relax_test.py"
+            ],
+            "lineno": 158
+          }
+        ],
+        "tail_scope_two_contracts": true,
+        "n_scope_contracts": 2,
+        "full_denominator_129": true,
+        "scope_fraction": "2/129"
+      },
+      "scope_is_two_contracts": true,
+      "scope_two_of_129": true,
+      "c1c2": [
+        "contract_context_gate_test.py",
+        "contract_inliner_relax_test.py"
+      ]
+    },
+    "B_tail_hits": {
+      "per_run": {
+        "r117": {
+          "available": true,
+          "path": "/tmp/r117_full.json",
+          "sha256": "062a44d1d1b887a19cccbabb1d6f0fa7b793f73b07d36cb5956f9f975081840c",
+          "n_runs": 129,
+          "counts": {
+            "pass": 129,
+            "fail": 0,
+            "skip": 0,
+            "timeout": 0,
+            "error": 0
+          },
+          "ok": true,
+          "tail_all_str": true,
+          "n_hits": 3,
+          "hits": [
+            {
+              "script": "contract_knowledge_consume_test.py",
+              "keys": "hit",
+              "status": "pass",
+              "tail": "  PASS ✓ G3 ⛔ 空结果也要记账（没召回 ≠ 没检索），且 `hit_channels == {}`\n  PASS ✓ G4 ⛔ `hit_channels` 只出现 1 次且**只进账本**（读数是读数，不参与判据）\n====================================================================\n✅ 知识消费侧契约全部通过：短内容三道闸后仍不可召回、两个 access 增长点可区分、晋级条目按 note_id 追踪"
+            },
+            {
+              "script": "contract_sampling_test.py",
+              "keys": "depth",
+              "status": "pass",
+              "tail": "  PASS S6.3 ⛔ 降级到 depth=1 确实能采到 easy 层（出口不是空的） \n\n============================================================\n结果：全部通过"
+            },
+            {
+              "script": "contract_serve_test.py",
+              "keys": "resolve",
+              "status": "pass",
+              "tail": "  PASS ✓ J17 符号链接指向仓库外 ⇒ 400（先 resolve 再判，不是先拼后判）\n  PASS ✓ J18 反证：去掉 resolve ⇒ 同一软链请求读到仓库外内容（证明 J17 有牙）\n====================================================================\n✅ API 层契约全部通过：无前缀判断、无默认全开、无无上限读取、热装载默认关闭"
+            }
+          ],
+          "hit_signature": [
+            [
+              "contract_knowledge_consume_test.py",
+              "hit"
+            ],
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ]
+          ]
+        },
+        "r118": {
+          "available": true,
+          "path": "/tmp/r118_full.json",
+          "sha256": "84bee094f9f179621de29dd8ae484c69bcf674f424e23c4a2dd740468939e0b1",
+          "n_runs": 130,
+          "counts": {
+            "pass": 129,
+            "fail": 1,
+            "skip": 0,
+            "timeout": 0,
+            "error": 0
+          },
+          "ok": false,
+          "tail_all_str": true,
+          "n_hits": 4,
+          "hits": [
+            {
+              "script": "contract_knowledge_consume_test.py",
+              "keys": "hit",
+              "status": "pass",
+              "tail": "  PASS ✓ G3 ⛔ 空结果也要记账（没召回 ≠ 没检索），且 `hit_channels == {}`\n  PASS ✓ G4 ⛔ `hit_channels` 只出现 1 次且**只进账本**（读数是读数，不参与判据）\n====================================================================\n✅ 知识消费侧契约全部通过：短内容三道闸后仍不可召回、两个 access 增长点可区分、晋级条目按 note_id 追踪"
+            },
+            {
+              "script": "contract_sampling_test.py",
+              "keys": "depth",
+              "status": "pass",
+              "tail": "  PASS S6.3 ⛔ 降级到 depth=1 确实能采到 easy 层（出口不是空的） \n\n============================================================\n结果：全部通过"
+            },
+            {
+              "script": "contract_serve_test.py",
+              "keys": "resolve",
+              "status": "pass",
+              "tail": "  PASS ✓ J17 符号链接指向仓库外 ⇒ 400（先 resolve 再判，不是先拼后判）\n  PASS ✓ J18 反证：去掉 resolve ⇒ 同一软链请求读到仓库外内容（证明 J17 有牙）\n====================================================================\n✅ API 层契约全部通过：无前缀判断、无默认全开、无无上限读取、热装载默认关闭"
+            },
+            {
+              "script": "contract_signature_impostor_test.py",
+              "keys": "selftest",
+              "status": "fail",
+              "tail": "（共 145 行，省略 127 行无信号内容）\n============================================================================\nr117 / README 196 契约：第五类证据只验 signature 字符串的强度边界\n============================================================================\n  A1    PASS\n  A10   PASS\n  A11   PASS\n  E8    PASS\n  E9    PASS\n  PASS F1 存档存在 + schema v1 + 4 个待交付文件齐备 \n  PASS F2 ⛔ 抽取器正例 + 事故版反例有牙（字段表清空令正例失效） \n  FAIL F3 ⛔ 同源实算 A/B 账逐字段对拍 + caliber 逐键磁盘 hash 零差异 \n  PASS F4 ⛔ 真跑 Impostor：selftest 15/15 绿 + 签名 2/2 绿 + 4 位全 False + 对照打红 \n  PASS F5 A1 四文件纳入候选面 + scan_text 零命中 + 正例有牙 \n  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n❌ 有失败 A–E 132 项 + F 组 6 项\nF FAIL: ['F3 ⛔ 同源实算 A/B 账逐字段对拍 + caliber 逐键磁盘 hash 零差异']\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案"
+            }
+          ],
+          "hit_signature": [
+            [
+              "contract_knowledge_consume_test.py",
+              "hit"
+            ],
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ],
+            [
+              "contract_signature_impostor_test.py",
+              "selftest"
+            ]
+          ]
+        },
+        "r118b": {
+          "available": true,
+          "path": "/tmp/r118_full2.json",
+          "sha256": "0a67b928bb8ff842c361d4666278340318b21e94235361bfb0dd4b8ae3b18ce0",
+          "n_runs": 129,
+          "counts": {
+            "pass": 129,
+            "fail": 0,
+            "skip": 0,
+            "timeout": 0,
+            "error": 0
+          },
+          "ok": true,
+          "tail_all_str": true,
+          "n_hits": 3,
+          "hits": [
+            {
+              "script": "contract_knowledge_consume_test.py",
+              "keys": "hit",
+              "status": "pass",
+              "tail": "  PASS ✓ G3 ⛔ 空结果也要记账（没召回 ≠ 没检索），且 `hit_channels == {}`\n  PASS ✓ G4 ⛔ `hit_channels` 只出现 1 次且**只进账本**（读数是读数，不参与判据）\n====================================================================\n✅ 知识消费侧契约全部通过：短内容三道闸后仍不可召回、两个 access 增长点可区分、晋级条目按 note_id 追踪"
+            },
+            {
+              "script": "contract_sampling_test.py",
+              "keys": "depth",
+              "status": "pass",
+              "tail": "  PASS S6.3 ⛔ 降级到 depth=1 确实能采到 easy 层（出口不是空的） \n\n============================================================\n结果：全部通过"
+            },
+            {
+              "script": "contract_serve_test.py",
+              "keys": "resolve",
+              "status": "pass",
+              "tail": "  PASS ✓ J17 符号链接指向仓库外 ⇒ 400（先 resolve 再判，不是先拼后判）\n  PASS ✓ J18 反证：去掉 resolve ⇒ 同一软链请求读到仓库外内容（证明 J17 有牙）\n====================================================================\n✅ API 层契约全部通过：无前缀判断、无默认全开、无无上限读取、热装载默认关闭"
+            }
+          ],
+          "hit_signature": [
+            [
+              "contract_knowledge_consume_test.py",
+              "hit"
+            ],
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ]
+          ]
+        },
+        "r119": {
+          "available": true,
+          "path": "/tmp/r119_full.json",
+          "sha256": "2d424bc299310d76fac27090382641d8ca358fce1f1ec0af1b116ef26f8b2587",
+          "n_runs": 129,
+          "counts": {
+            "pass": 129,
+            "fail": 0,
+            "skip": 0,
+            "timeout": 0,
+            "error": 0
+          },
+          "ok": true,
+          "tail_all_str": true,
+          "n_hits": 3,
+          "hits": [
+            {
+              "script": "contract_knowledge_consume_test.py",
+              "keys": "hit",
+              "status": "pass",
+              "tail": "  PASS ✓ G3 ⛔ 空结果也要记账（没召回 ≠ 没检索），且 `hit_channels == {}`\n  PASS ✓ G4 ⛔ `hit_channels` 只出现 1 次且**只进账本**（读数是读数，不参与判据）\n====================================================================\n✅ 知识消费侧契约全部通过：短内容三道闸后仍不可召回、两个 access 增长点可区分、晋级条目按 note_id 追踪"
+            },
+            {
+              "script": "contract_sampling_test.py",
+              "keys": "depth",
+              "status": "pass",
+              "tail": "  PASS S6.3 ⛔ 降级到 depth=1 确实能采到 easy 层（出口不是空的） \n\n============================================================\n结果：全部通过"
+            },
+            {
+              "script": "contract_serve_test.py",
+              "keys": "resolve",
+              "status": "pass",
+              "tail": "  PASS ✓ J17 符号链接指向仓库外 ⇒ 400（先 resolve 再判，不是先拼后判）\n  PASS ✓ J18 反证：去掉 resolve ⇒ 同一软链请求读到仓库外内容（证明 J17 有牙）\n====================================================================\n✅ API 层契约全部通过：无前缀判断、无默认全开、无无上限读取、热装载默认关闭"
+            }
+          ],
+          "hit_signature": [
+            [
+              "contract_knowledge_consume_test.py",
+              "hit"
+            ],
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ]
+          ]
+        },
+        "r120": {
+          "available": true,
+          "path": "/tmp/r120_full.json",
+          "sha256": "7ffb715f1256fb610c2dfdaf6ba76d8333b1f57a6604393402aa8ef7887fedb5",
+          "n_runs": 129,
+          "counts": {
+            "pass": 129,
+            "fail": 0,
+            "skip": 0,
+            "timeout": 0,
+            "error": 0
+          },
+          "ok": true,
+          "tail_all_str": true,
+          "n_hits": 3,
+          "hits": [
+            {
+              "script": "contract_knowledge_consume_test.py",
+              "keys": "hit",
+              "status": "pass",
+              "tail": "  PASS ✓ G3 ⛔ 空结果也要记账（没召回 ≠ 没检索），且 `hit_channels == {}`\n  PASS ✓ G4 ⛔ `hit_channels` 只出现 1 次且**只进账本**（读数是读数，不参与判据）\n====================================================================\n✅ 知识消费侧契约全部通过：短内容三道闸后仍不可召回、两个 access 增长点可区分、晋级条目按 note_id 追踪"
+            },
+            {
+              "script": "contract_sampling_test.py",
+              "keys": "depth",
+              "status": "pass",
+              "tail": "  PASS S6.3 ⛔ 降级到 depth=1 确实能采到 easy 层（出口不是空的） \n\n============================================================\n结果：全部通过"
+            },
+            {
+              "script": "contract_serve_test.py",
+              "keys": "resolve",
+              "status": "pass",
+              "tail": "  PASS ✓ J17 符号链接指向仓库外 ⇒ 400（先 resolve 再判，不是先拼后判）\n  PASS ✓ J18 反证：去掉 resolve ⇒ 同一软链请求读到仓库外内容（证明 J17 有牙）\n====================================================================\n✅ API 层契约全部通过：无前缀判断、无默认全开、无无上限读取、热装载默认关闭"
+            }
+          ],
+          "hit_signature": [
+            [
+              "contract_knowledge_consume_test.py",
+              "hit"
+            ],
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ]
+          ]
+        },
+        "r121": {
+          "available": true,
+          "path": "/tmp/r121_full.json",
+          "sha256": "c0bf919b68453106fe43fda9a57d4ec8257011448dfed7e125d5e41c46db91f6",
+          "n_runs": 129,
+          "counts": {
+            "pass": 129,
+            "fail": 0,
+            "skip": 0,
+            "timeout": 0,
+            "error": 0
+          },
+          "ok": true,
+          "tail_all_str": true,
+          "n_hits": 3,
+          "hits": [
+            {
+              "script": "contract_knowledge_consume_test.py",
+              "keys": "hit",
+              "status": "pass",
+              "tail": "  PASS ✓ G3 ⛔ 空结果也要记账（没召回 ≠ 没检索），且 `hit_channels == {}`\n  PASS ✓ G4 ⛔ `hit_channels` 只出现 1 次且**只进账本**（读数是读数，不参与判据）\n====================================================================\n✅ 知识消费侧契约全部通过：短内容三道闸后仍不可召回、两个 access 增长点可区分、晋级条目按 note_id 追踪"
+            },
+            {
+              "script": "contract_sampling_test.py",
+              "keys": "depth",
+              "status": "pass",
+              "tail": "  PASS S6.3 ⛔ 降级到 depth=1 确实能采到 easy 层（出口不是空的） \n\n============================================================\n结果：全部通过"
+            },
+            {
+              "script": "contract_serve_test.py",
+              "keys": "resolve",
+              "status": "pass",
+              "tail": "  PASS ✓ J17 符号链接指向仓库外 ⇒ 400（先 resolve 再判，不是先拼后判）\n  PASS ✓ J18 反证：去掉 resolve ⇒ 同一软链请求读到仓库外内容（证明 J17 有牙）\n====================================================================\n✅ API 层契约全部通过：无前缀判断、无默认全开、无无上限读取、热装载默认关闭"
+            }
+          ],
+          "hit_signature": [
+            [
+              "contract_knowledge_consume_test.py",
+              "hit"
+            ],
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ]
+          ]
+        }
+      },
+      "n_available": 6,
+      "all_runs_129": true,
+      "red_run_exceptions": {
+        "r118": 130
+      },
+      "tail_all_str": true,
+      "n_stable_hits": 3,
+      "stable_hit_signature": [
+        [
+          "contract_knowledge_consume_test.py",
+          "hit"
+        ],
+        [
+          "contract_sampling_test.py",
+          "depth"
+        ],
+        [
+          "contract_serve_test.py",
+          "resolve"
+        ]
+      ],
+      "hit_signature_stable_across_clean_runs": true,
+      "n_distinct_signatures_including_red": 2,
+      "c1c2_hit_count": 0,
+      "non_c1c2_hit_count": 19,
+      "all_hits": [
+        {
+          "run": "r117",
+          "script": "contract_knowledge_consume_test.py",
+          "keys": "hit",
+          "status": "pass",
+          "tail": "  PASS ✓ G3 ⛔ 空结果也要记账（没召回 ≠ 没检索），且 `hit_channels == {}`\n  PASS ✓ G4 ⛔ `hit_channels` 只出现 1 次且**只进账本**（读数是读数，不参与判据）\n====================================================================\n✅ 知识消费侧契约全部通过：短内容三道闸后仍不可召回、两个 access 增长点可区分、晋级条目按 note_id 追踪"
+        },
+        {
+          "run": "r117",
+          "script": "contract_sampling_test.py",
+          "keys": "depth",
+          "status": "pass",
+          "tail": "  PASS S6.3 ⛔ 降级到 depth=1 确实能采到 easy 层（出口不是空的） \n\n============================================================\n结果：全部通过"
+        },
+        {
+          "run": "r117",
+          "script": "contract_serve_test.py",
+          "keys": "resolve",
+          "status": "pass",
+          "tail": "  PASS ✓ J17 符号链接指向仓库外 ⇒ 400（先 resolve 再判，不是先拼后判）\n  PASS ✓ J18 反证：去掉 resolve ⇒ 同一软链请求读到仓库外内容（证明 J17 有牙）\n====================================================================\n✅ API 层契约全部通过：无前缀判断、无默认全开、无无上限读取、热装载默认关闭"
+        },
+        {
+          "run": "r118",
+          "script": "contract_knowledge_consume_test.py",
+          "keys": "hit",
+          "status": "pass",
+          "tail": "  PASS ✓ G3 ⛔ 空结果也要记账（没召回 ≠ 没检索），且 `hit_channels == {}`\n  PASS ✓ G4 ⛔ `hit_channels` 只出现 1 次且**只进账本**（读数是读数，不参与判据）\n====================================================================\n✅ 知识消费侧契约全部通过：短内容三道闸后仍不可召回、两个 access 增长点可区分、晋级条目按 note_id 追踪"
+        },
+        {
+          "run": "r118",
+          "script": "contract_sampling_test.py",
+          "keys": "depth",
+          "status": "pass",
+          "tail": "  PASS S6.3 ⛔ 降级到 depth=1 确实能采到 easy 层（出口不是空的） \n\n============================================================\n结果：全部通过"
+        },
+        {
+          "run": "r118",
+          "script": "contract_serve_test.py",
+          "keys": "resolve",
+          "status": "pass",
+          "tail": "  PASS ✓ J17 符号链接指向仓库外 ⇒ 400（先 resolve 再判，不是先拼后判）\n  PASS ✓ J18 反证：去掉 resolve ⇒ 同一软链请求读到仓库外内容（证明 J17 有牙）\n====================================================================\n✅ API 层契约全部通过：无前缀判断、无默认全开、无无上限读取、热装载默认关闭"
+        },
+        {
+          "run": "r118",
+          "script": "contract_signature_impostor_test.py",
+          "keys": "selftest",
+          "status": "fail",
+          "tail": "（共 145 行，省略 127 行无信号内容）\n============================================================================\nr117 / README 196 契约：第五类证据只验 signature 字符串的强度边界\n============================================================================\n  A1    PASS\n  A10   PASS\n  A11   PASS\n  E8    PASS\n  E9    PASS\n  PASS F1 存档存在 + schema v1 + 4 个待交付文件齐备 \n  PASS F2 ⛔ 抽取器正例 + 事故版反例有牙（字段表清空令正例失效） \n  FAIL F3 ⛔ 同源实算 A/B 账逐字段对拍 + caliber 逐键磁盘 hash 零差异 \n  PASS F4 ⛔ 真跑 Impostor：selftest 15/15 绿 + 签名 2/2 绿 + 4 位全 False + 对照打红 \n  PASS F5 A1 四文件纳入候选面 + scan_text 零命中 + 正例有牙 \n  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n❌ 有失败 A–E 132 项 + F 组 6 项\nF FAIL: ['F3 ⛔ 同源实算 A/B 账逐字段对拍 + caliber 逐键磁盘 hash 零差异']\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案"
+        },
+        {
+          "run": "r118b",
+          "script": "contract_knowledge_consume_test.py",
+          "keys": "hit",
+          "status": "pass",
+          "tail": "  PASS ✓ G3 ⛔ 空结果也要记账（没召回 ≠ 没检索），且 `hit_channels == {}`\n  PASS ✓ G4 ⛔ `hit_channels` 只出现 1 次且**只进账本**（读数是读数，不参与判据）\n====================================================================\n✅ 知识消费侧契约全部通过：短内容三道闸后仍不可召回、两个 access 增长点可区分、晋级条目按 note_id 追踪"
+        },
+        {
+          "run": "r118b",
+          "script": "contract_sampling_test.py",
+          "keys": "depth",
+          "status": "pass",
+          "tail": "  PASS S6.3 ⛔ 降级到 depth=1 确实能采到 easy 层（出口不是空的） \n\n============================================================\n结果：全部通过"
+        },
+        {
+          "run": "r118b",
+          "script": "contract_serve_test.py",
+          "keys": "resolve",
+          "status": "pass",
+          "tail": "  PASS ✓ J17 符号链接指向仓库外 ⇒ 400（先 resolve 再判，不是先拼后判）\n  PASS ✓ J18 反证：去掉 resolve ⇒ 同一软链请求读到仓库外内容（证明 J17 有牙）\n====================================================================\n✅ API 层契约全部通过：无前缀判断、无默认全开、无无上限读取、热装载默认关闭"
+        },
+        {
+          "run": "r119",
+          "script": "contract_knowledge_consume_test.py",
+          "keys": "hit",
+          "status": "pass",
+          "tail": "  PASS ✓ G3 ⛔ 空结果也要记账（没召回 ≠ 没检索），且 `hit_channels == {}`\n  PASS ✓ G4 ⛔ `hit_channels` 只出现 1 次且**只进账本**（读数是读数，不参与判据）\n====================================================================\n✅ 知识消费侧契约全部通过：短内容三道闸后仍不可召回、两个 access 增长点可区分、晋级条目按 note_id 追踪"
+        },
+        {
+          "run": "r119",
+          "script": "contract_sampling_test.py",
+          "keys": "depth",
+          "status": "pass",
+          "tail": "  PASS S6.3 ⛔ 降级到 depth=1 确实能采到 easy 层（出口不是空的） \n\n============================================================\n结果：全部通过"
+        },
+        {
+          "run": "r119",
+          "script": "contract_serve_test.py",
+          "keys": "resolve",
+          "status": "pass",
+          "tail": "  PASS ✓ J17 符号链接指向仓库外 ⇒ 400（先 resolve 再判，不是先拼后判）\n  PASS ✓ J18 反证：去掉 resolve ⇒ 同一软链请求读到仓库外内容（证明 J17 有牙）\n====================================================================\n✅ API 层契约全部通过：无前缀判断、无默认全开、无无上限读取、热装载默认关闭"
+        },
+        {
+          "run": "r120",
+          "script": "contract_knowledge_consume_test.py",
+          "keys": "hit",
+          "status": "pass",
+          "tail": "  PASS ✓ G3 ⛔ 空结果也要记账（没召回 ≠ 没检索），且 `hit_channels == {}`\n  PASS ✓ G4 ⛔ `hit_channels` 只出现 1 次且**只进账本**（读数是读数，不参与判据）\n====================================================================\n✅ 知识消费侧契约全部通过：短内容三道闸后仍不可召回、两个 access 增长点可区分、晋级条目按 note_id 追踪"
+        },
+        {
+          "run": "r120",
+          "script": "contract_sampling_test.py",
+          "keys": "depth",
+          "status": "pass",
+          "tail": "  PASS S6.3 ⛔ 降级到 depth=1 确实能采到 easy 层（出口不是空的） \n\n============================================================\n结果：全部通过"
+        },
+        {
+          "run": "r120",
+          "script": "contract_serve_test.py",
+          "keys": "resolve",
+          "status": "pass",
+          "tail": "  PASS ✓ J17 符号链接指向仓库外 ⇒ 400（先 resolve 再判，不是先拼后判）\n  PASS ✓ J18 反证：去掉 resolve ⇒ 同一软链请求读到仓库外内容（证明 J17 有牙）\n====================================================================\n✅ API 层契约全部通过：无前缀判断、无默认全开、无无上限读取、热装载默认关闭"
+        },
+        {
+          "run": "r121",
+          "script": "contract_knowledge_consume_test.py",
+          "keys": "hit",
+          "status": "pass",
+          "tail": "  PASS ✓ G3 ⛔ 空结果也要记账（没召回 ≠ 没检索），且 `hit_channels == {}`\n  PASS ✓ G4 ⛔ `hit_channels` 只出现 1 次且**只进账本**（读数是读数，不参与判据）\n====================================================================\n✅ 知识消费侧契约全部通过：短内容三道闸后仍不可召回、两个 access 增长点可区分、晋级条目按 note_id 追踪"
+        },
+        {
+          "run": "r121",
+          "script": "contract_sampling_test.py",
+          "keys": "depth",
+          "status": "pass",
+          "tail": "  PASS S6.3 ⛔ 降级到 depth=1 确实能采到 easy 层（出口不是空的） \n\n============================================================\n结果：全部通过"
+        },
+        {
+          "run": "r121",
+          "script": "contract_serve_test.py",
+          "keys": "resolve",
+          "status": "pass",
+          "tail": "  PASS ✓ J17 符号链接指向仓库外 ⇒ 400（先 resolve 再判，不是先拼后判）\n  PASS ✓ J18 反证：去掉 resolve ⇒ 同一软链请求读到仓库外内容（证明 J17 有牙）\n====================================================================\n✅ API 层契约全部通过：无前缀判断、无默认全开、无无上限读取、热装载默认关闭"
+        }
+      ]
+    },
+    "C_attribution": {
+      "per_contract": {
+        "contract_knowledge_consume_test.py": {
+          "frame_key": "hit",
+          "source_has_word": true,
+          "word_in_pass_text": true,
+          "source_bytes": 12005
+        },
+        "contract_sampling_test.py": {
+          "frame_key": "depth",
+          "source_has_word": true,
+          "word_in_pass_text": true,
+          "source_bytes": 14730
+        },
+        "contract_serve_test.py": {
+          "frame_key": "resolve",
+          "source_has_word": true,
+          "word_in_pass_text": true,
+          "source_bytes": 34947
+        }
+      },
+      "all_expected_contracts_hit": true,
+      "unexpected_hit_scripts": [
+        "contract_signature_impostor_test.py"
+      ],
+      "unexpected_only_red_run": true,
+      "c1c2_tail_frame_word_zero": true,
+      "all_hits_are_selfreport_text": true,
+      "hit_is_not_runtime_evidence": true,
+      "two_ledgers_separate": true,
+      "merged_into_bool": false
+    },
+    "D_boundary": {
+      "anchor": {
+        "ok": true,
+        "repos": 3,
+        "diffs": [],
+        "caliber_diffs": []
+      },
+      "denominator_dual_source": {
+        "main": 135,
+        "form": 119,
+        "no_result": 94,
+        "dual_source": {
+          "main_rows": 135,
+          "main_summary": 135,
+          "form_rows": 119,
+          "form_summary": 119,
+          "no_result_rows": 94,
+          "no_result_summary": 94
+        },
+        "all_distinct": true
+      },
+      "superseded": {
+        "n_registered": 3,
+        "diffs": [],
+        "all_match": true
+      },
+      "selfcheck": {
+        "own_call_sites": {
+          "scripts/probe_tail_selfreport.py": 0,
+          "scripts/tail_selfreport_contract.py": 0
+        },
+        "new_files_resolve_policy_calls": 0,
+        "no_new_denominator_call_site": true,
+        "self_archive_suffix": ".jsonl",
+        "self_archive_not_json": true,
+        "new_contract_in_scripts_not_tests": true,
+        "scripts_json_dynamic_denominator": []
+      },
+      "section_183_touched": false,
+      "real_expr_run": 0,
+      "real_commit_run": 0,
+      "main_repo_run": 0,
+      "gain_rows_reported": 0,
+      "product_files_modified": 0,
+      "scope_narrowing_only": true,
+      "direction_199_200_unchanged": true
+    }
+  },
+  "closure": {
+    "a1_ledger_scope_two_contracts": true,
+    "a2_scope_two_of_129": true,
+    "a3_c1c2_are_the_two": true,
+    "b1_six_products_available": true,
+    "b2_clean_runs_129_red_130": true,
+    "b3_tail_all_str": true,
+    "b4_stable_three_hits": true,
+    "b5_stable_across_clean_runs": true,
+    "b6_c1c2_hit_zero": true,
+    "b7_non_c1c2_hits_present": true,
+    "c1_all_expected_contracts_hit": true,
+    "c2_unexpected_only_red_run": true,
+    "c3_c1c2_zero_in_full": true,
+    "c4_all_hits_selfreport_text": true,
+    "c5_hit_not_runtime_evidence": true,
+    "c6_two_ledgers_not_merged": true,
+    "d1_denominator_dual_source": true,
+    "d2_superseded_all_match": true,
+    "d3_anchor_ok": true,
+    "d4_no_new_resolve_calls": true,
+    "d5_no_dynamic_json_denominator": true,
+    "d6_section183_zero": true,
+    "d7_scope_narrowing_only": true
+  },
+  "derived": {
+    "n_closure": 23,
+    "n_closure_true": 23,
+    "n_stable_hits": 3,
+    "scope_fraction": "2/129"
+  }
+}
