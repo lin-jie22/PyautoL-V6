@@ -11273,3 +11273,30 @@ B 段 `6/6` F 组撤回、静态四项（真 3.9.6 parse、裸 `noqa` 0、
 再跑 H 组、⑤ 放宽 / 降级 deny-modules、190 留下的 `ok_nogold`
 ledger 语义 / 189 反证组补样本），一律未开工；r118 新开口「修 r117
 F3 全仓契约快照判据口径」单列、不并入。① 已取证收口、④ / ⑥ 已落地。
+
+═══ 六、全量验收收口（2026-11-18）═══
+
+首跑即全绿，**无 r114–r118 那种首跑真红**：脱管 env（只 unset
+`PYTHONPATH`）、`-j 2`、后台按产物判定（⛔ 通知 exit code 不作判据）。
+
+`/tmp/r120_full.json` 产物读数：`counts pass=129 / fail=0 / skip=0 /
+timeout=0 / error=0`、`n_scripts 127`、`n_runs 129`、`jobs 2`、
+`ok=True`、`exit_code=0`、`status {'pass': 129}`、`rc {0: 129}`、
+`n_bad 0`；`/tmp/r120_full.rc = exit=0 / done`、`stderr` 空。
+零真红印证本轮两处预防性绕开成立且未被触发：产物闸放 `scripts/`、
+存档 `.jsonl`，127 分母与 `coverage_scripts` 常量均未漂移，不必如
+r118 那样改名移出扫描面。
+
+`undeclared_modes` 仍 10 份、**不含** `full_run_ledger` / `truerun` /
+`product_label`：证实本产物闸不进全量发现面，全量不为它 +1，
+运行时证据是 §199 第四段的**单跑复核**（`closure 29/29`、契约 A–E
+19 + F、反证 A/B 两段、静态四项）。代价如实登记，不冒充全量绿。
+
+全量后复核：`pfl.anchor_report()` `ok=True repos=3 diffs=[] caliber_diffs=[]`；
+A1 四文件 `in_surface 4/4`、`scan_hits 0`、正例有牙；
+`git diff --check rc=0`；`HEAD == origin/main == 6ab5dad`、
+工作区干净（三件套已先于全量提交推送）。
+
+拍板清单与边界未变，见第五段：本轮仍是纯只读取证 +
+归档，§183 零触碰、未改 189–198 任何判据 / 尺子 / 存档口径、
+不报收益、不构成「默认生效」的新证据。
