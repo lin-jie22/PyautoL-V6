@@ -1,0 +1,312 @@
+{
+  "caliber": {
+    "aether/check.py": "88cc4c09ed9293dc881c0f77993666edf1e217292740b0ba88f55f90d9804c82",
+    "scripts/probe_full_run_ledger.py": "0ba39e1aa92fe3cd45292a8fd3e96d9785ae27b1be7e2d591275208091814ce8",
+    "scripts/probe_tail_selfreport.py": "bc95e492ec1d6bde4c33f38d0e2e85400bd7f0350436a0dae41850bfb3fbdb1c",
+    "scripts/probe_frameword_caliber.py": "3a800387dc6ac46924e717bd7a8c5ad05a0fa93cb6f81b48ff28540b537fadd2",
+    "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+    "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+    "scripts/probe_default_effect.py": "881318647f769036f321a0dfb5f7ececa1d4279355ee27027e2f342ccfd0d9f3",
+    "scripts/probe_truerun_count.py": "ca728265ce966eb2ddfcf0a3916b18b23a44ab69e43e62d5d913224d5f1fea26",
+    "scripts/probe_product_label.py": "2863d5965da2ad23af7debe574ff67505103a64ccbd14a08947ef3d0fa4de5da",
+    "scripts/probe_stub_gate.py": "6d39d84331441040c3e4ff804afba2cd16dd33eb95b48012e3c8f936593996bf",
+    "scripts/frameword_caliber_census.jsonl": "9eb2ab76f7348aac04725dc177f36dc17d79ac7b6cf3a3cfdcd8f59d25a096f7",
+    "scripts/obs_surface_stdout.jsonl": "a41627895500a93b39c219a545ccd0af8995c3b716e9b711dc93fd5aec9babcb",
+    "scripts/caliber_superseded.json": "77a828b6a82e3afefa83f23c21cbbab7360e091486a4f517e867a89c277265fb",
+    "scripts/truerun_count_census.jsonl": "dfc751c37a735bfbddbc1321e6dca910c0050bee6cb36e9148b46a46fa604022",
+    "scripts/product_label_census.jsonl": "7658e921d57246fa17bf799757d20d3ba78604324ab6a1a456ebd84e12e92b4c",
+    "scripts/stub_gate_census.jsonl": "33fee8def401d77cd2625414618884dbab3ad7e0a05a098ae28ba5c3f2102d1f",
+    "scripts/tail_selfreport_census.jsonl": "a3d9430444bfe6c99a91eda1197d7c09758f04c2eff6ed75ba33d4082bf532a9",
+    "tests/contract_context_gate_test.py": "4b7721d4de44b5e291101ae743f2ccbe548bd540eab1defdd5490c3540e9ef21",
+    "tests/contract_inliner_relax_test.py": "9c1f9c126055da0f30576e144ee0213804b52783e816d6f76cc986c7f3401792",
+    "tests/contract_knowledge_consume_test.py": "d83129653656a9c05e9f373df6696da013b2691003037be1127ffa4d476ff952",
+    "tests/contract_sampling_test.py": "7cd83d4399e3569a0144d67fa9865a58b7417071e44278c4f2bdcfcfcf9e26e7",
+    "tests/contract_serve_test.py": "be755a258ed2c9e43c3fc44b5dcc2bdb10e55b34f8980ab90b0c1274a0a814e4",
+    "tests/contract_default_effect_test.py": "83e15d7478bd9e4bbc085fa91974c8df6cf9e6f62dc1f28b09f2a5513d56e8c3"
+  },
+  "accounts": {
+    "A_obs_surface": {
+      "found": true,
+      "func_lineno": 123,
+      "success_branch_found": true,
+      "success_negative_slice": true,
+      "success_chars_cap": 400,
+      "success_is_truncated_tail": true,
+      "failure_keeps_signal_lines": true,
+      "two_observation_surfaces": true,
+      "obs_surface_definition": "产物 tail = stdout.strip().splitlines()[-4:] 再 [:400]（成功分支）"
+    },
+    "B_tricaliber": {
+      "per_contract": {
+        "contract_context_gate_test.py": {
+          "rc": 0,
+          "stdout_bytes": 3847,
+          "tail_bytes": 391,
+          "in_product": true,
+          "product_status": "pass",
+          "tail_equals_stdout_last4": true,
+          "sub_string_full": [
+            "selftest"
+          ],
+          "sub_string_tail": [],
+          "word_full": [
+            "selftest"
+          ],
+          "word_tail": [],
+          "sub_gain_by_full": [
+            "selftest"
+          ],
+          "word_gain_by_full": [
+            "selftest"
+          ],
+          "stdout": "==========================================================================\n契约：上下文门量具 —— 内联器四条自限 + 三档判档\n==========================================================================\n\n== A 组：内联器基本正确性 ==\n  PASS A1 抽到断言并记下所属函数 \n  PASS A2 绑定按作用域分开 \n  PASS A3 内联用**本作用域**的绑定（t1 的 v 是 'a'） \n  PASS A4 递归内联（b → a+1 → 3+1） \n  PASS A5 没有可展的名字 ⇒ 返回 None（不许原样返回冒充救回） \n\n== B 组：⛔ 四条自限，每条带反证 ==\n  PASS B1 自限① 作用域隔离：t2 的 v 不串到 t1 \n  PASS B2 自限② 同名两个不同 rhs ⇒ 整条剔除（循环里重复赋值） \n  PASS B2b ⛔ 反证（构造）：歧义若被内联为首个 rhs=1 ⇒ 与 gold=2 不符 \n  PASS B3 自限③ 时间依赖 ⇒ 拒收 \n  PASS B3b 无时间依赖的普通表达式不受影响 \n  PASS B4 自限④ 与测试写死 expected 不符 ⇒ 判 mismatch（不算救回） \n\n== C 组：判档四档 ==\n  PASS C1 求值不了 ⇒ none \n  PASS C2 能求值但与 gold 不符 ⇒ mismatch \n  PASS C3 能求值且与 gold 一致 ⇒ ok \n  PASS C4 gold 不是字面量 ⇒ ok_nogold（**不许猜**，也不许当已验证） \n  PASS C5 gold 提取：非字面量 ⇒ None \n\n== D 组：⛔⛔ 反证 —— 能求值 ≠ 语义对；有判据 ≠ 有鉴别力 ==\n  PASS D1 探针在参照实现上能求值（先证装置有效） \n  PASS D2 ⛔ 能求值 + 稳定，但值与测试写死期望不符 ⇒ mismatch ⇒ 不进救回 \n  PASS D3 ⛔ 语义对（ok）但 fixed 与 buggy 同值 ⇒ **不算收益** \n  PASS D4 判档函数对 raises 类：不 passed ⇒ none（没有 mismatch 这一说） \n\n== E 组：量具自检可复现 ==\n    ✓ 自检A 找出断言: 期望 True                         实得 True\n    ✓ 自检B 作用域绑定: 期望 ['b']                        实得 ['b']\n    ✓ 自检C 内联: 期望 \"'01'.upper()\"               实得 \"'01'.upper()\"\n    ✓ 自检D 歧义剔除: 期望 {}                           实得 {}\n    ✓ 自检E 时间依赖: 期望 True                         实得 True\n    ✓ 自检F 无依赖: 期望 False                        实得 False\n    ✓ 自检G 硬失败: 期望 'none'                       实得 'none'\n    ✓ 自检H 软失败: 期望 'mismatch'                   实得 'mismatch'\n    ✓ 自检I 通过: 期望 'ok'                         实得 'ok'\n    ✓ 自检J 默认策略 1111: 期望 '1111'                       实得 '1111'\n    ✓ 自检K --strict 策略 0000: 期望 '0000'                       实得 '0000'\n    ✓ 自检L ①严格态用本作用域: 期望 \"'a'.upper()\"                实得 \"'a'.upper()\"\n    ✓ 自检M ①放宽态串到 t2: 期望 \"'b'.upper()\"                实得 \"'b'.upper()\"\n    ✓ 自检N ②严格态剔除歧义: 期望 {}                           实得 {}\n    ✓ 自检O ②放宽态取首个 rhs: 期望 '1'                          实得 '1'\n  PASS E1 selftest() 全绿 \n\n== F 组：⛔ r110 默认放宽策略 + 四条开关逐条有牙 ==\n  PASS F1 默认策略 1111（四条全放宽且默认生效） \n  PASS F2 --strict 策略 0000（154 口径可复算） \n  PASS F3 ①严格态用本作用域 vs 放宽态串到 t2 \n  PASS F4 ②严格剔除歧义 vs 放宽取首个 rhs \n  PASS F5 ③低层拒收仍严格（放宽只是**不采纳拒绝动作**） \n  PASS F6 ④严格态 mismatch 拒收 / 放宽态另账且语义未证 \n  PASS F7 ⛔ 假鉴别力绝不进收益账：mismatch 即便 disc=True 也 counts_disc=False \n==========================================================================\n✅ 低层四条规则仍严格（旧口径可复算）；默认策略已放宽 1111；『能求值』与『有鉴别力』仍是分开的两个数\n"
+        },
+        "contract_inliner_relax_test.py": {
+          "rc": 0,
+          "stdout_bytes": 1906,
+          "tail_bytes": 203,
+          "in_product": true,
+          "product_status": "pass",
+          "tail_equals_stdout_last4": true,
+          "sub_string_full": [],
+          "sub_string_tail": [],
+          "word_full": [],
+          "word_tail": [],
+          "sub_gain_by_full": [],
+          "word_gain_by_full": [],
+          "stdout": "  PASS A1\n  PASS A10\n  PASS A11\n  PASS A12\n  PASS A13\n  PASS A14\n  PASS A15\n  PASS A16\n  PASS A17\n  PASS A18\n  PASS A19\n  PASS A2\n  PASS A20\n  PASS A21\n  PASS A22\n  PASS A23\n  PASS A24\n  PASS A25\n  PASS A26\n  PASS A27\n  PASS A28\n  PASS A3\n  PASS A4\n  PASS A5\n  PASS A6\n  PASS A7\n  PASS A8\n  PASS A9\n  PASS B1\n  PASS B10\n  PASS B11\n  PASS B2\n  PASS B3\n  PASS B4\n  PASS B5\n  PASS B6\n  PASS B7\n  PASS B8\n  PASS B9\n    ✓ 自检A 找出断言: 期望 True                         实得 True\n    ✓ 自检B 作用域绑定: 期望 ['b']                        实得 ['b']\n    ✓ 自检C 内联: 期望 \"'01'.upper()\"               实得 \"'01'.upper()\"\n    ✓ 自检D 歧义剔除: 期望 {}                           实得 {}\n    ✓ 自检E 时间依赖: 期望 True                         实得 True\n    ✓ 自检F 无依赖: 期望 False                        实得 False\n    ✓ 自检G 硬失败: 期望 'none'                       实得 'none'\n    ✓ 自检H 软失败: 期望 'mismatch'                   实得 'mismatch'\n    ✓ 自检I 通过: 期望 'ok'                         实得 'ok'\n    ✓ 自检J 默认策略 1111: 期望 '1111'                       实得 '1111'\n    ✓ 自检K --strict 策略 0000: 期望 '0000'                       实得 '0000'\n    ✓ 自检L ①严格态用本作用域: 期望 \"'a'.upper()\"                实得 \"'a'.upper()\"\n    ✓ 自检M ①放宽态串到 t2: 期望 \"'b'.upper()\"                实得 \"'b'.upper()\"\n    ✓ 自检N ②严格态剔除歧义: 期望 {}                           实得 {}\n    ✓ 自检O ②放宽态取首个 rhs: 期望 '1'                          实得 '1'\n  PASS C1\n  PASS C2\n  PASS C3\n  PASS C4\n  PASS C5\n  PASS C6\n==========================================================================\n✅ 四条全放宽且默认生效已落地；两本账分开、旧口径可复算、superseded 登记有牙\n"
+        },
+        "contract_knowledge_consume_test.py": {
+          "rc": 0,
+          "stdout_bytes": 3138,
+          "tail_bytes": 416,
+          "in_product": true,
+          "product_status": "pass",
+          "tail_equals_stdout_last4": true,
+          "sub_string_full": [
+            "call",
+            "hit"
+          ],
+          "sub_string_tail": [
+            "hit"
+          ],
+          "word_full": [],
+          "word_tail": [],
+          "sub_gain_by_full": [
+            "call"
+          ],
+          "word_gain_by_full": [],
+          "stdout": "====================================================================\nA 组 · 检索侧长度闸（`memory.py:430`）—— 短条目永远进不了召回\n  PASS ✓ A1 ⛔ 19 字条目**不出现在**检索结果里（写入了但读不到）\n  PASS ✓ A2 ⛔ 反证（不是「全都检索不到」）：79 字条目**在**结果里\n  PASS ✓ A3 ⛔ 反证（闸**有牙**）：把下限设成 0 ⇒ 同一条短内容**能**被召回\nB 组 · 三道闸互不抵消：写入 written ∧ 往返还在 ⇒ 仍可能检索不到\n  PASS ✓ B1 写入侧对短内容返回 `written`（不拒，只标 `below_min_content`）\n  PASS ✓ B2 ⛔ 写入成功 ∧ 在库中 ∧ 检索不到 ⇒ **死库存**（写入侧读数说成功）\n  PASS ✓ B3 ⛔ 对照组：够长的内容三道闸**都过得去**\nC 组 · `access_count` 有两个增长点 ⇒ 「涨了」不等于「被读了」\n  PASS ✓ C1 重复写同一内容 ⇒ `deduped` 且 access **+1**（**假消费**）\n  PASS ✓ C2 检索命中 ⇒ access **+1**（**真消费**）\n  PASS ✓ C3 ⛔ 两者在读数上**同形** ⇒ 判「真被消费」必须扣掉写入次数，或另设检索侧独立计数（第 75 条）\nD 组 · `promote` 后按 **note_id** 追踪（r59 实测踩的坑）\n  PASS ✓ D1 promote 成功 ⇒ tier→L2、channel→curated，但 **note_id 不变**\n  PASS ✓ D2 ⛔ 反证：只按 `channel=='learner'` 过滤 ⇒ 晋级条目被读成「消失了」（观测口径必须按 note_id）\n  PASS ✓ D3 ⛔ 反证（D1 有牙）：verifier=None ⇒ fail-closed 不提升\nE 组 · 形态正确 ≠ 可用（第 24 条：形态与可用性要分开量）\n  PASS ✓ E1 修后知识形态 = `kind / env：证据`（与生产被消费 1600+ 次的化石同形）\n  PASS ✓ E2 ⛔ 反证：空壳的**前缀形态也对**（`kind / env：`，只是冒号后为空） ⇒ 别拿形态当可用性判据\nF 组 · ⛔ 长度闸的**旁路**：默认 `expand_links=True` 会把它绕过去\n  PASS ✓ F1 ⛔ 默认 `expand_links=True` ⇒ 被闸拦掉的 19 字条目**仍在结果里**\n  PASS ✓ F2 ⛔ 反证（F1 有牙）：同一库 `expand_links=False` ⇒ 它**不在**\n  PASS ✓ F3 ⛔ 旁路**不违背**设计意图：短条目只落在链接段（位置 ≥ 主循环命中数，不占主循环名额）\n  PASS ✓ F4 ⛔ 反证（F3 有牙）：下限设 0 ⇒ 它落进**主循环段**（位置 < 主循环命中数，能靠余弦抢位）⇒ 「不霸占」不是恒真\nG 组 · `hit_channels` 读数（账本只能看 top_note ⇒ 补聚合口径）\n  PASS ✓ G1 `ledger_actor` 非空 ⇒ 记一条 `memory.recall` 且含 `hit_channels`\n  PASS ✓ G2 ⛔ 反证（不是恒真）：各 channel 计数之和 == `n_hits`\n  PASS ✓ G3 ⛔ 空结果也要记账（没召回 ≠ 没检索），且 `hit_channels == {}`\n  PASS ✓ G4 ⛔ `hit_channels` 只出现 1 次且**只进账本**（读数是读数，不参与判据）\n====================================================================\n✅ 知识消费侧契约全部通过：短内容三道闸后仍不可召回、两个 access 增长点可区分、晋级条目按 note_id 追踪\n"
+        },
+        "contract_sampling_test.py": {
+          "rc": 0,
+          "stdout_bytes": 3443,
+          "tail_bytes": 167,
+          "in_product": true,
+          "product_status": "pass",
+          "tail_equals_stdout_last4": true,
+          "sub_string_full": [
+            "depth"
+          ],
+          "sub_string_tail": [
+            "depth"
+          ],
+          "word_full": [
+            "depth"
+          ],
+          "word_tail": [
+            "depth"
+          ],
+          "sub_gain_by_full": [],
+          "word_gain_by_full": [],
+          "stdout": "S1 组：点位表必须与真实变异**同源**（另写一份枚举必错位）\n  PASS S1.textscore 前 24 个点位逐个反查一致（同源） \n  PASS S1.eventflow 前 24 个点位逐个反查一致（同源） \n  PASS S1.chaos 前 24 个点位逐个反查一致（同源） \n  PASS S1.4 ⛔ `which=-1` 是探针模式：**必须**抛异常（不许偷偷变异） \nS2 组：均衡序列的定义（长度不超 / 各维度差 ≤1 / 确定性）\n  PASS S2.6 长度 = min(max_n, 点位数)（⛔ 尝试次数不变） \n  PASS S2.6b 无重复点位 \n  PASS S2.12 长度 = min(max_n, 点位数)（⛔ 尝试次数不变） \n  PASS S2.12b 无重复点位 \n  PASS S2.24 长度 = min(max_n, 点位数)（⛔ 尝试次数不变） \n  PASS S2.24b 无重复点位 \n  PASS S2.4096 长度 = min(max_n, 点位数)（⛔ 尝试次数不变） \n  PASS S2.4096b 无重复点位 \n  PASS S2.5 轮流公平：**还剩点位**却比最多的少 ≥2 ⇒ 违规（点位耗尽的不算；实测分布 {'binop': 1, 'boolop': 2, 'compare': 3, 'constant': 3, 'string': 2, 'unaryop': 1}） \n  PASS S2.6 ⛔ 确定性：同输入两次调用结果相同 \n  PASS S2.7 ⛔ 均衡 ≠ 顺序：两者**长度相同但取点不同**（否则是空转） \n  PASS S2.8 配额给足时覆盖全部点位（只是换顺序，不丢点位） \nS3 组：默认（balanced=False）**绝不**走新代码路径\n  PASS S3.1 ⛔ 默认路径不调用 `mutation_sites`（装了炸弹也没炸到） \n  PASS S3.2 默认报告的 `sampling` 记 sequential \n  PASS S3.3 默认报告**不**写维度账（None，不是空 dict —— 空 dict 会被读成「枚举过但没点位」） \n  PASS S3.4 默认任务 id 仍是 `m{i}` 顺序形态（口径未漂） \nS4 组：真实环境（dev=textscore）上，均衡采样确实出更多维度\n     顺序：3 题 / 维度 ['compare']\n     均衡：6 题 / 维度 ['boolop', 'compare', 'unaryop']\n  PASS S4.1 ⛔ 尝试次数相同（这是「只差一个变量」的前提） \n  PASS S4.2 均衡采样的题量 ≥ 顺序 \n  PASS S4.3 ⛔ 均衡采样覆盖**更多维度**（dev 环境不再被单一算子垄断） \n  PASS S4.4 报告记了口径与维度账 \n  PASS S4.5 ⛔ `chosen_by_kind` 是**采到**的点位账，不是点位总账（两者不同 ⇒ 说明确实只采了一部分） \n  PASS S4.6 ⛔ 反证：实现退化成顺序后维度数回落 ⇒ S4.3 有牙（不是恒真） \n     utils 顺序 0 题 / 均衡 2 题\n  PASS S4.7 顺序采样 0 题的环境，均衡后能出题（题源被采样方式浪费掉了） \nS5 组：采样口径必须可观测（报告 + 账本配置）\n  PASS S5.1 `to_dict()` 带 sampling / sites_by_kind / chosen_by_kind \n  PASS S5.2 CLI 有 `--balanced` 开关（新口径必须显式开启） \n  PASS S5.3 ⛔ `balanced` 进账本 run_config（不记 ⇒ 读不出换的是口径还是世界） \n  PASS S5.4 ⛔ 冻结套件的合成调用**不**带 balanced（基线锚点不许随采样实验漂移） \nS6 组：缺难度层时必须有出口（否则『明明有增益却 0 提交』）\n  PASS S6.1 CLI 有 depth 降级补层分支，且**记账**（不是静默换口径） \n  PASS S6.2 ⛔ 降级分支只在 depth≥2 缺层时触发（默认 depth=1 零影响） \n     depth=1 均衡：6 题 easy=3 hard=3\n  PASS S6.3 ⛔ 降级到 depth=1 确实能采到 easy 层（出口不是空的） \n\n============================================================\n结果：全部通过\n"
+        },
+        "contract_serve_test.py": {
+          "rc": 0,
+          "stdout_bytes": 10638,
+          "tail_bytes": 381,
+          "in_product": true,
+          "product_status": "pass",
+          "tail_equals_stdout_last4": true,
+          "sub_string_full": [
+            "payload",
+            "resolve"
+          ],
+          "sub_string_tail": [
+            "resolve"
+          ],
+          "word_full": [
+            "payload",
+            "resolve"
+          ],
+          "word_tail": [
+            "resolve"
+          ],
+          "sub_gain_by_full": [
+            "payload"
+          ],
+          "word_gain_by_full": [
+            "payload"
+          ],
+          "stdout": "[aether] \"GET /api/status HTTP/1.1\" 200 -\n[aether] \"GET /api/status_extra HTTP/1.1\" 404 -\n[aether] \"GET /api/events_backup HTTP/1.1\" 404 -\n[aether] \"GET /api/events?limit=2 HTTP/1.1\" 200 -\n[aether] \"GET /api/status_extra HTTP/1.1\" 200 -\n[aether] \"GET /api/status_extra HTTP/1.1\" 404 -\n[aether] \"GET /api/status?limit=abc HTTP/1.1\" 400 -\n[aether] \"GET /api/events?limit=abc HTTP/1.1\" 400 -\n[aether] \"GET /api/events?limit=-1 HTTP/1.1\" 400 -\n[aether] \"GET /console/index.html HTTP/1.1\" 200 -\n[aether] \"GET /console/../console_bak/secret.txt HTTP/1.1\" 404 -\n[aether] \"GET /console/../../../etc/passwd HTTP/1.1\" 404 -\n[aether] \"GET /console/../console_bak/secret.txt HTTP/1.1\" 200 -\n[aether] \"GET /console/../console_bak/secret.txt HTTP/1.1\" 404 -\n[aether] \"GET /api/status HTTP/1.1\" 200 -\n[aether] \"GET /api/status HTTP/1.1\" 200 -\n[aether] \"GET /api/status HTTP/1.1\" 200 -\n[aether] \"GET /api/status HTTP/1.1\" 200 -\n[aether] \"GET /api/status HTTP/1.1\" 200 -\n[aether] \"GET /api/status HTTP/1.1\" 200 -\n[aether] \"GET /api/ledger/raw HTTP/1.1\" 200 -\n[aether] \"GET /api/ledger/raw HTTP/1.1\" 413 -\n[aether] \"GET /api/ledger/raw HTTP/1.1\" 200 -\n[aether] \"GET /api/status?limit=3 HTTP/1.1\" 200 -\n[aether] \"GET /api/events?limit=3 HTTP/1.1\" 200 -\n[aether] \"GET /api/status?limit=2 HTTP/1.1\" 200 -\n[aether] \"GET /api/events?limit=2 HTTP/1.1\" 200 -\n[aether] \"GET /api/status?limit=1 HTTP/1.1\" 200 -\n[aether] \"GET /api/status?limit=-1 HTTP/1.1\" 400 -\n[aether] \"GET /api/status?limit=99999 HTTP/1.1\" 400 -\n[aether] \"GET /api/status?limit=abc HTTP/1.1\" 400 -\n[aether] \"GET /api/events?limit=-1 HTTP/1.1\" 400 -\n[aether] \"GET /api/events?limit=99999 HTTP/1.1\" 400 -\n[aether] \"GET /api/events?limit=abc HTTP/1.1\" 400 -\n[aether] \"GET /api/status?limit=2 HTTP/1.1\" 200 -\n[aether] \"GET /api/events?limit=2 HTTP/1.1\" 200 -\n[aether] \"GET /api/status?limit=200 HTTP/1.1\" 200 -\n[aether] \"POST /api/capabilities/reload HTTP/1.1\" 403 -\n[aether] \"POST /api/capabilities/reload HTTP/1.1\" 400 -\n[aether] \"POST /api/capabilities/reload HTTP/1.1\" 200 -\n[aether] \"POST /api/invoke HTTP/1.1\" 422 -\n[aether] \"POST /api/capabilities/reload HTTP/1.1\" 200 -\n[aether] \"POST /api/invoke HTTP/1.1\" 200 -\n[aether] \"POST /api/capabilities/reload HTTP/1.1\" 400 -\n[aether] \"POST /api/capabilities/reload HTTP/1.1\" 409 -\n[aether] \"POST /api/invoke HTTP/1.1\" 200 -\n[aether] \"POST /api/capabilities/reload HTTP/1.1\" 207 -\n[aether] \"POST /api/capabilities/reload HTTP/1.1\" 404 -\n[aether] \"GET /api/capabilities HTTP/1.1\" 200 -\n[aether] \"GET /api/capabilities HTTP/1.1\" 200 -\n[aether] \"GET /api/files?path=. HTTP/1.1\" 200 -\n[aether] \"GET /api/files?path=many HTTP/1.1\" 200 -\n[aether] \"GET /api/files?path=. HTTP/1.1\" 200 -\n[aether] \"GET /api/files?path=../../.. HTTP/1.1\" 400 -\n[aether] \"GET /api/files?path=/etc HTTP/1.1\" 400 -\n[aether] \"GET /api/files?path=~/Library HTTP/1.1\" 400 -\n[aether] \"GET /api/files HTTP/1.1\" 200 -\n[aether] \"GET /api/files?path=README.md HTTP/1.1\" 400 -\n[aether] \"GET /api/file?path=README.md HTTP/1.1\" 200 -\n[aether] \"GET /api/file?path=/etc/passwd HTTP/1.1\" 400 -\n[aether] \"GET /api/file?path=../../etc/passwd HTTP/1.1\" 400 -\n[aether] \"GET /api/file?path=data/aether.db HTTP/1.1\" 415 -\n[aether] \"GET /api/file?path=bad.md HTTP/1.1\" 415 -\n[aether] \"GET /api/file?path=big.md HTTP/1.1\" 413 -\n[aether] \"GET /api/file?path=data/aether.db HTTP/1.1\" 415 -\n[aether] \"GET /api/file?path=escape.md HTTP/1.1\" 400 -\n[aether] \"GET /api/file?path=escape.md HTTP/1.1\" 200 -\n====================================================================\nA 组 · 端点按路径边界匹配（startswith 会把 _extra 也算命中）\n  PASS ✓ A1 /api/status 正常返回\n  PASS ✓ A2 /api/status_extra ⇒ 404（前缀判断会误命中 status）\n  PASS ✓ A3 /api/events_backup ⇒ 404（前缀判断会误命中 events）\n  PASS ✓ A4 /api/events 正常返回且受 limit 约束\n  PASS ✓ A5 反证：还原 startswith 写法 ⇒ /api/status_extra 不再是 404（否则 A2 是恒真断言）\n  PASS ✓ A6 反证已还原 ⇒ 恢复 404\n\nB 组 · 入参有明确失败形态（400，不是被兜成 500）\n  PASS ✓ B1 limit=abc ⇒ 400（不是 500）\n  PASS ✓ B2 /api/events?limit=abc ⇒ 400（不是 500）\n  PASS ✓ B3 limit=-1 ⇒ 400 并说明原因（不是静默空列表）\n\nC 组 · 静态文件按路径分量判断（兄弟前缀目录不是子路径）\n  PASS ✓ C1 正常 console 文件能服务（修穿越不得修成全 404）\n  PASS ✓ C2 兄弟前缀目录 secret.txt ⇒ 404（字符串前缀判断会把它当 console 子路径）\n  PASS ✓ C3 向上穿越到 /etc/passwd ⇒ 404\n  PASS ✓ C4 反证：还原字符串前缀写法 ⇒ secret.txt 被读出（否则 C2 是恒真断言）\n  PASS ✓ C5 反证已还原 ⇒ 恢复 404\n\nD 组 · CORS 默认关闭（只读 ≠ 无隐私）\n  PASS ✓ D1 默认配置 + 带 Origin ⇒ **不发** Access-Control-Allow-Origin\n  PASS ✓ D2 白名单内 ⇒ 回显该 origin（不是回 *）\n  PASS ✓ D3 白名单命中时带 Vary: Origin（避免缓存串味）\n  PASS ✓ D4 白名单外 ⇒ 不发 ACAO\n  PASS ✓ D5 无 Origin 头 ⇒ 不发 ACAO\n  PASS ✓ D6 反证：还原旧写法（硬编码 *）⇒ 任意 origin 都拿到 ACAO（否则 D4 是恒真断言）\n  PASS ✓ D7 反证已还原 ⇒ 恢复不发送\n\nE 组 · /api/ledger/raw 有上限（append-only ⇒ 无上限是线性增长）\n  PASS ✓ E1 小账本 raw 正常返回 ndjson\n  PASS ✓ E2 超过上限 ⇒ 413（不是把整个账本读进内存）\n  PASS ✓ E3 413 响应给出替代路径（否则调用方无从自救）\n  PASS ✓ E4 上限复原 ⇒ 恢复 200\n\nF 组 · 两个事件端点共用同一个序列化函数（结构不得漂移）\n  PASS ✓ F1 /api/status.events 与 /api/events.events **键集合相同**\n  PASS ✓ F2 事件里带 kind / payload（TS 侧监督器靠这两个字段）\n  PASS ✓ F3 `_event_dict` 能吃下 slots dataclass（不会被 __dict__ 打 500）\n  PASS ✓ F4 `_event_dict` 退路能吃下普通对象\n  PASS ✓ F5 反证：给 `_event_dict` 打标记 ⇒ **两个端点同时**带上该标记（某端自己抄了一份序列化 ⇒ 这里必然转红）\n  PASS ✓ F6 反证已还原 ⇒ 恢复真实事件结构\n\nG 组 · 污染判据是对称条件（老快照未声明 ⇒ 不得全算外来）\n  PASS ✓ G1 未声明 embedder_id 的老快照 ⇒ foreign_embedder=0（不得反过来把所有条目算成外来）\n  PASS ✓ G2 同上：dim 未声明 ⇒ wrong_dim=0\n  PASS ✓ G3 反证：非对称写法会把这条算成外来（证明 G1 拦住的是一个真会触发的分支）\n====================================================================\nH 组 · 列表端点不得有第二种无上限读取（limit 是第二个人口）\n  PASS ✓ H1 /api/status?limit=-1 ⇒ 400（负 limit 在 SQLite 里是**无限制**）\n  PASS ✓ H2 /api/status?limit=99999 ⇒ 400（超过 MAX_LIST_LIMIT=5000）\n  PASS ✓ H3 /api/status?limit=abc ⇒ 400（不是 500）\n  PASS ✓ H1 /api/events?limit=-1 ⇒ 400（负 limit 在 SQLite 里是**无限制**）\n  PASS ✓ H2 /api/events?limit=99999 ⇒ 400（超过 MAX_LIST_LIMIT=5000）\n  PASS ✓ H3 /api/events?limit=abc ⇒ 400（不是 500）\n  PASS ✓ H4 /api/status?limit=2 ⇒ 200 且 events ≤ 2\n  PASS ✓ H5 /api/events?limit=2 ⇒ 200 且 events ≤ 2\n  PASS ✓ H6 反证：SQLite 原生 `LIMIT -1` 返回**全表**（证明 H1 拦的是真会触发的分支，不是恒真）\n  PASS ✓ H6b 深层防御：Store 的每个 limit 入口都夹住负数\n  PASS ✓ H7 snapshots(limit=3) 取**最后** 3 条\n  PASS ✓ H8 判据不受响应截断影响：snapshot_ids() 仍是**全量**\n  PASS ✓ H9 /api/status 带 snapshots_total 与 snapshots_truncated（切了就要说切了）\n====================================================================\nI 组 · 能力热装载：默认关闭 / 只收路径 / 换空不替换（r30）\n  PASS ✓ I1 ⛔ 默认关闭 ⇒ 403（热装载=运行时改变能力集，不是默认能力）\n  PASS ✓ I2a 开闸后缺 manifest 且**无启动清单** ⇒ 400（不是静默装载空表）\n  PASS ✓ I2b 缺 manifest 但**有启动清单** ⇒ 回退重载那一份（changed=false，不是偷偷换成别的）\n  PASS ✓ I3 对照组：装载前 i.only ⇒ unavailable（不是 ok）\n  PASS ✓ I4 热装载 ⇒ 200 且能力集真的换了（changed=true, reload_count+1）\n  PASS ✓ I5 装载后 i.only 真能调通（out=HOT）—— 不是只有装载报告说成功\n  PASS ✓ I6 ⛔ 内联能力描述 ⇒ 400（否则=远程注入实现进本进程）\n  PASS ✓ I7 ⛔ 装载 0 条 ⇒ 409 且保持原能力集（kept=装载前的 fingerprint）\n  PASS ✓ I8 换空失败后 i.only 仍可调 ⇒ 证明真没被换成空表\n  PASS ✓ I9 ⛔ 部分成功 ⇒ 207（不是 200）—— 与「status=ok 掩盖落差」同源\n  PASS ✓ I10 manifest 不是文件 ⇒ 404\n  PASS ✓ I11 /api/capabilities 暴露 source / hot_reload / reload_count （磁盘清单 ≠ 进程清单时靠这个读数）\n  PASS ✓ I12 ⛔ 同源对拍：CLI 与 HTTP 装载同一清单 ⇒ fingerprint 相同（两个入口各写一份装载 ⇒ 幽灵差异）\n====================================================================\nJ 组 · 文件浏览/预览（`/api/files` `/api/file`）—— 只读，且只许看仓库内\n  PASS ✓ J1 /api/files 列根目录 200 且 n == len(entries)\n  PASS ✓ J2 超 500 条 ⇒ truncated=True 且 n 跟随实际（不是目录总数）\n  PASS ✓ J3 响应带 skipped_dirs（前端从这里渲染，不硬编码名单）\n  PASS ✓ J4 跳过目录不出现在列举里（.git / node_modules / __pycache__）\n  PASS ✓ J5 `..` 逃出仓库根 ⇒ 400（且说清是逃出，不是'不存在'）\n  PASS ✓ J6 绝对路径 ⇒ 400\n  PASS ✓ J7 `~` ⇒ 400\n  PASS ✓ J8 缺 path ⇒ 按仓库根处理（200，不是报错）\n  PASS ✓ J9 对文件列目录 ⇒ 400（明确说'不是目录'）\n  PASS ✓ J10 /api/file 文本预览 200 且 sha256 与内容一致\n  PASS ✓ J11 绝对路径 /etc/passwd ⇒ 400\n  PASS ✓ J12 `..` 穿越 ⇒ 400\n  PASS ✓ J13 二进制后缀（.db） ⇒ 415\n  PASS ✓ J14 后缀可预览但内容非 UTF-8 ⇒ 415\n  PASS ✓ J15 超 512KB ⇒ 413\n  PASS ✓ J16 415 时列出可预览后缀（不给名单 = 让人猜）\n  PASS ✓ J17 符号链接指向仓库外 ⇒ 400（先 resolve 再判，不是先拼后判）\n  PASS ✓ J18 反证：去掉 resolve ⇒ 同一软链请求读到仓库外内容（证明 J17 有牙）\n====================================================================\n✅ API 层契约全部通过：无前缀判断、无默认全开、无无上限读取、热装载默认关闭\n"
+        },
+        "contract_default_effect_test.py": {
+          "rc": 0,
+          "stdout_bytes": 2311,
+          "tail_bytes": 463,
+          "in_product": true,
+          "product_status": "pass",
+          "tail_equals_stdout_last4": true,
+          "sub_string_full": [
+            "resolve"
+          ],
+          "sub_string_tail": [],
+          "word_full": [],
+          "word_tail": [],
+          "sub_gain_by_full": [
+            "resolve"
+          ],
+          "word_gain_by_full": [],
+          "stdout": "==========================================================================\nr113 / README 192：「默认生效」的证据类型分层（静态 ≠ 运行）\n==========================================================================\n== A–E 组：接入点 / 运行证据 / 四层 reach / 边界 / closure ==\n  PASS A1\n  PASS A2\n  PASS A3\n  PASS A4\n  PASS A5\n  PASS A6\n  PASS A7\n  PASS A8\n  PASS A9\n  PASS A9b\n  PASS A9c\n  PASS A10\n  PASS A11\n  PASS A12\n  PASS A13\n  PASS A14\n  PASS A15\n  PASS A16\n  PASS A17\n  PASS A18\n  PASS A19\n  PASS A20\n  PASS A21\n  PASS A22\n  PASS A23\n  PASS B1\n  PASS B2\n  PASS B3\n  PASS B4\n  PASS B5\n  PASS B6\n  PASS B7\n  PASS B8\n  PASS B9\n  PASS B10\n  PASS B11\n  PASS B12\n  PASS B13\n  PASS B14\n  PASS B15\n  PASS B16\n  PASS B17\n  PASS B18\n  PASS B19\n  PASS B20\n  PASS B21\n  PASS B22\n  PASS B23\n  PASS B24\n  PASS B25\n  PASS C1\n  PASS C2\n  PASS C3\n  PASS C4\n  PASS C5\n  PASS C6\n  PASS C7\n  PASS C8\n  PASS C9\n  PASS C10\n  PASS C11\n  PASS C12\n  PASS C13\n  PASS C14\n  PASS C15\n  PASS C16\n  PASS C17\n  PASS C18\n  PASS C19\n  PASS D1\n  PASS D2\n  PASS D3\n  PASS D4\n  PASS D5\n  PASS D6\n  PASS D7\n  PASS D8\n  PASS D9\n  PASS D10\n  PASS D11\n  PASS D12\n  PASS D13\n  PASS D14\n  PASS D15\n  PASS E1\n  PASS E2\n  PASS E3\n  PASS E4\n  PASS E5\n  PASS E6\n  PASS E7\n  PASS E8\n  PASS E9\n  PASS E10\n  PASS E11\n  PASS E12\n  PASS E13\n  PASS E14\n  PASS E15\n  PASS E16\n== F 组：本机实战 ==\n  PASS F1 caliber 14 项磁盘 hash 全对拍（189–191 存档零回写）\n  PASS F2 ⛔ AST 抽取器正例 4/4 + 反例 0 + 属性形式真命中（零命中先证能命中）\n  PASS F3 同源实算 A/B/C 账逐字段对拍（事故版补丁有打红点）\n  PASS F4 ⛔ 事故版恒返 STRICT ⇒ 同源实算 resolve_default 翻转（反证有牙）\n  PASS F5 ⛔ main() 产物探测器正例命中 / 真实存档全不命中（0 份不是恒空）\n  PASS F6 验锚 OK 3/3 + 尺子同源重算幂等 + closure 49/49 + A1 三文件纳入\n==========================================================================\n✅ 全部通过（A–E 100 项 + F 组 6 项）\n『默认生效』只有静态 AST / 零沙箱合成 / 零沙箱离线三类证据；产品主流程运行证据 0 份；189 C 账 2 次真跑 run_all 不接 policy ⇒ 证据类型边界，不是产品洞、不是『默认没生效』；不报收益\n"
+        }
+      },
+      "n_probes": 6,
+      "n_ok_runs": 6,
+      "all_rc_zero": true,
+      "all_in_product": true,
+      "tail_faithful_to_last4": true,
+      "gain_rows": [
+        "contract_context_gate_test.py",
+        "contract_default_effect_test.py",
+        "contract_knowledge_consume_test.py",
+        "contract_serve_test.py"
+      ],
+      "n_gain_rows": 4,
+      "word_gain_rows": [
+        "contract_context_gate_test.py",
+        "contract_serve_test.py"
+      ],
+      "observation_surface_matters": true
+    },
+    "C_attribution": {
+      "diff_detail": {
+        "contract_context_gate_test.py": [
+          {
+            "frame_key": "selftest",
+            "in_full_stdout": true,
+            "in_tail": false
+          }
+        ],
+        "contract_knowledge_consume_test.py": [
+          {
+            "frame_key": "call",
+            "in_full_stdout": true,
+            "in_tail": false
+          }
+        ],
+        "contract_serve_test.py": [
+          {
+            "frame_key": "payload",
+            "in_full_stdout": true,
+            "in_tail": false
+          }
+        ],
+        "contract_default_effect_test.py": [
+          {
+            "frame_key": "resolve",
+            "in_full_stdout": true,
+            "in_tail": false
+          }
+        ]
+      },
+      "all_gain_keys_in_full": true,
+      "call_from_recall": true,
+      "context_gate_selftest_word_true": true,
+      "context_gate_selftest_word_in_tail": false,
+      "c1_false_green_by_truncation": true,
+      "selfreport_line_count": 13,
+      "gain_is_selfreport_text": true,
+      "hit_not_runtime_evidence": true,
+      "three_surfaces_not_merged": true,
+      "merged_into_bool": false,
+      "not_overturn_199_201_202_123": true
+    },
+    "D_boundary": {
+      "denominator_dual_source": {
+        "main": 135,
+        "form": 119,
+        "no_result": 94,
+        "dual_source": {
+          "main_rows": 135,
+          "main_summary": 135,
+          "form_rows": 119,
+          "form_summary": 119,
+          "no_result_rows": 94,
+          "no_result_summary": 94
+        },
+        "all_distinct": true
+      },
+      "superseded": {
+        "n_registered": 3,
+        "diffs": [],
+        "all_match": true
+      },
+      "anchor": {
+        "ok": true,
+        "repos": 3,
+        "diffs": [],
+        "caliber_diffs": []
+      },
+      "selfcheck": {
+        "new_files_resolve_policy_calls": 0,
+        "scripts_json_dynamic_denominator": []
+      },
+      "section_183_touched": false,
+      "real_expr_run": 0,
+      "real_commit_run": 0,
+      "main_repo_run": 0,
+      "gain_rows_reported": 0,
+      "product_files_modified": 0,
+      "scope_narrowing_only": true,
+      "direction_199_202_unchanged": true
+    }
+  },
+  "closure": {
+    "a1_summarize_out_found": true,
+    "a2_success_truncated_tail": true,
+    "a3_failure_keeps_signal": true,
+    "a4_two_observation_surfaces": true,
+    "b1_six_probes": true,
+    "b2_all_rc_zero": true,
+    "b3_all_in_product": true,
+    "b4_tail_faithful_last4": true,
+    "b5_gain_rows_ge_three": true,
+    "b6_obs_surface_matters": true,
+    "c1_gain_keys_in_full": true,
+    "c2_call_from_recall": true,
+    "c3_c1_selftest_false_green": true,
+    "c4_gain_is_selfreport": true,
+    "c5_hit_not_runtime_evidence": true,
+    "c6_three_surfaces_not_merged": true,
+    "c7_not_overturn": true,
+    "d1_denominator_dual_source": true,
+    "d2_superseded_all_match": true,
+    "d3_anchor_ok": true,
+    "d4_no_new_resolve_calls": true,
+    "d5_no_dynamic_json_denominator": true,
+    "d6_section183_zero": true,
+    "d7_scope_narrowing_only": true
+  },
+  "derived": {
+    "n_closure": 24,
+    "n_closure_true": 24,
+    "n_gain_rows": 4,
+    "gain_rows": [
+      "contract_context_gate_test.py",
+      "contract_default_effect_test.py",
+      "contract_knowledge_consume_test.py",
+      "contract_serve_test.py"
+    ],
+    "c1_false_green_by_truncation": true
+  }
+}

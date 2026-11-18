@@ -11713,3 +11713,116 @@ r118 那样改名移出扫描面。
 拍板清单与边界未变，见第五段：本轮仍是纯只读取证 +
 归档，§183 零触碰、未改 189–201 任何判据 / 尺子 / 存档口径、
 不报收益、不构成「默认生效」的新证据。
+
+### 203. ⛔ **「帧词命中数」依赖第三个正交口径——观测面：契约 stdout 全文 vs 产物 tail（`_summarize_out` 末4行/400字截断）。6 条契约实证 4 条全文命中严格多于 tail；C1 的 `selftest` 是词边界真词却被截断完全砍掉——§199「tail 无帧词」绿灯靠截断「看不见」挣来，不是真没有**（2026-11-18）
+
+═══ 一、起点：命中数只在「产物 tail」一个观测面上量过 ═══
+
+199/201/202/r123 一路把「帧词命中」收窄到可复现的读数：作用域 2/129、
+全体 3 条 self-report、子串 vs 词边界差恒 1。但四轮的命中数**全部只在
+产物 `runs[].tail` 一个观测面上量过**——而 tail 是
+`aether.check._summarize_out` **成功分支** `lines[-4:][:400]` 的截断结果
+（源码 AST 实证：`if ok` 分支含 `Slice(lower=-4)` 与 `Slice(upper=400)`；
+失败分支另走「保留信号行」逻辑，两个观测面本就不同）。
+
+于是「产物 tail 里看不到 X」被当成了「契约 stdout 里没有 X」。
+本轮只量一件从未量过的事：**同一条契约，stdout 全文与产物 tail 两个
+观测面上，同源 FRAME_KEYS 的命中数差多少？** 便宜对照（单跑 1 条）即见
+`memory.recall` 的 `call` 在 stdout 全文命中、被末4行截断砍掉。
+
+| 检查 | 实测 |
+|---|---|
+| 观测面定义（AST） | 成功分支末4行+400字截断、失败分支保留信号行 ⇒ 两面不同 |
+| tail 保真度 | 6 条契约 tail 逐字 == stdout.strip() 末4行（成功分支口径） |
+| 全文 vs tail 子串命中 | 6 条里 4 条全文严格多于 tail（差 1 词），2 条相等 |
+| 与 r123 的关系 | 正交：r123 量「匹配方式」（子串/词边界），本轮量「观测面」（全文/tail） |
+
+⇒ skill 契约⑤「静态不得声称看到了运行 / 局部观测不得声称全貌」的产物侧实例。
+⛔ 本轮纯只读取证：契约单跑是原始证据采集（env 脱管、非真实 expr / commit /
+`main() --repo`）、量具本体零 spawn、零 F2P / 收益、§183 零触碰。
+
+═══ 二、四本账（⛔ 不合并成布尔）═══
+
+**A 观测面定义层**：AST 实证 `_summarize_out` 的两个分支——成功 `lines[-4:][:400]`
+截断、失败保留信号行（`_BAD_LINE_RE.search`）；产物 tail = 成功分支截断。
+故「产物里没有」是**截断后的局部观测**，不等于「契约 stdout 里没有」。
+
+**B 三口径对拍层**：6 条验收契约（含 C1/C2）单跑拿 stdout 全文存档，与 r123
+产物 tail 对拍，逐条记子串全文 / 子串 tail / 词边界全文 / 词边界 tail：
+
+| 契约 | stdout 全文(子串) | tail(子串) | 差 | 词边界(全文) |
+|---|---|---|---|---|
+| context_gate (C1) | selftest | — | **selftest** | selftest（真词） |
+| default_effect | resolve | — | **resolve** | — |
+| knowledge_consume | call, hit | hit | **call**(=recall 子串) | — |
+| serve | payload, resolve | resolve | **payload** | payload, resolve |
+| sampling | depth | depth | — | depth |
+| inliner_relax (C2) | — | — | — | — |
+
+4 条有差、2 条无差（sanity）；6 条 tail 全部逐字忠实末4行。
+
+**C 归因层（差集性质）**：差词全部逐字存在于 stdout 全文（只是 tail 看不到）；
+`call` 来自 `memory.recall` 子串；13 行命中词所在行都含 `PASS` / 账本 / ⛔ 字样
+⇒ 差词仍全是契约 self-report 文案、非 runner 帧、非运行证据。
+**关键**：C1 的 `selftest` 是词边界严格匹配下的真词（word_full 命中），
+却被末4行截断完全砍掉（word_tail 无）⇒ §199「C1/C2 tail 无帧词」这个绿灯
+是靠截断「看不见」挣来的。命中数三个观测面（全文子串 / tail 子串 /
+词边界）**三本分开记**，不合并成布尔。
+
+**D 边界层**：三分母 `135/119/94` 双源（复用 r121 同源）；superseded 逐键
+磁盘 hash 全匹配；验锚 `OK 3/3 diffs=0`；192 分母闸——本轮两个新文件
+`resolve_policy(...)` AST 调用点均 **0**；193 `coverage_scripts` 未漂移
+（新存档 `.jsonl`、契约在 `scripts/`、无新 `scripts/*.json`）；§183 五项全 0。
+
+═══ 三、结论（收窄口径，不翻案）═══
+
+⛔ **199/200/201/202/r123 方向一条不改**：3 条命中仍是 self-report 文案、
+非运行证据，产物零帧字段结构必然，§199 断言作用域 2/129，子串命中数 3、
+词边界 2——本轮一条不翻。只增加一件事：
+把「帧词命中数」显式化为**依赖观测面**的读数——stdout 全文与产物 tail
+不是同一本账，tail 是截断后的局部观测；拿「tail 里没有」当「stdout 里没有」
+是局部观测冒充全貌（skill 契约⑤）。C1 的 `selftest` 假绿灯只说明截断会
+隐藏真词，不说明产品有帧证据——它仍是契约 PASS 文案。
+既不说默认生效也不说没生效，**不报收益**。
+缺口不变：「默认 policy 对象 → 主流程消费链」绑定证据仍须跑 `main() --repo`
+碰 §183 ⇒ 需取证面显式拍板。
+⛔ 不推翻 189–202、不改任何判据 / 尺子 / 存档口径、`aether/` 零回写。
+
+═══ 四、设施 / 契约 / 反证 / 静态四项 ═══
+
+四件：`scripts/probe_obs_surface.py`、`scripts/obs_surface_stdout.jsonl`
+（原始证据：6 条契约 stdout 全文，Bash 独立进程采集避 spawn 累积 SIGTERM）、
+`scripts/obs_surface_census.jsonl`（sha `84c02041…`，stdout sha `4457d828…`）、
+`scripts/obs_surface_contract.py`（r116–r123 同构 `ck` 合规形态；
+⛔ 有意放 `scripts/`、不进 `aether.check::discover()` 面）。
+⛔ 量具本体纯只读、不 spawn；契约单跑是采集步骤，与 r118–r123「读现成
+产物」同构，只是本轮的原始产物是 stdout 存档。
+
+单跑：`closure 24/24`；契约 **A–E 24 条**全绿（A4+B6+C7+D7）。
+
+注入反证（拆 A/B 两段独立进程，避免 spawn 累积 `SIGTERM(137)`）：
+A 段 `24/24` 条件逐条撤回恰好命中自身、`24/24` 定向叶子篡改令条件翻转、
+`3/3` 事故补丁（A 观测面 / B+C 对拍归因 / D 边界）多条件同时打红；
+B 段 `12/12` F 组撤回、静态四项（真 3.9.6 parse、裸 `noqa` 0、
+`git diff --check rc=0`、A1 扫描面本轮产物零命中 + 正例有牙）全通过、验锚同源。
+`FALSIFICATION_OK_A=True` / `FALSIFICATION_OK_B=True`。
+
+⛔ 本轮量具两次尺子真红均按「修尺子不放宽断言」处理：① 首版量具在
+Python 进程内连续 spawn 6 契约触发 `SIGTERM(137)` ⇒ 改读预采集 stdout
+存档（量具纯只读，与历史同构），断言不变；② A 账 AST 把 `lines[-4:]`
+误判为 `Constant(-1)`（实为 `Slice(lower=UnaryOp(USub, 4))`）⇒ 精确重写
+切片 AST 匹配，不放宽。corrigendum 后 24/24 稳定。
+
+═══ 五、边界 / 开口 / 拍板清单 ═══
+
+⛔ r115 / r117 已登记的两个动态分母开口本轮预防性绕开、未触发：
+193 `coverage_scripts` 钉常量（新存档 `.jsonl`、无新 `scripts/*.json`）；
+r117 `contract_surface()` 全仓契约快照钉死 127 份（产物闸放 `scripts/`、
+不进 discover 面；实测 discover 仍 127、不含 obs_surface）。
+代价与 §197–202 相同：**本产物闸不在全量发现面，全量不为它 +1，
+运行时证据是单跑复核**；修这两处判据口径属另一次拍板，不擅自开工。
+
+拍板清单未变，合计 **4 条**（② 多步状态序列、③ CI 先 `bootstrap`
+再跑 H 组、⑤ 放宽 / 降级 deny-modules、190 留下的 `ok_nogold`
+ledger 语义 / 189 反证组补样本），一律未开工；r118 新开口「修 r117
+F3 全仓契约快照判据口径」单列、不并入。① 已取证收口、④ / ⑥ 已落地。
