@@ -1,0 +1,532 @@
+{
+  "caliber": {
+    "aether/check.py": "88cc4c09ed9293dc881c0f77993666edf1e217292740b0ba88f55f90d9804c82",
+    "scripts/probe_full_run_ledger.py": "0ba39e1aa92fe3cd45292a8fd3e96d9785ae27b1be7e2d591275208091814ce8",
+    "scripts/probe_tail_selfreport.py": "bc95e492ec1d6bde4c33f38d0e2e85400bd7f0350436a0dae41850bfb3fbdb1c",
+    "aether/extract.py": "974203181bc9170bd9c7871918959445eba37b71d8ecad9a6f06edb0aaddaad6",
+    "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+    "scripts/probe_default_effect.py": "881318647f769036f321a0dfb5f7ececa1d4279355ee27027e2f342ccfd0d9f3",
+    "scripts/probe_truerun_count.py": "ca728265ce966eb2ddfcf0a3916b18b23a44ab69e43e62d5d913224d5f1fea26",
+    "scripts/probe_product_label.py": "2863d5965da2ad23af7debe574ff67505103a64ccbd14a08947ef3d0fa4de5da",
+    "scripts/probe_stub_gate.py": "6d39d84331441040c3e4ff804afba2cd16dd33eb95b48012e3c8f936593996bf",
+    "scripts/full_run_ledger_census.jsonl": "68d14bc9dda19ee2952ae0b63cb49372467181e3518101935420a466b7ed280c",
+    "scripts/tail_selfreport_census.jsonl": "a3d9430444bfe6c99a91eda1197d7c09758f04c2eff6ed75ba33d4082bf532a9",
+    "scripts/truerun_count_census.jsonl": "dfc751c37a735bfbddbc1321e6dca910c0050bee6cb36e9148b46a46fa604022",
+    "scripts/product_label_census.jsonl": "7658e921d57246fa17bf799757d20d3ba78604324ab6a1a456ebd84e12e92b4c",
+    "scripts/stub_gate_census.jsonl": "33fee8def401d77cd2625414618884dbab3ad7e0a05a098ae28ba5c3f2102d1f",
+    "tests/contract_context_gate_test.py": "4b7721d4de44b5e291101ae743f2ccbe548bd540eab1defdd5490c3540e9ef21",
+    "tests/contract_inliner_relax_test.py": "9c1f9c126055da0f30576e144ee0213804b52783e816d6f76cc986c7f3401792",
+    "tests/contract_knowledge_consume_test.py": "d83129653656a9c05e9f373df6696da013b2691003037be1127ffa4d476ff952",
+    "tests/contract_sampling_test.py": "7cd83d4399e3569a0144d67fa9865a58b7417071e44278c4f2bdcfcfcf9e26e7",
+    "tests/contract_serve_test.py": "be755a258ed2c9e43c3fc44b5dcc2bdb10e55b34f8980ab90b0c1274a0a814e4",
+    "tests/contract_default_effect_test.py": "83e15d7478bd9e4bbc085fa91974c8df6cf9e6f62dc1f28b09f2a5513d56e8c3",
+    "tests/contract_signature_impostor_test.py": "76e3452a368e49917689875b8c783c4e4f37ff2261616ffc0bb3413b20f9d327"
+  },
+  "accounts": {
+    "A_matching": {
+      "ledger_matching": {
+        "file": "scripts/probe_full_run_ledger.py",
+        "functions": [
+          {
+            "func": "_frame_keys",
+            "lineno": 138,
+            "in_compare_count": 1,
+            "re_call_count": 0,
+            "has_word_boundary_literal": false
+          },
+          {
+            "func": "account_a",
+            "lineno": 144,
+            "in_compare_count": 3,
+            "re_call_count": 0,
+            "has_word_boundary_literal": false
+          }
+        ],
+        "all_substring_no_word_boundary": true
+      },
+      "tail_matching": {
+        "file": "scripts/probe_tail_selfreport.py",
+        "functions": [
+          {
+            "func": "_frame_hits",
+            "lineno": 196,
+            "in_compare_count": 1,
+            "re_call_count": 0,
+            "has_word_boundary_literal": false
+          }
+        ],
+        "all_substring_no_word_boundary": true
+      },
+      "both_use_substring_only": true,
+      "frame_keys": [
+        "frame",
+        "prof",
+        "hit",
+        "call",
+        "trace",
+        "resolve",
+        "selftest",
+        "caller",
+        "depth",
+        "payload"
+      ],
+      "n_frame_keys": 10
+    },
+    "B_dual_caliber": {
+      "per_run": {
+        "r117": {
+          "available": true,
+          "path": "/tmp/r117_full.json",
+          "sha256": "062a44d1d1b887a19cccbabb1d6f0fa7b793f73b07d36cb5956f9f975081840c",
+          "n_runs": 129,
+          "counts": {
+            "pass": 129,
+            "fail": 0,
+            "skip": 0,
+            "timeout": 0,
+            "error": 0
+          },
+          "ok": true,
+          "tail_all_str": true,
+          "n_substring_hits": 3,
+          "n_word_hits": 2,
+          "delta": 1,
+          "substring_signature": [
+            [
+              "contract_knowledge_consume_test.py",
+              "hit"
+            ],
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ]
+          ],
+          "word_signature": [
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ]
+          ]
+        },
+        "r118": {
+          "available": true,
+          "path": "/tmp/r118_full.json",
+          "sha256": "84bee094f9f179621de29dd8ae484c69bcf674f424e23c4a2dd740468939e0b1",
+          "n_runs": 130,
+          "counts": {
+            "pass": 129,
+            "fail": 1,
+            "skip": 0,
+            "timeout": 0,
+            "error": 0
+          },
+          "ok": false,
+          "tail_all_str": true,
+          "n_substring_hits": 4,
+          "n_word_hits": 3,
+          "delta": 1,
+          "substring_signature": [
+            [
+              "contract_knowledge_consume_test.py",
+              "hit"
+            ],
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ],
+            [
+              "contract_signature_impostor_test.py",
+              "selftest"
+            ]
+          ],
+          "word_signature": [
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ],
+            [
+              "contract_signature_impostor_test.py",
+              "selftest"
+            ]
+          ]
+        },
+        "r118b": {
+          "available": true,
+          "path": "/tmp/r118_full2.json",
+          "sha256": "0a67b928bb8ff842c361d4666278340318b21e94235361bfb0dd4b8ae3b18ce0",
+          "n_runs": 129,
+          "counts": {
+            "pass": 129,
+            "fail": 0,
+            "skip": 0,
+            "timeout": 0,
+            "error": 0
+          },
+          "ok": true,
+          "tail_all_str": true,
+          "n_substring_hits": 3,
+          "n_word_hits": 2,
+          "delta": 1,
+          "substring_signature": [
+            [
+              "contract_knowledge_consume_test.py",
+              "hit"
+            ],
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ]
+          ],
+          "word_signature": [
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ]
+          ]
+        },
+        "r119": {
+          "available": true,
+          "path": "/tmp/r119_full.json",
+          "sha256": "2d424bc299310d76fac27090382641d8ca358fce1f1ec0af1b116ef26f8b2587",
+          "n_runs": 129,
+          "counts": {
+            "pass": 129,
+            "fail": 0,
+            "skip": 0,
+            "timeout": 0,
+            "error": 0
+          },
+          "ok": true,
+          "tail_all_str": true,
+          "n_substring_hits": 3,
+          "n_word_hits": 2,
+          "delta": 1,
+          "substring_signature": [
+            [
+              "contract_knowledge_consume_test.py",
+              "hit"
+            ],
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ]
+          ],
+          "word_signature": [
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ]
+          ]
+        },
+        "r120": {
+          "available": true,
+          "path": "/tmp/r120_full.json",
+          "sha256": "7ffb715f1256fb610c2dfdaf6ba76d8333b1f57a6604393402aa8ef7887fedb5",
+          "n_runs": 129,
+          "counts": {
+            "pass": 129,
+            "fail": 0,
+            "skip": 0,
+            "timeout": 0,
+            "error": 0
+          },
+          "ok": true,
+          "tail_all_str": true,
+          "n_substring_hits": 3,
+          "n_word_hits": 2,
+          "delta": 1,
+          "substring_signature": [
+            [
+              "contract_knowledge_consume_test.py",
+              "hit"
+            ],
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ]
+          ],
+          "word_signature": [
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ]
+          ]
+        },
+        "r121": {
+          "available": true,
+          "path": "/tmp/r121_full.json",
+          "sha256": "c0bf919b68453106fe43fda9a57d4ec8257011448dfed7e125d5e41c46db91f6",
+          "n_runs": 129,
+          "counts": {
+            "pass": 129,
+            "fail": 0,
+            "skip": 0,
+            "timeout": 0,
+            "error": 0
+          },
+          "ok": true,
+          "tail_all_str": true,
+          "n_substring_hits": 3,
+          "n_word_hits": 2,
+          "delta": 1,
+          "substring_signature": [
+            [
+              "contract_knowledge_consume_test.py",
+              "hit"
+            ],
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ]
+          ],
+          "word_signature": [
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ]
+          ]
+        },
+        "r122": {
+          "available": true,
+          "path": "/tmp/r122_full.json",
+          "sha256": "fc75844bb518de9f96148ff1586e5fddbba1c5446f8f4d53527956316bc01364",
+          "n_runs": 129,
+          "counts": {
+            "pass": 129,
+            "fail": 0,
+            "skip": 0,
+            "timeout": 0,
+            "error": 0
+          },
+          "ok": true,
+          "tail_all_str": true,
+          "n_substring_hits": 3,
+          "n_word_hits": 2,
+          "delta": 1,
+          "substring_signature": [
+            [
+              "contract_knowledge_consume_test.py",
+              "hit"
+            ],
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ]
+          ],
+          "word_signature": [
+            [
+              "contract_sampling_test.py",
+              "depth"
+            ],
+            [
+              "contract_serve_test.py",
+              "resolve"
+            ]
+          ]
+        }
+      },
+      "n_available": 7,
+      "n_clean": 6,
+      "all_clean_runs_129": true,
+      "red_run_exceptions": {
+        "r118": 130
+      },
+      "tail_all_str": true,
+      "clean_sub_signature_stable": true,
+      "clean_word_signature_stable": true,
+      "clean_sub_signature": [
+        [
+          "contract_knowledge_consume_test.py",
+          "hit"
+        ],
+        [
+          "contract_sampling_test.py",
+          "depth"
+        ],
+        [
+          "contract_serve_test.py",
+          "resolve"
+        ]
+      ],
+      "clean_word_signature": [
+        [
+          "contract_sampling_test.py",
+          "depth"
+        ],
+        [
+          "contract_serve_test.py",
+          "resolve"
+        ]
+      ],
+      "clean_delta_stable_one": true,
+      "clean_n_substring": 3,
+      "clean_n_word": 2,
+      "all_delta_one": true
+    },
+    "C_attribution": {
+      "per_hit": {
+        "contract_knowledge_consume_test.py": {
+          "frame_key": "hit",
+          "substring_hit": true,
+          "word_boundary_hit": false,
+          "caliber": "substring_only"
+        },
+        "contract_sampling_test.py": {
+          "frame_key": "depth",
+          "substring_hit": true,
+          "word_boundary_hit": true,
+          "caliber": "word"
+        },
+        "contract_serve_test.py": {
+          "frame_key": "resolve",
+          "substring_hit": true,
+          "word_boundary_hit": true,
+          "caliber": "word"
+        }
+      },
+      "substring_only_key": "hit",
+      "substring_only_script": "contract_knowledge_consume_test.py",
+      "substring_only_confirmed": true,
+      "host_word": "hit_channels",
+      "host_in_contract_source": true,
+      "host_in_product_tail": true,
+      "word_hits_are_two": true,
+      "hit_is_not_runtime_evidence": true,
+      "two_calibers_not_merged": true,
+      "merged_into_bool": false,
+      "not_overturn_201": true
+    },
+    "D_boundary": {
+      "anchor": {
+        "ok": true,
+        "repos": 3,
+        "diffs": [],
+        "caliber_diffs": []
+      },
+      "denominator_dual_source": {
+        "main": 135,
+        "form": 119,
+        "no_result": 94,
+        "dual_source": {
+          "main_rows": 135,
+          "main_summary": 135,
+          "form_rows": 119,
+          "form_summary": 119,
+          "no_result_rows": 94,
+          "no_result_summary": 94
+        },
+        "all_distinct": true
+      },
+      "superseded": {
+        "n_registered": 3,
+        "diffs": [],
+        "all_match": true
+      },
+      "selfcheck": {
+        "own_call_sites": {
+          "scripts/probe_frameword_caliber.py": 0
+        },
+        "new_files_resolve_policy_calls": 0,
+        "no_new_denominator_call_site": true,
+        "self_archive_suffix": ".jsonl",
+        "self_archive_not_json": true,
+        "new_contract_in_scripts_not_tests": true,
+        "scripts_json_dynamic_denominator": []
+      },
+      "section_183_touched": false,
+      "real_expr_run": 0,
+      "real_commit_run": 0,
+      "main_repo_run": 0,
+      "gain_rows_reported": 0,
+      "product_files_modified": 0,
+      "scope_narrowing_only": true,
+      "direction_199_201_unchanged": true
+    }
+  },
+  "closure": {
+    "a1_ledger_substring_only": true,
+    "a2_tail_substring_only": true,
+    "a3_both_substring_no_word_boundary": true,
+    "a4_frame_keys_same_source": true,
+    "b1_seven_products_available": true,
+    "b2_clean_runs_129": true,
+    "b3_red_run_exception_only_r118": true,
+    "b4_tail_all_str": true,
+    "b5_clean_sub_stable_three": true,
+    "b6_clean_word_stable_two": true,
+    "b7_clean_delta_stable_one": true,
+    "b8_all_delta_one": true,
+    "c1_substring_only_confirmed": true,
+    "c2_host_word_in_source_and_tail": true,
+    "c3_word_hits_are_two": true,
+    "c4_hit_not_runtime_evidence": true,
+    "c5_two_calibers_not_merged": true,
+    "c6_not_overturn_201": true,
+    "d1_denominator_dual_source": true,
+    "d2_superseded_all_match": true,
+    "d3_anchor_ok": true,
+    "d4_no_new_resolve_calls": true,
+    "d5_no_dynamic_json_denominator": true,
+    "d6_section183_zero": true,
+    "d7_scope_narrowing_only": true
+  },
+  "derived": {
+    "n_closure": 25,
+    "n_closure_true": 25,
+    "clean_n_substring": 3,
+    "clean_n_word": 2,
+    "clean_delta": 1
+  }
+}

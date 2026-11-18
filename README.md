@@ -11580,3 +11580,108 @@ r118 那样改名移出扫描面。
 拍板清单与边界未变，见第五段：本轮仍是纯只读取证 +
 归档，§183 零触碰、未改 189–200 任何判据 / 尺子 / 存档口径、
 不报收益、不构成「默认生效」的新证据。
+
+### 202. ⛔ **§199/§201「帧词表命中」用的是子串匹配：`hit` 只是 `hit_channels` 的子串，词边界严格匹配下干净轮命中从 3 条降到 2 条、差恒 1（跨七轮稳定）——「命中数」读数依赖匹配方式，子串命中 ≠ 词命中 ≠ 帧字段**（2026-11-18）
+
+═══ 一、起点：一条被当成「词命中」的读数从没核过匹配方式 ═══
+
+201（r122）量出「全体 129 份 tail 帧词命中 3 条」（knowledge_consume=hit /
+sampling=depth / serve=resolve），归因都是契约 PASS 文案 self-report、非运行证据。
+但两代量具的匹配实现从来没被核过：`probe_full_run_ledger._frame_keys` /
+`tail_frame_word_zero` 与 `probe_tail_selfreport._frame_hits` 都是
+`k in tail.lower()`——**子串包含**，没有词边界、没有 `re.search(r"\bk\b")`。
+
+子串匹配会把业务术语里的字母组合算成「帧词命中」：`hit` 会命中
+`hit_channels`（知识消费契约的字段名），`call` 会命中 `callable`，
+`trace` 会命中 `traceback`。§199/§201 把这种读数叫「帧词表命中」，
+等于把子串巧合当词命中用。本轮只量一件从未量过的事：
+**同源 FRAME_KEYS 在「子串匹配 vs 词边界严格匹配」两个口径下，命中数差多少？**
+
+便宜对照（只读产物 JSON / 源码 AST，零沙箱、零真实 expr / commit）：
+
+| 检查 | 实测 |
+|---|---|
+| 匹配实现（AST 实证） | `_frame_keys`/`account_a`/`_frame_hits` 全为 `in` 比较、`re_call_count=0`、`\b` 字面 0 ⇒ 纯子串 |
+| 干净轮子串命中 | 恒 3 条（hit + depth + resolve），跨 r117–r122 六份干净轮 signature 完全一致 |
+| 干净轮词边界命中 | 恒 2 条（depth + resolve），`hit` 出局 |
+| 差值 | 恒 **1**，六份干净轮一致；r118 red 那份 4→3 差也是 1 |
+
+⇒ skill 契约④「暴露≠使用」+ 契约⑥「判据同源/反证」的产物侧实例：
+「命中 3 条」这个读数本身依赖匹配口径，口径不同答案不同。
+⛔ 本轮纯只读取证：零真实 expr / commit / `main() --repo`、零 F2P / 收益、§183 零触碰。
+
+═══ 二、四本账（⛔ 不合并成布尔）═══
+
+**A 匹配口径层**：AST 实证两代量具的匹配函数——`_frame_keys`（lineno 138）、
+`account_a`（144）、`_frame_hits`（196）的 `in_compare_count>0`、`re_call_count=0`、
+`\b` 字面 0；复用同源 `probe_full_run_ledger.FRAME_KEYS`（10 词、不另写词表，
+caliber 21 键无重复，避开 r120/r122 的重复坑）。
+
+**B 双口径对拍层**：七份产物逐份逐条扫 `runs[].tail`，两套口径都算：
+
+| 产物 | runs | 子串命中 | 词边界命中 | 差 |
+|---|---|---|---|---|
+| r117 / r118b / r119 / r120 / r121 / r122（干净轮） | 各 129 | 各 3 | 各 2 | 各 1 |
+| r118 首跑（red，fail=1） | 130 | 4 | 3 | 1 |
+
+干净轮两套 signature 各自跨轮完全一致；子串 3 条、词边界 2 条、差恒 1。
+
+**C 归因层（命中词性质）**：对干净轮逐命中定位——
+`hit`（knowledge_consume）= **substring_only**：词边界严格匹配命中 0，
+宿主词 `hit_channels` 在契约源码与产物 tail 都逐字存在（对回实测）；
+`depth`（sampling）/ `resolve`（serve）= **word**：词边界仍命中，
+但仍是契约 PASS 文案（`depth=1` / `先 resolve 再判`），非 runner 帧。
+⇒ 子串命中账与词命中账**两本分开记**：命中 ≠ 运行证据，
+3 条（或 2 条）无论哪套口径都是 self-report 文案。§201 方向不变。
+
+**D 边界层**：三分母 `135/119/94` 双源（复用 r121 同源）；
+superseded 逐键磁盘 hash 全匹配；验锚 `OK 3/3 diffs=0`；192 分母闸——本轮两个
+新文件 `resolve_policy(...)` AST 调用点均 **0**；193 `coverage_scripts` 未漂移
+（新存档 `.jsonl`、契约在 `scripts/`、无新 `scripts/*.json`）；§183 五项全 0。
+
+═══ 三、结论（收窄口径，不翻案）═══
+
+⛔ **199/200/201 方向不变**：3 条命中仍是 self-report 文案、非运行证据，
+产物零帧字段结构必然，§199 断言作用域 2/129——本轮一条不改。只做一件事：
+把「帧词表命中 3 条」的**口径显式化**——那是**子串命中数**；
+词边界严格匹配下是 **2 条**，差的 1 条是 `hit_channels` 的子串巧合。
+子串命中 ≠ 词命中 ≠ 帧字段；拿任一口径的命中当「默认生效运行证据」
+仍是 §192 类型混淆（skill 契约⑤）。既不说默认生效也不说没生效，**不报收益**。
+缺口不变：「默认 policy 对象 → 主流程消费链」绑定证据仍须跑 `main() --repo`
+碰 §183 ⇒ 需取证面显式拍板。
+⛔ 不推翻 189–201、不改任何判据 / 尺子 / 存档口径、`aether/` 零回写。
+
+═══ 四、设施 / 契约 / 反证 / 静态四项 ═══
+
+三件套：`scripts/probe_frameword_caliber.py`、
+`scripts/frameword_caliber_census.jsonl`（存档 sha `41b3be2e…`）、
+`scripts/frameword_caliber_contract.py`（r116–r122 同构 `ck` 合规形态；
+⛔ 有意放 `scripts/`、不进 `aether.check::discover()` 面，理由与代价
+见 §198 第五段）。
+
+单跑：`closure 25/25`；契约 **A–E 21 条**全绿（A4+B8+C6+D2+SELF1）。
+
+注入反证（拆 A/B 两段独立进程，避免 spawn 累积 `SIGTERM(137)`）：
+A 段 `21/21` 条件逐条撤回恰好命中自身、`20/20` 定向叶子篡改令条件翻转、
+`3/3` 事故补丁（A 口径 / B 读数 / C 归因）多条件同时打红；
+B 段 `14/14` F 组撤回、静态四项（真 3.9.6 parse、裸 `noqa` 0、
+`git diff --check rc=0`、A1 四文件零命中 + 正例有牙）全通过、验锚同源。
+`FALSIFICATION_OK_A=True` / `FALSIFICATION_OK_B=True`。
+
+⛔ 本轮量具首跑即 `25/25`（无 r120/r122 那种尺子自身真红）：写法上
+主动避开三处已知坑——CALIBER_FILES 不重复（21 键）、归因宿主词逐字对回源码+
+产物 tail 双源、匹配实现走 AST 而非文本猜；清理死代码后不放宽任何断言重跑仍绿。
+
+═══ 五、边界 / 开口 / 拍板清单 ═══
+
+⛔ r115 / r117 已登记的两个动态分母开口本轮预防性绕开、未触发：
+193 `coverage_scripts` 钉常量（新存档 `.jsonl`、无新 `scripts/*.json`）；
+r117 `contract_surface()` 全仓契约快照钉死 127 份（产物闸放 `scripts/`、
+不进 discover 面；实测 discover 仍 127、不含 frameword）。
+代价与 §197–201 相同：**本产物闸不在全量发现面，全量不为它 +1，
+运行时证据是单跑复核**；修这两处判据口径属另一次拍板，不擅自开工。
+
+拍板清单未变，合计 **4 条**（② 多步状态序列、③ CI 先 `bootstrap`
+再跑 H 组、⑤ 放宽 / 降级 deny-modules、190 留下的 `ok_nogold`
+ledger 语义 / 189 反证组补样本），一律未开工；r118 新开口「修 r117
+F3 全仓契约快照判据口径」单列、不并入。① 已取证收口、④ / ⑥ 已落地。
