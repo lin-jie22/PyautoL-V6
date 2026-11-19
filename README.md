@@ -12205,9 +12205,9 @@ StopIteration），而探针每次求值新建生成器、表达不了「第 n �
 
 | 存档 | rows | fn 组 | multistep 组 |
 |---|---:|---:|---:|
-| extract_downstream（135 主账） | 135 | 71 | 2 |
+| extract_downstream（135 主账） | 135 | 76 | 2 |
 | criteria_gate_census（459 门普查） | 459 | 190 | 4 |
-| no_result_attribution（94 归因） | 94 | 58 | 1 |
+| no_result_attribution（94 归因） | 94 | 53 | 1 |
 
 跨三存档 **7 次出现 / 4 个 distinct fn**：boltons `93185b2` daterange、
 boltons `64e6430` iset、more-itertools `11c8280` lazy_consumption、
@@ -12242,4 +12242,19 @@ more-itertools `ddbbea2` infinite_iterables。§172 的 bug 在册（真阳性�
 
 ═══ 六、全量收口 ═══
 
-（待全量回归后填：五段提交 sha、全量产物四元组、验锚、第六段收口提交、链。）
+五段提交 `e97e3af`（README §207 前五段 + 三件套）已推送。全量两次原参数重跑
+（`-m aether.check --json -j 2`，产物 `/tmp/r128_full.json`、`/tmp/r128_full2.json`）
+读数**完全一致**：`ok=False`、`counts pass=128/fail=1/skip=0/timeout=0/error=0`、
+`runs 129`（pass 128 / fail 1）、rc `{0:128, 1:1}`、`n_bad 1`（从 runs 派生、顶层无该字段）、
+`n_runs 129`、`n_scripts 127`、`jobs 2`、`exit_code 1`、stderr 空、
+`undeclared_modes 10` 不含 multistep。⛔ **不宣布 129/129**：唯一 fail 是
+`contract_streaming_test.py` 的 I1/J3/K2 三条（217/200=1.08 遍、峰值 0.09 vs 0.51 MB、
+0.09 vs 0.29 MB，67/70），与 r128 无关——五段提交零产品代码改动
+（`git log 19cff76..HEAD -- aether/` 空）、r127 全量该契约曾 70/70 全绿、
+**r127 干净 worktree（`19cff76`）在当前环境单跑同样红这三条同读数**、
+验锚 `ok=True repos=3 diffs=[] caliber_diffs=[]`、工作区干净、无并发编辑、
+同 Python 3.13.12 / 同参数。⇒ 定性为**当前机器状态下的稳定失败（已知环境开口）**，
+非 r128 引入、非产品回归；按纪律不改产品 / timeout / 判据凑绿，如实记 128/1。
+通知 exit code 0 不作判据，按产物 JSON 判（首次误用 `python aether/check.py` 撞相对导入
+零产物，已改 `-m` 入口）。链 `…→d47efd4→8224258→e28efb8→5b1d51f→7d30c9c→19cff76→e97e3af`。
+第六段为纯文档收口提交（零代码），详见当日日志。
