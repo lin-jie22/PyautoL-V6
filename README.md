@@ -12270,5 +12270,15 @@ ALL PASS），四元组完整（pass=129/fail=0、rc 全 0、`n_bad 0`、`n_scri
 ⇒ 每个契约子进程都被 shim 劫持。⇒ 真因是**当前会话的沙箱 shim 注入污染了全局
 `json.loads` 计数器与内存峰值量具**，非产品回归、非 r128 引入、非机器负载。
 ⛔ 脱管读数仅用于根因诊断，不替代正式判据环境；按纪律不改产品 / timeout / 判据 /
-全量命令。链 `…→7d30c9c→19cff76→e97e3af→a22a1a2`。第六段为纯文档收口提交（零代码），
+全量命令。
+
+**再补（r130 全量级污染面普查，纯读两份已有产物、零重跑）**：逐 run 对拍带 shim
+`/tmp/r128_full.json` 与脱管 `/tmp/r128_full_noshim.json`（各 129 条、key 集合相同），
+分三面量：① **状态/rc 面**：仅 1 条差异（`contract_streaming_test.py` fail/1 → pass/0），
+其余 128 条逐条相同；② **断言读数面**（tail 归一化掉耗时行后逐字比）：同样仅这 1 条差异；
+③ **耗时面**：82 条 >0.5s 差异、脱管普遍更快（如 `contract_srcmut_test.py` 79.65s→20.57s、
+`contract_streaming_test.py` 23.53s→1.60s），是 shim broker IPC 每条文件操作的固定开销，
+但**无一条因此 timeout 或改判定**。顶层 counts 唯一差异即这 1 条，undeclared_modes 完全相同。
+⇒ shim 污染面在**判定层恰好 1 条、耗时层 82 条但不影响判定**，非系统性判据失效。
+链 `…→19cff76→e97e3af→a22a1a2→cb53d4a`。第六段及两次补记均为纯文档提交（零代码），
 详见当日日志。
