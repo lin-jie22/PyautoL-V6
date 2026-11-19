@@ -1,0 +1,178 @@
+{
+  "caliber": {
+    "aether/verifier.py": "8ed6e8e1c58cadda1677999b91a5f2333ee8951a00f86ea01118e1abaa15a56e",
+    "aether/agent.py": "81dd4c40580c9e42e36238d56a5190aa27b46a2f23f83d743b5132703b6960b1",
+    "aether/nongression.py": "371b3beea02d77f3c2330dd5f958ac9d0e3a42cee4c7161b6e76cc9324d6b299",
+    "aether/evolution.py": "750d1e593eba2762ae951d9d2117a40925767a56b2b418913130576ef22353b4",
+    "scripts/probe_default_effect.py": "881318647f769036f321a0dfb5f7ececa1d4279355ee27027e2f342ccfd0d9f3",
+    "scripts/probe_context_gate.py": "e471cc6ea81d111bbb710610ff19a87284e5b5441d9ec85f0565afd7bca7e835",
+    "scripts/probe_stub_gate.py": "6d39d84331441040c3e4ff804afba2cd16dd33eb95b48012e3c8f936593996bf",
+    "scripts/realrepo_baseline.py": "6d4ce9ee2684b3407510a1f54b208ed74caadf41e02c7fb2630bb086eda785ab",
+    "scripts/caliber_superseded.json": "77a828b6a82e3afefa83f23c21cbbab7360e091486a4f517e867a89c277265fb"
+  },
+  "accounts": {
+    "A_decision_closure": {
+      "verifier_validate_exists": true,
+      "sane_calls_no_selfreport": true,
+      "gate_calls_sane": true,
+      "check_verdict_ignores_reward": true,
+      "check_verdict_no_reward_param": true,
+      "runner_returns_verdict": true,
+      "reward_from_runner": true,
+      "decision_layer_closed_loop": true,
+      "chain": "runner(h,spec)→Verdict→assert_verdict_sane(validate+assert_no_self_report+空check作废)→reward 只从 passed/error 派生→evolution reward=self.runner(h,s).reward"
+    },
+    "B_scope_192": {
+      "scope_is_archive": true,
+      "scope_not_decision_layer": true,
+      "run_all_no_policy_param": true,
+      "run_all_has_pkg_param": true,
+      "zero_means_absence_not_ineffective": true,
+      "run_all_signature": "source: str, items, timeout: float = 15.0, pkg=None",
+      "not_scope_drift": true,
+      "scope_definition": "§192 的 0/4 专指 probe_* 取证存档（189/190/191 零沙箱离线重放、run_all 无 policy 参数），不是 V6 判定层没跑真实验证"
+    },
+    "C_runtime_frames": {
+      "policy_min": "1111",
+      "policy_strict": "0000",
+      "policy_full": "1111",
+      "ab_relaxed": {
+        "relaxed_adopted": [
+          12,
+          0
+        ],
+        "relaxed_pruned_assign": [
+          3,
+          0
+        ],
+        "relaxed_scopes_merged": [
+          343,
+          13
+        ],
+        "relaxed_rescue": [
+          7,
+          0
+        ]
+      },
+      "ab_differs": true,
+      "strict_near_zero": true,
+      "full_adopted": 946,
+      "full_pruned_assign": 112,
+      "full_scopes_merged": 29823,
+      "full_rescue": 443,
+      "full_per_commit_n": 29,
+      "disc_gain_zero_to_positive": [
+        [
+          "99dec84",
+          5
+        ],
+        [
+          "d0a284f",
+          1
+        ],
+        [
+          "4aa77cd",
+          2
+        ],
+        [
+          "8ba3a7f",
+          2
+        ]
+      ],
+      "n_disc_gain": 4,
+      "zero_candidate_repos": {
+        "more": 0,
+        "attrs": 0
+      },
+      "zero_candidate_is_hardcode": true,
+      "artifact_sizes": {
+        "min": 4818,
+        "strict": 3193,
+        "full": 3150158,
+        "more": 547,
+        "attrs": 547
+      },
+      "n1_fail_caveat": true
+    },
+    "D_boundary": {
+      "denominator_dual_source": {
+        "main": 135,
+        "form": 119,
+        "no_result": 94,
+        "dual_source": {
+          "main_rows": 135,
+          "main_summary": 135,
+          "form_rows": 119,
+          "form_summary": 119,
+          "no_result_rows": 94,
+          "no_result_summary": 94
+        },
+        "all_distinct": true
+      },
+      "superseded": {
+        "n_registered": 3,
+        "diffs": [],
+        "all_match": true
+      },
+      "anchor": {
+        "ok": true,
+        "repos": 3,
+        "diffs": [],
+        "caliber_diffs": []
+      },
+      "selfcheck": {
+        "new_files_resolve_policy_calls": 0,
+        "scripts_json_dynamic_denominator": []
+      },
+      "decision_layer_frame_reads": 0,
+      "wiring_frames_into_judge_violates_same_source": true,
+      "same_source_rule_quote": "判据同源：复用被测对象自己的函数，不在验证器里重写一套",
+      "closed_loop_needs_no_fix": true,
+      "section_183_ran_in_upstream": true,
+      "section_183_ran_in_this_probe": false,
+      "product_files_modified": 0,
+      "reward_definition_touched": 0,
+      "gain_rows_reported_as_f2p": 0,
+      "not_overturn_192_scope": true,
+      "scope_narrowing_only": true
+    }
+  },
+  "closure": {
+    "a1_validate_exists": true,
+    "a2_sane_blocks_selfreport": true,
+    "a3_gate_calls_sane": true,
+    "a4_reward_ignores_ledger": true,
+    "a5_runner_returns_verdict": true,
+    "a6_reward_from_runner": true,
+    "a7_decision_closed_loop": true,
+    "b1_zero_scope_archive": true,
+    "b2_zero_not_decision": true,
+    "b3_run_all_no_policy": true,
+    "b4_run_all_has_pkg": true,
+    "b5_zero_means_absence": true,
+    "b6_not_scope_drift": true,
+    "c1_default_1111": true,
+    "c2_strict_0000": true,
+    "c3_ab_differs": true,
+    "c4_strict_near_zero": true,
+    "c5_full_counts": true,
+    "c6_four_disc_gains": true,
+    "c7_zero_candidate_hardcode": true,
+    "c8_n1_no_generalization": true,
+    "d1_denominator_dual_source": true,
+    "d2_superseded_all_match": true,
+    "d3_anchor_ok": true,
+    "d4_no_new_resolve_calls": true,
+    "d5_no_dynamic_json_denominator": true,
+    "d6_no_product_change": true,
+    "d7_closed_loop_no_fix": true
+  },
+  "derived": {
+    "n_closure": 28,
+    "n_closure_true": 28,
+    "decision_closed_loop": true,
+    "ab_differs": true,
+    "n_disc_gain": 4,
+    "closed_loop_needs_no_fix": true
+  }
+}

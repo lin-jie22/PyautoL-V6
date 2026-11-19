@@ -12064,3 +12064,101 @@ caliber_diffs=[]`；读数取自 `e28efb8` 代码态，`HEAD==origin/main==e28ef
 与 §197–204 同代价：产物闸放 `scripts/`、存档 `.jsonl`，不进
 `discover()` 面、全量不为它 +1，运行时证据是单跑复核（§五）。
 全量链 `…→a7d5ec8→7b38d90→752add6(r125)→e28efb8(r126)` 连续收口。
+
+### 206. ⛔ **「补完整闭环」命题被取证推翻：V6 判定层本来自洽（evidence 强制 + self-report 拦截 + reward 唯一派生），§192「运行证据 0/4」专指取证存档非判定层，§183 实跑帧来自取证尺子的链——闭环无需补；把 boltons 帧接进判定层 = 判据污染 / reward hacking**（2026-11-19）
+
+═══ 一、起点：用户问「能补完整闭环吗」，四项授权逐层推翻前提 ═══
+
+用户授权四项缺口（真实主流程绑定 / 判据语义三项 / 可观测性 / deny-modules）。
+取证不是去「补」，而是先钉死「到底缺在哪、能不能补」，结果逐层推翻前提：
+
+| 层 | 原以为的缺口 | 取证结论 |
+|---|---|---|
+| 缺口 2 判据语义 | 给 `adopt_probe` 的 `ok_nogold` 补分支 | `contract_nogold_gap` 的全部职责是记录「改动前状态」，改尺子 = 抹掉 §190 刚立的证据 ⇒ 改为 supersede 另立新判据 |
+| 缺口 1/3/闭环 | aether/ 判定层没接主流程运行证据 | 判定层本来自洽；所有「缺口/证据」住在 `scripts/probe_*` 取证层，aether/ 判定层 0 消费 |
+| §183 实跑 | 拿到帧就能补闭环 | 帧来自取证尺子跑 boltons 断言的链，与 V6 判定链是两条链；接进去 = 判据污染 |
+
+⛔ 本轮纯只读取证：A/B 读源码 AST、C 读 /tmp 现成实跑产物 JSON；零契约单跑 /
+spawn、零 F2P / 收益、不改判定层、不写判据结论。§183 实跑在**上游已按授权完成**，
+本轮只读它的产物。
+
+═══ 二、三本账 + 边界（⛔ 不合并成布尔）═══
+
+**A 判定层闭环三证（源码 AST 实证）**：
+1. `agent.as_runner()` 定义 `runner(h, spec) -> Verdict`（`agent.py:598`），是 Runner 协议入口。
+2. 冻结闸 `aether/nongression.py:334` 对每个 verdict 调 `assert_verdict_sane(raw)`；
+   该函数（`verifier.py:389`）先 `v.validate()` 强制 check 带 evidence，再
+   `assert_no_self_report(v.evidence)` 拦截自述键，空 check 直接判 invalid（reward 归 0
+   并留痕）。源码写明「绕过这一步，一个 `Verdict(passed=True, checks=())` 就能让任何
+   任务通过 —— 闸变成假绿灯」。
+3. `check_verdict()`（`verifier.py:402`）从账本读回 Verdict 时明确「忽略
+   `payload["reward"]`：reward 只从 passed / error 派生」，构造 `Verdict(...)` 的关键字
+   参数里没有 reward（AST 实证）；`evolution.py:1628` 的 `reward = self.runner(h, s).reward`
+   是唯一奖励来源。
+
+⇒ `decision_layer_closed_loop=True`。这套系统本来就拿真实运行证据判定、本来就拦
+self-report、本来就防 reward 伪造。**闭环无需补**。
+
+**B §192「0/4」作用域证伪**：`probe_default_effect.py` 的「产品主流程运行证据 0/4」
+专指 189/190/191 三轮取证存档（零沙箱离线重放、`run_all(source, items, timeout, pkg)`
+签名无 policy 参数），源码还明写「0 份产物是证据 0 次，不是『默认没生效』」。
+它不是说 V6 判定层没跑真实验证。把取证存档的 0 读成判定层的 0 = 作用域漂移
+（规则 201）。`run_all` 已带 `pkg` 参数 = 缺口 4 用户选的「整包装载替代」路径本就存在。
+
+**C §183 实跑运行帧（只读上游产物）**：boltons 30 commit 全范围实跑，默认 `1111`
+vs `strict 0000` 同源 A/B：
+
+| relaxed 运行帧 | 默认 1111 | strict 0000 |
+|---|---:|---:|
+| `relaxed_adopted` | 946 | 0 |
+| `relaxed_pruned_assign` | 112 | 0 |
+| `relaxed_scopes_merged` | 29823 | 13 |
+| `relaxed_rescue` | 443 | 0 |
+
+4 个 commit 鉴别力 `0→≥1`（99dec84 +5、d0a284f +1、4aa77cd +2、8ba3a7f +2）；
+more-itertools / attrs 是 0 候选，因尺子第 399 行硬编码 `f.startswith("boltons/")`
+（量具限制，非仓库无 fix commit，规则 24）。这只证明**默认 policy 在取证尺子主流程里
+真被消费**（取证存档运行证据 0→≥1），不是判定层运行证据，n=1 不外推。
+
+**D 边界**：aether/ 源码对 `relaxed_*` 帧的读取点 **0 处**（`decision_layer_frame_reads=0`）；
+把这四帧接进判定层 = 用 boltons 源码断言结果决定 V6 采纳哪个自我修改，违反
+`verifier.py:16`「判据同源：复用被测对象自己的函数，不在验证器里重写一套」的
+头号纪律 ⇒ reward hacking，不实施。本轮 `product_files_modified=0`、
+`reward_definition_touched=0`、`gain_rows_reported_as_f2p=0`。
+
+═══ 三、结论：闭环无需补，缺口是伪问题 ═══
+
+⛔ **不翻案 192–205、非产品洞、不报收益、§183 在本轮零触碰**。真正的判定闭环
+（`runner→Verdict→sane→reward`）从设计起就是自洽的，不需要「补」；用户追的
+「主流程运行证据缺口」是取证尺子自己的口径问题（存档里没有 policy 帧字段），
+不是 V6 判定层的缺陷。§183 实跑把取证存档的证据从 0 填到 ≥1，但它属于取证层，
+不流进判定层，也不改变任何采纳决策——这正是规则 85「叫 applied ≠ 做了」的
+反面：拿到帧 ≠ 闭环成立，因为闭环本来就成立、且这些帧不该进闭环。
+
+诚实提示：4 条鉴别增益是取证尺子跑 boltons 题源的运行帧，与 §177 的 5 条真 F2P
+**不是同一本账**（4 vs 5），不声称同源、不声称端到端真修复。
+
+═══ 四、设施 / 契约 / 反证 ═══
+
+产物四件套：`scripts/probe_mainflow_closure.py`（只读量具）、
+`mainflow_closure_census.jsonl`（存档 `.jsonl` 避 193 F3）、
+`mainflow_closure_contract.py`（28 条 = A7+B6+C8+D7 + F 组 12 条）。量具首跑
+`closure 28/28`，契约 `conditions 28/28 verdict_bad=0 F_bad=0`。反证 A 段 28/28
+撤回 + 28/28 定向篡改 + 3/3 事故补丁；B 段 12/12 F 组撤回全红 + 静态四项
+（真 3.9.6 parse、裸 noqa 0、git diff --check、A1 扫描面 discover 仍 127 且不含
+新产物闸）+ 验锚 `ok=True repos=3 diffs=[]`。首跑踩过一次量具断言误判
+（`reward=` 出现在注释 `reward=1.0` 里被当构造参数），改用 AST 实证 `Verdict(...)`
+调用的 keywords 不含 reward——修尺子不放宽断言。
+
+═══ 五、边界 / 开口 / 拍板 ═══
+
+本轮不构成新拍板项：闭环无需补 = 不动判定层、不动 reward 定义、不碰 §183、
+不接 boltons 帧。若将来真要让「主流程运行帧」参与采纳判定，唯一合法形态是
+让帧来自 **V6 自己的 harness / task 验证链**（`runner(h, spec)` 那条链、判据同源），
+而不是取证尺子的 boltons 断言——那是独立的产品语义变更，须另一次拍板、逐字设计。
+
+拍板清单变化：**原 4 条中缺口 2（判据语义三项）、缺口 1（主流程绑定）经本轮取证
+判定为「前提不成立 / 伪缺口」，从待办中移除**；剩 ③ CI 先 `bootstrap` 再跑 H 组
+（需 workflow scope PAT）、⑤ 放宽 / 降级 deny-modules（用户已选「不放宽、走整包装载
+替代」⇒ 整包装载已由 `run_all(pkg=...)` 支持，无新改动）实为 0 条待开工。r118
+新开口「修 r117 F3 全仓契约快照判据口径」单列、不并入。① 已取证收口、④ / ⑥ 已落地。
