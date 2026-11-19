@@ -12175,3 +12175,71 @@ caliber_diffs=[]`；读数取自 `7d30c9c` 代码态，`HEAD==origin/main==7d30c
 与 §197–205 同代价：产物闸放 `scripts/`、存档 `.jsonl`，不进
 `discover()` 面、全量不为它 +1，运行时证据是单跑复核（§四）。
 全量链 `…→752add6(r125)→e28efb8(r126)→7d30c9c(r127)` 连续收口。
+
+### 207. ⛔ **「多步状态序列」量级普查：§172 现象不是孤例，但量级小——4 个 fn / 319 组、诊断读数不报收益**（2026-11-19）
+
+═══ 一、起点：用户拍板授权 ②「多步状态序列量级普查」 ═══
+
+§172 只证明 boltons `93185b2`（daterange inclusive）1 个 commit 上「单表达式探针
+表达不了多步状态序列」——人类测试在同一生成器上 `next(g2)` 两次（第二次期待
+StopIteration），而探针每次求值新建生成器、表达不了「第 n 次」。§172-七-2 留下
+量级普查为待办，多轮标「需拍板 / 非本判据域」。本轮经用户逐字拍板授权后开工，
+先查重（30 轮记录确认从未量过）+ pre-check（三份存档都含 `stmt` vs `call` 两列，
+数据 standing 足）才立题。
+
+⛔ 纯只读取证：读 scripts/ 三份现成存档，零契约单跑 / spawn、零真仓访问、
+零 F2P / 收益、§183 零触碰、不改产品代码 / 判据 / 任何已定存档口径。
+
+═══ 二、口径（钉死在量具 CALIBER，契约 AST 核对防漂移）═══
+
+以 `(repo, sha, fn)` 分组，对每条 `stmt` 做 AST 解析抽「消耗型调用」：
+`next(x)/send(x)`（以第一实参源码为 receiver）或 `x.pop()/x.read()/x.seek()`
+（以 receiver 源码为 key）。同一 `(kind, method, receiver_key, args_key)` 落在
+≥2 条不同 stmt ⇒ 该 fn 命中。⛔ **args_key 是关键判别**：真多步是「对同一对象
+重复**同一操作**观察状态演进」（next(it) 两次、pop(index) 两次）；而
+`stream.write(b'abc')` vs `stream.write(b'')` 实参不同、后次返回 0 只因实参空串，
+是两个独立断言——相同实参条件把它排除。不同实例（Stats([5,5]) vs Stats([0,0])）
+亦不归并。这条真伪区分写进 selfcheck 与反证，口径漂移会被契约抓住。
+
+═══ 三、读数（三本账 + 边界，⛔ 不合并成布尔）═══
+
+| 存档 | rows | fn 组 | multistep 组 |
+|---|---:|---:|---:|
+| extract_downstream（135 主账） | 135 | 71 | 2 |
+| criteria_gate_census（459 门普查） | 459 | 190 | 4 |
+| no_result_attribution（94 归因） | 94 | 58 | 1 |
+
+跨三存档 **7 次出现 / 4 个 distinct fn**：boltons `93185b2` daterange、
+boltons `64e6430` iset、more-itertools `11c8280` lazy_consumption、
+more-itertools `ddbbea2` infinite_iterables。§172 的 bug 在册（真阳性在）；
+伪多步（write 异参 / Stats 异实例）不在（真阴性排除），selfcheck 10/10。
+
+⛔ 边界：这是**已抽取判据存档内**的读数（4 fn），不是「119 commit 里所有潜在
+多步 bug」的上界——没被抽取层物化出来的判据不在分母里。n=4 两个仓库，不外推。
+读数是诊断性质，不是鉴别力增益、不是修复、不报收益。
+
+═══ 四、设施 / 契约 / 反证 ═══
+
+三件套：`scripts/probe_multistep_census.py`（只读量具，口径 CALIBER + discriminant
+真伪判别）、`scripts/multistep_census_census.jsonl`（存档 `.jsonl` 避 193 F3）、
+`scripts/multistep_census_contract.py`（35 项 = A6+B7+C6+D6+E5+F4+G1，放 scripts/
+不进 discover）。量具 selfcheck 10/10、契约单跑 `conditions 25 total 35 fails 0`。
+反证 A：25/25 前缀逐条精确打红；反证 B：4 组存档篡改命中对应 condition；
+事故补丁：抹掉 args_key ⇒ write 伪多步混入（discriminant 转 False）、从 BARE_CONSUME
+移除 next ⇒ 真多步检测失效（恢复后回绿）。验锚 `ok=True repos=3 diffs=[] caliber_diffs=[]`。
+首跑踩过两次量具自身坑：① 连续 spawn 25 次触发 SIGTERM(137) ⇒ 改单进程内 import
+反证；② anchor_report 误用不存在的入口 / discover 返回 Path 致 `in` 判断退化 ⇒
+改量具自带 anchor_report + `str(p)` 判断——修尺子不放宽断言。
+
+═══ 五、结论 ═══
+
+⛔ **§172 现象不是孤例，但量级小**：4 个 fn、跨 2 仓库、诊断读数。这条口径是
+「探针是否依赖跨语句状态」的只读量尺，把 §172 的个案变成可复现的普查读数，
+但**不构成新拍板项、非产品洞、不报收益、不翻案 172–206、§183 零触碰**。
+② 从「历史未开工的待拍板项」转为「已量级普查的诊断结论」，但它既不能让全量变绿、
+也不改变任何采纳决策（unpassed_on_fixed 的多步判据仍需「支持第 n 次调用」的
+判据形态扩张——那才是另一次拍板，本轮不并）。
+
+═══ 六、全量收口 ═══
+
+（待全量回归后填：五段提交 sha、全量产物四元组、验锚、第六段收口提交、链。）
