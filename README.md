@@ -12253,8 +12253,22 @@ more-itertools `ddbbea2` infinite_iterables。§172 的 bug 在册（真阳性�
 （`git log 19cff76..HEAD -- aether/` 空）、r127 全量该契约曾 70/70 全绿、
 **r127 干净 worktree（`19cff76`）在当前环境单跑同样红这三条同读数**、
 验锚 `ok=True repos=3 diffs=[] caliber_diffs=[]`、工作区干净、无并发编辑、
-同 Python 3.13.12 / 同参数。⇒ 定性为**当前机器状态下的稳定失败（已知环境开口）**，
-非 r128 引入、非产品回归；按纪律不改产品 / timeout / 判据凑绿，如实记 128/1。
+同 Python 3.13.12 / 同参数。按纪律不改产品 / timeout / 判据凑绿，如实记 128/1。
 通知 exit code 0 不作判据，按产物 JSON 判（首次误用 `python aether/check.py` 撞相对导入
-零产物，已改 `-m` 入口）。链 `…→d47efd4→8224258→e28efb8→5b1d51f→7d30c9c→19cff76→e97e3af`。
-第六段为纯文档收口提交（零代码），详见当日日志。
+零产物，已改 `-m` 入口）。
+
+**补记（r129 根因钉死，修正「机器状态敏感」初判）**：I1 是对 `json.loads` 的
+**确定性计数**（`_LG.json.loads` 被全局 monkeypatch，账本 200 条阈值 ≤210），机器负载
+不可能多 17 次。轻量探针实测 **217 = 200 真实账本事件 + 17 次沙箱 broker handshake
+的 JSON 解析**（样本参数 `{"command":"sandbox.broker.handshake",...}`，调用栈
+`open→_brokered_builtin_open→_brokered_open→_broker_request_file_token→_broker_send_request`）；
+J3/K2 的 tracemalloc 峰值同样被 broker IPC 内存污染。**脱管对拍铁证**：带 shim 单跑该
+契约 67/70（三条全红），仅摘 `PYTHONPATH` 的 shim 项后同样单跑 **70/70 全绿**；
+脱管全量（产物 `/tmp/r128_full_noshim.json`）**`ok=True` 129/129**（streaming 契约 70/70
+ALL PASS），四元组完整（pass=129/fail=0、rc 全 0、`n_bad 0`、`n_scripts 127`、`jobs 2`、
+`exit_code 0`、stderr 空）。全量 runner 的 `subprocess.run` 无 env 清洗、继承 `PYTHONPATH`
+⇒ 每个契约子进程都被 shim 劫持。⇒ 真因是**当前会话的沙箱 shim 注入污染了全局
+`json.loads` 计数器与内存峰值量具**，非产品回归、非 r128 引入、非机器负载。
+⛔ 脱管读数仅用于根因诊断，不替代正式判据环境；按纪律不改产品 / timeout / 判据 /
+全量命令。链 `…→7d30c9c→19cff76→e97e3af→a22a1a2`。第六段为纯文档收口提交（零代码），
+详见当日日志。
