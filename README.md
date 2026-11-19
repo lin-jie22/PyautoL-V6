@@ -12162,3 +12162,16 @@ more-itertools / attrs 是 0 候选，因尺子第 399 行硬编码 `f.startswit
 （需 workflow scope PAT）、⑤ 放宽 / 降级 deny-modules（用户已选「不放宽、走整包装载
 替代」⇒ 整包装载已由 `run_all(pkg=...)` 支持，无新改动）实为 0 条待开工。r118
 新开口「修 r117 F3 全仓契约快照判据口径」单列、不并入。① 已取证收口、④ / ⑥ 已落地。
+
+═══ 六、全量收口（r127，2026-11-19）═══
+
+`7d30c9c` 首跑即全绿：`ok=True`、`counts pass=129/fail=0/skip=0/
+timeout=0/error=0`、`runs` 129 条 status 全 `pass`（派生 `n_bad=0`，
+顶层无该字段）、`n_runs=129`、`n_scripts=127`、`jobs=2`、`exit_code=0`、
+stderr 空。`undeclared_modes` 10 条（与 r119–r126 同一组，不含本轮
+`mainflow_closure` 产物闸）。验锚同源 `ok=True repos=3 diffs=[]
+caliber_diffs=[]`；读数取自 `7d30c9c` 代码态，`HEAD==origin/main==7d30c9c`，
+工作区干净（第六段提交仅 README 文档、零代码变化）。
+与 §197–205 同代价：产物闸放 `scripts/`、存档 `.jsonl`，不进
+`discover()` 面、全量不为它 +1，运行时证据是单跑复核（§四）。
+全量链 `…→752add6(r125)→e28efb8(r126)→7d30c9c(r127)` 连续收口。
