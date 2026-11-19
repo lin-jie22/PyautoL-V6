@@ -1,0 +1,266 @@
+{
+  "caliber": {
+    "aether/check.py": "88cc4c09ed9293dc881c0f77993666edf1e217292740b0ba88f55f90d9804c82",
+    "scripts/probe_full_run_ledger.py": "0ba39e1aa92fe3cd45292a8fd3e96d9785ae27b1be7e2d591275208091814ce8",
+    "scripts/probe_tail_selfreport.py": "bc95e492ec1d6bde4c33f38d0e2e85400bd7f0350436a0dae41850bfb3fbdb1c",
+    "scripts/probe_frameword_caliber.py": "3a800387dc6ac46924e717bd7a8c5ad05a0fa93cb6f81b48ff28540b537fadd2",
+    "scripts/probe_obs_surface.py": "6684ff766c663ace7951df2a482c2a036819ed9127ef9302dd166f2d70bb4c48",
+    "scripts/probe_field_surface.py": "30aafd096dc334eb5dc14ffa4abffb785a2cd64344a0982a2910ca279dbce07f",
+    "scripts/probe_stub_gate.py": "6d39d84331441040c3e4ff804afba2cd16dd33eb95b48012e3c8f936593996bf",
+    "scripts/probe_truerun_count.py": "ca728265ce966eb2ddfcf0a3916b18b23a44ab69e43e62d5d913224d5f1fea26",
+    "scripts/caliber_superseded.json": "77a828b6a82e3afefa83f23c21cbbab7360e091486a4f517e867a89c277265fb",
+    "scripts/frameword_caliber_census.jsonl": "9eb2ab76f7348aac04725dc177f36dc17d79ac7b6cf3a3cfdcd8f59d25a096f7",
+    "scripts/tail_selfreport_census.jsonl": "a3d9430444bfe6c99a91eda1197d7c09758f04c2eff6ed75ba33d4082bf532a9",
+    "scripts/obs_surface_census.jsonl": "a9be43929f15173741e60bad860bc780e4c4b6759b06a19637e361bdd1b908e3",
+    "scripts/obs_surface_stdout.jsonl": "a41627895500a93b39c219a545ccd0af8995c3b716e9b711dc93fd5aec9babcb",
+    "scripts/field_surface_census.jsonl": "058e590a8f664584f0db213513dac9fa608ed7a4511ee566bb17bf5a31afebc8"
+  },
+  "accounts": {
+    "A_status_def": {
+      "summarize_found": true,
+      "has_ok_param": true,
+      "ok_branch_last4_slice": true,
+      "ok_branch_cap400_slice": true,
+      "fail_branch_keep_signal": true,
+      "fail_branch_refs_bad_re": true,
+      "two_branches_distinct": true,
+      "surface_definition": "status=pass → _summarize_out(ok=True) 末4行/400字截断；status=fail → _summarize_out(ok=False) 保信号行+头尾+省略计数"
+    },
+    "B_cross_status": {
+      "per_run": {
+        "r117": {
+          "n_target": 1,
+          "status": "pass",
+          "tail_len": 200,
+          "hits": [],
+          "selftest_in_tail": false,
+          "reason": "",
+          "tail_text": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案",
+          "tail_last4": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案"
+        },
+        "r118": {
+          "n_target": 1,
+          "status": "fail",
+          "tail_len": 801,
+          "hits": [
+            "selftest"
+          ],
+          "selftest_in_tail": true,
+          "reason": "退出码 1",
+          "tail_text": "（共 145 行，省略 127 行无信号内容）\n============================================================================\nr117 / README 196 契约：第五类证据只验 signature 字符串的强度边界\n============================================================================\n  A1    PASS\n  A10   PASS\n  A11   PASS\n  E8    PASS\n  E9    PASS\n  PASS F1 存档存在 + schema v1 + 4 个待交付文件齐备 \n  PASS F2 ⛔ 抽取器正例 + 事故版反例有牙（字段表清空令正例失效） \n  FAIL F3 ⛔ 同源实算 A/B 账逐字段对拍 + caliber 逐键磁盘 hash 零差异 \n  PASS F4 ⛔ 真跑 Impostor：selftest 15/15 绿 + 签名 2/2 绿 + 4 位全 False + 对照打红 \n  PASS F5 A1 四文件纳入候选面 + scan_text 零命中 + 正例有牙 \n  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n❌ 有失败 A–E 132 项 + F 组 6 项\nF FAIL: ['F3 ⛔ 同源实算 A/B 账逐字段对拍 + caliber 逐键磁盘 hash 零差异']\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案",
+          "tail_last4": "----------------------------------------------------------------------------\n❌ 有失败 A–E 132 项 + F 组 6 项\nF FAIL: ['F3 ⛔ 同源实算 A/B 账逐字段对拍 + caliber 逐键磁盘 hash 零差异']\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案"
+        },
+        "r118b": {
+          "n_target": 1,
+          "status": "pass",
+          "tail_len": 200,
+          "hits": [],
+          "selftest_in_tail": false,
+          "reason": "",
+          "tail_text": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案",
+          "tail_last4": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案"
+        },
+        "r119": {
+          "n_target": 1,
+          "status": "pass",
+          "tail_len": 200,
+          "hits": [],
+          "selftest_in_tail": false,
+          "reason": "",
+          "tail_text": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案",
+          "tail_last4": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案"
+        },
+        "r120": {
+          "n_target": 1,
+          "status": "pass",
+          "tail_len": 200,
+          "hits": [],
+          "selftest_in_tail": false,
+          "reason": "",
+          "tail_text": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案",
+          "tail_last4": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案"
+        },
+        "r121": {
+          "n_target": 1,
+          "status": "pass",
+          "tail_len": 200,
+          "hits": [],
+          "selftest_in_tail": false,
+          "reason": "",
+          "tail_text": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案",
+          "tail_last4": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案"
+        },
+        "r122": {
+          "n_target": 1,
+          "status": "pass",
+          "tail_len": 200,
+          "hits": [],
+          "selftest_in_tail": false,
+          "reason": "",
+          "tail_text": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案",
+          "tail_last4": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案"
+        },
+        "r123": {
+          "n_target": 1,
+          "status": "pass",
+          "tail_len": 200,
+          "hits": [],
+          "selftest_in_tail": false,
+          "reason": "",
+          "tail_text": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案",
+          "tail_last4": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案"
+        },
+        "r124": {
+          "n_target": 1,
+          "status": "pass",
+          "tail_len": 200,
+          "hits": [],
+          "selftest_in_tail": false,
+          "reason": "",
+          "tail_text": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案",
+          "tail_last4": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案"
+        },
+        "r125": {
+          "n_target": 1,
+          "status": "pass",
+          "tail_len": 200,
+          "hits": [],
+          "selftest_in_tail": false,
+          "reason": "",
+          "tail_text": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案",
+          "tail_last4": "  PASS F6 验锚 OK 3/3 + closure 全绿 + 192 分母仍 5 + 存档非 .json \n----------------------------------------------------------------------------\n✅ 全部通过 A–E 132 项 + F 组 6 项\n签名对 / 字段错仍全绿 ⇒ 第五类证据只能证明签名字符串；构造必然、不翻案"
+        }
+      },
+      "target": "contract_signature_impostor_test.py",
+      "n_products": 10,
+      "pass_tags": [
+        "r117",
+        "r118b",
+        "r119",
+        "r120",
+        "r121",
+        "r122",
+        "r123",
+        "r124",
+        "r125"
+      ],
+      "fail_tags": [
+        "r118"
+      ],
+      "n_pass": 9,
+      "n_fail": 1,
+      "pass_tail_lens": [
+        200
+      ],
+      "fail_tail_lens": [
+        801
+      ],
+      "pass_hit_signatures": [
+        []
+      ],
+      "fail_hit_signatures": [
+        [
+          "selftest"
+        ]
+      ],
+      "all_target_unique": true,
+      "pass_tails_uniform": true,
+      "fail_tail_selftest": true,
+      "status_surface_matters": true
+    },
+    "C_attribution": {
+      "fail_tag": "r118",
+      "selftest_lines": [
+        "  PASS F4 ⛔ 真跑 Impostor：selftest 15/15 绿 + 签名 2/2 绿 + 4 位全 False + 对照打红 "
+      ],
+      "n_selftest_lines": 1,
+      "all_selftest_lines_selfreport": true,
+      "pass_selftest_absent_in_last4": true,
+      "hit_not_frame_field": true,
+      "pass_fail_not_merged": true,
+      "merged_into_bool": false,
+      "n_fail_is_one": true,
+      "no_generalization_claim": true,
+      "hit_not_runtime_evidence": true,
+      "not_overturn_199_201_202_203_204_125": true
+    },
+    "D_boundary": {
+      "denominator_dual_source": {
+        "main": 135,
+        "form": 119,
+        "no_result": 94,
+        "dual_source": {
+          "main_rows": 135,
+          "main_summary": 135,
+          "form_rows": 119,
+          "form_summary": 119,
+          "no_result_rows": 94,
+          "no_result_summary": 94
+        },
+        "all_distinct": true
+      },
+      "superseded": {
+        "n_registered": 3,
+        "diffs": [],
+        "all_match": true
+      },
+      "anchor": {
+        "ok": true,
+        "repos": 3,
+        "diffs": [],
+        "caliber_diffs": []
+      },
+      "selfcheck": {
+        "new_files_resolve_policy_calls": 0,
+        "scripts_json_dynamic_denominator": []
+      },
+      "section_183_touched": false,
+      "real_expr_run": 0,
+      "real_commit_run": 0,
+      "main_repo_run": 0,
+      "gain_rows_reported": 0,
+      "product_files_modified": 0,
+      "scope_narrowing_only": true,
+      "direction_199_203_unchanged": true
+    }
+  },
+  "closure": {
+    "a1_summarize_found": true,
+    "a2_ok_last4_slice": true,
+    "a3_ok_cap400_slice": true,
+    "a4_two_branches_distinct": true,
+    "b1_ten_products": true,
+    "b2_all_target_unique": true,
+    "b3_nine_pass_one_fail": true,
+    "b4_pass_tails_uniform": true,
+    "b5_fail_tail_selftest": true,
+    "b6_status_surface_matters": true,
+    "c1_selftest_lines_nonzero": true,
+    "c2_all_selfreport": true,
+    "c3_pass_last4_absent": true,
+    "c4_hit_not_frame_field": true,
+    "c5_pass_fail_not_merged": true,
+    "c6_n1_no_generalization": true,
+    "c7_not_overturn": true,
+    "d1_denominator_dual_source": true,
+    "d2_superseded_all_match": true,
+    "d3_anchor_ok": true,
+    "d4_no_new_resolve_calls": true,
+    "d5_no_dynamic_json_denominator": true,
+    "d6_section183_zero": true,
+    "d7_scope_narrowing_only": true
+  },
+  "derived": {
+    "n_closure": 24,
+    "n_closure_true": 24,
+    "n_pass": 9,
+    "n_fail": 1,
+    "pass_tail_lens": [
+      200
+    ],
+    "fail_tail_lens": [
+      801
+    ],
+    "status_surface_matters": true
+  }
+}

@@ -11954,3 +11954,100 @@ caliber_diffs=[]`；读数取自 `752add6` 代码态，`HEAD==origin/main==752ad
 与 §197–203 同代价：产物闸放 `scripts/`、存档 `.jsonl`，不进
 `discover()` 面、全量不为它 +1，运行时证据是单跑复核（§五）。
 全量链 `…→9a2f6ff→a7d5ec8→7b38d90→752add6(r125)` 连续收口。
+
+### 205. ⛔ **「帧词命中数」依赖第五个正交口径——run 状态面：pass 成功分支 tail（`_summarize_out(ok=True)` 末4行/400字截断）vs fail 失败分支 tail（`ok=False` 保留信号行+头尾+省略计数）。十份全量产物对拍同一条 `contract_signature_impostor`：9 个 pass 轮 tail 恒 200 字命中 0、唯一 fail 轮（r118）tail 801 字命中 selftest——同一契约、同一词表、同一匹配实现，命中数只随 run 状态面而变；命中的 selftest 仍是契约 self-report 文案、非运行帧**（2026-11-19）
+
+═══ 一、起点：六轮命中数全在 status=pass 的成功分支 tail 上量过 ═══
+
+199/201/202/203/r124/r125 一路把「帧词命中」收窄到四个正交口径：作用域 2/129、
+子串 vs 词边界差恒 1、stdout 全文 vs tail 截断、tail vs 元数据字段面。但六轮
+**全部只扫 `status=pass` 的成功分支 tail**——即 `aether.check._summarize_out(ok=True)`
+的 `lines[-4:][:400]` 截断产物。源码里失败分支 `ok=False` 是另一套逻辑：保留信号行
+（含 `❌`/`AssertionError`/`!=`）+ 上下各一行 + 头 6 行 + 尾 12 行 + 明确写出省略行数，
+两个观测面本就不同（源码注释自己写明「失败时不能只取末4行」），却从没被当成独立口径量过。
+
+本轮只量一件从未量过的事：**同一条契约、同一同源 FRAME_KEYS、同一子串匹配实现，
+run 状态从 pass 变 fail 时，tail 帧词命中数变不变？** 便宜对照（扫 10 份现成产物的
+`contract_signature_impostor`）即见：r118 首跑红轮它是唯一的 fail run，tail 801 字、
+命中 `selftest`；其余 9 份它 pass，tail 恒 200 字、命中 0。
+
+| 检查 | 实测 |
+|---|---|
+| 状态面定义（AST） | `_summarize_out` 有 `ok` 参数；成功分支 `[-4:]` + `[:400]` 两 Slice；失败分支 `keep.update` + `_BAD_LINE_RE` |
+| 对拍对象 | 同一条 `contract_signature_impostor_test.py`，10 份产物各 1 条 run |
+| pass 分支 tail | 9 轮恒 200 字、帧词命中 0 |
+| fail 分支 tail | r118 唯一红轮 801 字、命中 `selftest` |
+| 与前四口径关系 | 正交：作用域 / 匹配方式 / 观测面 / 字段面 / 状态面，五本独立 |
+
+⇒ skill 契约⑤「局部观测不得声称全貌」的产物侧第六个实例：
+「该契约 tail 帧词命中 0」只在 pass 成功分支成立，切到 fail 失败分支读数不同。
+⛔ 本轮纯只读取证：读 /tmp 现成产物 JSON、零契约单跑 / spawn、零 F2P / 收益、§183 零触碰。
+
+═══ 二、两本账（⛔ 不合并成布尔）═══
+
+**A 状态面定义层**：AST 实证 `_summarize_out` 同时含 `ok` 参数、成功分支
+`Slice(lower=UnaryOp(USub, 4))`（末4行）与 `Slice(upper=400)`（400字上限）、
+失败分支 `keep.update(...)` 与 `_BAD_LINE_RE` 引用——两分支结构确实不同，
+`two_branches_distinct=True`。证明 status 决定走哪个分支、也就决定 tail 观测面。
+
+**B 跨状态对拍层**：10 份全量产物（r117–r125，含 r118 红轮）逐份定位同一条
+`contract_signature_impostor_test.py`：
+
+| run 状态 | 轮次 | tail 长度 | 帧词命中 |
+|---|---|---|---|
+| pass（成功分支截断） | 9 轮（r117/r118b/r119–r125） | 恒 200 字 | 0 |
+| fail（失败分支保信号） | r118 唯一红轮 | 801 字 | `selftest` |
+
+`status_surface_matters=True`：同契约同词表同匹配，命中数只随状态面变。
+前四口径全是 pass 面内的口径，状态面是跨 pass/fail 的第五本账。
+
+**C 归因层（命中类别）**：r118 fail tail 里 `selftest` 只出现在 1 行——
+`PASS F4 ⛔ 真跑 Impostor：selftest 15/15 绿 + 签名 2/2 绿 + 4 位全 False + 对照打红`，
+是契约自己的 self-report 文案（PASS/绿/⛔ 断言叙述），非 runner 运行帧、非帧字段赋值。
+pass 轮的末 4 行里 `selftest` 完全缺席（`pass_selftest_absent_in_last4=True`）——
+失败分支因「保信号行」而看得见、成功分支因「截断」而看不见。命中数两本账
+（pass 面 / fail 面）分开记，不合并成布尔；唯一失败 run（n=1）**不外推统计规律**。
+
+**D 边界层**：三分母 `135/119/94` 双源（复用 r121 同源）；superseded 逐键磁盘
+hash 全匹配；验锚 `OK 3/3 diffs=0`；192 分母闸——本轮两个新文件
+`resolve_policy(...)` AST 调用点均 **0**；193 `coverage_scripts` 未漂移
+（新存档 `.jsonl`、契约在 `scripts/`、无新 `scripts/*.json`）；§183 五项全 0。
+
+═══ 三、结论（收窄口径，不翻案）═══
+
+⛔ **199/200/201/202/203/r124/r125 方向一条不改**：tail 面 3 条仍全是 self-report
+文案、非运行证据，产物零帧字段结构必然，作用域 2/129、子串命中 3、词边界 2、
+tail 截断、元数据面命中是文件名常量——本轮一条不翻。只增加一件事：把「帧词命中数」
+显式化为**依赖 run 状态面**的读数——pass 面的 0 与 fail 面的 1 不是同一本账，
+失败分支看得见只是因为它保留信号行，不是因为那里有运行帧证据。
+既不说默认生效也不说没生效，**不报收益**。缺口不变：「默认 policy 对象 → 主流程消费链」
+绑定证据仍须跑 `main() --repo` 碰 §183 ⇒ 需取证面显式拍板。
+⛔ 不推翻 189–204、不改任何判据 / 尺子 / 存档口径、`aether/` 零回写。
+
+═══ 四、设施 / 契约 / 反证 / 静态四项 ═══
+
+两件新设施 + 一份存档：`scripts/probe_run_status_surface.py`（纯只读、读 10 份现成产物）、
+`scripts/run_status_surface_census.jsonl`（存档，读现成产物无需原始证据副本）、
+`scripts/run_status_surface_contract.py`（合规形态：conditions / verdict_from / run_c
+内嵌 ck + fails.append + return fails）。
+
+- 量具 closure **24/24**（A4+B6+C7+D7，全部实算、零手填）。
+- 契约单跑 **24/24 + F 组全绿**；F 组：状态面 AST live 重算、r118/r124 跨状态
+  live 重扫、pass/fail 命中签名差异反例、selftest self-report live 溯源、
+  caliber 逐键 hash、验锚、A1 扫描面。
+- A 反证（独立进程）：24/24 逐条撤回、24/24 定向叶子篡改、3/3 事故补丁全打红。
+- B 反证（独立进程）：F 组撤回 14/14 全红（有牙）、真 3.9.6 parse OK、裸 noqa 0、
+  `git diff --check` 干净、验锚 `ok=True repos=3 diffs=[] caliber_diffs=[]`；
+  A1 扫描面 `discover()` 仍 127、不含 `run_status_surface`（正例有牙：127 个契约都在）。
+
+═══ 五、边界 / 开口 / 拍板 ═══
+
+本轮是纯只读收窄口径，**非产品洞、不报收益、不翻案 194–204、§183 零触碰**。
+「帧词命中数」至此五个正交口径全部显式化（作用域 / 匹配方式 / 观测面 / 字段面 /
+状态面），每一本都指向 self-report 或文件名常量、无一是运行帧证据——这是五轮的
+共同结论，不是新鉴别力。缺口仍是「默认 policy 对象 → 主流程消费链」绑定证据
+（须拍板、碰 §183）。
+拍板清单未变，合计 **4 条**（② 多步状态序列、③ CI 先 `bootstrap`
+再跑 H 组、⑤ 放宽 / 降级 deny-modules、190 留下的 `ok_nogold`
+ledger 语义 / 189 反证组补样本），一律未开工；r118 新开口「修 r117
+F3 全仓契约快照判据口径」单列、不并入。① 已取证收口、④ / ⑥ 已落地。
